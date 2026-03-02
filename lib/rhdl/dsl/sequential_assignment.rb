@@ -4,17 +4,38 @@ module RHDL
   module DSL
     # Sequential assignment (inside process)
     class SequentialAssignment
-      attr_reader :target, :value
+      VALID_KINDS = %i[auto nonblocking blocking].freeze
 
-      def initialize(target, value)
+      attr_reader :target, :value, :kind
+
+      def initialize(target, value, kind: :auto, nonblocking: nil)
+        kind = nonblocking ? :nonblocking : :blocking unless nonblocking.nil?
+        unless VALID_KINDS.include?(kind)
+          raise ArgumentError, "Invalid assignment kind: #{kind.inspect}. Valid: #{VALID_KINDS.join(', ')}"
+        end
+
         @target = target
         @value = value
+        @kind = kind
       end
 
-      def to_verilog
+      def nonblocking?(default: true)
+        case kind
+        when :nonblocking then true
+        when :blocking then false
+        else default
+        end
+      end
+
+      def to_verilog(nonblocking: nil)
         t = target.respond_to?(:to_verilog) ? target.to_verilog : target.to_s
         v = value.respond_to?(:to_verilog) ? value.to_verilog : value.to_s
-        "#{t} <= #{v};"
+        op = if nonblocking.nil?
+          nonblocking?(default: true) ? "<=" : "="
+        else
+          nonblocking ? "<=" : "="
+        end
+        "#{t} #{op} #{v};"
       end
     end
   end

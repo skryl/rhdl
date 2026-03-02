@@ -63,12 +63,13 @@ RHDL::Export.export_all_to_files('export/verilog/')
 
 All generated HDL files are placed in `/export/verilog/`.
 
-### Rake Tasks
+### CLI Commands
 
 ```bash
-rake hdl:export    # Export DSL components to Verilog
-rake hdl:verilog   # Export Verilog files
-rake hdl:clean     # Clean generated HDL files
+rhdl export --all
+rhdl export --all --scope lib
+rhdl export --lang verilog --out ./export/verilog RHDL::HDL::Counter
+rhdl export --clean
 ```
 
 ### Running Export Tests
@@ -76,7 +77,10 @@ rake hdl:clean     # Clean generated HDL files
 Verilog export tests require Icarus Verilog (`iverilog` and `vvp`). If the toolchain is missing, specs are skipped automatically.
 
 ```bash
-bundle exec rspec spec/export_verilog_spec.rb
+bundle exec rspec \
+  spec/rhdl/codegen/export_verilog_spec.rb \
+  spec/rhdl/verilog_export_spec.rb \
+  spec/examples/riscv/verilog_export_spec.rb
 ```
 
 ---
@@ -142,13 +146,13 @@ The netlist will be written to `tmp/netlists/<name>.json`.
 **CPU (2):**
 `InstructionDecoder`, `SynthDatapath` (hierarchical composition of decoder, ALU, PC, register)
 
-### Rake Tasks
+### Validation Commands
 
 ```bash
-rake gates:export   # Export all 53 components to gate-level JSON netlists
-rake gates:simcpu   # Export SynthDatapath CPU components
-rake gates:stats    # Show synthesis statistics (gate counts per component)
-rake gates:clean    # Clean gate-level output directory
+bundle exec rspec \
+  spec/rhdl/codegen/gate_level_equivalence_spec.rb \
+  spec/rhdl/diagram/diagram_gate_spec.rb
+bundle exec rake bench:gates
 ```
 
 Output files are written to `/export/gates/` with JSON netlists and TXT summaries.

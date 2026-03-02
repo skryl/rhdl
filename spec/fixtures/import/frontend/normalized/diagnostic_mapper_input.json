@@ -1,0 +1,47 @@
+{
+  "sources": [
+    {
+      "id": "42",
+      "path": "./rtl/math.sv"
+    },
+    {
+      "id": "3",
+      "path": "rtl/top.sv"
+    }
+  ],
+  "diagnostics": [
+    {
+      "severity": "INFO",
+      "message": "unmapped path fallback",
+      "span": {
+        "file": "rtl/missing.sv",
+        "line": "7",
+        "column": "2"
+      }
+    },
+    {
+      "severity": "error",
+      "code": "E_PARSE",
+      "message": "bad token",
+      "location": {
+        "source_id": "3",
+        "start": {
+          "line": 4,
+          "column": 11
+        },
+        "end": {
+          "line": 4,
+          "column": 12
+        }
+      }
+    },
+    {
+      "severity": "warning",
+      "code": "W_WIDTH",
+      "message": "truncated assignment",
+      "file": "rtl/math.sv",
+      "line": 9,
+      "column": 1
+    }
+  ]
+}

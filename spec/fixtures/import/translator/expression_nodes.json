@@ -1,0 +1,48 @@
+{
+  "supported": [
+    {
+      "kind": "binary",
+      "operator": "&",
+      "left": {
+        "kind": "identifier",
+        "name": "a"
+      },
+      "right": {
+        "kind": "identifier",
+        "name": "b"
+      }
+    },
+    {
+      "kind": "ternary",
+      "condition": {
+        "kind": "identifier",
+        "name": "sel"
+      },
+      "true_expr": {
+        "kind": "number",
+        "value": 1
+      },
+      "false_expr": {
+        "kind": "number",
+        "value": 0
+      }
+    }
+  ],
+  "unsupported": {
+    "kind": "streaming_concat",
+    "parts": [
+      {
+        "kind": "identifier",
+        "name": "data"
+      }
+    ],
+    "span": {
+      "source_id": 1,
+      "source_path": "rtl/expr.sv",
+      "line": 8,
+      "column": 10,
+      "end_line": 8,
+      "end_column": 24
+    }
+  }
+}

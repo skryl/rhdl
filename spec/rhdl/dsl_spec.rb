@@ -29,6 +29,12 @@ RSpec.describe RHDL::DSL do
         expect(slice.range).to eq(3..7)
         expect(slice.to_verilog).to eq('data[7:3]')
       end
+
+      it 'preserves symbolic range endpoint order' do
+        slice = signal[:HIGH..:LOW]
+        expect(slice).to be_a(RHDL::DSL::BitSlice)
+        expect(slice.to_verilog).to eq('data[HIGH:LOW]')
+      end
     end
 
     describe 'arithmetic operators' do
@@ -193,6 +199,11 @@ RSpec.describe RHDL::DSL do
       expect(port.to_verilog).to eq('output [15:0] result')
     end
 
+    it 'creates parameterized width port' do
+      port = RHDL::DSL::Port.new(:data, :in, :WIDTH)
+      expect(port.to_verilog).to eq('input [WIDTH-1:0] data')
+    end
+
     it 'converts to signal ref' do
       port = RHDL::DSL::Port.new(:data, :in, 8)
       ref = port.to_signal_ref
@@ -215,6 +226,11 @@ RSpec.describe RHDL::DSL do
     it 'creates signal with default value' do
       sig = RHDL::DSL::Signal.new(:counter, 8, default: 0)
       expect(sig.to_verilog).to eq("reg [7:0] counter = 8'b00000000;")
+    end
+
+    it 'creates parameterized width signal' do
+      sig = RHDL::DSL::Signal.new(:counter, :WIDTH)
+      expect(sig.to_verilog).to eq('reg [WIDTH-1:0] counter;')
     end
 
     it 'creates single-bit signal with default' do
@@ -265,7 +281,7 @@ RSpec.describe RHDL::DSL do
 
       verilog = proc.to_verilog
       expect(verilog).to include('always @(clk) begin')
-      expect(verilog).to include('result <= data;')
+      expect(verilog).to include('result = data;')
       expect(verilog).to include('end')
     end
 
@@ -281,9 +297,10 @@ RSpec.describe RHDL::DSL do
 
       verilog = proc.to_verilog
       expect(verilog).to include('if ((enable == 1)) begin')
-      expect(verilog).to include('result <= data;')
+      expect(verilog).to include('result = data;')
       expect(verilog).to include('end')
     end
+
   end
 
   describe 'IfStatement' do
@@ -394,6 +411,27 @@ RSpec.describe RHDL::DSL do
       expect(verilog).to include('register #(.width(16)) reg1 (')
       expect(verilog).to include('.d(data_in)')
       expect(verilog).to include('.q(data_out)')
+    end
+
+    it 'uses wildcard ports when port map is empty' do
+      inst = RHDL::DSL::ComponentInstance.new(:exc, :exception, port_map: {})
+
+      verilog = inst.to_verilog
+      expect(verilog).to eq('exception exc (.*);')
+    end
+
+    it 'adds wildcard auto-connect when explicit ports are provided' do
+      inst = RHDL::DSL::ComponentInstance.new(:exc, :exception, port_map: {
+        a: :input_a,
+        y: :output_y
+      })
+
+      verilog = inst.to_verilog
+      expect(verilog).to include('exception exc (')
+      expect(verilog).to include('.a(input_a)')
+      expect(verilog).to include('.y(output_y)')
+      expect(verilog).to include('.*')
+      expect(verilog).to end_with(");")
     end
   end
 

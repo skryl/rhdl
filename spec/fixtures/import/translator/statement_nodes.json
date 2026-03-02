@@ -1,0 +1,71 @@
+{
+  "supported": [
+    {
+      "kind": "continuous_assign",
+      "target": {
+        "kind": "identifier",
+        "name": "out"
+      },
+      "value": {
+        "kind": "binary",
+        "operator": "^",
+        "left": {
+          "kind": "identifier",
+          "name": "a"
+        },
+        "right": {
+          "kind": "identifier",
+          "name": "b"
+        }
+      }
+    },
+    {
+      "kind": "if",
+      "condition": {
+        "kind": "identifier",
+        "name": "en"
+      },
+      "then": [
+        {
+          "kind": "blocking_assign",
+          "target": {
+            "kind": "identifier",
+            "name": "q"
+          },
+          "value": {
+            "kind": "identifier",
+            "name": "d"
+          }
+        }
+      ],
+      "else": [
+        {
+          "kind": "blocking_assign",
+          "target": {
+            "kind": "identifier",
+            "name": "q"
+          },
+          "value": {
+            "kind": "number",
+            "value": 0
+          }
+        }
+      ]
+    }
+  ],
+  "unsupported": {
+    "kind": "while",
+    "condition": {
+      "kind": "identifier",
+      "name": "busy"
+    },
+    "span": {
+      "source_id": 2,
+      "source_path": "rtl/stmt.sv",
+      "line": 15,
+      "column": 7,
+      "end_line": 15,
+      "end_column": 25
+    }
+  }
+}

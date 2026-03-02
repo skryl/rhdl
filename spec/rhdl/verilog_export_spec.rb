@@ -66,6 +66,11 @@ RSpec.describe 'Verilog Export' do
       expr = ~signal
       expect(expr.to_verilog).to eq('~data')
     end
+
+    it 'wraps nested unary reductions to avoid invalid operator fusion' do
+      expr = RHDL::DSL::UnaryOp.new(:|, RHDL::DSL::UnaryOp.new(:&, RHDL::DSL::SignalRef.new(:save_readburst, width: 4)))
+      expect(expr.to_verilog).to eq('|(&save_readburst)')
+    end
   end
 
   describe 'Concatenation' do
@@ -169,7 +174,7 @@ RSpec.describe 'Verilog Export' do
       verilog = proc.to_verilog
       expect(verilog).to include('always @(clk)')
       expect(verilog).to include('begin')
-      expect(verilog).to include('result <= data;')
+      expect(verilog).to include('result = data;')
       expect(verilog).to include('end')
     end
 
@@ -370,6 +375,29 @@ RSpec.describe 'Verilog Export' do
       expect(verilog).not_to include('parameter')
       expect(verilog).to include('input [7:0] a')
       expect(verilog).to include('output [7:0] y')
+    end
+  end
+
+  describe 'Namespaced component export regression' do
+    before(:all) do
+      Object.send(:remove_const, :VerilogExportRegression) if defined?(VerilogExportRegression)
+
+      module VerilogExportRegression
+        class NamespaceMux
+          include RHDL::DSL
+
+          input :a, width: 8
+          input :b, width: 8
+          output :y, width: 8
+        end
+      end
+    end
+
+    it 'keeps legacy basename-derived module naming' do
+      verilog = VerilogExportRegression::NamespaceMux.to_verilog
+
+      expect(verilog).to include('module namespace_mux')
+      expect(verilog).not_to include('verilog_export_regression_namespace_mux')
     end
   end
 end

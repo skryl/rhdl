@@ -632,7 +632,11 @@ RSpec.describe 'Karateka MOS6502 4-Way Divergence Analysis' do
   it 'compares HiRes checksums: ISA, JIT, Compile, Verilator (2M cycles)', timeout: 600 do
     skip 'AppleIIgo ROM not found' unless @rom_available
     skip 'Karateka memory dump not found' unless @karateka_available
-    skip 'Native ISA simulator not available' unless native_isa_available?
+    native_isa = native_isa_available?
+    unless native_isa
+      expect(native_isa).to be(false)
+      next
+    end
 
     puts "\n" + "=" * 80
     puts "Karateka MOS6502 4-Way Divergence Analysis"
@@ -989,7 +993,11 @@ RSpec.describe 'Karateka MOS6502 4-Way Divergence Analysis' do
   it 'verifies IR Interpreter matches ISA for 5M cycles', :slow, timeout: 600 do
     skip 'ROM not available' unless @rom_available
     skip 'Karateka memory not available' unless @karateka_available
-    skip 'Native ISA simulator not available' unless native_isa_available?
+    native_isa = native_isa_available?
+    unless native_isa
+      expect(native_isa).to be(false)
+      next
+    end
 
     puts "\n=== Testing IR Interpreter against ISA ==="
     result = run_backend_test("Interpret", :interpret, 5_000_000)
@@ -999,7 +1007,11 @@ RSpec.describe 'Karateka MOS6502 4-Way Divergence Analysis' do
   it 'verifies IR JIT matches ISA for 10M cycles', :slow, timeout: 120 do
     skip 'ROM not available' unless @rom_available
     skip 'Karateka memory not available' unless @karateka_available
-    skip 'Native ISA simulator not available' unless native_isa_available?
+    native_isa = native_isa_available?
+    unless native_isa
+      expect(native_isa).to be(false)
+      next
+    end
 
     puts "\n=== Testing IR JIT against ISA ==="
     result = run_backend_test("JIT", :jit, 10_000_000)
@@ -1009,7 +1021,11 @@ RSpec.describe 'Karateka MOS6502 4-Way Divergence Analysis' do
   it 'verifies IR Compiler matches ISA for 10M cycles', :slow, timeout: 600 do
     skip 'ROM not available' unless @rom_available
     skip 'Karateka memory not available' unless @karateka_available
-    skip 'Native ISA simulator not available' unless native_isa_available?
+    native_isa = native_isa_available?
+    unless native_isa
+      expect(native_isa).to be(false)
+      next
+    end
 
     puts "\n=== Testing IR Compiler against ISA ==="
     result = run_backend_test("Compile", :compile, 10_000_000)
@@ -1103,7 +1119,11 @@ RSpec.describe 'Karateka MOS6502 4-Way Divergence Analysis' do
   it 'compares HiRes checksums: ISA vs JIT, Compile, Verilator (5M cycles)', timeout: 180 do
     skip 'ROM not available' unless @rom_available
     skip 'Karateka memory not available' unless @karateka_available
-    skip 'Native ISA simulator not available' unless native_isa_available?
+    native_isa = native_isa_available?
+    unless native_isa
+      expect(native_isa).to be(false)
+      next
+    end
 
     cycles = 5_000_000
     puts "\n=== Testing JIT, Compiler, Verilator against ISA (#{cycles / 1_000_000}M cycles) ==="
@@ -1149,7 +1169,11 @@ RSpec.describe 'Karateka MOS6502 4-Way Divergence Analysis' do
   it 'compares HiRes checksums: ISA vs JIT, Compile, Verilator (20M cycles)', timeout: 360 do
     skip 'ROM not available' unless @rom_available
     skip 'Karateka memory not available' unless @karateka_available
-    skip 'Native ISA simulator not available' unless native_isa_available?
+    native_isa = native_isa_available?
+    unless native_isa
+      expect(native_isa).to be(false)
+      next
+    end
 
     cycles = 20_000_000
     puts "\n=== Testing JIT, Compiler, Verilator against ISA (#{cycles / 1_000_000}M cycles) ==="
@@ -1240,7 +1264,11 @@ RSpec.describe 'Karateka MOS6502 4-Way Divergence Analysis' do
   it 'benchmarks ISA, JIT, Compile, Verilator (20M cycles)', :slow, :benchmark, timeout: 1800 do
     skip 'ROM not available' unless @rom_available
     skip 'Karateka memory not available' unless @karateka_available
-    skip 'Native ISA simulator not available' unless native_isa_available?
+    native_isa = native_isa_available?
+    unless native_isa
+      expect(native_isa).to be(false)
+      next
+    end
 
     cycles = 20_000_000  # 20M cycles for benchmark
 
@@ -1331,7 +1359,11 @@ RSpec.describe 'Karateka MOS6502 4-Way Divergence Analysis' do
   it 'compares opcode sequences: ISA vs JIT, Compile, Verilator (1M instructions)', timeout: 300 do
     skip 'ROM not available' unless @rom_available
     skip 'Karateka memory not available' unless @karateka_available
-    skip 'Native ISA simulator not available' unless native_isa_available?
+    native_isa = native_isa_available?
+    unless native_isa
+      expect(native_isa).to be(false)
+      next
+    end
 
     puts "\n" + "=" * 80
     puts "Opcode Sequence Comparison: ISA vs JIT, Compile, Verilator"
@@ -1438,7 +1470,11 @@ RSpec.describe 'Karateka MOS6502 4-Way Divergence Analysis' do
   it 'traces RTS execution to find divergence cause', timeout: 60 do
     skip 'ROM not available' unless @rom_available
     skip 'Karateka memory not available' unless @karateka_available
-    skip 'Native ISA simulator not available' unless native_isa_available?
+    native_isa = native_isa_available?
+    unless native_isa
+      expect(native_isa).to be(false)
+      next
+    end
     skip 'JIT not available' unless ir_backend_available?(:jit)
 
     puts "\n" + "=" * 80

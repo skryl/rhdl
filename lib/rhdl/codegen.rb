@@ -2,6 +2,10 @@
 require_relative "codegen/ir/ir"
 require_relative "codegen/ir/lower"
 require_relative "codegen/ir/sim/ir_simulator"
+require_relative "codegen/hir/ir"
+require_relative "codegen/hir/lower"
+require_relative "codegen/lir/ir"
+require_relative "codegen/lir/lower"
 
 # Verilog codegen
 require_relative "codegen/verilog/verilog"
@@ -26,7 +30,7 @@ module RHDL
     class << self
       # Behavior Verilog codegen
       def verilog(component, top_name: nil)
-        module_def = IR::Lower.new(component, top_name: top_name).build
+        module_def = HIR::Lower.new(component, top_name: top_name).build
         Verilog.generate(module_def)
       end
       alias_method :to_verilog, :verilog
@@ -37,7 +41,7 @@ module RHDL
 
       # CIRCT FIRRTL codegen
       def circt(component, top_name: nil)
-        module_def = IR::Lower.new(component, top_name: top_name).build
+        module_def = LIR::Lower.new(component, top_name: top_name).build
         CIRCT::FIRRTL.generate(module_def)
       end
       alias_method :to_circt, :circt
@@ -155,6 +159,8 @@ module RHDL
     # Backwards compatibility aliases for old namespace
     # IR module is now at top level in Codegen::IR, not nested in Verilog
     Lower = IR::Lower
+    HIRLower = HIR::Lower
+    LIRLower = LIR::Lower
 
     # Backwards compatibility: Behavior -> Verilog, Structure -> Netlist
     Behavior = Verilog

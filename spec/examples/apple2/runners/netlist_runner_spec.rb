@@ -4,7 +4,14 @@ require 'spec_helper'
 require 'rhdl'
 require_relative '../../../../examples/apple2/utilities/runners/netlist_runner'
 
-RSpec.describe RHDL::Examples::Apple2::NetlistRunner do
+NATIVE_NETLIST_BACKENDS_AVAILABLE = begin
+  RHDL::Codegen::Netlist::NETLIST_INTERPRETER_AVAILABLE &&
+    RHDL::Codegen::Netlist::NETLIST_JIT_AVAILABLE
+rescue NameError
+  false
+end
+
+RSpec.describe RHDL::Examples::Apple2::NetlistRunner, if: NATIVE_NETLIST_BACKENDS_AVAILABLE do
   # These tests verify all 3 backend options for netlist mode
   # Combined with hdl mode, this covers all 6 mode/sim combinations
 
@@ -200,5 +207,11 @@ RSpec.describe RHDL::Examples::Apple2::NetlistRunner do
         end
       end
     end
+  end
+end
+
+RSpec.describe RHDL::Examples::Apple2::NetlistRunner, unless: NATIVE_NETLIST_BACKENDS_AVAILABLE do
+  it 'requires native netlist backends' do
+    skip "Netlist interpreter/jit backends are unavailable. Run 'bundle exec rake native:build'."
   end
 end

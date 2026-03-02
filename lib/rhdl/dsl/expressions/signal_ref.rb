@@ -4,6 +4,8 @@ module RHDL
   module DSL
     # Signal value wrapper for DSL expressions
     class SignalRef
+      include ExpressionOperators
+
       attr_reader :name, :width, :component
 
       def initialize(name, width: 1, component: nil)

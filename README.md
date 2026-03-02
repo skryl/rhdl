@@ -32,6 +32,7 @@ Demo: [Web Simulator](https://skryl.github.io/rhdl)
 |----------|-------------|
 | [Overview](docs/overview.md) | Introduction to the HDL framework |
 | [CLI Reference](docs/cli.md) | Command line interface reference |
+| [Import](docs/import.md) | Verilog/SystemVerilog import workflow and current semantics |
 | [DSL Guide](docs/dsl.md) | DSL reference for synthesizable components |
 | [Components](docs/components.md) | Complete reference for all HDL components |
 | [Simulation](docs/simulation.md) | Core simulation engine infrastructure |
@@ -230,6 +231,29 @@ alu.propagate
 
 puts alu.get_output(:result)  # => 15
 ```
+
+### Importing Existing Verilog/SystemVerilog
+
+```bash
+# Autoscan mode
+rhdl import --src ./rtl --top top ./build/imported_rhdl
+
+# Filelist mode
+rhdl import --filelist rtl.f -I include -D WIDTH=32
+
+# ao486 chip-trace parity against converted IR simulator
+rhdl import --src examples/ao486/reference/rtl/ao486 --dependency-resolution none --compile-unit-filter modules_only --missing-modules blackbox_stubs --top ao486 --check-profile ao486_trace_ir --trace-cycles 1024 examples/ao486/hdl
+
+# ao486 sample-program parity across reference/generated-verilog/generated-ir
+rhdl import --src examples/ao486/reference/rtl/ao486 --dependency-resolution none --compile-unit-filter modules_only --missing-modules blackbox_stubs --top ao486 --check-profile ao486_program_parity --trace-cycles 256 examples/ao486/hdl
+```
+
+Notes:
+- Requires `verilator` on `PATH` for frontend ingestion.
+- Differential checks use `iverilog` first with `verilator` fallback.
+- Use `--no-check` to disable differential checks.
+
+See [Import Guide](docs/import.md) for full behavior and output contract.
 
 ## Examples
 
@@ -504,11 +528,33 @@ rhdl export --lang verilog --out ./out RHDL::HDL::Counter
 rhdl gates --export                      # Export to JSON netlists
 rhdl gates --stats                       # Show synthesis statistics
 
+# Import
+rhdl import --src ./rtl --top top --no-check
+rhdl import --help
+
 # Example emulators
 rhdl examples apple2 --demo              # Run Apple II demo mode
 rhdl examples gameboy --demo             # Run Game Boy demo mode
 rhdl examples riscv --xv6 -d             # Run RISC-V xv6 with debug panel
 ```
+
+## Import
+
+RHDL includes a Verilog/SystemVerilog import surface under `rhdl import`.
+
+- `rhdl import` runs through the import task/API pipeline and writes a report.
+- Exit code is `0` on success and non-zero on partial conversion/check/tool failures.
+- If `--report FILE` is provided, the report is copied to that exact path.
+- `--missing-modules fail` (default) fails unresolved dependencies; `--missing-modules blackbox_stubs` auto-generates deterministic stubs.
+- `--check-profile ao486_trace` compares trace events (`--expected-trace` / `--actual-trace` or `--expected-trace-cmd` / `--actual-trace-cmd`), supports key filtering via `--trace-key`, and writes trace artifacts.
+- `--check-profile ao486_trace_ir` compares reference Verilog trace events against converted IR trace events.
+- `--check-profile ao486_program_parity` runs a deterministic sample program from reset vector on reference Verilog, generated Verilog, and generated IR, then compares PC/instruction-fetch and memory results.
+- `--trace-converted-export-mode` selects converted trace export source (`component` default; `dsl_super` prefers inherited export when present, otherwise falls back to standard component export).
+- `examples/ao486/tools/capture_trace.rb` provides deterministic ao486 reference/converted trace commands for `ao486_trace` checks.
+- With `--check-profile ao486_trace` and top `ao486`, importer can auto-run the built-in harness when no trace inputs are supplied (`--trace-cycles`, `--trace-reference-root`).
+- Import reports include `blackboxes_generated` for generated stub modules.
+
+See [Import Guide](docs/import.md) for input modes, output layout, check semantics, and reproducibility details.
 
 ## Execution Backends
 

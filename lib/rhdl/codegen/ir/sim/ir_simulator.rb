@@ -193,8 +193,16 @@ module RHDL
           if selected
             configure_backend(selected)
             load_library
-            create_simulator
-            compile if @backend == :compile
+            begin
+              create_simulator
+              compile if @backend == :compile
+            rescue StandardError
+              raise unless allow_fallback
+
+              @sim = RubyIrSim.new(ir_json)
+              @backend = :ruby
+              @fallback = true
+            end
           elsif allow_fallback
             @sim = RubyIrSim.new(ir_json)
             @backend = :ruby
@@ -1046,8 +1054,9 @@ module RHDL
 
           # Initialize ports
           @ir[:ports]&.each do |port|
-            @signals[port[:name]] = 0
-            @widths[port[:name]] = port[:width]
+            width = port[:width]
+            @signals[port[:name]] = normalize_initial_value(port[:default], width: width)
+            @widths[port[:name]] = width
             if port[:direction] == 'in'
               @inputs << port[:name]
             else
@@ -1094,7 +1103,31 @@ module RHDL
         end
 
         def mask(width)
-          width >= 64 ? 0xFFFFFFFFFFFFFFFF : (1 << width) - 1
+          normalized = width.to_i
+          return 0 if normalized <= 0
+
+          (1 << normalized) - 1
+        end
+
+        def normalize_initial_value(value, width:)
+          return 0 if value.nil?
+
+          case value
+          when Hash
+            return normalize_initial_value(value[:value] || value["value"], width: width) if (value[:type] || value["type"]).to_s == "literal"
+            return 0
+          when Integer
+            value & mask(width)
+          when String
+            token = value.strip
+            return 0 if token.empty?
+            base = token.start_with?("0x", "0X") ? 16 : 10
+            Integer(token, base) & mask(width)
+          else
+            Integer(value) & mask(width)
+          end
+        rescue ArgumentError, TypeError
+          0
         end
 
         def eval_expr(expr)
@@ -1132,8 +1165,8 @@ module RHDL
             when '*' then (l * r) & m
             when '/' then r != 0 ? l / r : 0
             when '%' then r != 0 ? l % r : 0
-            when '<<' then (l << [r, 63].min) & m
-            when '>>' then l >> [r, 63].min
+            when '<<' then (l << [r, 0].max) & m
+            when '>>' then l >> [r, 0].max
             when '==' then l == r ? 1 : 0
             when '!=' then l != r ? 1 : 0
             when '<' then l < r ? 1 : 0
@@ -1181,13 +1214,25 @@ module RHDL
         end
 
         def poke(name, value)
-          raise "Unknown input: #{name}" unless @inputs.include?(name)
-          width = @widths[name] || 64
-          @signals[name] = value & mask(width)
+          signal_name = resolve_signal_name(name)
+          raise "Unknown input: #{name}" unless signal_name
+
+          width = @widths[signal_name] || 64
+          @signals[signal_name] = value & mask(width)
         end
 
         def peek(name)
           @signals[name] || 0
+        end
+
+        def resolve_signal_name(name)
+          string_name = name.to_s
+          return string_name if @signals.key?(string_name)
+
+          symbol_name = name.to_sym
+          return symbol_name if @signals.key?(symbol_name)
+
+          nil
         end
 
         def evaluate
@@ -1303,13 +1348,46 @@ module RHDL
         module_function
 
         def convert(ir)
+          assign_hashes = ir.assigns.map { |a| assign_to_hash(a) }
+          process_hashes = []
+
+          ir.processes.each do |process|
+            process_hash = process_to_hash(process)
+            if process.clocked
+              process_hashes << process_hash
+            elsif process.respond_to?(:initial) && process.initial
+              assign_hashes.concat(
+                Array(process_hash[:statements]).map do |stmt|
+                  {
+                    target: stmt[:target],
+                    expr: stmt[:expr]
+                  }
+                end
+              )
+            else
+              next if Array(process.sensitivity_list).empty?
+
+              # The native IR simulators only execute clocked processes.
+              # Lower combinational processes into explicit assigns so their
+              # behavior is preserved during IR simulation.
+              assign_hashes.concat(
+                Array(process_hash[:statements]).map do |stmt|
+                  {
+                    target: stmt[:target],
+                    expr: stmt[:expr]
+                  }
+                end
+              )
+            end
+          end
+
           {
             name: ir.name,
             ports: ir.ports.map { |p| port_to_hash(p) },
             nets: ir.nets.map { |n| net_to_hash(n) },
             regs: ir.regs.map { |r| reg_to_hash(r) },
-            assigns: ir.assigns.map { |a| assign_to_hash(a) },
-            processes: ir.processes.map { |p| process_to_hash(p) },
+            assigns: assign_hashes,
+            processes: process_hashes,
             memories: (ir.memories || []).map { |m| memory_to_hash(m) },
             write_ports: (ir.write_ports || []).map { |wp| write_port_to_hash(wp) },
             sync_read_ports: (ir.sync_read_ports || []).map { |rp| sync_read_port_to_hash(rp) }
@@ -1317,11 +1395,13 @@ module RHDL
         end
 
         def port_to_hash(port)
-          {
+          hash = {
             name: port.name.to_s,
             direction: port.direction.to_s,
             width: port.width
           }
+          hash[:default] = port.default unless port.default.nil?
+          hash
         end
 
         def net_to_hash(net)
@@ -1336,7 +1416,7 @@ module RHDL
             name: reg.name.to_s,
             width: reg.width
           }
-          hash[:reset_value] = reg.reset_value if reg.reset_value
+          hash[:reset_value] = reg.reset_value unless reg.reset_value.nil?
           hash
         end
 
@@ -1352,71 +1432,193 @@ module RHDL
             name: process.name.to_s,
             clock: process.clock&.to_s,
             clocked: process.clocked,
-            statements: flatten_statements(process.statements)
+            initial: (process.respond_to?(:initial) && process.initial),
+            statements: flatten_statements(process.statements, substitute_sequential: !process.clocked)
           }
         end
 
-        def flatten_statements(stmts)
-          return [] unless stmts
-          result = []
-          stmts.each do |stmt|
-            case stmt
-            when IR::SeqAssign
-              result << seq_assign_to_hash(stmt)
-            when IR::If
-              flatten_if(stmt, result)
-            end
+        def flatten_statements(stmts, substitute_sequential:)
+          state = reduce_statement_block(stmts, {}, substitute_sequential: substitute_sequential)
+          state.map do |target, expr|
+            {
+              target: target,
+              expr: expr
+            }
           end
-          result
         end
 
-        def flatten_if(if_stmt, result)
-          cond = expr_to_hash(if_stmt.condition)
+        def reduce_statement_block(stmts, incoming_state, substitute_sequential:)
+          state = incoming_state.dup
 
-          then_assigns = {}
-          if_stmt.then_statements&.each do |s|
-            case s
+          Array(stmts).each do |stmt|
+            case stmt
             when IR::SeqAssign
-              then_assigns[s.target.to_s] = expr_to_hash(s.expr)
+              expr_hash = expr_to_hash(stmt.expr)
+              expr_hash = rewrite_expr_with_state(expr_hash, state) if substitute_sequential
+              state[stmt.target.to_s] = expr_hash
             when IR::If
-              flatten_if(s, result)
+              state = reduce_if_statement(stmt, state, substitute_sequential: substitute_sequential)
+            when IR::CaseStmt
+              state = reduce_case_statement(stmt, state, substitute_sequential: substitute_sequential)
             end
           end
 
-          else_assigns = {}
-          if_stmt.else_statements&.each do |s|
-            case s
-            when IR::SeqAssign
-              else_assigns[s.target.to_s] = expr_to_hash(s.expr)
-            when IR::If
-              flatten_if(s, result)
-            end
+          state
+        end
+
+        def reduce_if_statement(if_stmt, incoming_state, substitute_sequential:)
+          condition = expr_to_hash(if_stmt.condition)
+          condition = rewrite_expr_with_state(condition, incoming_state) if substitute_sequential
+          then_state = reduce_statement_block(if_stmt.then_statements, incoming_state, substitute_sequential: substitute_sequential)
+          else_state = reduce_statement_block(if_stmt.else_statements, incoming_state, substitute_sequential: substitute_sequential)
+
+          merged = {}
+          targets = (incoming_state.keys + then_state.keys + else_state.keys).uniq
+          targets.each do |target|
+            then_expr = then_state[target]
+            else_expr = else_state[target]
+
+            width = infer_target_width(then_expr, else_expr, incoming_state[target])
+            then_expr ||= { type: 'signal', name: target, width: width }
+            else_expr ||= { type: 'signal', name: target, width: width }
+
+            merged[target] =
+              if then_expr == else_expr
+                then_expr
+              else
+                {
+                  type: 'mux',
+                  condition: condition,
+                  when_true: then_expr,
+                  when_false: else_expr,
+                  width: width
+                }
+              end
           end
 
-          all_targets = (then_assigns.keys + else_assigns.keys).uniq
-          all_targets.each do |target|
-            then_expr = then_assigns[target]
-            else_expr = else_assigns[target]
-            width = (then_expr || else_expr)&.dig(:width) || 8
+          merged
+        end
 
-            if then_expr && else_expr
-              result << {
-                target: target,
-                expr: { type: 'mux', condition: cond, when_true: then_expr, when_false: else_expr, width: width }
-              }
-            elsif then_expr
-              result << {
-                target: target,
-                expr: { type: 'mux', condition: cond, when_true: then_expr, when_false: { type: 'signal', name: target, width: width }, width: width }
-              }
-            elsif else_expr
-              inv_cond = { type: 'unary_op', op: '~', operand: cond, width: 1 }
-              result << {
-                target: target,
-                expr: { type: 'mux', condition: inv_cond, when_true: else_expr, when_false: { type: 'signal', name: target, width: width }, width: width }
+        def reduce_case_statement(case_stmt, incoming_state, substitute_sequential:)
+          selector = expr_to_hash(case_stmt.selector)
+          selector = rewrite_expr_with_state(selector, incoming_state) if substitute_sequential
+
+          branch_states = Array(case_stmt.branches).map do |branch|
+            values = Array(branch.values).map { |value| expr_to_hash(value) }
+            values = values.map { |value| rewrite_expr_with_state(value, incoming_state) } if substitute_sequential
+            lowered_state = reduce_statement_block(branch.statements, incoming_state, substitute_sequential: substitute_sequential)
+            { values: values, state: lowered_state }
+          end
+
+          default_state = reduce_statement_block(
+            case_stmt.default_statements,
+            incoming_state,
+            substitute_sequential: substitute_sequential
+          )
+
+          merged = {}
+          targets = (incoming_state.keys + default_state.keys + branch_states.flat_map { |entry| entry[:state].keys }).uniq
+          targets.each do |target|
+            base_expr = default_state[target]
+            width = infer_target_width(base_expr, incoming_state[target])
+            base_expr ||= incoming_state[target]
+            base_expr ||= { type: 'signal', name: target, width: width }
+            current = base_expr
+
+            branch_states.reverse_each do |entry|
+              branch_expr = entry[:state][target] || current
+              next if branch_expr == current
+
+              conditions = entry[:values].map do |value_hash|
+                {
+                  type: 'binary_op',
+                  op: '==',
+                  left: deep_clone_expr_hash(selector),
+                  right: deep_clone_expr_hash(value_hash),
+                  width: 1
+                }
+              end
+              condition = conditions.reduce do |memo, expr_hash|
+                {
+                  type: 'binary_op',
+                  op: '|',
+                  left: memo,
+                  right: expr_hash,
+                  width: 1
+                }
+              end
+              next if condition.nil?
+
+              current = {
+                type: 'mux',
+                condition: condition,
+                when_true: branch_expr,
+                when_false: current,
+                width: infer_target_width(branch_expr, current, incoming_state[target])
               }
             end
+
+            merged[target] = current
           end
+
+          merged
+        end
+
+        def rewrite_expr_with_state(expr_hash, state, stack = [])
+          return expr_hash unless expr_hash.is_a?(Hash)
+
+          case expr_hash[:type]
+          when 'signal'
+            name = expr_hash[:name].to_s
+            replacement = state[name]
+            return expr_hash if replacement.nil? || stack.include?(name)
+
+            rewrite_expr_with_state(deep_clone_expr_hash(replacement), state, stack + [name])
+          when 'unary_op'
+            expr_hash.merge(operand: rewrite_expr_with_state(expr_hash[:operand], state, stack))
+          when 'binary_op'
+            expr_hash.merge(
+              left: rewrite_expr_with_state(expr_hash[:left], state, stack),
+              right: rewrite_expr_with_state(expr_hash[:right], state, stack)
+            )
+          when 'mux'
+            expr_hash.merge(
+              condition: rewrite_expr_with_state(expr_hash[:condition], state, stack),
+              when_true: rewrite_expr_with_state(expr_hash[:when_true], state, stack),
+              when_false: rewrite_expr_with_state(expr_hash[:when_false], state, stack)
+            )
+          when 'slice'
+            expr_hash.merge(base: rewrite_expr_with_state(expr_hash[:base], state, stack))
+          when 'concat'
+            expr_hash.merge(parts: Array(expr_hash[:parts]).map { |part| rewrite_expr_with_state(part, state, stack) })
+          when 'resize'
+            expr_hash.merge(expr: rewrite_expr_with_state(expr_hash[:expr], state, stack))
+          when 'mem_read'
+            expr_hash.merge(addr: rewrite_expr_with_state(expr_hash[:addr], state, stack))
+          else
+            expr_hash
+          end
+        end
+
+        def deep_clone_expr_hash(value)
+          case value
+          when Hash
+            value.each_with_object({}) do |(key, inner), memo|
+              memo[key] = deep_clone_expr_hash(inner)
+            end
+          when Array
+            value.map { |entry| deep_clone_expr_hash(entry) }
+          else
+            value
+          end
+        end
+
+        def infer_target_width(*expr_hashes)
+          Array(expr_hashes).each do |entry|
+            width = entry&.dig(:width)
+            return width if width.is_a?(Integer) && width.positive?
+          end
+          8
         end
 
         def seq_assign_to_hash(stmt)

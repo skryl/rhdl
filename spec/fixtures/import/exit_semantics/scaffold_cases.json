@@ -1,0 +1,8 @@
+{
+  "non_zero_cases": [
+    { "name": "partial_conversion", "exit_code": 1 },
+    { "name": "check_failure", "exit_code": 2 },
+    { "name": "tool_failure", "exit_code": 70 }
+  ],
+  "zero_case": { "name": "success", "exit_code": 0 }
+}

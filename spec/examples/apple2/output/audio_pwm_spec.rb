@@ -2,6 +2,7 @@
 
 require 'spec_helper'
 require 'rhdl'
+require 'tmpdir'
 require_relative '../../../../examples/apple2/hdl/audio_pwm'
 require_relative '../../../support/vhdl_reference_helper'
 require_relative '../../../support/hdl_toolchain'

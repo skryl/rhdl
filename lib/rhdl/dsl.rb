@@ -65,14 +65,42 @@ module RHDL
         define_method(name) { SignalRef.new(name, width: width, component: self) }
       end
 
+      # Expression helpers for class-level DSL emission (for example importer output).
+      # Keeping these on RHDL::Component avoids per-generated-file AST helper boilerplate.
+      def sig(name, width: 1)
+        SignalRef.new(name.to_sym, width: width)
+      end
+
+      def lit(value, width: nil, base: nil, signed: false)
+        Literal.new(value, width: width, base: base, signed: signed)
+      end
+
+      def mux(condition, when_true, when_false)
+        TernaryOp.new(condition, when_true, when_false)
+      end
+
+      def case_select(selector, cases:, default: 0)
+        CaseSelect.new(selector, cases: cases, default: default)
+      end
+
+      def u(op, operand)
+        UnaryOp.new(op.to_sym, operand)
+      end
+
       # Concurrent signal assignment
       def assign(target, value, when_condition: nil)
         _assignments << Assignment.new(target, value, condition: when_condition)
       end
 
       # Define a process block
-      def process(name, sensitivity: [], clocked: false, &block)
-        proc = ProcessBlock.new(name, sensitivity_list: sensitivity, clocked: clocked, &block)
+      def process(name, sensitivity: [], clocked: false, initial: false, &block)
+        proc = ProcessBlock.new(
+          name,
+          sensitivity_list: sensitivity,
+          clocked: clocked,
+          initial: initial,
+          &block
+        )
         _processes << proc
       end
 
@@ -180,6 +208,7 @@ module RHDL
 end
 
 # Load expression classes first (in dependency order)
+require_relative "dsl/expressions/expression_operators"
 require_relative "dsl/expressions/bit_select"
 require_relative "dsl/expressions/bit_slice"
 require_relative "dsl/expressions/binary_op"
@@ -187,6 +216,9 @@ require_relative "dsl/expressions/unary_op"
 require_relative "dsl/expressions/concatenation"
 require_relative "dsl/expressions/replication"
 require_relative "dsl/expressions/signal_ref"
+require_relative "dsl/expressions/literal"
+require_relative "dsl/expressions/ternary_op"
+require_relative "dsl/expressions/case_select"
 
 # Load basic DSL classes
 require_relative "dsl/port"

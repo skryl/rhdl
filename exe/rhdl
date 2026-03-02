@@ -17,6 +17,7 @@ def show_help
       tui           Launch interactive TUI debugger
       diagram       Generate circuit diagrams
       export        Export components to Verilog
+      import        Import Verilog/SystemVerilog projects
       gates         Gate-level synthesis
       examples      Run example emulators (mos6502, apple2)
       disk          Disk image utilities for Apple II
@@ -183,6 +184,80 @@ def handle_export(args)
   options[:component] = args.shift unless options[:all] || options[:clean]
 
   RHDL::CLI::Tasks::ExportTask.new(options).run
+end
+
+def handle_import(args)
+  options = {
+    src: [],
+    exclude: [],
+    incdir: [],
+    define: [],
+    top: [],
+    dependency_resolution: "none",
+    compile_unit_filter: "all",
+    missing_modules: "fail",
+    recovery_mode: "recoverable",
+    hint_backend: "surelog",
+    hint_min_confidence: "medium",
+    hint_conflict_policy: "prefer_ast",
+    check_profile: "default",
+    trace_keys: [],
+    trace_cycles: 1024,
+    check: true,
+    keep_temp: false
+  }
+
+  parser = OptionParser.new do |opts|
+    opts.banner = <<~BANNER
+      Usage: rhdl import [options]
+
+      Import a Verilog/SystemVerilog project into a standalone RHDL project.
+
+      Options:
+    BANNER
+
+    opts.on('--filelist FILE', 'Input filelist (.f)') { |v| options[:filelist] = v }
+    opts.on('--src DIR', 'Source directory (repeatable)') { |v| options[:src] << v }
+    opts.on('--exclude PATTERN', 'Exclude pattern (repeatable)') { |v| options[:exclude] << v }
+    opts.on('-I', '--incdir DIR', 'Include directory (repeatable)') { |v| options[:incdir] << v }
+    opts.on('-D', '--define MACRO[=VALUE]', 'Preprocessor define (repeatable)') { |v| options[:define] << v }
+    opts.on('--dependency-resolution MODE', 'Dependency resolution: none | parent_root_auto_scan') { |v| options[:dependency_resolution] = v }
+    opts.on('--compile-unit-filter MODE', 'Compile unit filter: all | modules_only') { |v| options[:compile_unit_filter] = v }
+    opts.on('--missing-modules MODE', 'Missing module policy: fail | blackbox_stubs') { |v| options[:missing_modules] = v }
+    opts.on('--recovery-mode MODE', 'Recovery mode: off | recoverable | strict') { |v| options[:recovery_mode] = v }
+    opts.on('--hint-backend BACKEND', 'Hint backend: off | surelog') { |v| options[:hint_backend] = v }
+    opts.on('--hint-min-confidence LEVEL', 'Hint minimum confidence: low | medium | high') { |v| options[:hint_min_confidence] = v }
+    opts.on('--hint-conflict-policy POLICY', 'Hint conflict policy: prefer_ast | prefer_hint | strict') { |v| options[:hint_conflict_policy] = v }
+    opts.on('--check-profile PROFILE', 'Check profile selector (for example: default, ao486_trace, ao486_trace_ir, ao486_component_parity, ao486_program_parity)') { |v| options[:check_profile] = v }
+    opts.on('--top MODULE', 'Top module (repeatable)') { |v| options[:top] << v }
+    opts.on('--check', 'Enable differential checks (default)') { options[:check] = true }
+    opts.on('--no-check', 'Disable differential checks') { options[:check] = false }
+    opts.on('--check-scope SCOPE', 'Check scope selector') { |v| options[:check_scope] = v }
+    opts.on('--check-backend BACKEND', 'Check backend preference') { |v| options[:check_backend] = v }
+    opts.on('--expected-trace FILE', 'Expected trace events JSON (for ao486_trace profile)') { |v| options[:expected_trace_path] = v }
+    opts.on('--actual-trace FILE', 'Actual trace events JSON (for ao486_trace profile)') { |v| options[:actual_trace_path] = v }
+    opts.on('--expected-trace-cmd CMD', 'Expected trace command (stdout must be JSON)') { |v| options[:expected_trace_command] = v }
+    opts.on('--actual-trace-cmd CMD', 'Actual trace command (stdout must be JSON)') { |v| options[:actual_trace_command] = v }
+    opts.on('--trace-command-cwd DIR', 'Working directory for trace commands') { |v| options[:trace_command_cwd] = v }
+    opts.on('--trace-key KEY', 'Trace event key to compare (repeatable)') { |v| options[:trace_keys] << v }
+    opts.on('--trace-cycles N', Integer, 'Cycle budget for built-in ao486 trace harness (default: 1024)') { |v| options[:trace_cycles] = v }
+    opts.on('--trace-reference-root DIR', 'Reference RTL root for built-in ao486 trace harness') { |v| options[:trace_reference_root] = v }
+    opts.on('--trace-converted-export-mode MODE', 'Converted trace export mode: component | dsl_super') { |v| options[:trace_converted_export_mode] = v }
+    opts.on('--vectors N', Integer, 'Vector count for checks') { |v| options[:vectors] = v }
+    opts.on('--seed N', Integer, 'Deterministic seed for checks') { |v| options[:seed] = v }
+    opts.on('--report FILE', 'Write import report to FILE') { |v| options[:report] = v }
+    opts.on('--keep-temp', 'Keep temporary artifacts') { options[:keep_temp] = true }
+    opts.on('-h', '--help', 'Show this help') do
+      puts opts
+      exit 0
+    end
+  end
+
+  parser.parse!(args)
+  options[:remaining_args] = args
+
+  success = RHDL::CLI::Tasks::ImportTask.new(options).run
+  exit(success ? 0 : 1)
 end
 
 def handle_gates(args)
@@ -632,6 +707,8 @@ when 'diagram', 'diagrams'
   handle_diagram(ARGV)
 when 'export', 'exports'
   handle_export(ARGV)
+when 'import'
+  handle_import(ARGV)
 when 'gates', 'gate'
   handle_gates(ARGV)
 when 'examples'

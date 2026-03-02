@@ -6,6 +6,7 @@ RSpec.describe RHDL::Export do
   before(:all) do
     Object.send(:remove_const, :ExportTestAdder) if defined?(ExportTestAdder)
     Object.send(:remove_const, :ExportTestCounter) if defined?(ExportTestCounter)
+    Object.send(:remove_const, :ExportKeywordNames) if defined?(ExportKeywordNames)
 
     class ExportTestAdder
       include RHDL::DSL
@@ -30,6 +31,15 @@ RSpec.describe RHDL::Export do
 
       signal :counter_reg, width: 8, default: 0
     end
+
+    class ExportKeywordNames
+      include RHDL::DSL
+
+      input :module, width: 1
+      output :end, width: 1
+
+      assign :end, :module
+    end
   end
 
   describe '.discover_components' do
@@ -50,6 +60,21 @@ RSpec.describe RHDL::Export do
       verilog = RHDL::Export.to_verilog(ExportTestAdder)
       expect(verilog).to include('module export_test_adder')
       expect(verilog).to include('endmodule')
+    end
+
+    it 'sanitizes keyword identifiers for legacy DSL exports' do
+      verilog = RHDL::Export.to_verilog(ExportKeywordNames)
+
+      expect(verilog).to include('module export_keyword_names')
+      expect(verilog).to include('input module_rhdl')
+      expect(verilog).to include('output end_rhdl')
+      expect(verilog).to include('assign end_rhdl = module_rhdl;')
+    end
+
+    it 'sanitizes keyword top_name overrides' do
+      verilog = RHDL::Export.to_verilog(ExportTestAdder, top_name: 'module')
+
+      expect(verilog).to include('module module_rhdl')
     end
   end
 

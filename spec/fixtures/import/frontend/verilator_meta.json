@@ -1,0 +1,16 @@
+{
+  "sources": [
+    {
+      "id": 1,
+      "path": "rtl/top.sv"
+    },
+    {
+      "id": 2,
+      "path": "rtl/alu.sv"
+    }
+  ],
+  "defines": [
+    "ENABLE_TRACE",
+    "WIDTH=32"
+  ]
+}

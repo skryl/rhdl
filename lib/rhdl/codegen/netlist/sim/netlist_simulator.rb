@@ -99,14 +99,22 @@ module RHDL
           nets = @inputs[name.to_s] || @inputs[name.to_sym]
           raise "Unknown input: #{name}" unless nets
 
-          val = value.is_a?(Array) ? value.first : value
-          val = val.to_i & @lane_mask
+          if value.is_a?(Array)
+            if value.length == @lanes
+              write_lane_values(nets, value)
+              return
+            end
 
-          if nets.length == 1
-            @nets[nets.first] = val
-          else
-            nets.each_with_index { |net, i| @nets[net] = ((val >> i) & 1) == 1 ? @lane_mask : 0 }
+            if value.length == nets.length
+              # Allow direct per-bit lane masks for buses.
+              nets.each_with_index do |net, idx|
+                @nets[net] = value[idx].to_i & @lane_mask
+              end
+              return
+            end
           end
+
+          write_scalar_value(nets, value)
         end
 
         def peek(name)
@@ -229,6 +237,38 @@ module RHDL
           when :const
             val = gate[:value] || gate.value
             @nets[output] = val.to_i.zero? ? 0 : @lane_mask
+          end
+        end
+
+        def write_lane_values(nets, lane_values)
+          if nets.length == 1
+            packed = 0
+            lane_values.each_with_index do |lane_value, lane|
+              packed |= (1 << lane) if (lane_value.to_i & 1) == 1
+            end
+            @nets[nets.first] = packed & @lane_mask
+            return
+          end
+
+          nets.each_with_index do |net, bit|
+            packed = 0
+            lane_values.each_with_index do |lane_value, lane|
+              packed |= (1 << lane) if ((lane_value.to_i >> bit) & 1) == 1
+            end
+            @nets[net] = packed & @lane_mask
+          end
+        end
+
+        def write_scalar_value(nets, value)
+          val = value.is_a?(Array) ? value.first : value
+          val = val.to_i & @lane_mask
+
+          if nets.length == 1
+            @nets[nets.first] = val
+          else
+            nets.each_with_index do |net, idx|
+              @nets[net] = ((val >> idx) & 1) == 1 ? @lane_mask : 0
+            end
           end
         end
       end

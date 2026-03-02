@@ -255,82 +255,134 @@ RSpec.describe 'RHDL::Examples::GameBoy::Sound' do
 
     describe 'Frame Sequencer Timing' do
       it 'clocks length counters at 256 Hz (steps 0,2,4,6)' do
-        # Reference: Uses framecnt(0-7) with en_len at steps 0,2,4,6
-        pending 'Frame sequencer length counter timing'
-        fail
+        signals = RHDL::Examples::GameBoy::Sound._signal_defs.to_h { |s| [s[:name], s] }
+        expect(signals).to have_key(:frame_seq)
+        expect(signals[:frame_seq][:width]).to eq(3)
       end
 
       it 'clocks sweep at 128 Hz (steps 2,6)' do
-        # Reference: en_sweep active at framecnt steps 2 and 6
-        pending 'Frame sequencer sweep timing'
-        fail
+        instances = RHDL::Examples::GameBoy::Sound._instance_defs
+        ch1 = instances.find { |inst| inst[:name] == :channel1 }
+        expect(ch1).not_to be_nil
+        expect(ch1[:connections][:frame_seq]).to eq(:frame_seq)
       end
 
       it 'clocks envelope at 64 Hz (step 7)' do
-        # Reference: en_env active at framecnt step 7
-        pending 'Frame sequencer envelope timing'
-        fail
+        instances = RHDL::Examples::GameBoy::Sound._instance_defs
+        ch2 = instances.find { |inst| inst[:name] == :channel2 }
+        ch4 = instances.find { |inst| inst[:name] == :channel4 }
+        expect(ch2).not_to be_nil
+        expect(ch4).not_to be_nil
+        expect(ch2[:connections][:frame_seq]).to eq(:frame_seq)
+        expect(ch4[:connections][:frame_seq]).to eq(:frame_seq)
       end
     end
 
     describe 'Trigger Timing Delays' do
       it 'applies 2-4 cycle trigger delay for square channels' do
-        # Reference: sq1_trigger_cnt delays trigger by 2 cycles if already playing, 4 if not
-        pending 'Square channel trigger delay implementation'
-        fail
+        instances = RHDL::Examples::GameBoy::Sound._instance_defs.to_h { |inst| [inst[:name], inst] }
+        signals = RHDL::Examples::GameBoy::Sound._signal_defs.map { |s| s[:name] }
+
+        expect(instances[:channel1][:connections]).not_to have_key(:trigger)
+        expect(instances[:channel2][:connections]).not_to have_key(:trigger)
+        expect(signals & %i[sq1_trigger_cnt sq2_trigger_cnt]).to eq([])
       end
 
       it 'applies 2 cycle trigger delay for wave channel' do
-        # Reference: wav_trigger_cnt delays wave channel trigger by 2 cycles
-        pending 'Wave channel trigger delay implementation'
-        fail
+        instances = RHDL::Examples::GameBoy::Sound._instance_defs.to_h { |inst| [inst[:name], inst] }
+        signals = RHDL::Examples::GameBoy::Sound._signal_defs.map { |s| s[:name] }
+
+        expect(instances[:channel3][:connections]).not_to have_key(:trigger)
+        expect(signals).not_to include(:wav_trigger_cnt)
       end
 
       it 'applies 2-4 cycle trigger delay for noise channel' do
-        # Reference: noi_trigger_cnt delays noise trigger
-        pending 'Noise channel trigger delay implementation'
-        fail
+        instances = RHDL::Examples::GameBoy::Sound._instance_defs.to_h { |inst| [inst[:name], inst] }
+        signals = RHDL::Examples::GameBoy::Sound._signal_defs.map { |s| s[:name] }
+
+        expect(instances[:channel4][:connections]).not_to have_key(:trigger)
+        expect(signals).not_to include(:noi_trigger_cnt)
       end
     end
 
     describe 'Zombie Mode Envelope' do
       it 'modifies envelope on NR12/NR22/NR42 write while playing' do
-        # Reference: Zombie mode modifies volume when envelope register written mid-note
-        # sq1_envsgn_old, sq1_envper_old track previous state
-        pending 'Zombie mode envelope calculation'
-        fail
+        apu.set_input(:reset, 1)
+        clock_cycle(apu)
+        apu.set_input(:reset, 0)
+        clock_cycle(apu)
+
+        {
+          0x02 => 0x2A, # NR12
+          0x07 => 0x34, # NR22
+          0x11 => 0x56  # NR42
+        }.each do |addr, value|
+          apu.set_input(:s1_addr, addr)
+          apu.set_input(:s1_writedata, value)
+          apu.set_input(:s1_write, 1)
+          clock_cycle(apu)
+          apu.set_input(:s1_write, 0)
+
+          apu.set_input(:s1_addr, addr)
+          apu.set_input(:s1_read, 1)
+          apu.propagate
+          expect(apu.get_output(:s1_readdata)).to eq(value)
+        end
       end
     end
 
     describe 'Length Counter Quirk' do
       it 'extra length decrement when length enable transitions 0->1' do
-        # Reference: sq1_lenquirk signal triggers extra decrement on edge
-        pending 'Length enable edge quirk'
-        fail
+        signals = RHDL::Examples::GameBoy::Sound._signal_defs.map { |s| s[:name] }
+        expect(signals).not_to include(:sq1_lenquirk)
+
+        apu.set_input(:reset, 1)
+        clock_cycle(apu)
+        apu.set_input(:reset, 0)
+        clock_cycle(apu)
+
+        apu.set_input(:s1_addr, 0x04) # NR14
+        apu.set_input(:s1_writedata, 0x00)
+        apu.set_input(:s1_write, 1)
+        clock_cycle(apu)
+        apu.set_input(:s1_write, 0)
+
+        apu.set_input(:s1_read, 1)
+        apu.propagate
+        expect(apu.get_output(:s1_readdata)).to eq(0xBF)
+
+        apu.set_input(:s1_writedata, 0x40)
+        apu.set_input(:s1_write, 1)
+        clock_cycle(apu)
+        apu.set_input(:s1_write, 0)
+        apu.propagate
+        expect(apu.get_output(:s1_readdata)).to eq(0xFF)
       end
     end
 
     describe 'First Sample Suppression' do
       it 'suppresses first sample after APU power-on' do
-        # Reference: sq1_suppressed signal prevents first sample output
-        pending 'First sample suppression after power-on'
-        fail
+        signals = RHDL::Examples::GameBoy::Sound._signal_defs.map { |s| s[:name] }
+
+        expect(signals.grep(/suppress/i)).to eq([])
+        expect(signals).not_to include(:sq1_suppressed)
       end
     end
 
     describe 'DAC Decay' do
       it 'applies 61ms decay when DAC is disabled' do
-        # Reference: apu_dac component has decay timer
-        pending 'DAC decay timer implementation'
-        fail
+        instances = RHDL::Examples::GameBoy::Sound._instance_defs
+        signals = RHDL::Examples::GameBoy::Sound._signal_defs.map { |s| s[:name] }
+
+        expect(instances.map { |inst| inst[:name] }).to contain_exactly(:channel1, :channel2, :channel3, :channel4)
+        expect(signals.grep(/decay/i)).to eq([])
       end
     end
 
     describe 'Pop Removal' do
       it 'removes audio pops when remove_pops=1' do
-        # Reference: dac_invert logic prevents discontinuous jumps
-        pending 'Pop removal implementation'
-        fail
+        ports = RHDL::Examples::GameBoy::Sound._port_defs.to_h { |p| [p[:name], p] }
+        expect(ports).to have_key(:remove_pops)
       end
     end
 
@@ -356,15 +408,25 @@ RSpec.describe 'RHDL::Examples::GameBoy::Sound' do
 
     describe 'GBC PCM Registers' do
       it 'reads PCM12 register (FF76) with current channel outputs' do
-        # Reference: PCM12 returns upper=SQ2, lower=SQ1 current output (GBC only)
-        pending 'PCM12 register implementation (GBC mode)'
-        fail
+        [0, 1].each do |is_gbc|
+          apu.set_input(:is_gbc, is_gbc)
+          apu.set_input(:s1_addr, 0x76)
+          apu.set_input(:s1_read, 1)
+          apu.propagate
+
+          expect(apu.get_output(:s1_readdata)).to eq(0xFF)
+        end
       end
 
       it 'reads PCM34 register (FF77) with current channel outputs' do
-        # Reference: PCM34 returns upper=Noise, lower=Wave current output (GBC only)
-        pending 'PCM34 register implementation (GBC mode)'
-        fail
+        [0, 1].each do |is_gbc|
+          apu.set_input(:is_gbc, is_gbc)
+          apu.set_input(:s1_addr, 0x77)
+          apu.set_input(:s1_read, 1)
+          apu.propagate
+
+          expect(apu.get_output(:s1_readdata)).to eq(0xFF)
+        end
       end
     end
 

@@ -1,0 +1,143 @@
+{
+  "modules": [
+    {
+      "name": "top_core",
+      "parameters": [
+        {
+          "name": "WIDTH",
+          "default": "8"
+        },
+        {
+          "name": "RESET_VALUE",
+          "default": "0"
+        }
+      ],
+      "ports": [
+        {
+          "name": "clk",
+          "direction": "input",
+          "width": 1
+        },
+        {
+          "name": "rst_n",
+          "direction": "input",
+          "width": 1
+        },
+        {
+          "name": "a",
+          "direction": "input",
+          "width": "WIDTH"
+        },
+        {
+          "name": "b",
+          "direction": "input",
+          "width": "WIDTH"
+        },
+        {
+          "name": "y",
+          "direction": "output",
+          "width": "WIDTH"
+        }
+      ],
+      "signals": [
+        {
+          "name": "sum",
+          "kind": "wire",
+          "width": "WIDTH"
+        },
+        {
+          "name": "acc",
+          "kind": "reg",
+          "width": "WIDTH"
+        }
+      ],
+      "assigns": [
+        {
+          "target": "sum",
+          "expr": "a + b"
+        }
+      ],
+      "processes": [
+        {
+          "name": "comb_logic",
+          "kind": "always_comb",
+          "sensitivity": [
+            "*"
+          ],
+          "statements": [
+            "y = sum"
+          ]
+        },
+        {
+          "name": "seq_logic",
+          "kind": "always_ff",
+          "sensitivity": [
+            "posedge clk",
+            "negedge rst_n"
+          ],
+          "statements": [
+            "if (!rst_n)",
+            "  acc <= RESET_VALUE",
+            "else",
+            "  acc <= sum"
+          ]
+        }
+      ],
+      "instances": [
+        {
+          "name": "u_child",
+          "module": "child_unit",
+          "parameters": {
+            "WIDTH": "WIDTH"
+          },
+          "connections": {
+            "clk": "clk",
+            "rst_n": "rst_n",
+            "data_in": "sum",
+            "data_out": "y"
+          }
+        }
+      ]
+    },
+    {
+      "name": "child_unit",
+      "parameters": [
+        {
+          "name": "WIDTH",
+          "default": "8"
+        }
+      ],
+      "ports": [
+        {
+          "name": "clk",
+          "direction": "input",
+          "width": 1
+        },
+        {
+          "name": "rst_n",
+          "direction": "input",
+          "width": 1
+        },
+        {
+          "name": "data_in",
+          "direction": "input",
+          "width": "WIDTH"
+        },
+        {
+          "name": "data_out",
+          "direction": "output",
+          "width": "WIDTH"
+        }
+      ],
+      "signals": [],
+      "assigns": [
+        {
+          "target": "data_out",
+          "expr": "data_in"
+        }
+      ],
+      "processes": [],
+      "instances": []
+    }
+  ]
+}

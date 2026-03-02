@@ -51,6 +51,10 @@ lib/rhdl/codegen/ir/sim/ir_compiler/*.json
 # HDL build artifacts (Verilator/Arcilator for example systems)
 .hdl_build/
 
+# AO486 importer scratch outputs
+/examples/ao486/tmp/*
+!/examples/ao486/tmp/.gitkeep
+
 # Web simulator generated artifacts
 web/assets/fixtures/*
 

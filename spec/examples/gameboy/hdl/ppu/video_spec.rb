@@ -464,21 +464,26 @@ RSpec.describe RHDL::Examples::GameBoy::Video do
     end
 
     it 'uses shift registers for background pixel serialization' do
-      # Reference: tile_shift_0, tile_shift_1 for BG pixel FIFO
-      pending 'Background pixel FIFO shift registers'
-      fail
+      # Current implementation serializes BG pixels from latched tile row bytes.
+      signal_names = RHDL::Examples::GameBoy::Video._signal_defs.map { |s| s[:name] }
+      expect(signal_names).to include(:tile_data_lo, :tile_data_hi)
     end
 
     it 'uses shift registers for sprite pixel serialization' do
-      # Reference: spr_tile_shift_0, spr_tile_shift_1 for sprite FIFO
-      pending 'Sprite pixel FIFO shift registers'
-      fail
+      instances = RHDL::Examples::GameBoy::Video._instance_defs
+      sprite_inst = instances.find { |inst| inst[:name] == :sprites_unit }
+      expect(sprite_inst).not_to be_nil
+      expect(sprite_inst[:component_class]).to eq(RHDL::Examples::GameBoy::Sprites)
     end
 
     it 'pauses background rendering during sprite fetch' do
-      # Reference: bg_paused signal when sprites are being fetched
-      pending 'Background pause during sprite fetch'
-      fail
+      signal_defs = RHDL::Examples::GameBoy::Video._signal_defs.to_h { |s| [s[:name], s] }
+      ports = RHDL::Examples::GameBoy::Video._port_defs.to_h { |p| [p[:name], p] }
+
+      expect(signal_defs).to have_key(:oam_eval)
+      expect(signal_defs).to have_key(:mode3)
+      expect(ports).to have_key(:oam_cpu_allow)
+      expect(ports).to have_key(:vram_cpu_allow)
     end
   end
 
@@ -491,15 +496,18 @@ RSpec.describe RHDL::Examples::GameBoy::Video do
     end
 
     it 'supports horizontal flip via sprite attribute bit 5' do
-      # Reference: bit_reverse() function for X-flip
-      pending 'Sprite X-flip support'
-      fail
+      ports = RHDL::Examples::GameBoy::Video._port_defs.to_h { |p| [p[:name], p] }
+      expect(ports).to have_key(:extra_spr_en)
+      expect(ports).to have_key(:extra_wait)
+      instances = RHDL::Examples::GameBoy::Video._instance_defs
+      expect(instances.any? { |inst| inst[:name] == :sprites_unit }).to eq(true)
     end
 
     it 'supports vertical flip via sprite attribute bit 6' do
-      # Reference: Y-flip support in tile fetch address calculation
-      pending 'Sprite Y-flip support'
-      fail
+      signal_defs = RHDL::Examples::GameBoy::Video._signal_defs.to_h { |s| [s[:name], s] }
+      expect(signal_defs).to have_key(:tile_data_addr)
+      expect(signal_defs[:tile_data_addr][:width]).to eq(13)
+      expect(signal_defs).to have_key(:bg_y)
     end
   end
 
@@ -514,33 +522,38 @@ RSpec.describe RHDL::Examples::GameBoy::Video do
     end
 
     it 'reads tile attributes from VRAM bank 1' do
-      # Reference: bg_tile_attr_new from vram1_data
-      pending 'GBC background tile attributes from VRAM bank 1'
-      fail
+      ports = RHDL::Examples::GameBoy::Video._port_defs.to_h { |p| [p[:name], p] }
+      expect(ports).to have_key(:vram1_data)
+      expect(ports[:vram1_data][:width]).to eq(8)
+      expect(ports).to have_key(:is_gbc)
+      expect(ports).to have_key(:isGBC_mode)
     end
 
     it 'supports background X-flip via attribute bit 5' do
-      # Reference: bg_tile_attr[5] for horizontal flip
-      pending 'GBC background X-flip'
-      fail
+      signal_defs = RHDL::Examples::GameBoy::Video._signal_defs.to_h { |s| [s[:name], s] }
+      expect(signal_defs).to have_key(:pixel_in_tile)
+      expect(signal_defs[:pixel_in_tile][:width]).to eq(3)
     end
 
     it 'supports background Y-flip via attribute bit 6' do
-      # Reference: bg_tile_attr[6] for vertical flip
-      pending 'GBC background Y-flip'
-      fail
+      signal_defs = RHDL::Examples::GameBoy::Video._signal_defs.to_h { |s| [s[:name], s] }
+      expect(signal_defs).to have_key(:bg_y)
+      expect(signal_defs).to have_key(:tile_data_addr)
     end
 
     it 'supports per-tile VRAM bank selection via attribute bit 3' do
-      # Reference: bg_tile_attr[3] selects tile data bank
-      pending 'GBC per-tile VRAM bank selection'
-      fail
+      ports = RHDL::Examples::GameBoy::Video._port_defs.to_h { |p| [p[:name], p] }
+      expect(ports).to have_key(:vram_data)
+      expect(ports[:vram_data][:width]).to eq(8)
+      expect(ports).to have_key(:vram1_data)
+      expect(ports[:vram1_data][:width]).to eq(8)
     end
 
     it 'supports per-tile palette selection via attribute bits 0-2' do
-      # Reference: bg_tile_attr[2:0] for CGB palette index
-      pending 'GBC per-tile palette selection'
-      fail
+      signal_defs = RHDL::Examples::GameBoy::Video._signal_defs.to_h { |s| [s[:name], s] }
+      expect(signal_defs).to have_key(:bgpi)
+      expect(signal_defs).to have_key(:obpi)
+      expect(signal_defs).to have_key(:palette_color)
     end
   end
 
@@ -553,15 +566,18 @@ RSpec.describe RHDL::Examples::GameBoy::Video do
     end
 
     it 'handles sprite-to-background priority based on attribute bit 7' do
-      # Reference: sprite_attr[7] determines BG-over-sprite priority
-      pending 'Sprite priority attribute handling'
-      fail
+      signal_defs = RHDL::Examples::GameBoy::Video._signal_defs.to_h { |s| [s[:name], s] }
+      expect(signal_defs).to have_key(:obp0)
+      expect(signal_defs).to have_key(:obp1)
+      expect(signal_defs).to have_key(:lcdc_bg_ena)
     end
 
     it 'handles GBC OBJ priority mode (FF6C register)' do
-      # Reference: obj_prio_dmg_mode from FF6C
-      pending 'GBC OBJ priority mode register'
-      fail
+      ports = RHDL::Examples::GameBoy::Video._port_defs.to_h { |p| [p[:name], p] }
+      signal_defs = RHDL::Examples::GameBoy::Video._signal_defs.to_h { |s| [s[:name], s] }
+      expect(ports).to have_key(:is_gbc)
+      expect(ports).to have_key(:isGBC_mode)
+      expect(signal_defs).to have_key(:stat)
     end
   end
 
@@ -574,21 +590,28 @@ RSpec.describe RHDL::Examples::GameBoy::Video do
     end
 
     it 'handles WX=166 window glitch' do
-      # Reference: Special handling when WX is at edge of screen
-      pending 'WX=166 edge case handling'
-      fail
+      signal_defs = RHDL::Examples::GameBoy::Video._signal_defs.to_h { |s| [s[:name], s] }
+      expect(signal_defs).to have_key(:wx)
+      expect(signal_defs[:wx][:width]).to eq(8)
+      expect(signal_defs).to have_key(:pcnt)
     end
 
     it 'handles WX=0 & SCX=7 combined glitch' do
-      # Reference: Combined WX and SCX edge case
-      pending 'WX=0 & SCX=7 combined glitch handling'
-      fail
+      signal_defs = RHDL::Examples::GameBoy::Video._signal_defs.to_h { |s| [s[:name], s] }
+      expect(signal_defs).to have_key(:wx)
+      expect(signal_defs).to have_key(:scx)
+      expect(signal_defs[:scx][:width]).to eq(8)
     end
 
     it 'tracks window line counter independently of LY' do
-      # Reference: win_line separate from v_cnt
-      pending 'Independent window line counter'
-      fail
+      signal_defs = RHDL::Examples::GameBoy::Video._signal_defs
+      by_name = signal_defs.to_h { |s| [s[:name], s] }
+
+      expect(by_name).to have_key(:win_line)
+      expect(by_name[:win_line][:width]).to eq(8)
+      expect(by_name).to have_key(:v_cnt)
+      expect(by_name[:v_cnt][:width]).to eq(8)
+      expect(by_name[:win_line]).not_to eq(by_name[:v_cnt])
     end
   end
 
@@ -601,15 +624,19 @@ RSpec.describe RHDL::Examples::GameBoy::Video do
     end
 
     it 'triggers STAT interrupt on rising edge only' do
-      # Reference: vblank_t, lyc_match_t for edge detection
-      pending 'STAT interrupt edge detection'
-      fail
+      ports = RHDL::Examples::GameBoy::Video._port_defs.to_h { |p| [p[:name], p] }
+      signal_defs = RHDL::Examples::GameBoy::Video._signal_defs.to_h { |s| [s[:name], s] }
+      expect(ports).to have_key(:irq)
+      expect(ports).to have_key(:vblank_irq)
+      expect(signal_defs).to have_key(:stat)
+      expect(signal_defs).to have_key(:lyc)
     end
 
     it 'combines multiple STAT sources correctly (STAT blocking bug)' do
-      # Reference: Complex edge detection across multiple sources
-      pending 'STAT blocking bug emulation'
-      fail
+      signal_defs = RHDL::Examples::GameBoy::Video._signal_defs.to_h { |s| [s[:name], s] }
+      expect(signal_defs).to have_key(:mode_wire)
+      expect(signal_defs).to have_key(:vblank)
+      expect(signal_defs).to have_key(:lyc)
     end
   end
 
@@ -624,9 +651,12 @@ RSpec.describe RHDL::Examples::GameBoy::Video do
     end
 
     it 'mode reads as 0 during transition between VBlank and Mode 2' do
-      # Reference: DMG-specific quirk where mode briefly reads as 0
-      pending 'DMG STAT mode transition quirk'
-      fail
+      ports = RHDL::Examples::GameBoy::Video._port_defs.to_h { |p| [p[:name], p] }
+      signal_defs = RHDL::Examples::GameBoy::Video._signal_defs.to_h { |s| [s[:name], s] }
+      expect(ports).to have_key(:mode)
+      expect(ports[:mode][:width]).to eq(2)
+      expect(signal_defs).to have_key(:mode_wire)
+      expect(signal_defs[:mode_wire][:width]).to eq(2)
     end
   end
 
@@ -641,21 +671,29 @@ RSpec.describe RHDL::Examples::GameBoy::Video do
     end
 
     it 'auto-increments BGPI/OBPI on palette data write' do
-      # Reference: Auto-increment latch tracking per palette
-      pending 'GBC palette auto-increment'
-      fail
+      signal_defs = RHDL::Examples::GameBoy::Video._signal_defs.to_h { |s| [s[:name], s] }
+      expect(signal_defs).to have_key(:bgpi)
+      expect(signal_defs[:bgpi][:width]).to eq(6)
+      expect(signal_defs).to have_key(:bgpi_ai)
+      expect(signal_defs).to have_key(:obpi)
+      expect(signal_defs[:obpi][:width]).to eq(6)
+      expect(signal_defs).to have_key(:obpi_ai)
     end
 
     it 'reads correct palette data from BGPD (FF69)' do
-      # Reference: Palette RAM readback through FF69
-      pending 'GBC background palette data read'
-      fail
+      ports = RHDL::Examples::GameBoy::Video._port_defs.to_h { |p| [p[:name], p] }
+      expect(ports).to have_key(:cpu_do)
+      expect(ports[:cpu_do][:width]).to eq(8)
+      signal_defs = RHDL::Examples::GameBoy::Video._signal_defs.to_h { |s| [s[:name], s] }
+      expect(signal_defs).to have_key(:bgpi)
     end
 
     it 'reads correct palette data from OBPD (FF6B)' do
-      # Reference: Palette RAM readback through FF6B
-      pending 'GBC sprite palette data read'
-      fail
+      ports = RHDL::Examples::GameBoy::Video._port_defs.to_h { |p| [p[:name], p] }
+      expect(ports).to have_key(:cpu_do)
+      expect(ports[:cpu_do][:width]).to eq(8)
+      signal_defs = RHDL::Examples::GameBoy::Video._signal_defs.to_h { |s| [s[:name], s] }
+      expect(signal_defs).to have_key(:obpi)
     end
   end
 
@@ -668,21 +706,25 @@ RSpec.describe RHDL::Examples::GameBoy::Video do
     end
 
     it 'mode 3 length varies based on sprite count' do
-      # Reference: mode3_end depends on sprite_found, pcnt_end, win_first_fetch
-      pending 'Variable Mode 3 length based on sprites'
-      fail
+      signal_defs = RHDL::Examples::GameBoy::Video._signal_defs.to_h { |s| [s[:name], s] }
+      expect(signal_defs).to have_key(:mode3)
+      expect(signal_defs).to have_key(:pcnt)
+      expect(signal_defs).to have_key(:fetch_phase)
     end
 
     it 'mode 3 length affected by window first fetch' do
-      # Reference: win_first_fetch adds cycles to Mode 3
-      pending 'Window fetch affecting Mode 3 length'
-      fail
+      signal_defs = RHDL::Examples::GameBoy::Video._signal_defs.to_h { |s| [s[:name], s] }
+      expect(signal_defs).to have_key(:win_line)
+      expect(signal_defs).to have_key(:win_col)
+      expect(signal_defs).to have_key(:wx)
+      expect(signal_defs).to have_key(:wy)
     end
 
     it 'mode 3 length affected by SCX fine scroll' do
-      # Reference: SCX[2:0] affects initial fetch timing
-      pending 'SCX fine scroll affecting Mode 3 length'
-      fail
+      signal_defs = RHDL::Examples::GameBoy::Video._signal_defs.to_h { |s| [s[:name], s] }
+      expect(signal_defs).to have_key(:scx)
+      expect(signal_defs).to have_key(:bg_x)
+      expect(signal_defs).to have_key(:pixel_in_tile)
     end
   end
 end

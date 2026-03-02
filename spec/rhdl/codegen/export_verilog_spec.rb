@@ -5,8 +5,8 @@ RSpec.describe "Verilog HDL export" do
     skip "Icarus Verilog not installed" unless HdlToolchain.iverilog_available?
   end
 
-  def run_case(component:, reference:, cycles:, clocked:, input_builder:)
-    top_name = component.name.split("::").last.underscore
+  def run_case(component:, reference:, cycles:, clocked:, input_builder:, top_name: nil)
+    top_name ||= component.name.split("::").last.underscore
     base_dir = File.join("tmp/hdl_export", top_name, "verilog")
     FileUtils.mkdir_p(base_dir)
 
@@ -24,10 +24,12 @@ RSpec.describe "Verilog HDL export" do
     module_path = File.join(base_dir, "#{top_name}.v")
     tb_path = File.join(base_dir, "tb.v")
 
-    File.write(module_path, RHDL::Export.verilog(component, top_name: top_name))
+    module_source = RHDL::Export.verilog(component, top_name: top_name)
+    instantiated_top_name = HdlExportHelper.extract_module_name(module_source)
+    File.write(module_path, module_source)
     HdlExportHelper.write_verilog_testbench(
       tb_path,
-      top_name: top_name,
+      top_name: instantiated_top_name,
       ports: ports,
       output_names: vectors[:output_names],
       vectors: vectors[:inputs],
@@ -81,6 +83,20 @@ RSpec.describe "Verilog HDL export" do
       clocked: true,
       input_builder: lambda { |cycle|
         { reset: cycle.zero? ? 1 : 0, d: rng.rand(256) }
+      }
+    )
+  end
+
+  it "exports and simulates with a keyword top_name override" do
+    rng = Random.new(2468)
+    run_case(
+      component: RHDL::ExportFixtures::Mux2,
+      reference: RHDL::ExportFixtures::Mux2Ref,
+      cycles: 8,
+      clocked: false,
+      top_name: "module",
+      input_builder: lambda { |_cycle|
+        { a: rng.rand(16), b: rng.rand(16), sel: rng.rand(2) }
       }
     )
   end

@@ -1,6 +1,6 @@
 # RHDL Command Line Interface
 
-The `rhdl` command provides a unified interface for working with RHDL components, including interactive debugging, diagram generation, HDL export, gate-level synthesis, and Apple II emulation.
+The `rhdl` command is the top-level CLI for simulation/debugging, diagram/export flows, example runners, disk tools, and project import.
 
 ## Installation
 
@@ -11,7 +11,7 @@ gem install rhdl
 rhdl --help
 ```
 
-For development, use `bundle exec`:
+For development in this repository, use:
 
 ```bash
 bundle exec rhdl --help
@@ -24,14 +24,15 @@ bundle exec rhdl --help
 | `tui` | Launch interactive TUI debugger |
 | `diagram` | Generate circuit diagrams |
 | `export` | Export components to Verilog |
+| `import` | Import Verilog/SystemVerilog projects |
 | `gates` | Gate-level synthesis |
-| `apple2` | Apple II emulator and ROM tools |
-
----
+| `examples` | Run example emulators (`mos6502`, `apple2`, `gameboy`, `riscv`) |
+| `disk` | Disk image utilities for Apple II workflows |
+| `generate` | Generate diagrams + HDL exports |
+| `clean` | Clean generated diagrams/exports/gates output |
+| `regenerate` | Clean and regenerate all outputs |
 
 ## TUI Command
-
-Launch the interactive Terminal User Interface debugger for HDL components.
 
 ### Usage
 
@@ -39,94 +40,24 @@ Launch the interactive Terminal User Interface debugger for HDL components.
 rhdl tui [options] <ComponentRef>
 ```
 
-### Component References
-
-Components can be specified in two ways:
-
-1. **Short path**: `category/component_name` (e.g., `sequential/counter`)
-2. **Full class reference**: `RHDL::HDL::ClassName` (e.g., `RHDL::HDL::Counter`)
-
 ### Options
 
 | Option | Description |
 |--------|-------------|
 | `--signals TYPE` | Signals to display: `all`, `inputs`, `outputs`, or comma-separated list |
-| `--format FORMAT` | Signal display format: `auto`, `binary`, `hex`, `decimal`, `signed` |
-| `--list` | List all available components |
+| `--format FORMAT` | Signal format: `auto`, `binary`, `hex`, `decimal`, `signed` |
+| `--list` | List available components |
 | `-h, --help` | Show help |
 
 ### Examples
 
 ```bash
-# Launch TUI with a counter
 rhdl tui sequential/counter
-
-# Debug an ALU, show only inputs
 rhdl tui RHDL::HDL::ALU --signals inputs
-
-# Debug with specific signals in hex format
-rhdl tui arithmetic/alu_8bit --signals a,b,result --format hex
-
-# List all available components
 rhdl tui --list
 ```
 
-### Keyboard Controls
-
-| Key | Action |
-|-----|--------|
-| `Space` | Step one cycle |
-| `n` | Step half cycle |
-| `r` | Run simulation continuously |
-| `s` | Stop/pause simulation |
-| `R` | Reset simulation |
-| `c` | Continue until breakpoint |
-| `w` | Add watchpoint |
-| `b` | Add breakpoint |
-| `j` / `k` | Scroll signals up/down |
-| `↑` / `↓` | Scroll signals up/down |
-| `:` | Enter command mode |
-| `h` / `?` | Show help |
-| `q` | Quit |
-
-### Command Mode
-
-Press `:` to enter command mode. Available commands:
-
-| Command | Description |
-|---------|-------------|
-| `run [n]` | Run n cycles (default: continuous) |
-| `step` | Single step |
-| `watch <signal> [type]` | Add watchpoint (types: `change`, `equals`, `rising_edge`, `falling_edge`) |
-| `break [cycle]` | Add breakpoint at cycle |
-| `delete <id>` | Delete breakpoint by ID |
-| `clear [breaks\|waves\|log]` | Clear breakpoints, waveforms, or log |
-| `set <signal> <value>` | Set signal value (supports `0x`, `0b`, `0o` prefixes) |
-| `print <signal>` | Print signal value |
-| `list` | List all signals |
-| `export <file>` | Export VCD waveform file |
-| `help` | Show help |
-| `quit` | Exit TUI |
-
-### TUI Layout
-
-```
-┌─────────── Signals ──────────┐┌─────────── Waveform ──────────┐
-│ signal.name    value         ││ sig │▀▄▀▄▀▄▀▄▀▄▀▄▀▄▀▄▀▄▀▄│
-│ counter.q      0x2A (42)     ││ clk │▀▄▀▄▀▄▀▄▀▄▀▄▀▄▀▄▀▄▀▄│
-└──────────────────────────────┘└────────────────────────────────┘
-┌─────────── Console ──────────┐┌──────── Breakpoints ──────────┐
-│ 12:34:56 Simulation started  ││ ● #1 signal changes (hits: 5) │
-│ 12:34:57 Breakpoint hit      ││ ○ #2 cycle == 100 (hits: 0)   │
-└──────────────────────────────┘└────────────────────────────────┘
- ▶ RUNNING │ T:42 C:42                    h:Help q:Quit Space:Step
-```
-
----
-
 ## Diagram Command
-
-Generate circuit diagrams for HDL components in various formats.
 
 ### Usage
 
@@ -140,57 +71,24 @@ rhdl diagram [options] [ComponentRef]
 |--------|-------------|
 | `--all` | Generate diagrams for all components |
 | `--mode MODE` | Batch mode: `component`, `hierarchical`, `gate`, or `all` |
-| `--clean` | Clean all generated diagrams |
-| `--level LEVEL` | Single component level: `component`, `hierarchy`, `netlist`, `gate` |
-| `--depth DEPTH` | Hierarchy depth: number or `all` |
+| `--clean` | Clean generated diagrams |
+| `--level LEVEL` | Single-component mode: `component`, `hierarchy`, `netlist`, or `gate` |
+| `--depth DEPTH` | Hierarchy depth (`N` or `all`) |
 | `--bit-blasted` | Bit-blast gate-level nets |
 | `--format FORMAT` | Output format: `svg`, `png`, `dot` |
-| `--out DIR` | Output directory (default: `diagrams`) |
+| `--out DIR` | Output directory |
 | `-h, --help` | Show help |
 
 ### Examples
 
 ```bash
-# Generate all diagrams in all modes
 rhdl diagram --all
-
-# Generate only component-level diagrams
-rhdl diagram --all --mode component
-
-# Generate only gate-level diagrams
 rhdl diagram --all --mode gate
-
-# Generate diagram for a single component
 rhdl diagram RHDL::HDL::ALU --level component --format svg
-
-# Generate hierarchical diagram with full depth
-rhdl diagram RHDL::HDL::CPU::Datapath --level hierarchy --depth all
-
-# Clean generated diagrams
 rhdl diagram --clean
 ```
 
-### Diagram Modes
-
-| Mode | Description |
-|------|-------------|
-| `component` | Simple block diagrams showing inputs/outputs |
-| `hierarchical` | Detailed schematics with internal subcomponents |
-| `gate` | Gate-level netlist showing primitive gates and flip-flops |
-
-### Output Formats
-
-| Format | Description |
-|--------|-------------|
-| `svg` | Scalable Vector Graphics (default) |
-| `png` | Portable Network Graphics (requires Graphviz) |
-| `dot` | Graphviz DOT format for custom rendering |
-
----
-
 ## Export Command
-
-Export HDL components to Verilog.
 
 ### Usage
 
@@ -204,8 +102,8 @@ rhdl export [options] [ComponentRef]
 |--------|-------------|
 | `--all` | Export all components |
 | `--scope SCOPE` | Batch scope: `all`, `lib`, or `examples` |
-| `--clean` | Clean all generated HDL files |
-| `--lang LANG` | Target language: `verilog` |
+| `--clean` | Clean generated HDL files |
+| `--lang LANG` | Target language (`verilog`) |
 | `--out DIR` | Output directory |
 | `--top NAME` | Override top module/entity name |
 | `-h, --help` | Show help |
@@ -213,50 +111,88 @@ rhdl export [options] [ComponentRef]
 ### Examples
 
 ```bash
-# Export all components to Verilog
 rhdl export --all
-
-# Export only lib/ components
-rhdl export --all --scope lib
-
-# Export only examples/ components
 rhdl export --all --scope examples
-
-# Export a single component
 rhdl export --lang verilog --out ./output RHDL::HDL::Counter
-
-# Export with custom top module name
-rhdl export --lang verilog --out ./output --top my_counter RHDL::HDL::Counter
-
-# Clean generated files
 rhdl export --clean
 ```
 
-### Output Directory Structure
+## Import Command
 
-```
-export/verilog/
-├── gates/
-│   ├── and_gate.v
-│   ├── or_gate.v
-│   └── ...
-├── sequential/
-│   ├── counter.v
-│   ├── register.v
-│   └── ...
-├── arithmetic/
-│   ├── alu.v
-│   └── ...
-└── mos6502/
-    ├── mos6502_alu.v
-    └── ...
+### Usage
+
+```bash
+rhdl import [options] [OUT_DIR]
 ```
 
----
+### Behavior
+
+`rhdl import` runs the import task, calls `RHDL::Import.project(...)`, prints a short status summary, writes `reports/import_report.json` under the output directory, and exits with:
+
+- `0` on success
+- non-zero on partial conversion, check failure, or tool/internal failure
+
+If `OUT_DIR` is omitted, output defaults to `./rhdl_import`.
+At least one input mode is required: `--filelist FILE` or one/more `--src DIR`.
+By default, checks run on converted detected tops; use `--check-scope` to override selection.
+
+### Options
+
+| Option | Description |
+|--------|-------------|
+| `--filelist FILE` | Input filelist (`.f`) |
+| `--src DIR` | Source directory (repeatable) |
+| `--exclude PATTERN` | Exclude glob pattern (repeatable) |
+| `-I, --incdir DIR` | Include directory (repeatable) |
+| `-D, --define MACRO[=VALUE]` | Preprocessor define (repeatable) |
+| `--dependency-resolution MODE` | Dependency resolution: `none` or `parent_root_auto_scan` |
+| `--compile-unit-filter MODE` | Compile-unit filtering: `all` or `modules_only` |
+| `--missing-modules MODE` | Missing module policy: `fail` or `blackbox_stubs` |
+| `--check-profile PROFILE` | Check profile selector (for example: `default`, `ao486_trace`, `ao486_trace_ir`, `ao486_component_parity`, `ao486_program_parity`) |
+| `--top MODULE` | Top module (repeatable) |
+| `--check` | Enable differential checks (default) |
+| `--no-check` | Disable differential checks |
+| `--check-scope SCOPE` | Check scope selector |
+| `--check-backend BACKEND` | Check backend preference |
+| `--expected-trace FILE` | Expected trace events JSON (for `ao486_trace`) |
+| `--actual-trace FILE` | Actual trace events JSON (for `ao486_trace`) |
+| `--expected-trace-cmd CMD` | Expected trace command (`stdout` JSON) |
+| `--actual-trace-cmd CMD` | Actual trace command (`stdout` JSON) |
+| `--trace-command-cwd DIR` | Working directory for trace commands |
+| `--trace-key KEY` | Trace event key filter (repeatable) |
+| `--trace-cycles N` | Cycle budget for built-in ao486 trace harness |
+| `--trace-reference-root DIR` | Reference RTL root for built-in ao486 trace harness |
+| `--trace-converted-export-mode MODE` | Converted trace export mode: `component` or `dsl_super` |
+| `--vectors N` | Vector count for checks |
+| `--seed N` | Deterministic seed for checks |
+| `--report FILE` | Write import report to `FILE` |
+| `--keep-temp` | Keep temporary artifacts |
+| `-h, --help` | Show help |
+
+### Examples
+
+```bash
+rhdl import --help
+rhdl import --src ./rtl --top top --no-check
+rhdl import --filelist rtl.f -I include -D WIDTH=32
+rhdl import --src ./rtl --dependency-resolution parent_root_auto_scan --compile-unit-filter modules_only
+rhdl import --src ./rtl --missing-modules blackbox_stubs --no-check
+rhdl import --src ./rtl --check-profile ao486_trace --expected-trace ./expected.json --actual-trace ./actual.json
+rhdl import --src ./rtl --check-profile ao486_trace --expected-trace-cmd "cat ./expected.json" --actual-trace-cmd "cat ./actual.json"
+rhdl import --src ./rtl --check-profile ao486_trace --trace-command-cwd ./sim --expected-trace-cmd "./run_expected.sh" --actual-trace-cmd "./run_actual.sh"
+rhdl import --src ./rtl --check-profile ao486_trace --expected-trace ./expected.json --actual-trace ./actual.json --trace-key pc --trace-key eax
+rhdl import --src examples/ao486/reference/rtl/ao486 --dependency-resolution none --compile-unit-filter modules_only --missing-modules blackbox_stubs --top ao486 --check-profile ao486_trace --trace-cycles 1024 examples/ao486/hdl
+rhdl import --src examples/ao486/reference/rtl/ao486 --dependency-resolution none --compile-unit-filter modules_only --missing-modules blackbox_stubs --top ao486 --check-profile ao486_trace --trace-converted-export-mode dsl_super examples/ao486/hdl
+rhdl import --src examples/ao486/reference/rtl/ao486 --dependency-resolution none --compile-unit-filter modules_only --missing-modules blackbox_stubs --top ao486 --check-profile ao486_trace_ir --trace-cycles 1024 examples/ao486/hdl
+rhdl import --src examples/ao486/reference/rtl/ao486 --dependency-resolution none --compile-unit-filter modules_only --missing-modules blackbox_stubs --top ao486 --check-profile ao486_program_parity --trace-cycles 256 examples/ao486/hdl
+rhdl import --src examples/ao486/reference/rtl/ao486 --dependency-resolution none --compile-unit-filter modules_only --missing-modules blackbox_stubs --top ao486 --check-profile ao486_trace --expected-trace-cmd "bundle exec ruby examples/ao486/tools/capture_trace.rb --mode reference --top %{top} --out %{out} --cycles 1024" --actual-trace-cmd "bundle exec ruby examples/ao486/tools/capture_trace.rb --mode converted --top %{top} --out %{out} --cycles 1024" examples/ao486/hdl
+rhdl import --src examples/ao486/reference/rtl/ao486 --dependency-resolution none --compile-unit-filter modules_only --missing-modules blackbox_stubs --top ao486 --check-profile ao486_trace_ir --expected-trace-cmd "bundle exec ruby examples/ao486/tools/capture_trace.rb --mode reference --top %{top} --out %{out} --cycles 1024" --actual-trace-cmd "bundle exec ruby examples/ao486/tools/capture_trace.rb --mode converted_ir --top %{top} --out %{out} --cycles 1024" examples/ao486/hdl
+rhdl import --src ./rtl ./build/imported_rhdl
+```
+
+For implementation-level import semantics, see [Import Guide](import.md).
 
 ## Gates Command
-
-Gate-level synthesis - export components to primitive gate netlists (AND, OR, XOR, NOT, MUX, DFF).
 
 ### Usage
 
@@ -268,8 +204,8 @@ rhdl gates [options]
 
 | Option | Description |
 |--------|-------------|
-| `--export` | Export all components to JSON netlists (default) |
-| `--simcpu` | Export SimCPU datapath components |
+| `--export` | Export all components to gate-level IR (JSON netlists) |
+| `--simcpu` | Export SimCPU datapath to gate-level |
 | `--stats` | Show gate-level synthesis statistics |
 | `--clean` | Clean gate-level output |
 | `-h, --help` | Show help |
@@ -277,188 +213,118 @@ rhdl gates [options]
 ### Examples
 
 ```bash
-# Export all components to gate-level JSON
 rhdl gates
-rhdl gates --export
-
-# Export CPU datapath components
 rhdl gates --simcpu
-
-# Show synthesis statistics
 rhdl gates --stats
-
-# Clean output
 rhdl gates --clean
 ```
 
-### Statistics Output
-
-```
-RHDL Gate-Level Synthesis Statistics
-==================================================
-
-Components by Gate Count:
---------------------------------------------------
-  cpu/synth_datapath: 505 gates, 24 DFFs, 892 nets
-  arithmetic/alu: 312 gates, 0 DFFs, 456 nets
-  arithmetic/multiplier: 256 gates, 0 DFFs, 384 nets
-  ...
-
-==================================================
-Total Components: 53
-Total Gates: 2847
-Total DFFs: 156
-```
-
-### Output Format
-
-Each component generates two files:
-
-1. **JSON netlist** (`component.json`): Machine-readable gate-level representation
-2. **Summary** (`component.txt`): Human-readable statistics
-
-```
-export/gates/
-├── arithmetic/
-│   ├── alu.json
-│   ├── alu.txt
-│   └── ...
-├── sequential/
-│   ├── counter.json
-│   ├── counter.txt
-│   └── ...
-└── cpu/
-    ├── synth_datapath.json
-    └── synth_datapath.txt
-```
-
----
-
-## Apple2 Command
-
-Apple II emulator and ROM tools for the MOS 6502 CPU implementation.
+## Examples Command
 
 ### Usage
 
 ```bash
-rhdl apple2 [options]
+rhdl examples <subcommand> [options]
 ```
+
+### Subcommands
+
+| Subcommand | Description |
+|------------|-------------|
+| `mos6502` | MOS 6502 emulator |
+| `apple2` | Apple II emulator |
+| `gameboy` | Game Boy emulator |
+| `riscv` | RISC-V emulator |
+
+### Examples
+
+```bash
+rhdl examples mos6502 --demo
+rhdl examples apple2 --mode netlist --sim jit --demo
+rhdl examples gameboy --demo
+rhdl examples riscv --xv6
+```
+
+Run `rhdl examples <subcommand> --help` for subcommand-specific options.
+
+## Disk Command
+
+### Usage
+
+```bash
+rhdl disk <command> [options] FILE
+```
+
+### Commands
+
+| Command | Description |
+|---------|-------------|
+| `info` | Show disk image information |
+| `convert` | Convert disk to a binary file |
+| `boot` | Extract boot sector |
+| `tracks` | Extract track range |
+| `memdump` | Boot disk and dump memory (requires ROM) |
 
 ### Options
 
 | Option | Description |
 |--------|-------------|
-| `--build` | Assemble the mini monitor ROM |
-| `--run` | Run emulator after build |
-| `--demo` | Run emulator in demo mode (no ROM needed) |
-| `--appleiigo` | Run with AppleIIGo public domain ROM |
-| `--clean` | Clean ROM output files |
-| `-d, --debug` | Enable debug mode |
-| `-r, --rom FILE` | ROM file to load |
-| `--rom-address ADDR` | ROM load address (hex) |
+| `-o, --output FILE` | Output file path |
+| `-r, --rom FILE` | ROM file for booting (`memdump`) |
+| `--start-track N` | Start track for extraction |
+| `--end-track N` | End track for extraction |
+| `--prodos` | Use ProDOS sector interleaving |
+| `--max-cycles N` | Max boot cycles for `memdump` |
+| `--base-addr ADDR` | Memory dump base address (hex) |
+| `--end-addr ADDR` | Memory dump end address (hex) |
 | `-h, --help` | Show help |
 
-### Examples
+## Workflow Commands
+
+### `generate`
 
 ```bash
-# Run the emulator (default)
-rhdl apple2
-
-# Run in demo mode (no ROM required)
-rhdl apple2 --demo
-
-# Build the mini monitor ROM
-rhdl apple2 --build
-
-# Build ROM and immediately run
-rhdl apple2 --build --run
-
-# Run with AppleIIGo public domain ROM
-rhdl apple2 --appleiigo
-
-# Run with custom ROM
-rhdl apple2 --rom my_program.bin --rom-address 8000
-
-# Enable debug mode
-rhdl apple2 --demo --debug
-
-# Clean ROM output files
-rhdl apple2 --clean
+rhdl generate
 ```
 
-### Demo Mode
-
-Demo mode runs a simple demonstration program without requiring a ROM file:
+Equivalent to:
 
 ```bash
-rhdl apple2 --demo
+rhdl diagram --all
+rhdl export --all
 ```
 
-### Building the Mini Monitor
-
-The mini monitor is a simple ROM that provides basic memory inspection:
+### `clean`
 
 ```bash
-rhdl apple2 --build
-# Output: export/roms/mini_monitor.bin
+rhdl clean
 ```
 
----
+Equivalent to:
 
-## Available Components
+```bash
+rhdl diagram --clean
+rhdl export --clean
+rhdl gates --clean
+```
 
-Use `rhdl tui --list` to see all available components:
+### `regenerate`
 
-### Gates
-- `gates/not_gate`, `gates/and_gate`, `gates/or_gate`, `gates/xor_gate`
-- `gates/nand_gate`, `gates/nor_gate`, `gates/xnor_gate`
-- `gates/buffer`, `gates/tristate_buffer`
-- `gates/bitwise_and`, `gates/bitwise_or`, `gates/bitwise_xor`, `gates/bitwise_not`
+```bash
+rhdl regenerate
+```
 
-### Sequential
-- `sequential/d_flipflop`, `sequential/t_flipflop`, `sequential/jk_flipflop`
-- `sequential/sr_flipflop`, `sequential/sr_latch`
-- `sequential/register_8bit`, `sequential/register_16bit`, `sequential/register_load`
-- `sequential/shift_register`, `sequential/counter`
-- `sequential/program_counter`, `sequential/stack_pointer`
+Equivalent to:
 
-### Arithmetic
-- `arithmetic/half_adder`, `arithmetic/full_adder`, `arithmetic/ripple_carry_adder`
-- `arithmetic/subtractor`, `arithmetic/addsub`
-- `arithmetic/comparator`, `arithmetic/multiplier`, `arithmetic/divider`
-- `arithmetic/incdec`, `arithmetic/alu_8bit`, `arithmetic/alu_16bit`
-
-### Combinational
-- `combinational/mux2`, `combinational/mux4`, `combinational/mux8`, `combinational/muxn`
-- `combinational/demux2`, `combinational/demux4`
-- `combinational/decoder_2to4`, `combinational/decoder_3to8`, `combinational/decoder_n`
-- `combinational/encoder_4to2`, `combinational/encoder_8to3`
-- `combinational/zero_detect`, `combinational/sign_extend`, `combinational/zero_extend`
-- `combinational/barrel_shifter`, `combinational/bit_reverse`
-- `combinational/popcount`, `combinational/lzcount`
-
-### Memory
-- `memory/ram`, `memory/ram_64k`, `memory/dual_port_ram`
-- `memory/rom`, `memory/register_file`
-- `memory/stack`, `memory/fifo`
-
-### CPU
-- `cpu/instruction_decoder`, `cpu/accumulator`, `cpu/datapath`
-
----
-
-## Environment Variables
-
-| Variable | Description |
-|----------|-------------|
-| `RHDL_BENCH_LANES` | Number of SIMD lanes for gate-level benchmarks (default: 64) |
-| `RHDL_BENCH_CYCLES` | Number of cycles for benchmarks (default: 100000) |
-
----
+```bash
+rhdl clean
+rhdl generate
+```
 
 ## See Also
 
-- [Debugging Guide](debugging.md) - Detailed TUI and debugging documentation
-- [Diagrams Guide](diagrams.md) - Diagram generation details
-- [Export Guide](export.md) - Verilog export details
-- [Components Reference](components.md) - Complete component documentation
+- [Import Guide](import.md)
+- [Debugging Guide](debugging.md)
+- [Diagrams Guide](diagrams.md)
+- [Export Guide](export.md)
+- [RISC-V + Linux/xv6](riscv.md)

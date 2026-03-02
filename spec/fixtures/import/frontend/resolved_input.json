@@ -1,0 +1,18 @@
+{
+  "source_files": [
+    "rtl/top.sv",
+    "rtl/alu.sv"
+  ],
+  "include_dirs": [
+    "rtl/include",
+    "vendor/include"
+  ],
+  "defines": {
+    "WIDTH": "32",
+    "ENABLE_TRACE": null
+  },
+  "top_modules": [
+    "top"
+  ],
+  "language": "1800-2017"
+}

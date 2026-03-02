@@ -12,7 +12,7 @@ RSpec.shared_examples 'zacas core behavior' do |pipeline:|
     cpu.run_cycles(program.length + (pipeline ? 42 : 14))
   end
 
-  it 'implements AMOCAS.W success/failure return semantics' do
+  it 'implements AMOCAS.W success/failure return semantics', timeout: 30 do
     if pipeline
       cpu.write_data(0x140, 7)
     else

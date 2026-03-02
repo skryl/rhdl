@@ -2,8 +2,8 @@
 
 module RHDL
   module DSL
-    # Component instance
-    class ComponentInstance
+      # Component instance
+      class ComponentInstance
       attr_reader :name, :component_type, :port_map, :generic_map
 
       def initialize(name, component_type, port_map: {}, generic_map: {})
@@ -17,6 +17,8 @@ module RHDL
         lines = []
 
         # In Verilog: module_name #(.param(value)) instance_name (.port(signal), ...);
+        return wildcard_connection if port_map.empty?
+
         if generic_map.empty?
           lines << "#{component_type} #{name} ("
         else
@@ -24,14 +26,29 @@ module RHDL
           lines << "#{component_type} #(#{params.join(', ')}) #{name} ("
         end
 
-        ports = port_map.map do |k, v|
+        ports = port_map.filter_map do |k, v|
           val = v.respond_to?(:to_verilog) ? v.to_verilog : v.to_s
+          next if val.to_s.strip.empty?
           ".#{k}(#{val})"
         end
+        return wildcard_connection if ports.empty?
+
+        ports << ".*"
         lines << "  #{ports.join(', ')}"
         lines << ");"
 
         lines.join("\n")
+      end
+
+      private
+
+      def wildcard_connection
+        if generic_map.empty?
+          "#{component_type} #{name} (.*);"
+        else
+          params = generic_map.map { |k, v| ".#{k}(#{v})" }
+          "#{component_type} #(#{params.join(', ')}) #{name} (.*);"
+        end
       end
     end
   end

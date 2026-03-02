@@ -25,27 +25,41 @@ module RHDL
         @else_block << stmt
       end
 
-      def to_verilog
+      def to_verilog(nonblocking: nil)
         lines = []
         cond = condition.respond_to?(:to_verilog) ? condition.to_verilog : condition.to_s
         lines << "if (#{cond}) begin"
-        then_block.each { |s| lines << "  #{s.to_verilog}" }
+        then_block.each { |s| lines << "  #{render_statement(s, nonblocking: nonblocking)}" }
         lines << "end"
 
         elsif_blocks.each do |cond, stmts|
           c = cond.respond_to?(:to_verilog) ? cond.to_verilog : cond.to_s
           lines << "else if (#{c}) begin"
-          stmts.each { |s| lines << "  #{s.to_verilog}" }
+          stmts.each { |s| lines << "  #{render_statement(s, nonblocking: nonblocking)}" }
           lines << "end"
         end
 
         unless else_block.empty?
           lines << "else begin"
-          else_block.each { |s| lines << "  #{s.to_verilog}" }
+          else_block.each { |s| lines << "  #{render_statement(s, nonblocking: nonblocking)}" }
           lines << "end"
         end
 
         lines.join("\n")
+      end
+
+      private
+
+      def render_statement(statement, nonblocking:)
+        return statement.to_verilog(nonblocking: nonblocking) if accepts_nonblocking_kw?(statement)
+
+        statement.to_verilog
+      end
+
+      def accepts_nonblocking_kw?(statement)
+        params = statement.method(:to_verilog).parameters
+        params.any? { |type, name| [:key, :keyreq].include?(type) && name == :nonblocking } ||
+          params.any? { |type, _name| type == :keyrest }
       end
     end
   end

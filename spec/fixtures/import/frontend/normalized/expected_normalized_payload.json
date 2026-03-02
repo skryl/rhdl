@@ -1,0 +1,115 @@
+{
+  "schema_version": 1,
+  "adapter": {
+    "name": "verilator_json",
+    "version": "5.028"
+  },
+  "invocation": {
+    "cwd": "/tmp/project",
+    "command": [
+      "verilator",
+      "--json-only-output",
+      "obj/ast.json"
+    ]
+  },
+  "source_map": {
+    "sources": [
+      {
+        "id": 1,
+        "original_id": 7,
+        "path": "rtl/alu.sv"
+      },
+      {
+        "id": 2,
+        "original_id": 4,
+        "path": "rtl/core.sv"
+      },
+      {
+        "id": 3,
+        "original_id": 2,
+        "path": "rtl/top.sv"
+      }
+    ]
+  },
+  "design": {
+    "modules": [
+      {
+        "name": "alu",
+        "source_id": 1,
+        "span": {
+          "source_id": 1,
+          "source_path": "rtl/alu.sv",
+          "line": 3,
+          "column": 1,
+          "end_line": 90,
+          "end_column": 3
+        }
+      },
+      {
+        "name": "core",
+        "source_id": 2,
+        "span": {
+          "source_id": 2,
+          "source_path": "rtl/core.sv",
+          "line": 5,
+          "column": 1,
+          "end_line": 220,
+          "end_column": 3
+        }
+      },
+      {
+        "name": "top",
+        "source_id": 3,
+        "span": {
+          "source_id": 3,
+          "source_path": "rtl/top.sv",
+          "line": 1,
+          "column": 1,
+          "end_line": 120,
+          "end_column": 3
+        }
+      }
+    ]
+  },
+  "diagnostics": [
+    {
+      "severity": "error",
+      "code": "PARSE",
+      "message": "Unexpected token",
+      "span": {
+        "source_id": 3,
+        "source_path": "rtl/top.sv",
+        "line": 12,
+        "column": 5,
+        "end_line": 12,
+        "end_column": 10
+      }
+    },
+    {
+      "severity": "warning",
+      "code": "UNDRIVEN",
+      "message": "Signal is never driven",
+      "span": {
+        "source_id": 1,
+        "source_path": "rtl/alu.sv",
+        "line": 44,
+        "column": 9,
+        "end_line": 44,
+        "end_column": 15
+      }
+    },
+    {
+      "severity": "note",
+      "code": "WIDTH",
+      "message": "width inferred from context",
+      "span": {
+        "source_id": 2,
+        "source_path": "rtl/core.sv",
+        "line": 20,
+        "column": 7,
+        "end_line": 20,
+        "end_column": 7
+      }
+    }
+  ]
+}

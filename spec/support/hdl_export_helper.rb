@@ -49,6 +49,13 @@ module HdlExportHelper
     { stdout: stdout, stderr: stderr, status: status }
   end
 
+  def extract_module_name(verilog_source)
+    match = verilog_source.match(/^\s*module\s+([A-Za-z_][A-Za-z0-9_]*)\b/)
+    raise "Unable to parse module name from generated Verilog" unless match
+
+    match[1]
+  end
+
   def parse_cycles(output, output_names)
     lines = output.split("\n")
     results = []

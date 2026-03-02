@@ -1,0 +1,439 @@
+{
+  "schema_version": 1,
+  "generated_at": "2026-03-01T19:00:25Z",
+  "status": "success",
+  "project": {
+    "out_dir": "/Users/skryl/Documents/dev/projects/rhdl/codex-import/examples/ao486/hdl",
+    "options": {
+      "src": [
+        "examples/ao486/reference/rtl"
+      ],
+      "exclude": [],
+      "incdir": [],
+      "define": [],
+      "dependency_resolution": "none",
+      "compile_unit_filter": "modules_only",
+      "missing_modules": "blackbox_stubs",
+      "recovery_mode": "recoverable",
+      "hint_backend": "surelog",
+      "hint_min_confidence": "medium",
+      "hint_conflict_policy": "prefer_ast",
+      "check_profile": "default",
+      "top": [
+        "ao486"
+      ],
+      "check": false,
+      "trace_keys": [],
+      "trace_cycles": 1024,
+      "keep_temp": false,
+      "source_files": [
+        "/Users/skryl/Documents/dev/projects/rhdl/codex-import/examples/ao486/reference/rtl/ao486/ao486.v",
+        "/Users/skryl/Documents/dev/projects/rhdl/codex-import/examples/ao486/reference/rtl/ao486/exception.v",
+        "/Users/skryl/Documents/dev/projects/rhdl/codex-import/examples/ao486/reference/rtl/ao486/global_regs.v",
+        "/Users/skryl/Documents/dev/projects/rhdl/codex-import/examples/ao486/reference/rtl/ao486/memory/avalon_mem.v",
+        "/Users/skryl/Documents/dev/projects/rhdl/codex-import/examples/ao486/reference/rtl/ao486/memory/icache.v",
+        "/Users/skryl/Documents/dev/projects/rhdl/codex-import/examples/ao486/reference/rtl/ao486/memory/link_dcacheread.v",
+        "/Users/skryl/Documents/dev/projects/rhdl/codex-import/examples/ao486/reference/rtl/ao486/memory/link_dcachewrite.v",
+        "/Users/skryl/Documents/dev/projects/rhdl/codex-import/examples/ao486/reference/rtl/ao486/memory/memory.v",
+        "/Users/skryl/Documents/dev/projects/rhdl/codex-import/examples/ao486/reference/rtl/ao486/memory/memory_read.v",
+        "/Users/skryl/Documents/dev/projects/rhdl/codex-import/examples/ao486/reference/rtl/ao486/memory/memory_write.v",
+        "/Users/skryl/Documents/dev/projects/rhdl/codex-import/examples/ao486/reference/rtl/ao486/memory/prefetch.v",
+        "/Users/skryl/Documents/dev/projects/rhdl/codex-import/examples/ao486/reference/rtl/ao486/memory/prefetch_control.v",
+        "/Users/skryl/Documents/dev/projects/rhdl/codex-import/examples/ao486/reference/rtl/ao486/memory/prefetch_fifo.v",
+        "/Users/skryl/Documents/dev/projects/rhdl/codex-import/examples/ao486/reference/rtl/ao486/memory/tlb.v",
+        "/Users/skryl/Documents/dev/projects/rhdl/codex-import/examples/ao486/reference/rtl/ao486/memory/tlb_memtype.v",
+        "/Users/skryl/Documents/dev/projects/rhdl/codex-import/examples/ao486/reference/rtl/ao486/memory/tlb_regs.v",
+        "/Users/skryl/Documents/dev/projects/rhdl/codex-import/examples/ao486/reference/rtl/ao486/pipeline/condition.v",
+        "/Users/skryl/Documents/dev/projects/rhdl/codex-import/examples/ao486/reference/rtl/ao486/pipeline/decode.v",
+        "/Users/skryl/Documents/dev/projects/rhdl/codex-import/examples/ao486/reference/rtl/ao486/pipeline/decode_commands.v",
+        "/Users/skryl/Documents/dev/projects/rhdl/codex-import/examples/ao486/reference/rtl/ao486/pipeline/decode_prefix.v",
+        "/Users/skryl/Documents/dev/projects/rhdl/codex-import/examples/ao486/reference/rtl/ao486/pipeline/decode_ready.v",
+        "/Users/skryl/Documents/dev/projects/rhdl/codex-import/examples/ao486/reference/rtl/ao486/pipeline/decode_regs.v",
+        "/Users/skryl/Documents/dev/projects/rhdl/codex-import/examples/ao486/reference/rtl/ao486/pipeline/execute.v",
+        "/Users/skryl/Documents/dev/projects/rhdl/codex-import/examples/ao486/reference/rtl/ao486/pipeline/execute_commands.v",
+        "/Users/skryl/Documents/dev/projects/rhdl/codex-import/examples/ao486/reference/rtl/ao486/pipeline/execute_divide.v",
+        "/Users/skryl/Documents/dev/projects/rhdl/codex-import/examples/ao486/reference/rtl/ao486/pipeline/execute_multiply.v",
+        "/Users/skryl/Documents/dev/projects/rhdl/codex-import/examples/ao486/reference/rtl/ao486/pipeline/execute_offset.v",
+        "/Users/skryl/Documents/dev/projects/rhdl/codex-import/examples/ao486/reference/rtl/ao486/pipeline/execute_shift.v",
+        "/Users/skryl/Documents/dev/projects/rhdl/codex-import/examples/ao486/reference/rtl/ao486/pipeline/fetch.v",
+        "/Users/skryl/Documents/dev/projects/rhdl/codex-import/examples/ao486/reference/rtl/ao486/pipeline/microcode.v",
+        "/Users/skryl/Documents/dev/projects/rhdl/codex-import/examples/ao486/reference/rtl/ao486/pipeline/microcode_commands.v",
+        "/Users/skryl/Documents/dev/projects/rhdl/codex-import/examples/ao486/reference/rtl/ao486/pipeline/pipeline.v",
+        "/Users/skryl/Documents/dev/projects/rhdl/codex-import/examples/ao486/reference/rtl/ao486/pipeline/read.v",
+        "/Users/skryl/Documents/dev/projects/rhdl/codex-import/examples/ao486/reference/rtl/ao486/pipeline/read_commands.v",
+        "/Users/skryl/Documents/dev/projects/rhdl/codex-import/examples/ao486/reference/rtl/ao486/pipeline/read_debug.v",
+        "/Users/skryl/Documents/dev/projects/rhdl/codex-import/examples/ao486/reference/rtl/ao486/pipeline/read_effective_address.v",
+        "/Users/skryl/Documents/dev/projects/rhdl/codex-import/examples/ao486/reference/rtl/ao486/pipeline/read_mutex.v",
+        "/Users/skryl/Documents/dev/projects/rhdl/codex-import/examples/ao486/reference/rtl/ao486/pipeline/read_segment.v",
+        "/Users/skryl/Documents/dev/projects/rhdl/codex-import/examples/ao486/reference/rtl/ao486/pipeline/write.v",
+        "/Users/skryl/Documents/dev/projects/rhdl/codex-import/examples/ao486/reference/rtl/ao486/pipeline/write_commands.v",
+        "/Users/skryl/Documents/dev/projects/rhdl/codex-import/examples/ao486/reference/rtl/ao486/pipeline/write_debug.v",
+        "/Users/skryl/Documents/dev/projects/rhdl/codex-import/examples/ao486/reference/rtl/ao486/pipeline/write_register.v",
+        "/Users/skryl/Documents/dev/projects/rhdl/codex-import/examples/ao486/reference/rtl/ao486/pipeline/write_stack.v",
+        "/Users/skryl/Documents/dev/projects/rhdl/codex-import/examples/ao486/reference/rtl/ao486/pipeline/write_string.v",
+        "/Users/skryl/Documents/dev/projects/rhdl/codex-import/examples/ao486/reference/rtl/cache/l1_icache.v",
+        "/Users/skryl/Documents/dev/projects/rhdl/codex-import/examples/ao486/reference/rtl/cache/l2_cache.v",
+        "/Users/skryl/Documents/dev/projects/rhdl/codex-import/examples/ao486/reference/rtl/common/cdc_vector_handshake_continuous.sv",
+        "/Users/skryl/Documents/dev/projects/rhdl/codex-import/examples/ao486/reference/rtl/common/simple_fifo.v",
+        "/Users/skryl/Documents/dev/projects/rhdl/codex-import/examples/ao486/reference/rtl/common/simple_fifo_mlab.v",
+        "/Users/skryl/Documents/dev/projects/rhdl/codex-import/examples/ao486/reference/rtl/common/simple_mult.v",
+        "/Users/skryl/Documents/dev/projects/rhdl/codex-import/examples/ao486/reference/rtl/common/simple_ram.v",
+        "/Users/skryl/Documents/dev/projects/rhdl/codex-import/examples/ao486/reference/rtl/common/simple_rom.v",
+        "/Users/skryl/Documents/dev/projects/rhdl/codex-import/examples/ao486/reference/rtl/common/simple_single_rom.v",
+        "/Users/skryl/Documents/dev/projects/rhdl/codex-import/examples/ao486/reference/rtl/common/synchronizer.sv",
+        "/Users/skryl/Documents/dev/projects/rhdl/codex-import/examples/ao486/reference/rtl/hps_ext.v",
+        "/Users/skryl/Documents/dev/projects/rhdl/codex-import/examples/ao486/reference/rtl/pll.v",
+        "/Users/skryl/Documents/dev/projects/rhdl/codex-import/examples/ao486/reference/rtl/pll/pll_0002.v",
+        "/Users/skryl/Documents/dev/projects/rhdl/codex-import/examples/ao486/reference/rtl/pll2.v",
+        "/Users/skryl/Documents/dev/projects/rhdl/codex-import/examples/ao486/reference/rtl/pll2/pll2_0002.v",
+        "/Users/skryl/Documents/dev/projects/rhdl/codex-import/examples/ao486/reference/rtl/soc/cdda.v",
+        "/Users/skryl/Documents/dev/projects/rhdl/codex-import/examples/ao486/reference/rtl/soc/dma.v",
+        "/Users/skryl/Documents/dev/projects/rhdl/codex-import/examples/ao486/reference/rtl/soc/floppy.v",
+        "/Users/skryl/Documents/dev/projects/rhdl/codex-import/examples/ao486/reference/rtl/soc/ide.v",
+        "/Users/skryl/Documents/dev/projects/rhdl/codex-import/examples/ao486/reference/rtl/soc/iobus.v",
+        "/Users/skryl/Documents/dev/projects/rhdl/codex-import/examples/ao486/reference/rtl/soc/joystick.v",
+        "/Users/skryl/Documents/dev/projects/rhdl/codex-import/examples/ao486/reference/rtl/soc/pic.v",
+        "/Users/skryl/Documents/dev/projects/rhdl/codex-import/examples/ao486/reference/rtl/soc/pit.v",
+        "/Users/skryl/Documents/dev/projects/rhdl/codex-import/examples/ao486/reference/rtl/soc/pit_counter.v",
+        "/Users/skryl/Documents/dev/projects/rhdl/codex-import/examples/ao486/reference/rtl/soc/ps2.v",
+        "/Users/skryl/Documents/dev/projects/rhdl/codex-import/examples/ao486/reference/rtl/soc/rtc.v",
+        "/Users/skryl/Documents/dev/projects/rhdl/codex-import/examples/ao486/reference/rtl/soc/sound/opl3/afifo.v",
+        "/Users/skryl/Documents/dev/projects/rhdl/codex-import/examples/ao486/reference/rtl/soc/sound/opl3/calc_envelope_shift.sv",
+        "/Users/skryl/Documents/dev/projects/rhdl/codex-import/examples/ao486/reference/rtl/soc/sound/opl3/calc_phase_inc.sv",
+        "/Users/skryl/Documents/dev/projects/rhdl/codex-import/examples/ao486/reference/rtl/soc/sound/opl3/calc_rhythm_phase.sv",
+        "/Users/skryl/Documents/dev/projects/rhdl/codex-import/examples/ao486/reference/rtl/soc/sound/opl3/channels.sv",
+        "/Users/skryl/Documents/dev/projects/rhdl/codex-import/examples/ao486/reference/rtl/soc/sound/opl3/clk_div.sv",
+        "/Users/skryl/Documents/dev/projects/rhdl/codex-import/examples/ao486/reference/rtl/soc/sound/opl3/control_operators.sv",
+        "/Users/skryl/Documents/dev/projects/rhdl/codex-import/examples/ao486/reference/rtl/soc/sound/opl3/dac_prep.sv",
+        "/Users/skryl/Documents/dev/projects/rhdl/codex-import/examples/ao486/reference/rtl/soc/sound/opl3/edge_detector.sv",
+        "/Users/skryl/Documents/dev/projects/rhdl/codex-import/examples/ao486/reference/rtl/soc/sound/opl3/envelope_generator.sv",
+        "/Users/skryl/Documents/dev/projects/rhdl/codex-import/examples/ao486/reference/rtl/soc/sound/opl3/host_if.sv",
+        "/Users/skryl/Documents/dev/projects/rhdl/codex-import/examples/ao486/reference/rtl/soc/sound/opl3/ksl_add_rom.sv",
+        "/Users/skryl/Documents/dev/projects/rhdl/codex-import/examples/ao486/reference/rtl/soc/sound/opl3/leds.sv",
+        "/Users/skryl/Documents/dev/projects/rhdl/codex-import/examples/ao486/reference/rtl/soc/sound/opl3/mem_multi_bank.sv",
+        "/Users/skryl/Documents/dev/projects/rhdl/codex-import/examples/ao486/reference/rtl/soc/sound/opl3/mem_multi_bank_reset.sv",
+        "/Users/skryl/Documents/dev/projects/rhdl/codex-import/examples/ao486/reference/rtl/soc/sound/opl3/mem_simple_dual_port.sv",
+        "/Users/skryl/Documents/dev/projects/rhdl/codex-import/examples/ao486/reference/rtl/soc/sound/opl3/mem_simple_dual_port_async_read.sv",
+        "/Users/skryl/Documents/dev/projects/rhdl/codex-import/examples/ao486/reference/rtl/soc/sound/opl3/operator.sv",
+        "/Users/skryl/Documents/dev/projects/rhdl/codex-import/examples/ao486/reference/rtl/soc/sound/opl3/opl3.sv",
+        "/Users/skryl/Documents/dev/projects/rhdl/codex-import/examples/ao486/reference/rtl/soc/sound/opl3/opl3_exp_lut.sv",
+        "/Users/skryl/Documents/dev/projects/rhdl/codex-import/examples/ao486/reference/rtl/soc/sound/opl3/opl3_log_sine_lut.sv",
+        "/Users/skryl/Documents/dev/projects/rhdl/codex-import/examples/ao486/reference/rtl/soc/sound/opl3/phase_generator.sv",
+        "/Users/skryl/Documents/dev/projects/rhdl/codex-import/examples/ao486/reference/rtl/soc/sound/opl3/pipeline_sr.sv",
+        "/Users/skryl/Documents/dev/projects/rhdl/codex-import/examples/ao486/reference/rtl/soc/sound/opl3/reset_sync.sv",
+        "/Users/skryl/Documents/dev/projects/rhdl/codex-import/examples/ao486/reference/rtl/soc/sound/opl3/timer.sv",
+        "/Users/skryl/Documents/dev/projects/rhdl/codex-import/examples/ao486/reference/rtl/soc/sound/opl3/timers.sv",
+        "/Users/skryl/Documents/dev/projects/rhdl/codex-import/examples/ao486/reference/rtl/soc/sound/opl3/tremolo.sv",
+        "/Users/skryl/Documents/dev/projects/rhdl/codex-import/examples/ao486/reference/rtl/soc/sound/opl3/trick_sw_detection.sv",
+        "/Users/skryl/Documents/dev/projects/rhdl/codex-import/examples/ao486/reference/rtl/soc/sound/opl3/vibrato.sv",
+        "/Users/skryl/Documents/dev/projects/rhdl/codex-import/examples/ao486/reference/rtl/soc/sound/saa1099.sv",
+        "/Users/skryl/Documents/dev/projects/rhdl/codex-import/examples/ao486/reference/rtl/soc/sound/sound.v",
+        "/Users/skryl/Documents/dev/projects/rhdl/codex-import/examples/ao486/reference/rtl/soc/sound/sound_dsp.v",
+        "/Users/skryl/Documents/dev/projects/rhdl/codex-import/examples/ao486/reference/rtl/soc/uart/uart.v",
+        "/Users/skryl/Documents/dev/projects/rhdl/codex-import/examples/ao486/reference/rtl/soc/vga.v",
+        "/Users/skryl/Documents/dev/projects/rhdl/codex-import/examples/ao486/reference/rtl/system.v"
+      ],
+      "include_dirs": [
+        "/Users/skryl/Documents/dev/projects/rhdl/codex-import/examples/ao486/reference/rtl",
+        "/Users/skryl/Documents/dev/projects/rhdl/codex-import/examples/ao486/reference/rtl/ao486",
+        "/Users/skryl/Documents/dev/projects/rhdl/codex-import/examples/ao486/reference/rtl/ao486/autogen",
+        "/Users/skryl/Documents/dev/projects/rhdl/codex-import/examples/ao486/reference/rtl/ao486/memory",
+        "/Users/skryl/Documents/dev/projects/rhdl/codex-import/examples/ao486/reference/rtl/ao486/pipeline",
+        "/Users/skryl/Documents/dev/projects/rhdl/codex-import/examples/ao486/reference/rtl/cache",
+        "/Users/skryl/Documents/dev/projects/rhdl/codex-import/examples/ao486/reference/rtl/common",
+        "/Users/skryl/Documents/dev/projects/rhdl/codex-import/examples/ao486/reference/rtl/pll",
+        "/Users/skryl/Documents/dev/projects/rhdl/codex-import/examples/ao486/reference/rtl/pll2",
+        "/Users/skryl/Documents/dev/projects/rhdl/codex-import/examples/ao486/reference/rtl/soc",
+        "/Users/skryl/Documents/dev/projects/rhdl/codex-import/examples/ao486/reference/rtl/soc/sound/opl3",
+        "/Users/skryl/Documents/dev/projects/rhdl/codex-import/examples/ao486/reference/rtl/soc/sound",
+        "/Users/skryl/Documents/dev/projects/rhdl/codex-import/examples/ao486/reference/rtl/soc/uart"
+      ],
+      "defines": [],
+      "mode": "autoscan",
+      "filelist_path": null,
+      "source_roots": [
+        "/Users/skryl/Documents/dev/projects/rhdl/codex-import/examples/ao486/reference/rtl"
+      ],
+      "exclude_patterns": [],
+      "recovery": {
+        "summary": {
+          "preserved_count": 12,
+          "lowered_count": 0,
+          "nonrecoverable_count": 0,
+          "hint_applied_count": 0
+        },
+        "events": [
+          {
+            "module": "avalon_mem",
+            "construct": "case",
+            "status": "preserved",
+            "code": "recovery_preserved"
+          },
+          {
+            "module": "avalon_mem",
+            "construct": "case",
+            "status": "preserved",
+            "code": "recovery_preserved"
+          },
+          {
+            "module": "execute_shift",
+            "construct": "case",
+            "status": "preserved",
+            "code": "recovery_preserved"
+          },
+          {
+            "module": "execute_shift",
+            "construct": "case",
+            "status": "preserved",
+            "code": "recovery_preserved"
+          },
+          {
+            "module": "l1_icache",
+            "construct": "case",
+            "status": "preserved",
+            "code": "recovery_preserved"
+          },
+          {
+            "module": "l1_icache",
+            "construct": "for",
+            "status": "preserved",
+            "code": "recovery_preserved"
+          },
+          {
+            "module": "l1_icache",
+            "construct": "for",
+            "status": "preserved",
+            "code": "recovery_preserved"
+          },
+          {
+            "module": "l1_icache",
+            "construct": "for",
+            "status": "preserved",
+            "code": "recovery_preserved"
+          },
+          {
+            "module": "l1_icache",
+            "construct": "for",
+            "status": "preserved",
+            "code": "recovery_preserved"
+          },
+          {
+            "module": "l1_icache",
+            "construct": "for",
+            "status": "preserved",
+            "code": "recovery_preserved"
+          },
+          {
+            "module": "l1_icache",
+            "construct": "for",
+            "status": "preserved",
+            "code": "recovery_preserved"
+          },
+          {
+            "module": "memory_read",
+            "construct": "case",
+            "status": "preserved",
+            "code": "recovery_preserved"
+          }
+        ]
+      },
+      "hints": {
+        "backend": "surelog",
+        "available": false,
+        "applied_count": 0,
+        "summary": {
+          "extracted_count": 0,
+          "applied_count": 0,
+          "discarded_count": 0,
+          "conflict_count": 0
+        },
+        "diagnostics": [
+          {
+            "severity": "warning",
+            "code": "hint_backend_unavailable",
+            "message": "surelog hint backend unavailable: surelog hint extraction failed (exit 4)",
+            "backend": "surelog"
+          }
+        ]
+      }
+    },
+    "tops": [
+      "ao486"
+    ]
+  },
+  "summary": {
+    "total_modules": 48,
+    "converted_modules": 48,
+    "failed_modules": 0,
+    "blackboxes_generated": 2,
+    "checks_run": 0,
+    "checks_failed": 0
+  },
+  "modules": {
+    "converted": [
+      "ao486",
+      "avalon_mem",
+      "condition",
+      "decode",
+      "decode_commands",
+      "decode_prefix",
+      "decode_ready",
+      "decode_regs",
+      "exception",
+      "execute",
+      "execute_commands",
+      "execute_divide",
+      "execute_multiply",
+      "execute_offset",
+      "execute_shift",
+      "fetch",
+      "global_regs",
+      "icache",
+      "l1_icache",
+      "link_dcacheread",
+      "link_dcachewrite",
+      "memory",
+      "memory_read",
+      "memory_write",
+      "microcode",
+      "microcode_commands",
+      "pipeline",
+      "prefetch",
+      "prefetch_control",
+      "prefetch_fifo",
+      "read",
+      "read_commands",
+      "read_debug",
+      "read_effective_address",
+      "read_mutex",
+      "read_segment",
+      "simple_fifo_mlab__W24_WB4",
+      "simple_fifo_mlab__WB4_W3e",
+      "simple_mult__W21_WB21_WC42",
+      "tlb",
+      "tlb_memtype",
+      "tlb_regs",
+      "write",
+      "write_commands",
+      "write_debug",
+      "write_register",
+      "write_stack",
+      "write_string"
+    ],
+    "failed": []
+  },
+  "blackboxes_generated": [
+    "altdpram",
+    "cpu_export"
+  ],
+  "recovery": {
+    "summary": {
+      "preserved_count": 12,
+      "lowered_count": 0,
+      "nonrecoverable_count": 0,
+      "hint_applied_count": 0
+    },
+    "events": [
+      {
+        "module": "avalon_mem",
+        "construct": "case",
+        "status": "preserved",
+        "code": "recovery_preserved"
+      },
+      {
+        "module": "avalon_mem",
+        "construct": "case",
+        "status": "preserved",
+        "code": "recovery_preserved"
+      },
+      {
+        "module": "execute_shift",
+        "construct": "case",
+        "status": "preserved",
+        "code": "recovery_preserved"
+      },
+      {
+        "module": "execute_shift",
+        "construct": "case",
+        "status": "preserved",
+        "code": "recovery_preserved"
+      },
+      {
+        "module": "l1_icache",
+        "construct": "case",
+        "status": "preserved",
+        "code": "recovery_preserved"
+      },
+      {
+        "module": "l1_icache",
+        "construct": "for",
+        "status": "preserved",
+        "code": "recovery_preserved"
+      },
+      {
+        "module": "l1_icache",
+        "construct": "for",
+        "status": "preserved",
+        "code": "recovery_preserved"
+      },
+      {
+        "module": "l1_icache",
+        "construct": "for",
+        "status": "preserved",
+        "code": "recovery_preserved"
+      },
+      {
+        "module": "l1_icache",
+        "construct": "for",
+        "status": "preserved",
+        "code": "recovery_preserved"
+      },
+      {
+        "module": "l1_icache",
+        "construct": "for",
+        "status": "preserved",
+        "code": "recovery_preserved"
+      },
+      {
+        "module": "l1_icache",
+        "construct": "for",
+        "status": "preserved",
+        "code": "recovery_preserved"
+      },
+      {
+        "module": "memory_read",
+        "construct": "case",
+        "status": "preserved",
+        "code": "recovery_preserved"
+      }
+    ]
+  },
+  "hints": {
+    "backend": "surelog",
+    "available": false,
+    "applied_count": 0,
+    "summary": {
+      "extracted_count": 0,
+      "applied_count": 0,
+      "discarded_count": 0,
+      "conflict_count": 0
+    },
+    "diagnostics": [
+      {
+        "severity": "warning",
+        "code": "hint_backend_unavailable",
+        "message": "surelog hint backend unavailable: surelog hint extraction failed (exit 4)",
+        "backend": "surelog"
+      }
+    ]
+  },
+  "diagnostics": [
+    {
+      "severity": "warning",
+      "code": "hint_backend_unavailable",
+      "message": "surelog hint backend unavailable: surelog hint extraction failed (exit 4)",
+      "backend": "surelog"
+    }
+  ],
+  "checks": []
+}

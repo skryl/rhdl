@@ -9,12 +9,66 @@ module RHDL
         @current_block = :then
       end
 
-      def assign(target, value)
-        stmt = SequentialAssignment.new(target, value)
+      def assign(target, value, kind: :auto, nonblocking: nil)
+        stmt = SequentialAssignment.new(target, value, kind: kind, nonblocking: nonblocking)
         case @current_block
         when :then then @if_stmt.add_then(stmt)
         when :else then @if_stmt.add_else(stmt)
         end
+      end
+
+      # Readable expression helpers used by importer-emitted branches.
+      def sig(name, width: 1)
+        SignalRef.new(name.to_sym, width: width)
+      end
+
+      def lit(value, width: nil, base: nil, signed: false)
+        Literal.new(value, width: width, base: base, signed: signed)
+      end
+
+      def mux(condition, when_true, when_false)
+        TernaryOp.new(condition, when_true, when_false)
+      end
+
+      def case_select(selector, cases:, default: 0)
+        CaseSelect.new(selector, cases: cases, default: default)
+      end
+
+      def u(op, operand)
+        UnaryOp.new(op.to_sym, operand)
+      end
+
+      def if_stmt(condition, &block)
+        stmt = IfStatement.new(condition)
+        ctx = IfContext.new(stmt)
+        ctx.instance_eval(&block)
+        case @current_block
+        when :then then @if_stmt.add_then(stmt)
+        when :else then @if_stmt.add_else(stmt)
+        end
+        stmt
+      end
+
+      def case_stmt(selector, &block)
+        stmt = CaseStatement.new(selector)
+        ctx = CaseContext.new(stmt)
+        ctx.instance_eval(&block)
+        case @current_block
+        when :then then @if_stmt.add_then(stmt)
+        when :else then @if_stmt.add_else(stmt)
+        end
+        stmt
+      end
+
+      def for_loop(var, range, &block)
+        stmt = ForLoop.new(var, range)
+        ctx = ProcessContext.new(stmt)
+        ctx.instance_eval(&block)
+        case @current_block
+        when :then then @if_stmt.add_then(stmt)
+        when :else then @if_stmt.add_else(stmt)
+        end
+        stmt
       end
 
       def elsif_block(condition, &block)

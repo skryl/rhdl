@@ -1,0 +1,242 @@
+{
+  "schema_version": 1,
+  "design": {
+    "modules": [
+      {
+        "name": "comb_alu",
+        "source_id": 1,
+        "span": {
+          "source_id": 1,
+          "source_path": "rtl/comb_alu.sv",
+          "line": 1,
+          "column": 1,
+          "end_line": 20,
+          "end_column": 3
+        },
+        "parameters": [
+          {
+            "name": "WIDTH",
+            "default": {
+              "kind": "number",
+              "value": 8
+            }
+          }
+        ],
+        "declarations": [
+          {
+            "kind": "logic",
+            "name": "sum",
+            "width": {
+              "msb": {
+                "kind": "binary",
+                "operator": "-",
+                "left": {
+                  "kind": "identifier",
+                  "name": "WIDTH"
+                },
+                "right": {
+                  "kind": "number",
+                  "value": 1
+                }
+              },
+              "lsb": {
+                "kind": "number",
+                "value": 0
+              }
+            }
+          }
+        ],
+        "statements": [
+          {
+            "kind": "continuous_assign",
+            "target": {
+              "kind": "identifier",
+              "name": "sum"
+            },
+            "value": {
+              "kind": "binary",
+              "operator": "+",
+              "left": {
+                "kind": "identifier",
+                "name": "a"
+              },
+              "right": {
+                "kind": "identifier",
+                "name": "b"
+              }
+            }
+          }
+        ]
+      },
+      {
+        "name": "seq_counter",
+        "source_id": 2,
+        "span": {
+          "source_id": 2,
+          "source_path": "rtl/seq_counter.sv",
+          "line": 1,
+          "column": 1,
+          "end_line": 32,
+          "end_column": 3
+        },
+        "declarations": [
+          {
+            "kind": "logic",
+            "name": "count",
+            "width": {
+              "msb": {
+                "kind": "number",
+                "value": 7
+              },
+              "lsb": {
+                "kind": "number",
+                "value": 0
+              }
+            }
+          }
+        ],
+        "processes": [
+          {
+            "kind": "always",
+            "domain": "sequential",
+            "sensitivity": [
+              {
+                "edge": "posedge",
+                "signal": {
+                  "kind": "identifier",
+                  "name": "clk"
+                }
+              },
+              {
+                "edge": "negedge",
+                "signal": {
+                  "kind": "identifier",
+                  "name": "rst_n"
+                }
+              }
+            ],
+            "statements": [
+              {
+                "kind": "if",
+                "condition": {
+                  "kind": "unary",
+                  "operator": "!",
+                  "operand": {
+                    "kind": "identifier",
+                    "name": "rst_n"
+                  }
+                },
+                "then": [
+                  {
+                    "kind": "nonblocking_assign",
+                    "target": {
+                      "kind": "identifier",
+                      "name": "count"
+                    },
+                    "value": {
+                      "kind": "number",
+                      "value": 0
+                    }
+                  }
+                ],
+                "else": [
+                  {
+                    "kind": "nonblocking_assign",
+                    "target": {
+                      "kind": "identifier",
+                      "name": "count"
+                    },
+                    "value": {
+                      "kind": "binary",
+                      "operator": "+",
+                      "left": {
+                        "kind": "identifier",
+                        "name": "count"
+                      },
+                      "right": {
+                        "kind": "number",
+                        "value": 1
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "name": "top_with_instance",
+        "source_id": 3,
+        "span": {
+          "source_id": 3,
+          "source_path": "rtl/top_with_instance.sv",
+          "line": 1,
+          "column": 1,
+          "end_line": 40,
+          "end_column": 3
+        },
+        "instances": [
+          {
+            "name": "u_counter",
+            "module_name": "seq_counter",
+            "parameter_overrides": [
+              {
+                "name": "WIDTH",
+                "value": {
+                  "kind": "number",
+                  "value": 16
+                }
+              }
+            ],
+            "connections": [
+              {
+                "port": "clk",
+                "signal": {
+                  "kind": "identifier",
+                  "name": "clk"
+                }
+              },
+              {
+                "port": "rst_n",
+                "signal": {
+                  "kind": "identifier",
+                  "name": "rst_n"
+                }
+              }
+            ]
+          }
+        ],
+        "statements": [
+          {
+            "kind": "unsupported_statement",
+            "detail": "force_release",
+            "span": {
+              "source_id": 3,
+              "source_path": "rtl/top_with_instance.sv",
+              "line": 30,
+              "column": 5,
+              "end_line": 30,
+              "end_column": 19
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "diagnostics": [
+    {
+      "severity": "warning",
+      "code": "UNUSED",
+      "message": "unused signal",
+      "span": {
+        "source_id": 1,
+        "source_path": "rtl/comb_alu.sv",
+        "line": 12,
+        "column": 3,
+        "end_line": 12,
+        "end_column": 7
+      }
+    }
+  ]
+}

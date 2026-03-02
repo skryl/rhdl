@@ -1,0 +1,11 @@
+bits 16
+org 0x000F_FFF0
+mov ax, 0xabcd
+mov bx, 0x0001
+add ax, bx
+mov [0x0208], ax
+mov cx, 0x0123
+mov [0x020a], cx
+mov dx, 0x4567
+mov [0x020c], dx
+jmp $

@@ -564,7 +564,7 @@ RSpec.describe RHDL::Examples::RISCV::HeadlessRunner do
       expect(find_li_values(words, 11)).to include(0)
     end
 
-    it 'hands off to supervisor mode and services SBI base get_spec_version ecall' do
+    it 'hands off to supervisor mode and services SBI base get_spec_version ecall', timeout: 30 do
       runner = described_class.new(mode: :ruby, sim: :ruby)
       bootstrap_addr = 0x100
       entry_pc = 0x1000

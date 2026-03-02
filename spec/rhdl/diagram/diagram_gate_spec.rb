@@ -31,15 +31,17 @@ RSpec.describe RHDL::Diagram do
       end
     end
 
-    it 'renders SVG when Graphviz is available' do
+    it 'renders SVG when Graphviz is available and returns nil otherwise' do
       diagram = described_class.gate_level(gate_ir)
-      unless RHDL::Diagram::RenderSVG.graphviz_available?
-        skip 'Graphviz not available'
-      end
-
+      graphviz_available = RHDL::Diagram::RenderSVG.graphviz_available?
       svg = RHDL::Diagram::RenderSVG.render(diagram, format: 'svg')
-      expect(svg).to be_a(String)
-      expect(svg.strip).not_to be_empty
+
+      if graphviz_available
+        expect(svg).to be_a(String)
+        expect(svg.strip).not_to be_empty
+      else
+        expect(svg).to be_nil
+      end
     end
   end
 end

@@ -5,10 +5,10 @@ module RHDL
     module IR
       class ModuleDef
         attr_reader :name, :ports, :nets, :regs, :assigns, :processes, :reg_ports, :instances,
-                    :memories, :write_ports, :sync_read_ports, :parameters
+                    :memories, :write_ports, :sync_read_ports, :parameters, :declaration_kinds
 
         def initialize(name:, ports:, nets:, regs:, assigns:, processes:, reg_ports: [], instances: [],
-                       memories: [], write_ports: [], sync_read_ports: [], parameters: {})
+                       memories: [], write_ports: [], sync_read_ports: [], parameters: {}, declaration_kinds: {})
           @name = name
           @ports = ports
           @nets = nets
@@ -21,6 +21,7 @@ module RHDL
           @write_ports = write_ports
           @sync_read_ports = sync_read_ports
           @parameters = parameters
+          @declaration_kinds = declaration_kinds
         end
       end
 
@@ -64,23 +65,25 @@ module RHDL
       end
 
       class Process
-        attr_reader :name, :clock, :sensitivity_list, :statements, :clocked
+        attr_reader :name, :clock, :sensitivity_list, :statements, :clocked, :initial
 
-        def initialize(name:, statements:, clocked:, clock: nil, sensitivity_list: [])
+        def initialize(name:, statements:, clocked:, clock: nil, sensitivity_list: [], initial: false)
           @name = name
           @statements = statements
           @clocked = clocked
           @clock = clock
           @sensitivity_list = sensitivity_list
+          @initial = initial
         end
       end
 
       class SeqAssign
-        attr_reader :target, :expr
+        attr_reader :target, :expr, :nonblocking
 
-        def initialize(target:, expr:)
+        def initialize(target:, expr:, nonblocking: nil)
           @target = target
           @expr = expr
+          @nonblocking = nonblocking
         end
       end
 
@@ -91,6 +94,30 @@ module RHDL
           @condition = condition
           @then_statements = then_statements
           @else_statements = else_statements
+        end
+      end
+
+      class CaseStmt
+        attr_reader :selector, :branches, :default_statements
+
+        # @param selector [Expr] Selector expression
+        # @param branches [Array<CaseBranch>] Ordered case branches
+        # @param default_statements [Array] Default branch statements
+        def initialize(selector:, branches:, default_statements: [])
+          @selector = selector
+          @branches = branches
+          @default_statements = default_statements
+        end
+      end
+
+      class CaseBranch
+        attr_reader :values, :statements
+
+        # @param values [Array<Expr>] Case item values
+        # @param statements [Array] Statements for the branch
+        def initialize(values:, statements:)
+          @values = values
+          @statements = statements
         end
       end
 
@@ -112,10 +139,12 @@ module RHDL
       end
 
       class Literal < Expr
-        attr_reader :value
+        attr_reader :value, :base, :signed
 
-        def initialize(value:, width:)
+        def initialize(value:, width:, base: nil, signed: false)
           @value = value
+          @base = base
+          @signed = !!signed
           super(width: width)
         end
       end
@@ -167,6 +196,18 @@ module RHDL
         def initialize(base:, range:, width:)
           @base = base
           @range = range
+          super(width: width)
+        end
+      end
+
+      # Dynamic bit-range select (bounds are expressions rather than static integers)
+      class DynamicSlice < Expr
+        attr_reader :base, :msb, :lsb
+
+        def initialize(base:, msb:, lsb:, width:)
+          @base = base
+          @msb = msb
+          @lsb = lsb
           super(width: width)
         end
       end

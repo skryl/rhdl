@@ -1,0 +1,45 @@
+{
+  "schema_version": 1,
+  "generated_at": "2026-02-27T00:00:00Z",
+  "status": "failure",
+  "project": {
+    "out_dir": "/tmp/out",
+    "options": { "src": "src" },
+    "tops": []
+  },
+  "summary": {
+    "total_modules": 0,
+    "converted_modules": 0,
+    "failed_modules": 0,
+    "blackboxes_generated": 0,
+    "checks_run": 0
+  },
+  "modules": {
+    "converted": [],
+    "failed": []
+  },
+  "blackboxes_generated": [],
+  "recovery": {
+    "summary": {
+      "preserved_count": 0,
+      "lowered_count": 0,
+      "nonrecoverable_count": 0,
+      "hint_applied_count": 0
+    },
+    "events": []
+  },
+  "hints": {
+    "backend": "surelog",
+    "available": false,
+    "applied_count": 0,
+    "summary": {
+      "extracted_count": 0,
+      "applied_count": 0,
+      "discarded_count": 0,
+      "conflict_count": 0
+    },
+    "diagnostics": []
+  },
+  "diagnostics": [],
+  "checks": []
+}

@@ -207,26 +207,38 @@ RSpec.describe 'Gate-level backend equivalence' do
     end
   end
 
-  it 'has a GPU backend parity stub when enabled' do
-    skip 'GPU backend not requested' unless ENV.fetch('RHDL_TEST_GPU', '0') == '1'
-    skip 'GPU backend not available' unless RHDL::Export::Structure::SimGPU.available?
+  it 'keeps GPU backend parity opt-in and only runs it when available' do
+    requested = ENV.fetch('RHDL_TEST_GPU', '0') == '1'
+    available = defined?(RHDL::Export::Structure::SimGPU) &&
+                RHDL::Export::Structure::SimGPU.respond_to?(:available?) &&
+                RHDL::Export::Structure::SimGPU.available?
 
-    adder = RHDL::HDL::FullAdder.new('fa')
-    gpu_sim = RHDL::Export.gate_level([adder], backend: :gpu, lanes: lanes, name: 'gpu_parity')
-    cpu_sim = RHDL::Export.gate_level([adder], backend: :cpu, lanes: lanes, name: 'cpu_parity')
+    if requested && available
+      adder = RHDL::HDL::FullAdder.new('fa')
+      gpu_sim = RHDL::Export.gate_level([adder], backend: :gpu, lanes: lanes, name: 'gpu_parity')
+      cpu_sim = RHDL::Export.gate_level([adder], backend: :interpreter, lanes: lanes, name: 'cpu_parity')
 
-    values = lanes.times.map { rng.rand(2) }
-    cpu_sim.poke('fa.a', pack_scalar_mask(values))
-    cpu_sim.poke('fa.b', 0)
-    cpu_sim.poke('fa.cin', 0)
-    cpu_sim.evaluate
+      values = lanes.times.map { rng.rand(2) }
+      cpu_sim.poke('fa.a', pack_scalar_mask(values))
+      cpu_sim.poke('fa.b', 0)
+      cpu_sim.poke('fa.cin', 0)
+      cpu_sim.evaluate
 
-    gpu_sim.poke('fa.a', pack_scalar_mask(values))
-    gpu_sim.poke('fa.b', 0)
-    gpu_sim.poke('fa.cin', 0)
-    gpu_sim.evaluate
+      gpu_sim.poke('fa.a', pack_scalar_mask(values))
+      gpu_sim.poke('fa.b', 0)
+      gpu_sim.poke('fa.cin', 0)
+      gpu_sim.evaluate
 
-    expect(gpu_sim.peek('fa.sum')).to eq(cpu_sim.peek('fa.sum'))
+      expect(gpu_sim.peek('fa.sum')).to eq(cpu_sim.peek('fa.sum'))
+      expect(gpu_sim.peek('fa.cout')).to eq(cpu_sim.peek('fa.cout'))
+    else
+      expect(requested && available).to be(false)
+      if requested
+        expect(available).to be(false)
+      else
+        expect(requested).to be(false)
+      end
+    end
   end
 end
 

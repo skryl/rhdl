@@ -4,6 +4,8 @@ module RHDL
   module DSL
     # Replication expression
     class Replication
+      include ExpressionOperators
+
       attr_reader :signal, :times
 
       def initialize(signal, times)
@@ -12,7 +14,8 @@ module RHDL
       end
 
       def to_verilog
-        "{#{times}{#{signal.to_verilog}}}"
+        rendered_times = times.respond_to?(:to_verilog) ? times.to_verilog : times.to_s
+        "{#{rendered_times}{#{signal.to_verilog}}}"
       end
     end
   end

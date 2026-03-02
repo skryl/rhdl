@@ -4,6 +4,8 @@ module RHDL
   module DSL
     # Binary operation expression
     class BinaryOp
+      include ExpressionOperators
+
       attr_reader :op, :left, :right
 
       VERILOG_OPS = {
@@ -26,10 +28,6 @@ module RHDL
         "(#{l} #{VERILOG_OPS[op]} #{r})"
       end
 
-      # Allow chaining
-      def &(other); BinaryOp.new(:&, self, other); end
-      def |(other); BinaryOp.new(:|, self, other); end
-      def ^(other); BinaryOp.new(:^, self, other); end
     end
   end
 end

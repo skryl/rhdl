@@ -4,6 +4,8 @@ module RHDL
   module DSL
     # Bit selection expression
     class BitSelect
+      include ExpressionOperators
+
       attr_reader :signal, :index
 
       def initialize(signal, index)
@@ -12,7 +14,8 @@ module RHDL
       end
 
       def to_verilog
-        "#{signal.to_verilog}[#{index}]"
+        rendered_index = index.respond_to?(:to_verilog) ? index.to_verilog : index.to_s
+        "#{signal.to_verilog}[#{rendered_index}]"
       end
     end
   end

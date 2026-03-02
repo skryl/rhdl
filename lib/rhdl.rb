@@ -1,5 +1,6 @@
 require_relative "rhdl/version"
 require_relative "rhdl/dsl"
+require_relative "rhdl/import"
 require 'rhdl/support/inflections'
 
 module RHDL

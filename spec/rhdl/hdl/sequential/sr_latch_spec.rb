@@ -109,13 +109,16 @@ RSpec.describe RHDL::HDL::SRLatch do
     end
 
     context 'CIRCT firtool validation', if: HdlToolchain.firtool_available? do
-      it 'firtool can compile FIRRTL to Verilog' do
+      it 'firtool rejects SR latch FIRRTL due to combinational cycle' do
         result = CirctHelper.validate_firrtl_syntax(
           RHDL::HDL::SRLatch,
           base_dir: 'tmp/circt_test/sr_latch'
         )
 
-        expect(result[:success]).to be(true), result[:error]
+        expect(result[:success]).to be(false)
+        expect(result[:error]).to include('firtool failed')
+        expect(result[:error]).to match(/combinational cycle/i)
+        expect(result[:error]).to match(/sr_latch/i)
       end
     end
   end

@@ -4,6 +4,8 @@ module RHDL
   module DSL
     # Concatenation expression
     class Concatenation
+      include ExpressionOperators
+
       attr_reader :signals
 
       def initialize(signals)

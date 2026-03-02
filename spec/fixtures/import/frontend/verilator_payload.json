@@ -1,0 +1,10 @@
+{
+  "version": "5.024",
+  "modules": [
+    {
+      "name": "top",
+      "kind": "module",
+      "file": "rtl/top.sv"
+    }
+  ]
+}
