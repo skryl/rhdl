@@ -132,11 +132,11 @@ bundle exec rake desktop:clean    # Remove packaged desktop artifacts
 
 Runner presets are generated into:
 
-- `web/app/components/runner/config/generated_presets.mjs`
+- `web/app/components/runner/config/generated_presets.ts`
 
 Current generated runner order:
 
-- `generic` (manual IR runner, from `presets.mjs`)
+- `generic` (manual IR runner, from `presets.ts`)
 - `cpu`
 - `mos6502`
 - `apple2`
@@ -203,32 +203,32 @@ RISC-V web preset status:
 Run all web unit tests (no build step required):
 
 ```bash
-node --test $(find web/test -type f -name '*.test.mjs' | sort)
+bun test $(find web/test -type f -name '*.test.ts' | sort)
 ```
 
 Run only browser integration smoke tests (Playwright):
 
 ```bash
 cd web
-npm install
-npx playwright install chromium
-npm run test:integration
+bun install
+bunx playwright install chromium
+bun run test:integration
 ```
 
 Useful integration suites:
 
-- `web/test/integration/app_load.test.mjs`
-- `web/test/integration/app_flows.test.mjs`
-- `web/test/integration/mos6502_compiler_backend.test.mjs`
-- `web/test/integration/cpu8bit_default_bin_autoload.test.mjs`
-- `web/test/integration/cpu8bit_programs.test.mjs`
-- `web/test/integration/memory_dump_asset_tree.test.mjs`
-- `web/test/integration/memory_follow_pc_highlight.test.mjs`
+- `web/test/integration/app_load.test.ts`
+- `web/test/integration/app_flows.test.ts`
+- `web/test/integration/mos6502_compiler_backend.test.ts`
+- `web/test/integration/cpu8bit_default_bin_autoload.test.ts`
+- `web/test/integration/cpu8bit_programs.test.ts`
+- `web/test/integration/memory_dump_asset_tree.test.ts`
+- `web/test/integration/memory_follow_pc_highlight.test.ts`
 
 Run only state store tests:
 
 ```bash
-node --test web/test/state/store.test.mjs
+bun test web/test/state/store.test.ts
 ```
 
 ## Notes
@@ -272,12 +272,12 @@ This section describes the current architecture of the RHDL web simulator and wh
 - `web/app/core/bootstrap.ts` is the composition root.
 - `web/app/main.ts` loads UI components and starts bootstrap.
 - Bootstrap creates:
-  - DOM refs (`bindings/dom_bindings.mjs`)
-  - mutable runtime context (`runtime/context.mjs`)
-  - mutable UX state (`state/initial_state.mjs`)
-  - Redux store + bridge (`state/store.mjs`, `state/store_bridge.mjs`)
-  - controller registry (`controllers/registry_controller.mjs`)
-  - startup orchestration (`controllers/startup_controller.mjs`)
+  - DOM refs (`bindings/dom_bindings.ts`)
+  - mutable runtime context (`runtime/context.ts`)
+  - mutable UX state (`state/initial_state.ts`)
+  - Redux store + bridge (`state/store.ts`, `state/store_bridge.ts`)
+  - controller registry (`controllers/registry_controller.ts`)
+  - startup orchestration (`controllers/startup_controller.ts`)
 
 ### Layering
 

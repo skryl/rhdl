@@ -62,6 +62,11 @@ web/dist/
 
 # Web wasm build artifacts
 web/assets/pkg/*
+# Web simulator intermediate build artifacts
+web/build/arcilator/*
+!web/build/arcilator/.gitignore
+web/build/verilator/*
+!web/build/verilator/.gitignore
 
 # RISC-V software artifacts: keep canonical fixtures only
 /examples/riscv/software/bin/*

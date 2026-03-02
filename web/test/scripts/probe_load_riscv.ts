@@ -1,6 +1,6 @@
 import path from 'node:path';
 import { chromium } from 'playwright';
-import { createStaticServer, serverBaseUrl } from './test/integration/browser_test_harness.mjs';
+import { createStaticServer, serverBaseUrl } from './integration/browser_test_harness.ts';
 
 const server = await createStaticServer(path.resolve('.'));
 const base = serverBaseUrl(server);

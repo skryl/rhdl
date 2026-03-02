@@ -16,7 +16,7 @@ test('mos6502 runner loads with compiler backend using runner-specific AOT wasm'
   try {
     ({ chromium } = await import('playwright'));
   } catch (_err: unknown) {
-    console.warn('Playwright is not installed (run: `cd web && npm install`)');
+    console.warn('Playwright is not installed (run: `cd web && bun install`)');
     return;
   }
 
@@ -30,7 +30,7 @@ test('mos6502 runner loads with compiler backend using runner-specific AOT wasm'
   try {
     browser = await chromium.launch({ headless: true });
   } catch (_err: unknown) {
-    console.warn('Playwright browser binaries are missing (run: `cd web && npx playwright install chromium`)');
+    console.warn('Playwright browser binaries are missing (run: `cd web && bunx playwright install chromium`)');
     return;
   }
   t.after(async () => {

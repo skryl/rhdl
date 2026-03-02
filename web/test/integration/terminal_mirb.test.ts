@@ -80,7 +80,7 @@ test('terminal mirb supports one-shot and session flows', { timeout: 300000 }, a
   try {
     ({ chromium } = await import('playwright'));
   } catch (_err: unknown) {
-    console.warn('Playwright is not installed (run: `cd web && npm install`)');
+    console.warn('Playwright is not installed (run: `cd web && bun install`)');
     return;
   }
 
@@ -99,7 +99,7 @@ test('terminal mirb supports one-shot and session flows', { timeout: 300000 }, a
   try {
     browser = await chromium.launch({ headless: true });
   } catch (_err: unknown) {
-    console.warn('Playwright browser binaries are missing (run: `cd web && npx playwright install chromium`)');
+    console.warn('Playwright browser binaries are missing (run: `cd web && bunx playwright install chromium`)');
     return;
   }
   t.after(async () => {

@@ -13,7 +13,7 @@ module RHDL
       #   -> clang --target=wasm32 -> wasm-ld -> riscv_arcilator.wasm
       module WebRiscvArcilatorBuild
         PROJECT_ROOT = File.expand_path('../../../..', __dir__)
-        BUILD_DIR = File.join(PROJECT_ROOT, 'web', 'arcilator', 'riscv_build')
+        BUILD_DIR = File.join(PROJECT_ROOT, 'web', 'build', 'arcilator', 'riscv_build')
 
         FIRRTL_FILE = File.join(BUILD_DIR, 'riscv_cpu.fir')
         PARSED_MLIR_FILE = File.join(BUILD_DIR, 'riscv_cpu_parsed.mlir')

@@ -1,4 +1,4 @@
-#!/usr/bin/env node
+#!/usr/bin/env bun
 // Headless Apple II WASM benchmark harness.
 //
 // Loads a WASM module (arcilator or ir_compiler), initialises the Apple II
@@ -6,7 +6,7 @@
 // wall-clock timing as JSON on stdout.
 //
 // Usage:
-//   node web/bench/apple2_wasm_bench.mjs <wasm_path> <rom_path> <ram_path> <cycles> [ir_json_path]
+//   bun run web/bench/apple2_wasm_bench.ts <wasm_path> <rom_path> <ram_path> <cycles> [ir_json_path]
 //
 // The optional ir_json_path is required for the ir_compiler backend
 // (which needs the IR JSON passed to sim_create).  Arcilator ignores it.
@@ -111,7 +111,7 @@ async function instantiateWasm(wasmBytes) {
 const [wasmPath, romPath, ramPath, cyclesStr, irJsonPath] = process.argv.slice(2);
 if (!wasmPath || !romPath || !ramPath || !cyclesStr) {
   process.stderr.write(
-    'Usage: node apple2_wasm_bench.mjs <wasm> <rom> <ram> <cycles> [ir_json]\n'
+    'Usage: bun run apple2_wasm_bench.ts <wasm> <rom> <ram> <cycles> [ir_json]\n'
   );
   process.exit(1);
 }

@@ -14,7 +14,7 @@ module RHDL
       # web/bench/riscv_wasm_bench.mjs.
       module WebRiscvVerilatorBuild
         PROJECT_ROOT = File.expand_path('../../../..', __dir__)
-        BUILD_DIR = File.join(PROJECT_ROOT, 'web', 'verilator', 'riscv_build')
+        BUILD_DIR = File.join(PROJECT_ROOT, 'web', 'build', 'verilator', 'riscv_build')
         VERILOG_DIR = File.join(BUILD_DIR, 'verilog')
         OBJ_DIR = File.join(BUILD_DIR, 'obj_dir')
         VERILOG_FILE = File.join(VERILOG_DIR, 'riscv_cpu.v')

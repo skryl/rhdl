@@ -1,9 +1,9 @@
-#!/usr/bin/env node
+#!/usr/bin/env bun
 /**
  * Take documentation screenshots for the web simulator.
  *
  * Usage:
- *   cd web && node tools/take_screenshots.mjs
+ *   cd web && bun run tools/take_screenshots.ts
  *
  * Produces PNGs under docs/screenshots/.
  */
@@ -16,7 +16,7 @@ import {
   createStaticServer,
   serverBaseUrl,
   resolveWebRoot
-} from '../test/integration/browser_test_harness.mjs';
+} from '../test/integration/browser_test_harness.ts';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DOCS_DIR = path.resolve(__dirname, '..', '..', 'docs', 'screenshots');

@@ -44,7 +44,7 @@ test('schematic webgl renderer emits wire draws with line divisor resets', { tim
   try {
     ({ chromium } = await import('playwright'));
   } catch (_err: unknown) {
-    console.warn('Playwright is not installed (run: `cd web && npm install`)');
+    console.warn('Playwright is not installed (run: `cd web && bun install`)');
     return;
   }
 
@@ -58,7 +58,7 @@ test('schematic webgl renderer emits wire draws with line divisor resets', { tim
   try {
     browser = await chromium.launch({ headless: true, args: WEBGL_LAUNCH_ARGS });
   } catch (_err: unknown) {
-    console.warn('Playwright browser binaries are missing (run: `cd web && npx playwright install chromium`)');
+    console.warn('Playwright browser binaries are missing (run: `cd web && bunx playwright install chromium`)');
     return;
   }
   t.after(async () => {

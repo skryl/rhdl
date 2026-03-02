@@ -14,7 +14,7 @@ module RHDL
       # the web benchmark harness.
       module WebApple2VerilatorBuild
         PROJECT_ROOT = File.expand_path('../../../..', __dir__)
-        BUILD_DIR = File.join(PROJECT_ROOT, 'web', 'verilator', 'build')
+        BUILD_DIR = File.join(PROJECT_ROOT, 'web', 'build', 'verilator', 'build')
         VERILOG_DIR = File.join(BUILD_DIR, 'verilog')
         OBJ_DIR = File.join(BUILD_DIR, 'obj_dir')
         VERILOG_FILE = File.join(VERILOG_DIR, 'apple2.v')

@@ -1,5 +1,5 @@
 import { chromium } from 'playwright';
-import { createStaticServer } from './test/integration/browser_test_harness.mjs';
+import { createStaticServer } from './integration/browser_test_harness.ts';
 
 const server = await createStaticServer(process.cwd());
 const base = `http://127.0.0.1:${server.address().port}`;

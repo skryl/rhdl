@@ -1,4 +1,4 @@
-#!/usr/bin/env node
+#!/usr/bin/env bun
 // Headless RISC-V WASM benchmark harness.
 //
 // Supports:
@@ -6,7 +6,7 @@
 // 2) Arcilator backend (lightweight sim_* ABI, no IR JSON)
 //
 // Usage:
-//   node web/bench/riscv_wasm_bench.mjs <wasm_path> <kernel_path> <fs_path> <cycles> [ir_json_path]
+//   bun run web/bench/riscv_wasm_bench.ts <wasm_path> <kernel_path> <fs_path> <cycles> [ir_json_path]
 
 import { readFileSync } from 'node:fs';
 import { performance } from 'node:perf_hooks';
@@ -289,7 +289,7 @@ async function runArcilatorBackend(e, kernelData, fsData, cycles) {
 const [wasmPath, kernelPath, fsPath, cyclesStr, irJsonPath] = process.argv.slice(2);
 if (!wasmPath || !kernelPath || !fsPath || !cyclesStr) {
   process.stderr.write(
-    'Usage: node riscv_wasm_bench.mjs <wasm> <kernel> <fs> <cycles> [ir_json]\n'
+    'Usage: bun run riscv_wasm_bench.ts <wasm> <kernel> <fs> <cycles> [ir_json]\n'
   );
   process.exit(1);
 }

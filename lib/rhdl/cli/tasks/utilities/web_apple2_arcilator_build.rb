@@ -16,7 +16,7 @@ module RHDL
       # from MLIR rather than going through the IR simulator layer.
       module WebApple2ArcilatorBuild
         PROJECT_ROOT = File.expand_path('../../../..', __dir__)
-        BUILD_DIR = File.join(PROJECT_ROOT, 'web', 'arcilator', 'build')
+        BUILD_DIR = File.join(PROJECT_ROOT, 'web', 'build', 'arcilator', 'build')
         WRAPPER_SOURCE = File.join(BUILD_DIR, 'arc_wasm_wrapper.c')
         FIRRTL_FILE = File.join(BUILD_DIR, 'apple2.fir')
         MLIR_FILE = File.join(BUILD_DIR, 'apple2_hw.mlir')

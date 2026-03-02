@@ -5,7 +5,10 @@
   "scripts": {
     "build": "bun run build.ts",
     "build:prod": "NODE_ENV=production bun run build.ts",
+    "bench:apple2": "bun run bench/apple2_wasm_bench.ts",
+    "bench:riscv": "bun run bench/riscv_wasm_bench.ts",
     "typecheck": "tsc --noEmit",
+    "screenshots": "bun run tools/take_screenshots.ts",
     "test": "bun test test/core/ test/components/",
     "test:all": "bun test test/",
     "test:integration": "bun test test/integration/"
