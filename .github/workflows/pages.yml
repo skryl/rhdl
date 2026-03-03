@@ -43,11 +43,31 @@ jobs:
         with:
           bun-version: latest
 
-      - name: Install Verilator + Emscripten
+      - name: Install Verilator + Emscripten + LLVM Linker
         run: |
           set -euo pipefail
           sudo apt-get update
-          sudo apt-get install -y verilator emscripten
+          sudo apt-get install -y verilator emscripten llvm lld clang
+
+          # Some Ubuntu images ship a verilator wrapper that expects
+          # /usr/share/verilator/verilator_bin, but only install verilator_bin in PATH.
+          if [ ! -x /usr/share/verilator/verilator_bin ] && command -v verilator_bin >/dev/null 2>&1; then
+            sudo mkdir -p /usr/share/verilator
+            sudo ln -sf "$(command -v verilator_bin)" /usr/share/verilator/verilator_bin
+          fi
+
+          # Ensure unversioned wasm-ld is available for arcilator wasm link step.
+          if ! command -v wasm-ld >/dev/null 2>&1; then
+            wasm_ld_candidate="$(ls /usr/bin/wasm-ld-* 2>/dev/null | head -n 1 || true)"
+            if [ -n "$wasm_ld_candidate" ]; then
+              sudo ln -sf "$wasm_ld_candidate" /usr/local/bin/wasm-ld
+            fi
+          fi
+
+          verilator --version
+          em++ --version
+          clang --version
+          wasm-ld --version
 
       - name: Install CIRCT tools (firtool/arcilator/circt-opt)
         run: |
