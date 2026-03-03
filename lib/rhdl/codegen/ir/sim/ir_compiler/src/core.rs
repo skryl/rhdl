@@ -120,6 +120,8 @@ pub struct ModuleIR {
     pub nets: Vec<NetDef>,
     pub regs: Vec<RegDef>,
     pub assigns: Vec<AssignDef>,
+    #[serde(default)]
+    pub initial_assigns: Vec<AssignDef>,
     pub processes: Vec<ProcessDef>,
     #[serde(default)]
     pub memories: Vec<MemoryDef>,
@@ -229,7 +231,9 @@ impl CoreSimulator {
                 continue;
             }
             let clk_name = process.clock.as_deref().unwrap_or("clk");
-            let clk_idx = *name_to_idx.get(clk_name).unwrap_or(&0);
+            let clk_idx = Self::resolve_clock_signal_idx(&name_to_idx, clk_name)
+                .or_else(|| name_to_idx.get("clk").copied())
+                .unwrap_or(0);
             clock_indices_set.insert(clk_idx);
 
             for stmt in &process.statements {
@@ -299,6 +303,90 @@ impl CoreSimulator {
         } else {
             format!("0x{:X}u64", (1u64 << width) - 1)
         }
+    }
+
+    fn clean_clock_token(token: &str) -> String {
+        token
+            .trim()
+            .trim_matches(|ch: char| matches!(ch, '(' | ')' | ',' | ';'))
+            .trim()
+            .to_string()
+    }
+
+    fn strip_edge_prefix(token: &str) -> Option<String> {
+        let mut parts = token.split_whitespace();
+        let first = parts.next()?;
+        if !first.eq_ignore_ascii_case("posedge") && !first.eq_ignore_ascii_case("negedge") {
+            return None;
+        }
+        let rest = parts.collect::<Vec<_>>().join(" ");
+        let cleaned = Self::clean_clock_token(&rest);
+        if cleaned.is_empty() { None } else { Some(cleaned) }
+    }
+
+    fn strip_prefixed_edge(token: &str) -> Option<String> {
+        let lower = token.to_ascii_lowercase();
+        let marker = if lower.contains("__posedge ") {
+            "__posedge "
+        } else if lower.contains("__negedge ") {
+            "__negedge "
+        } else {
+            return None;
+        };
+        let split_at = lower.find(marker)?;
+        let prefix = token[..split_at].trim_end_matches('_').trim();
+        let signal = token[(split_at + marker.len())..].trim();
+        if prefix.is_empty() || signal.is_empty() {
+            return None;
+        }
+        Some(Self::clean_clock_token(&format!("{}__{}", prefix, signal)))
+    }
+
+    fn resolve_clock_signal_idx(
+        name_to_idx: &HashMap<String, usize>,
+        raw_clock: &str,
+    ) -> Option<usize> {
+        let token = Self::clean_clock_token(raw_clock);
+        if token.is_empty() {
+            return None;
+        }
+
+        let mut candidates = vec![token.clone()];
+        if let Some(stripped) = Self::strip_edge_prefix(&token) {
+            candidates.push(stripped);
+        }
+        if let Some(prefixed) = Self::strip_prefixed_edge(&token) {
+            candidates.push(prefixed);
+        }
+        if let Some(last) = token.split_whitespace().last() {
+            let cleaned = Self::clean_clock_token(last);
+            if !cleaned.is_empty() {
+                candidates.push(cleaned);
+            }
+        }
+
+        let mut unique = HashSet::new();
+        for candidate in candidates {
+            let cleaned = Self::clean_clock_token(&candidate);
+            if cleaned.is_empty() || !unique.insert(cleaned.clone()) {
+                continue;
+            }
+
+            if let Some(&idx) = name_to_idx.get(&cleaned) {
+                return Some(idx);
+            }
+        }
+
+        for candidate in unique {
+            if let Some((_, &idx)) = name_to_idx
+                .iter()
+                .find(|(name, _)| name.eq_ignore_ascii_case(&candidate))
+            {
+                return Some(idx);
+            }
+        }
+
+        None
     }
 
     pub fn expr_width(&self, expr: &ExprDef) -> usize {
@@ -424,6 +512,7 @@ impl CoreSimulator {
         // For compiled cores, memory state lives in generated `static mut`
         // arrays, so we must also run the compiled memory initializer.
         let _ = self.init_compiled_memories();
+        self.apply_initial_assigns_runtime();
     }
 
     pub fn signal_count(&self) -> usize {
@@ -432,6 +521,131 @@ impl CoreSimulator {
 
     pub fn reg_count(&self) -> usize {
         self.seq_targets.len()
+    }
+
+    fn eval_expr_runtime(&self, expr: &ExprDef) -> u64 {
+        match expr {
+            ExprDef::Signal { name, width } => {
+                if let Some(&idx) = self.name_to_idx.get(name) {
+                    self.signals.get(idx).copied().unwrap_or(0) & Self::mask(*width)
+                } else {
+                    0
+                }
+            }
+            ExprDef::Literal { value, width } => (*value as u64) & Self::mask(*width),
+            ExprDef::UnaryOp { op, operand, width } => {
+                let src = self.eval_expr_runtime(operand);
+                let result = match op.as_str() {
+                    "~" => !src,
+                    "!" | "logical_not" => {
+                        if src == 0 { 1 } else { 0 }
+                    }
+                    "-" => (!src).wrapping_add(1),
+                    "&" | "reduce_and" => {
+                        if src == Self::mask(self.expr_width(operand)) { 1 } else { 0 }
+                    }
+                    "|" | "reduce_or" => {
+                        if src != 0 { 1 } else { 0 }
+                    }
+                    "^" | "reduce_xor" => (src.count_ones() as u64) & 1,
+                    _ => src,
+                };
+                result & Self::mask(*width)
+            }
+            ExprDef::BinaryOp { op, left, right, width } => {
+                let l = self.eval_expr_runtime(left);
+                let r = self.eval_expr_runtime(right);
+                let result = match op.as_str() {
+                    "+" => l.wrapping_add(r),
+                    "-" => l.wrapping_sub(r),
+                    "*" => l.wrapping_mul(r),
+                    "/" => if r == 0 { 0 } else { l / r },
+                    "%" => if r == 0 { 0 } else { l % r },
+                    "<<" => l.checked_shl((r & 0xFF) as u32).unwrap_or(0),
+                    ">>" => l.checked_shr((r & 0xFF) as u32).unwrap_or(0),
+                    "&" => l & r,
+                    "|" => l | r,
+                    "^" => l ^ r,
+                    "==" => if l == r { 1 } else { 0 },
+                    "!=" => if l != r { 1 } else { 0 },
+                    "<" => if l < r { 1 } else { 0 },
+                    "<=" => if l <= r { 1 } else { 0 },
+                    ">" => if l > r { 1 } else { 0 },
+                    ">=" => if l >= r { 1 } else { 0 },
+                    "&&" => if l != 0 && r != 0 { 1 } else { 0 },
+                    "||" => if l != 0 || r != 0 { 1 } else { 0 },
+                    _ => 0,
+                };
+                result & Self::mask(*width)
+            }
+            ExprDef::Mux { condition, when_true, when_false, width } => {
+                let cond = self.eval_expr_runtime(condition);
+                let selected = if cond != 0 {
+                    self.eval_expr_runtime(when_true)
+                } else {
+                    self.eval_expr_runtime(when_false)
+                };
+                selected & Self::mask(*width)
+            }
+            ExprDef::Slice { base, low, width, .. } => {
+                let base_val = self.eval_expr_runtime(base);
+                let shifted = base_val.checked_shr(*low as u32).unwrap_or(0);
+                shifted & Self::mask(*width)
+            }
+            ExprDef::Concat { parts, width } => {
+                let mut result = 0u64;
+                let mut shift = 0usize;
+                for part in parts.iter().rev() {
+                    let part_width = self.expr_width(part);
+                    let part_val = self.eval_expr_runtime(part) & Self::mask(part_width);
+                    if shift == 0 {
+                        result |= part_val;
+                    } else {
+                        result |= part_val.checked_shl(shift as u32).unwrap_or(0);
+                    }
+                    shift = shift.saturating_add(part_width);
+                }
+                result & Self::mask(*width)
+            }
+            ExprDef::Resize { expr, width } => self.eval_expr_runtime(expr) & Self::mask(*width),
+            ExprDef::MemRead { memory, addr, width } => {
+                let Some(&mem_idx) = self.memory_name_to_idx.get(memory) else {
+                    return 0;
+                };
+                let Some(mem) = self.memory_arrays.get(mem_idx) else {
+                    return 0;
+                };
+                if mem.is_empty() {
+                    return 0;
+                }
+                let address = (self.eval_expr_runtime(addr) as usize) % mem.len();
+                mem[address] & Self::mask(*width)
+            }
+        }
+    }
+
+    fn apply_initial_assigns_runtime(&mut self) {
+        if self.ir.initial_assigns.is_empty() {
+            return;
+        }
+
+        for _ in 0..10 {
+            let mut changed = false;
+            for assign in &self.ir.initial_assigns {
+                let Some(&idx) = self.name_to_idx.get(&assign.target) else {
+                    continue;
+                };
+                let width = self.widths.get(idx).copied().unwrap_or(64);
+                let new_val = self.eval_expr_runtime(&assign.expr) & Self::mask(width);
+                if self.signals[idx] != new_val {
+                    self.signals[idx] = new_val;
+                    changed = true;
+                }
+            }
+            if !changed {
+                break;
+            }
+        }
     }
 
     // ========================================================================
@@ -623,6 +837,7 @@ impl CoreSimulator {
 
         code.push_str("//! Auto-generated circuit simulation code\n");
         code.push_str("//! Generated by RHDL IR Compiler (Core)\n\n");
+        code.push_str(&format!("// initial_assigns: {}\n\n", self.ir.initial_assigns.len()));
 
         // Generate mutable memory arrays.
         //
@@ -859,7 +1074,12 @@ impl CoreSimulator {
             }
             ExprDef::Slice { base, low, width, .. } => {
                 let base_code = self.expr_to_rust_ptr(base, signals_ptr);
-                format!("(({} >> {}) & {})", base_code, low, Self::mask_const(*width))
+                format!(
+                    "(({}).checked_shr({}u32).unwrap_or(0) & {})",
+                    base_code,
+                    low,
+                    Self::mask_const(*width)
+                )
             }
             ExprDef::Concat { parts, width } => {
                 let mut result = String::from("((");
@@ -873,7 +1093,12 @@ impl CoreSimulator {
                     }
                     first = false;
                     if shift > 0 {
-                        result.push_str(&format!("(({} & {}) << {})", part_code, Self::mask_const(part_width), shift));
+                        result.push_str(&format!(
+                            "(({} & {}).checked_shl({}u32).unwrap_or(0))",
+                            part_code,
+                            Self::mask_const(part_width),
+                            shift
+                        ));
                     } else {
                         result.push_str(&format!("({} & {})", part_code, Self::mask_const(part_width)));
                     }
@@ -967,7 +1192,12 @@ impl CoreSimulator {
             }
             ExprDef::Slice { base, low, width, .. } => {
                 let base_code = self.expr_to_rust_ptr_cached(base, signals_ptr, cache);
-                format!("(({} >> {}) & {})", base_code, low, Self::mask_const(*width))
+                format!(
+                    "(({}).checked_shr({}u32).unwrap_or(0) & {})",
+                    base_code,
+                    low,
+                    Self::mask_const(*width)
+                )
             }
             ExprDef::Concat { parts, width } => {
                 let mut result = String::from("((");
@@ -981,7 +1211,12 @@ impl CoreSimulator {
                     }
                     first = false;
                     if shift > 0 {
-                        result.push_str(&format!("(({} & {}) << {})", part_code, Self::mask_const(part_width), shift));
+                        result.push_str(&format!(
+                            "(({} & {}).checked_shl({}u32).unwrap_or(0))",
+                            part_code,
+                            Self::mask_const(part_width),
+                            shift
+                        ));
                     } else {
                         result.push_str(&format!("({} & {})", part_code, Self::mask_const(part_width)));
                     }
@@ -1073,7 +1308,8 @@ impl CoreSimulator {
             let Some(&memory_idx) = self.memory_name_to_idx.get(&wp.memory) else {
                 continue;
             };
-            let Some(&clock_idx) = self.name_to_idx.get(&wp.clock) else {
+            let Some(clock_idx) = Self::resolve_clock_signal_idx(&self.name_to_idx, &wp.clock)
+                .or_else(|| self.name_to_idx.get("clk").copied()) else {
                 continue;
             };
             let Some(memory) = self.ir.memories.get(memory_idx) else {
@@ -1111,7 +1347,8 @@ impl CoreSimulator {
             let Some(&memory_idx) = self.memory_name_to_idx.get(&rp.memory) else {
                 continue;
             };
-            let Some(&clock_idx) = self.name_to_idx.get(&rp.clock) else {
+            let Some(clock_idx) = Self::resolve_clock_signal_idx(&self.name_to_idx, &rp.clock)
+                .or_else(|| self.name_to_idx.get("clk").copied()) else {
                 continue;
             };
             let Some(&data_idx) = self.name_to_idx.get(&rp.data) else {

@@ -20,7 +20,8 @@ mod ffi;
 mod vcd;
 
 pub use core::CoreSimulator;
-pub use extensions::{Apple2Extension, Cpu8BitExtension, GameBoyExtension, Mos6502Extension};
+pub use extensions::{Apple2Extension, Cpu8BitExtension, GameBoyExtension, Mos6502Extension, RiscvExtension};
+pub use extensions::Ao486Extension;
 pub use vcd::{VcdTracer, TraceMode, SignalChange, TraceStats};
 
 // Re-export FFI functions at crate root for easier linking

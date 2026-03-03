@@ -348,6 +348,166 @@ RSpec.describe RHDL::Import::Translator::ModuleEmitter do
       expect(source).to include("for_loop(:i, 0..3) do")
     end
 
+    it "emits case_stmt qualifier keyword when case metadata includes a qualifier" do
+      source = described_class.emit(
+        "name" => "process_case_qualifier",
+        "ports" => [
+          { "direction" => "input", "name" => "op", "width" => 2 },
+          { "direction" => "output", "name" => "y", "width" => 8 }
+        ],
+        "processes" => [
+          {
+            "kind" => "always",
+            "domain" => "combinational",
+            "sensitivity" => [{ "edge" => "any", "signal" => { "kind" => "identifier", "name" => "op" } }],
+            "statements" => [
+              {
+                "kind" => "case",
+                "qualifier" => "unique",
+                "selector" => { "kind" => "identifier", "name" => "op" },
+                "items" => [
+                  {
+                    "values" => [{ "kind" => "number", "value" => 0, "base" => 10, "width" => 2, "signed" => false }],
+                    "body" => [
+                      {
+                        "kind" => "blocking_assign",
+                        "target" => { "kind" => "identifier", "name" => "y" },
+                        "value" => { "kind" => "number", "value" => 1, "base" => 10, "width" => 8, "signed" => false }
+                      }
+                    ]
+                  }
+                ],
+                "default_body" => [
+                  {
+                    "kind" => "blocking_assign",
+                    "target" => { "kind" => "identifier", "name" => "y" },
+                    "value" => { "kind" => "number", "value" => 0, "base" => 10, "width" => 8, "signed" => false }
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      )
+
+      expect(source).to include("case_stmt(sig(:op, width: 2), qualifier: :unique) do")
+    end
+
+    it "treats always_ff process intent as clocked when sensitivity edges are absent" do
+      source = described_class.emit(
+        "name" => "process_intent_clocked",
+        "ports" => [
+          { "direction" => "input", "name" => "clk" },
+          { "direction" => "output", "name" => "q", "width" => 8 }
+        ],
+        "processes" => [
+          {
+            "kind" => "always",
+            "domain" => "combinational",
+            "intent" => "always_ff",
+            "sensitivity" => [],
+            "statements" => [
+              {
+                "kind" => "nonblocking_assign",
+                "target" => { "kind" => "identifier", "name" => "q" },
+                "value" => { "kind" => "number", "value" => 0, "base" => 10, "width" => 8, "signed" => false }
+              }
+            ]
+          }
+        ]
+      )
+
+      expect(source).to include("process :sequential")
+      expect(source).to include("clocked: true,")
+    end
+
+    it "uses always_comb process intent for combinational naming when domain is absent" do
+      source = described_class.emit(
+        "name" => "process_intent_comb",
+        "ports" => [
+          { "direction" => "input", "name" => "a", "width" => 8 },
+          { "direction" => "output", "name" => "y", "width" => 8 }
+        ],
+        "processes" => [
+          {
+            "kind" => "always",
+            "intent" => "always_comb",
+            "sensitivity" => [],
+            "statements" => [
+              {
+                "kind" => "blocking_assign",
+                "target" => { "kind" => "identifier", "name" => "y" },
+                "value" => { "kind" => "identifier", "name" => "a" }
+              }
+            ]
+          }
+        ]
+      )
+
+      expect(source).to include("process :combinational_logic_0,")
+      expect(source).to include("clocked: false,")
+    end
+
+    it "emits elsif_block for nested if/else-if chains" do
+      source = described_class.emit(
+        "name" => "process_if_elsif",
+        "ports" => [
+          { "direction" => "input", "name" => "sel", "width" => 2 },
+          { "direction" => "output", "name" => "y", "width" => 8 }
+        ],
+        "processes" => [
+          {
+            "kind" => "always",
+            "domain" => "combinational",
+            "sensitivity" => [{ "edge" => "any", "signal" => { "kind" => "identifier", "name" => "sel" } }],
+            "statements" => [
+              {
+                "kind" => "if",
+                "condition" => { "kind" => "identifier", "name" => "sel" },
+                "then" => [
+                  {
+                    "kind" => "blocking_assign",
+                    "target" => { "kind" => "identifier", "name" => "y" },
+                    "value" => { "kind" => "number", "value" => 1, "base" => 10, "width" => 8, "signed" => false }
+                  }
+                ],
+                "else" => [
+                  {
+                    "kind" => "if",
+                    "condition" => {
+                      "kind" => "binary",
+                      "operator" => "==",
+                      "left" => { "kind" => "identifier", "name" => "sel" },
+                      "right" => { "kind" => "number", "value" => 0, "base" => 10, "width" => 2, "signed" => false }
+                    },
+                    "then" => [
+                      {
+                        "kind" => "blocking_assign",
+                        "target" => { "kind" => "identifier", "name" => "y" },
+                        "value" => { "kind" => "number", "value" => 2, "base" => 10, "width" => 8, "signed" => false }
+                      }
+                    ],
+                    "else" => [
+                      {
+                        "kind" => "blocking_assign",
+                        "target" => { "kind" => "identifier", "name" => "y" },
+                        "value" => { "kind" => "number", "value" => 3, "base" => 10, "width" => 8, "signed" => false }
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      )
+
+      expect(source).to include("if_stmt(")
+      expect(source).to include("elsif_block(")
+      expect(source).to include("else_block do")
+      expect(source).not_to include("else_block do\n      if_stmt(")
+    end
+
     it "preserves simple initial-static assignments as an explicit initial process" do
       source = described_class.emit(
         "name" => "initial_defaults",

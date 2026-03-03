@@ -13,6 +13,7 @@ require 'json'
 require 'fiddle'
 require 'fiddle/import'
 require 'rbconfig'
+require 'open3'
 
 module RHDL
   module Codegen
@@ -27,13 +28,22 @@ module RHDL
 
       def self.sim_backend_available?(lib_path)
         return false unless File.exist?(lib_path)
-
-        _test_lib = Fiddle.dlopen(lib_path)
-        _test_lib['sim_create']
-        _test_lib['sim_signal']
-        _test_lib['sim_exec']
-        true
-      rescue Fiddle::DLError
+        checker = <<~RUBY
+          require "fiddle"
+          lib = Fiddle.dlopen(ARGV.fetch(0))
+          lib["sim_create"]
+          lib["sim_signal"]
+          lib["sim_exec"]
+          $stdout.write("ok")
+        RUBY
+        stdout, _stderr, status = Open3.capture3(
+          RbConfig.ruby,
+          "-e",
+          checker,
+          lib_path.to_s
+        )
+        status.success? && stdout.to_s == "ok"
+      rescue StandardError
         false
       end
 
@@ -68,6 +78,7 @@ module RHDL
         RUNNER_KIND_GAMEBOY = 3
         RUNNER_KIND_CPU8BIT = 4
         RUNNER_KIND_RISCV = 5
+        RUNNER_KIND_AO486 = 6
 
         RUNNER_MEM_OP_LOAD = 0
         RUNNER_MEM_OP_READ = 1
@@ -96,6 +107,7 @@ module RHDL
         RUNNER_CONTROL_RISCV_SET_PLIC_SOURCES = 4
         RUNNER_CONTROL_RISCV_UART_PUSH_RX = 5
         RUNNER_CONTROL_RISCV_CLEAR_UART_TX = 6
+        RUNNER_CONTROL_AO486_PUSH_KEYBOARD = 7
 
         RUNNER_PROBE_KIND = 0
         RUNNER_PROBE_IS_MODE = 1
@@ -157,6 +169,7 @@ module RHDL
         SIM_BLOB_TRACE_TO_VCD = 2
         SIM_BLOB_TRACE_TAKE_LIVE_VCD = 3
         SIM_BLOB_GENERATED_CODE = 4
+        SIM_BLOB_AO486_EVENTS = 5
 
         BACKEND_CONFIGS = {
           interpreter: {
@@ -480,6 +493,7 @@ module RHDL
           when RUNNER_KIND_GAMEBOY then :gameboy
           when RUNNER_KIND_CPU8BIT then :cpu8bit
           when RUNNER_KIND_RISCV then :riscv
+          when RUNNER_KIND_AO486 then :ao486
           else nil
           end
         end
@@ -554,6 +568,36 @@ module RHDL
           }
           @sim_runner_speaker_toggles = ((@sim_runner_speaker_toggles || 0) + result[:speaker_toggles]) & 0xFFFFFFFF
           result
+        end
+
+        def runner_ao486_take_events
+          if @fallback
+            return @sim.runner_ao486_take_events if @sim.respond_to?(:runner_ao486_take_events)
+            return ''
+          end
+          return '' unless runner_kind == :ao486
+
+          core_blob(SIM_BLOB_AO486_EVENTS)
+        end
+
+        def runner_ao486_keyboard_byte(byte)
+          return false unless runner_kind == :ao486
+
+          @fn_runner_control.call(@ctx, RUNNER_CONTROL_AO486_PUSH_KEYBOARD, byte.to_i & 0xFF, 0) != 0
+        end
+
+        def runner_ao486_keyboard_bytes(bytes)
+          return false unless runner_kind == :ao486
+
+          payload = if bytes.is_a?(String)
+            bytes.b.bytes
+          else
+            Array(bytes)
+          end
+          payload.each do |entry|
+            return false unless runner_ao486_keyboard_byte(entry)
+          end
+          true
         end
 
         def runner_load_rom(data, offset = 0)
@@ -1093,9 +1137,12 @@ module RHDL
           end
 
           @assigns = @ir[:assigns] || []
+          @initial_assigns = @ir[:initial_assigns] || []
           @processes = @ir[:processes] || []
           @write_ports = @ir[:write_ports] || []
           @sync_read_ports = @ir[:sync_read_ports] || []
+
+          apply_initial_assigns
         end
 
         def native?
@@ -1313,6 +1360,7 @@ module RHDL
           @memory_meta.each do |name, meta|
             @memories[name] = meta[:initial].dup
           end
+          apply_initial_assigns
         end
 
         def signal_count
@@ -1341,6 +1389,24 @@ module RHDL
             process_count: @processes.length
           }
         end
+
+        def apply_initial_assigns
+          return if @initial_assigns.empty?
+
+          10.times do
+            changed = false
+            @initial_assigns.each do |assign|
+              new_val = eval_expr(assign[:expr])
+              width = @widths[assign[:target]] || assign.dig(:expr, :width) || 64
+              masked = new_val & mask(width)
+              if @signals[assign[:target]] != masked
+                @signals[assign[:target]] = masked
+                changed = true
+              end
+            end
+            break unless changed
+          end
+        end
       end
 
       # Convert Behavior IR to JSON format for the simulator
@@ -1348,7 +1414,10 @@ module RHDL
         module_function
 
         def convert(ir)
+          previous_offsets = @slice_index_offsets
+          @slice_index_offsets = {}
           assign_hashes = ir.assigns.map { |a| assign_to_hash(a) }
+          initial_assign_hashes = []
           process_hashes = []
 
           ir.processes.each do |process|
@@ -1356,7 +1425,7 @@ module RHDL
             if process.clocked
               process_hashes << process_hash
             elsif process.respond_to?(:initial) && process.initial
-              assign_hashes.concat(
+              initial_assign_hashes.concat(
                 Array(process_hash[:statements]).map do |stmt|
                   {
                     target: stmt[:target],
@@ -1388,10 +1457,13 @@ module RHDL
             regs: ir.regs.map { |r| reg_to_hash(r) },
             assigns: assign_hashes,
             processes: process_hashes,
+            initial_assigns: initial_assign_hashes,
             memories: (ir.memories || []).map { |m| memory_to_hash(m) },
             write_ports: (ir.write_ports || []).map { |wp| write_port_to_hash(wp) },
             sync_read_ports: (ir.sync_read_ports || []).map { |rp| sync_read_port_to_hash(rp) }
           }.to_json(max_nesting: false)
+        ensure
+          @slice_index_offsets = previous_offsets
         end
 
         def port_to_hash(port)
@@ -1686,6 +1758,38 @@ module RHDL
               low = expr.range
               high = expr.range
             end
+
+            # Verilog declarations like [31:2] may appear as packed width 30
+            # plus absolute indices. Track and apply the per-signal index
+            # offset so all slices are translated into packed zero-based bits.
+            base_width = expr.base.respond_to?(:width) ? expr.base.width.to_i : 0
+            signal_key =
+              if expr.base.is_a?(IR::Signal)
+                "#{expr.base.name}:#{base_width}"
+              end
+
+            index_offset = 0
+            if base_width.positive?
+              if high >= base_width
+                index_offset = high - (base_width - 1)
+              elsif low.positive? && ((high - low + 1) == base_width)
+                index_offset = low
+              end
+            end
+
+            if signal_key
+              known_offset = @slice_index_offsets.fetch(signal_key, nil)
+              if index_offset.positive?
+                @slice_index_offsets[signal_key] = known_offset.nil? ? index_offset : [known_offset, index_offset].max
+              end
+              index_offset = @slice_index_offsets.fetch(signal_key, index_offset)
+            end
+
+            if index_offset.positive?
+              low -= index_offset
+              high -= index_offset
+            end
+
             { type: 'slice', base: expr_to_hash(expr.base), low: low, high: high, width: expr.width }
           when IR::Concat
             { type: 'concat', parts: expr.parts.map { |p| expr_to_hash(p) }, width: expr.width }

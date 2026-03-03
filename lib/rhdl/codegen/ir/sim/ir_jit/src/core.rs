@@ -129,6 +129,8 @@ pub struct ModuleIR {
     pub nets: Vec<NetDef>,
     pub regs: Vec<RegDef>,
     pub assigns: Vec<AssignDef>,
+    #[serde(default)]
+    pub initial_assigns: Vec<AssignDef>,
     pub processes: Vec<ProcessDef>,
     #[serde(default)]
     pub memories: Vec<MemoryDef>,
@@ -728,6 +730,8 @@ pub struct CoreSimulator {
 
     /// Reset values for registers (signal index -> reset value)
     reset_values: Vec<(usize, u64)>,
+    /// Initial assignments from IR (applied during reset)
+    initial_assigns: Vec<AssignDef>,
 }
 
 impl CoreSimulator {
@@ -789,8 +793,10 @@ impl CoreSimulator {
             if !process.clocked {
                 continue;
             }
-            let clock_idx = process.clock.as_ref()
-                .and_then(|clk_name| name_to_idx.get(clk_name).copied())
+            let clock_name = process.clock.as_deref().unwrap_or("clk");
+            let clock_idx = Self::resolve_clock_signal_idx(&name_to_idx, clock_name)
+                .or_else(|| name_to_idx.get("clk").copied())
+                .or_else(|| name_to_idx.get("clk_14m").copied())
                 .unwrap_or(0);
             clock_set.insert(clock_idx);
 
@@ -835,7 +841,9 @@ impl CoreSimulator {
             let Some(&memory_idx) = mem_name_to_idx.get(&wp.memory) else {
                 continue;
             };
-            let Some(&clock_idx) = name_to_idx.get(&wp.clock) else {
+            let Some(clock_idx) = Self::resolve_clock_signal_idx(&name_to_idx, &wp.clock)
+                .or_else(|| name_to_idx.get("clk").copied())
+                .or_else(|| name_to_idx.get("clk_14m").copied()) else {
                 continue;
             };
             write_ports.push(ResolvedWritePort {
@@ -854,7 +862,9 @@ impl CoreSimulator {
             let Some(&memory_idx) = mem_name_to_idx.get(&rp.memory) else {
                 continue;
             };
-            let Some(&clock_idx) = name_to_idx.get(&rp.clock) else {
+            let Some(clock_idx) = Self::resolve_clock_signal_idx(&name_to_idx, &rp.clock)
+                .or_else(|| name_to_idx.get("clk").copied())
+                .or_else(|| name_to_idx.get("clk_14m").copied()) else {
                 continue;
             };
             let Some(&data_idx) = name_to_idx.get(&rp.data) else {
@@ -899,11 +909,96 @@ impl CoreSimulator {
             write_ports,
             sync_read_ports,
             reset_values,
+            initial_assigns: ir.initial_assigns.clone(),
         })
     }
 
     fn compute_mask(width: usize) -> u64 {
         if width >= 64 { u64::MAX } else { (1u64 << width) - 1 }
+    }
+
+    fn clean_clock_token(token: &str) -> String {
+        token
+            .trim()
+            .trim_matches(|ch: char| matches!(ch, '(' | ')' | ',' | ';'))
+            .trim()
+            .to_string()
+    }
+
+    fn strip_edge_prefix(token: &str) -> Option<String> {
+        let mut parts = token.split_whitespace();
+        let first = parts.next()?;
+        if !first.eq_ignore_ascii_case("posedge") && !first.eq_ignore_ascii_case("negedge") {
+            return None;
+        }
+        let rest = parts.collect::<Vec<_>>().join(" ");
+        let cleaned = Self::clean_clock_token(&rest);
+        if cleaned.is_empty() { None } else { Some(cleaned) }
+    }
+
+    fn strip_prefixed_edge(token: &str) -> Option<String> {
+        let lower = token.to_ascii_lowercase();
+        let marker = if lower.contains("__posedge ") {
+            "__posedge "
+        } else if lower.contains("__negedge ") {
+            "__negedge "
+        } else {
+            return None;
+        };
+        let split_at = lower.find(marker)?;
+        let prefix = token[..split_at].trim_end_matches('_').trim();
+        let signal = token[(split_at + marker.len())..].trim();
+        if prefix.is_empty() || signal.is_empty() {
+            return None;
+        }
+        Some(Self::clean_clock_token(&format!("{}__{}", prefix, signal)))
+    }
+
+    fn resolve_clock_signal_idx(
+        name_to_idx: &HashMap<String, usize>,
+        raw_clock: &str,
+    ) -> Option<usize> {
+        let token = Self::clean_clock_token(raw_clock);
+        if token.is_empty() {
+            return None;
+        }
+
+        let mut candidates = vec![token.clone()];
+        if let Some(stripped) = Self::strip_edge_prefix(&token) {
+            candidates.push(stripped);
+        }
+        if let Some(prefixed) = Self::strip_prefixed_edge(&token) {
+            candidates.push(prefixed);
+        }
+        if let Some(last) = token.split_whitespace().last() {
+            let cleaned = Self::clean_clock_token(last);
+            if !cleaned.is_empty() {
+                candidates.push(cleaned);
+            }
+        }
+
+        let mut unique = std::collections::HashSet::new();
+        for candidate in candidates {
+            let cleaned = Self::clean_clock_token(&candidate);
+            if cleaned.is_empty() || !unique.insert(cleaned.clone()) {
+                continue;
+            }
+
+            if let Some(&idx) = name_to_idx.get(&cleaned) {
+                return Some(idx);
+            }
+        }
+
+        for candidate in unique {
+            if let Some((_, &idx)) = name_to_idx
+                .iter()
+                .find(|(name, _)| name.eq_ignore_ascii_case(&candidate))
+            {
+                return Some(idx);
+            }
+        }
+
+        None
     }
 
     fn runtime_expr_width(expr: &ExprDef, widths: &[usize], name_to_idx: &HashMap<String, usize>) -> usize {
@@ -1009,6 +1104,30 @@ impl CoreSimulator {
                 }
                 let addr_val = self.eval_expr_runtime(addr) as usize % mem.len();
                 mem[addr_val] & Self::compute_mask(*width)
+            }
+        }
+    }
+
+    fn apply_initial_assigns_runtime(&mut self) {
+        if self.initial_assigns.is_empty() {
+            return;
+        }
+
+        for _ in 0..10 {
+            let mut changed = false;
+            for assign in &self.initial_assigns {
+                let Some(&idx) = self.name_to_idx.get(&assign.target) else {
+                    continue;
+                };
+                let width = self.widths.get(idx).copied().unwrap_or(64);
+                let new_val = self.eval_expr_runtime(&assign.expr) & Self::compute_mask(width);
+                if self.signals[idx] != new_val {
+                    self.signals[idx] = new_val;
+                    changed = true;
+                }
+            }
+            if !changed {
+                break;
             }
         }
     }
@@ -1309,6 +1428,7 @@ impl CoreSimulator {
         for &(idx, reset_val) in &self.reset_values {
             self.signals[idx] = reset_val;
         }
+        self.apply_initial_assigns_runtime();
         for val in self.prev_clock_values.iter_mut() {
             *val = 0;
         }

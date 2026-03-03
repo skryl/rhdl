@@ -110,5 +110,51 @@ RSpec.describe RHDL::Import::IR do
         span: nil
       )
     end
+
+    it "serializes hint provenance metadata on process and case nodes" do
+      process = RHDL::Import::IR::Process.new(
+        domain: "sequential",
+        sensitivity: [],
+        statements: [],
+        span: nil,
+        intent: "always_ff",
+        origin: "hint",
+        provenance: {
+          source: "surelog_hint",
+          construct_kind: "always_ff"
+        }
+      )
+
+      case_stmt = RHDL::Import::IR::CaseStatement.new(
+        selector: RHDL::Import::IR::Identifier.new(name: "sel", span: nil),
+        items: [],
+        default_body: [],
+        span: nil,
+        qualifier: "unique",
+        origin: "hint",
+        provenance: {
+          source: "surelog_hint",
+          construct_kind: "case_from_if"
+        }
+      )
+
+      expect(process.to_h).to include(
+        intent: "always_ff",
+        origin: "hint",
+        provenance: {
+          source: "surelog_hint",
+          construct_kind: "always_ff"
+        }
+      )
+
+      expect(case_stmt.to_h).to include(
+        qualifier: "unique",
+        origin: "hint",
+        provenance: {
+          source: "surelog_hint",
+          construct_kind: "case_from_if"
+        }
+      )
+    end
   end
 end

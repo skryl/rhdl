@@ -218,29 +218,12 @@ module RHDL
                 end
               lines << "#{pad}assign(#{target}, #{value}, kind: #{assignment_kind})"
             when "if"
-              condition = expression_to_ruby(value_for(hash, :condition))
-              next if condition.nil?
-
-              lines << "#{pad}if_stmt(#{condition}) do"
-              then_body = value_for(hash, :then) || value_for(hash, :then_body)
-              emit_process_statements(
+              emit_if_statement(
                 lines,
-                statements: Array(then_body),
-                indent: indent + 1,
+                statement: hash,
+                indent: indent,
                 default_kind: default_kind
               )
-              else_body = value_for(hash, :else) || value_for(hash, :else_body)
-              unless Array(else_body).empty?
-                lines << "#{pad}  else_block do"
-                emit_process_statements(
-                  lines,
-                  statements: Array(else_body),
-                  indent: indent + 2,
-                  default_kind: default_kind
-                )
-                lines << "#{pad}  end"
-              end
-              lines << "#{pad}end"
             when "case"
               emit_case_statement(
                 lines,
@@ -257,6 +240,54 @@ module RHDL
               )
             end
           end
+        end
+
+        def emit_if_statement(lines, statement:, indent:, default_kind:)
+          pad = "  " * indent
+          condition = expression_to_ruby(value_for(statement, :condition))
+          return if condition.nil?
+
+          lines << "#{pad}if_stmt(#{condition}) do"
+          then_body = value_for(statement, :then) || value_for(statement, :then_body)
+          emit_process_statements(
+            lines,
+            statements: Array(then_body),
+            indent: indent + 1,
+            default_kind: default_kind
+          )
+
+          current_else_body = Array(value_for(statement, :else) || value_for(statement, :else_body))
+          while current_else_body.length == 1
+            nested_if = normalize_hash(current_else_body.first)
+            break unless value_for(nested_if, :kind).to_s == "if"
+
+            elsif_condition = expression_to_ruby(value_for(nested_if, :condition))
+            break if elsif_condition.nil?
+
+            lines << "#{pad}  elsif_block(#{elsif_condition}) do"
+            nested_then_body = value_for(nested_if, :then) || value_for(nested_if, :then_body)
+            emit_process_statements(
+              lines,
+              statements: Array(nested_then_body),
+              indent: indent + 2,
+              default_kind: default_kind
+            )
+            lines << "#{pad}  end"
+            current_else_body = Array(value_for(nested_if, :else) || value_for(nested_if, :else_body))
+          end
+
+          unless current_else_body.empty?
+            lines << "#{pad}  else_block do"
+            emit_process_statements(
+              lines,
+              statements: current_else_body,
+              indent: indent + 2,
+              default_kind: default_kind
+            )
+            lines << "#{pad}  end"
+          end
+
+          lines << "#{pad}end"
         end
 
         def emit_import_metadata(lines)
@@ -282,7 +313,9 @@ module RHDL
           selector = expression_to_ruby(value_for(statement, :selector))
           return if selector.nil?
 
-          lines << "#{pad}case_stmt(#{selector}) do"
+          qualifier = normalize_case_qualifier(value_for(statement, :qualifier))
+          qualifier_arg = qualifier.nil? ? "" : ", qualifier: :#{qualifier}"
+          lines << "#{pad}case_stmt(#{selector}#{qualifier_arg}) do"
           Array(value_for(statement, :items)).each do |item|
             item_hash = normalize_hash(item)
             values = Array(value_for(item_hash, :values))
@@ -346,6 +379,16 @@ module RHDL
           return nil if rendered.nil? || rendered.empty?
 
           rendered
+        end
+
+        def normalize_case_qualifier(value)
+          token = value.to_s.strip.downcase
+          return nil if token.empty?
+
+          return "unique" if token == "unique"
+          return "priority" if token == "priority"
+
+          nil
         end
 
         def emit_instances(lines)
@@ -1673,6 +1716,7 @@ module RHDL
         def auto_process_base_name(process:, sensitivity_values:, index:)
           domain = value_for(process, :domain).to_s
           kind = value_for(process, :kind).to_s
+          intent = value_for(process, :intent).to_s.strip
 
           if domain == "initial"
             return "initial_block_#{index}"
@@ -1692,6 +1736,14 @@ module RHDL
                      "sequential_#{edge}_#{signal_name}"
                    end
             return sanitize_identifier(base)
+          end
+
+          if intent == "always_comb"
+            return "combinational_logic_#{index}"
+          end
+
+          if intent == "always_latch"
+            return "latch_logic_#{index}"
           end
 
           if domain == "combinational" || kind.include?("comb")
@@ -1726,6 +1778,8 @@ module RHDL
 
         def process_clocked?(process, sensitivity_values:)
           return false if value_for(process, :domain).to_s == "initial"
+
+          return true if value_for(process, :intent).to_s.strip == "always_ff"
 
           return true if value_for(process, :domain).to_s == "clocked"
 

@@ -243,6 +243,15 @@ RSpec.describe 'Verilog Export' do
       expect(verilog).to include('default: begin')
       expect(verilog).to include('endcase')
     end
+
+    it 'generates Verilog unique case statement' do
+      stmt = RHDL::DSL::CaseStatement.new(selector, qualifier: :unique)
+      stmt.add_when(0, [RHDL::DSL::SequentialAssignment.new(:output, 10)])
+
+      verilog = stmt.to_verilog
+      expect(verilog).to include('unique case (opcode)')
+      expect(verilog).to include('endcase')
+    end
   end
 
   describe 'ForLoop' do

@@ -104,7 +104,10 @@ module RHDL
             domain: normalize_process_domain(value_for(hash, :domain), kind: kind),
             sensitivity: kind == "initial" ? [] : map_sensitivity(value_for(hash, :sensitivity), module_name: module_name),
             statements: @statement_mapper.map_list(value_for(hash, :statements), module_name: module_name),
-            span: normalize_span(value_for(hash, :span))
+            span: normalize_span(value_for(hash, :span)),
+            intent: optional_string(value_for(hash, :intent)),
+            origin: optional_string(value_for(hash, :origin)),
+            provenance: normalize_metadata_hash(value_for(hash, :provenance))
           )
         end
       end

@@ -528,7 +528,7 @@ module RHDL
         end
 
         process_entry[:intent] = value_for(hint, :construct_kind).to_s
-        process_entry[:origin] = "hint"
+        apply_hint_metadata(node: process_entry, hint: hint)
         [true, diagnostics]
       end
 
@@ -571,7 +571,7 @@ module RHDL
           target_kind = value_for(target, :kind).to_s
           if target_kind == "case"
             target[:qualifier] = qualifier
-            target[:origin] = "hint"
+            apply_hint_metadata(node: target, hint: hint)
             return [true, diagnostics]
           end
 
@@ -615,7 +615,7 @@ module RHDL
               )
               return [false, diagnostics]
             else
-              replacement_case[:origin] = "hint"
+              apply_hint_metadata(node: replacement_case, hint: hint)
               statements[statement_index] = replacement_case
               process_entry[:statements] = statements
               diagnostics << hint_conflict_diagnostic(
@@ -629,8 +629,10 @@ module RHDL
           end
 
           if target_kind == "case"
-            replacement_case[:origin] = "hint"
-            statements[statement_index] = replacement_case if conflict_policy == "prefer_hint"
+            if conflict_policy == "prefer_hint"
+              apply_hint_metadata(node: replacement_case, hint: hint)
+              statements[statement_index] = replacement_case
+            end
             process_entry[:statements] = statements
             return [conflict_policy == "prefer_hint", diagnostics]
           end
@@ -675,12 +677,45 @@ module RHDL
           }
         end
 
-        {
+        case_node = {
           kind: "case",
           selector: deep_symbolize(selector),
           items: items,
           default: Array(value_for(hash, :default)).map { |entry| deep_symbolize(normalize_hash(entry)) }
         }
+        qualifier = value_for(hash, :qualifier).to_s.strip
+        case_node[:qualifier] = qualifier unless qualifier.empty?
+        origin = value_for(hash, :origin).to_s.strip
+        case_node[:origin] = origin unless origin.empty?
+        provenance = normalize_hint_metadata_hash(value_for(hash, :provenance))
+        case_node[:provenance] = provenance if provenance
+        case_node
+      end
+
+      def apply_hint_metadata(node:, hint:, source: "surelog_hint")
+        node[:origin] = "hint"
+        provenance = hint_provenance(hint, source: source)
+        node[:provenance] = provenance if provenance
+      end
+
+      def hint_provenance(hint, source:)
+        span = canonical_hint_span(value_for(hint, :span), hint)
+        {
+          source: source,
+          construct_family: value_for(hint, :construct_family).to_s.strip,
+          construct_kind: value_for(hint, :construct_kind).to_s.strip,
+          confidence: normalize_hint_confidence(value_for(hint, :confidence)),
+          span: span.nil? ? nil : deep_symbolize(span)
+        }.reject do |_, value|
+          value.nil? || (value.respond_to?(:empty?) && value.empty?)
+        end
+      end
+
+      def normalize_hint_metadata_hash(value)
+        hash = normalize_hash(value)
+        return nil if hash.empty?
+
+        deep_symbolize(hash)
       end
 
       def hint_conflict_diagnostic(module_name:, construct:, target_kind:, conflict_policy:)

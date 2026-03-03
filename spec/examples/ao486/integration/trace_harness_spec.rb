@@ -6,7 +6,7 @@ require "json"
 require "tmpdir"
 require "rhdl/import/checks/ao486_trace_harness"
 
-RSpec.describe RHDL::Import::Checks::Ao486TraceHarness do
+RSpec.describe RHDL::Import::Checks::Ao486TraceHarness, :no_vendor_reimport do
   describe "private helpers" do
     class FakeTraceIrSim
       attr_reader :tick_inputs
@@ -203,7 +203,7 @@ RSpec.describe RHDL::Import::Checks::Ao486TraceHarness do
       expect(Integer(sim.tick_inputs[6].fetch("avm_readdata"))).to eq(0xDEAD_BEEF)
     end
 
-    it "connects reference-mode memory so avm writes can be read back" do
+    it "connects reference-mode memory so avm writes can be read back", timeout: 60 do
       Dir.mktmpdir("ao486_trace_harness_memory_spec") do |root|
         source_root = File.join(root, "rtl")
         FileUtils.mkdir_p(source_root)

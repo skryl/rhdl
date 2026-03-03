@@ -80,7 +80,10 @@ module RHDL
               selector: selector,
               items: items,
               default_body: map_list(value_for(hash, :default), module_name: module_name),
-              span: normalize_span(value_for(hash, :span))
+              span: normalize_span(value_for(hash, :span)),
+              qualifier: optional_string(value_for(hash, :qualifier)),
+              origin: optional_string(value_for(hash, :origin)),
+              provenance: normalize_metadata_hash(value_for(hash, :provenance))
             )
           when "for"
             range = normalize_hash(value_for(hash, :range))

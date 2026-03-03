@@ -4,12 +4,13 @@ module RHDL
   module DSL
     # Case statement
     class CaseStatement
-      attr_reader :selector, :when_blocks, :default_block
+      attr_reader :selector, :when_blocks, :default_block, :qualifier
 
-      def initialize(selector)
+      def initialize(selector, qualifier: nil)
         @selector = selector
         @when_blocks = []
         @default_block = []
+        @qualifier = normalize_qualifier(qualifier)
       end
 
       def add_when(value, statements)
@@ -23,7 +24,7 @@ module RHDL
       def to_verilog(nonblocking: nil)
         lines = []
         sel = selector.respond_to?(:to_verilog) ? selector.to_verilog : selector.to_s
-        lines << "case (#{sel})"
+        lines << "#{case_keyword} (#{sel})"
 
         when_blocks.each do |val, stmts|
           v = val.respond_to?(:to_verilog) ? val.to_verilog : format_verilog_case_value(val)
@@ -43,6 +44,23 @@ module RHDL
       end
 
       private
+
+      def case_keyword
+        case qualifier
+        when :unique then "unique case"
+        when :priority then "priority case"
+        else "case"
+        end
+      end
+
+      def normalize_qualifier(value)
+        token = value.to_s.strip.downcase
+        return nil if token.empty?
+        return :unique if token == "unique"
+        return :priority if token == "priority"
+
+        nil
+      end
 
       def format_verilog_case_value(val)
         val.is_a?(Integer) ? val.to_s : val.to_s

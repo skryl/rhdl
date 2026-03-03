@@ -1,7 +1,7 @@
 # HIR/LIR Split PRD
 
 ## Status
-In Progress (2026-03-01)
+Completed (2026-03-02)
 
 ## Context
 The current `RHDL::Codegen::IR` lowering path serves two different consumers:
@@ -89,6 +89,15 @@ Refactor:
 Exit criteria:
 1. No new parse regressions introduced by HIR/LIR split.
 
+Phase 4 result (2026-03-02):
+1. Red captured on `spec/examples/ao486/import/all_modules_ast_roundtrip_spec.rb` due invalid recovered lvalue emit in `sound_dsp` (`sample_dma[15:8]` and `sample_dma[7:0]` without memory index).
+2. Green implemented in `IR::Lower` by lowering memory-like word-slice lvalues (`mem[idx][hi:lo]`) to `IR::MemoryWrite` with word-level RMW.
+3. Regression specs added in `spec/rhdl/codegen/hir_lir_split_spec.rb` for HIR lowering and Verilog emission of indexed slice writes.
+4. Ao486 gate rerun green:
+   - `INCLUDE_SLOW_TESTS=1 bundle exec rspec spec/examples/ao486/import/all_modules_ast_roundtrip_spec.rb`
+   - `bundle exec rspec spec/examples/ao486/import`
+   - `INCLUDE_SLOW_TESTS=1 bundle exec rspec spec/examples/ao486` (`32 examples, 0 failures`)
+
 ## Acceptance Criteria
 1. `RHDL::Codegen::HIR::Lower` and `RHDL::Codegen::LIR::Lower` exist and are tested.
 2. Verilog export entry path uses HIR lowering.
@@ -100,7 +109,8 @@ Exit criteria:
 1. HIR/LIR split entry points are implemented and covered by targeted specs.
 2. Verilog export now uses HIR; CIRCT/simulation call paths use LIR.
 3. Ao486 all-module roundtrip no longer fails Verilator parse on illegal scalar selects from recovered/preserved lvalues.
-4. Remaining open gate: canonical AST equivalence still reports `ast_mismatched=129` modules (structural fidelity work outside split plumbing).
+4. Ao486 importer and ao486 slow suite gates are green after memory-like slice lvalue fix.
+5. Canonical AST structural mismatches remain a separate importer fidelity backlog, outside the HIR/LIR split completion gate.
 
 ## Risks and Mitigations
 1. Risk: subtle breakage in existing export behavior.
@@ -120,4 +130,4 @@ Exit criteria:
 - [x] Phase 3 red tests added
 - [x] Phase 3 green implementation complete
 - [x] Phase 3 refactor complete
-- [ ] Phase 4 red/green/regression complete
+- [x] Phase 4 red/green/regression complete

@@ -69,6 +69,12 @@ module RHDL
           # Collect targets of sequential assignments that are outputs (need internal registers)
           seq_targets = collect_seq_targets(module_def)
           seq_output_targets = seq_targets.select { |t| output_ports.include?(t) }
+          self_ref_targets = collect_self_referential_assign_targets(module_def)
+          explicit_reg_names = module_def.regs.map(&:name).to_set
+          implicit_seq_reg_names = seq_targets
+            .merge(self_ref_targets)
+            .reject { |t| output_ports.include?(t) || explicit_reg_names.include?(t) }
+            .to_set
 
           # Track port-colliding registers (handled by seq_output_targets instead)
           port_colliding_regs = Set.new
@@ -90,15 +96,39 @@ module RHDL
 
           # Build set of register names for deduplication
           reg_names_set = module_def.regs.map { |r| sanitize(r.name) }.to_set
+          declared_wires = []
 
           # Internal wires (nets) - skip duplicates and names that are registers
           emitted_names = all_port_names.dup
+          # Clock signals can appear in process metadata without explicit net declarations.
+          # Declare them early so subsequent reg declarations can reference them.
+          collect_clock_signal_refs(module_def).each do |clock_name|
+            sname = sanitize(clock_name)
+            next if emitted_names.include?(sname)
+            next if reg_names_set.include?(sname)
+            emitted_names.add(sname)
+            lines << "    wire #{sname}: UInt<1>"
+            declared_wires << [sname, 1]
+          end
+
           module_def.nets.each do |net|
             sname = sanitize(net.name)
             next if emitted_names.include?(sname)
             next if reg_names_set.include?(sname)  # register declaration takes precedence
             emitted_names.add(sname)
-            lines << "    wire #{sname}: #{type_decl(net.width)}"
+            if implicit_seq_reg_names.include?(net.name)
+              reg_clock = find_clock_for_reg(module_def, net.name) || clock
+              if reg_clock
+                lines << "    reg #{sname}: #{type_decl(net.width)}, #{clock_expr(reg_clock)}"
+                reg_names_set.add(sname)
+              else
+                lines << "    wire #{sname}: #{type_decl(net.width)}"
+                declared_wires << [sname, net.width]
+              end
+            else
+              lines << "    wire #{sname}: #{type_decl(net.width)}"
+              declared_wires << [sname, net.width]
+            end
           end
 
           # Explicit registers from IR (skip those that collide with port names;
@@ -113,20 +143,21 @@ module RHDL
               lines << "    reg #{sname}: #{type_decl(reg.width)}, #{clock_expr(reg_clock)}"
             else
               lines << "    wire #{sname}: #{type_decl(reg.width)}"
+              declared_wires << [sname, reg.width]
             end
           end
 
           # Auto-declare any signals referenced in expressions but not yet declared
           all_refs = collect_all_signal_refs(module_def)
           mem_names = module_def.memories.map { |m| sanitize(m.name) }.to_set
-          auto_wires = []
           all_refs.each do |ref_name|
             sname = sanitize(ref_name)
             next if emitted_names.include?(sname)
             next if mem_names.include?(sname)
             emitted_names.add(sname)
-            auto_wires << sname
-            lines << "    wire #{sname}: UInt<16>"
+            width = 16
+            lines << "    wire #{sname}: UInt<#{width}>"
+            declared_wires << [sname, width]
           end
 
           # Create internal registers for output ports that have sequential assignments
@@ -254,9 +285,13 @@ module RHDL
             mem_read_index[mem_key] += 1
           end
 
-          # Initialize auto-declared wires to zero (prevent uninitialized sink errors)
-          auto_wires.each do |sname|
-            lines << "    connect #{sname}, UInt<16>(0)"
+          # Initialize internal wires to zero before subsequent overrides.
+          # This satisfies FIRRTL's full initialization requirements while
+          # preserving behavior when later connects drive the same wires.
+          declared_wires.each do |sname, width|
+            width_i = Integer(width || 1)
+            width_i = 1 if width_i <= 0
+            lines << "    connect #{sname}, UInt<#{width_i}>(0)"
           end
 
           # Connect unread memory ports to defaults
@@ -314,7 +349,7 @@ module RHDL
             mem = module_def.memories.find { |m| m.name == wp.memory }
             mem_width = mem&.width || 8
 
-            lines << "    connect #{mem_name}.#{write_port}.clk, #{clock_expr(wp.clock)}"
+            lines << "    connect #{mem_name}.#{write_port}.clk, #{clock_expr(normalize_clock_reference(wp.clock))}"
             lines << "    connect #{mem_name}.#{write_port}.en, #{expr(wp.enable)}"
             lines << "    connect #{mem_name}.#{write_port}.addr, #{expr(wp.addr)}"
             lines << "    connect #{mem_name}.#{write_port}.mask, UInt<#{mem_width}>(#{(1 << mem_width) - 1})"
@@ -369,10 +404,25 @@ module RHDL
           lines.join("\n")
         end
 
+        def collect_clock_signal_refs(module_def)
+          refs = Set.new
+          module_def.processes.each do |process|
+            next unless process.respond_to?(:clock) && process.clock
+            clock_name = normalize_clock_reference(process.clock)
+            refs.add(clock_name) if clock_name
+          end
+          module_def.write_ports.each do |write_port|
+            next unless write_port.respond_to?(:clock) && write_port.clock
+            clock_name = normalize_clock_reference(write_port.clock)
+            refs.add(clock_name) if clock_name
+          end
+          refs
+        end
+
         private_class_method :generate_module_body
 
         def find_clock_from_write_ports(module_def)
-          module_def.write_ports.first&.clock
+          normalize_clock_reference(module_def.write_ports.first&.clock)
         end
 
         def collect_memory_reads(module_def)
@@ -422,6 +472,13 @@ module RHDL
             collect_memory_reads_from_expr(stmt.condition, reads)
             stmt.then_statements.each { |s| collect_memory_reads_from_stmt(s, reads) }
             stmt.else_statements.each { |s| collect_memory_reads_from_stmt(s, reads) }
+          when IR::CaseStmt
+            collect_memory_reads_from_expr(stmt.selector, reads)
+            stmt.branches.each do |branch|
+              branch.values.each { |value| collect_memory_reads_from_expr(value, reads) }
+              branch.statements.each { |s| collect_memory_reads_from_stmt(s, reads) }
+            end
+            stmt.default_statements.each { |s| collect_memory_reads_from_stmt(s, reads) }
           end
         end
 
@@ -446,20 +503,24 @@ module RHDL
           when IR::Literal
             literal(expr_node.value, expr_node.width)
           when IR::UnaryOp
-            case expr_node.op
-            when :~, :!
-              "not(#{expr_with_mem_reads(expr_node.operand, memory_reads, mem_read_index, output_regs: output_regs, rom_read_wires: rom_read_wires)})"
-            else
-              raise ArgumentError, "Unsupported unary op: #{expr_node.op}"
-            end
+            unary_expr_with_mem_reads(expr_node, memory_reads: memory_reads, mem_read_index: mem_read_index, output_regs: output_regs, rom_read_wires: rom_read_wires)
           when IR::BinaryOp
             left = expr_with_mem_reads(expr_node.left, memory_reads, mem_read_index, output_regs: output_regs, rom_read_wires: rom_read_wires)
             right = expr_with_mem_reads(expr_node.right, memory_reads, mem_read_index, output_regs: output_regs, rom_read_wires: rom_read_wires)
             right_stripped = nil
+            right_width = expr_node.right.width
             if %i[<< >>].include?(expr_node.op) && expr_node.right.is_a?(IR::Resize) && expr_node.right.width > expr_node.right.expr.width
               right_stripped = expr_with_mem_reads(expr_node.right.expr, memory_reads, mem_read_index, output_regs: output_regs, rom_read_wires: rom_read_wires)
+              right_width = expr_node.right.expr.width
             end
-            binary_op_str(expr_node.op, left, right, right_stripped: right_stripped)
+            binary_op_str(
+              expr_node.op,
+              left,
+              right,
+              right_stripped: right_stripped,
+              right_width: right_width,
+              left_width: expr_node.left.width
+            )
           when IR::Mux
             cond = expr_with_mem_reads(expr_node.condition, memory_reads, mem_read_index, output_regs: output_regs, rom_read_wires: rom_read_wires)
             when_true = expr_with_mem_reads(expr_node.when_true, memory_reads, mem_read_index, output_regs: output_regs, rom_read_wires: rom_read_wires)
@@ -472,6 +533,7 @@ module RHDL
             base = expr_with_mem_reads(expr_node.base, memory_reads, mem_read_index, output_regs: output_regs, rom_read_wires: rom_read_wires)
             high = [expr_node.range.begin, expr_node.range.end].max
             low = [expr_node.range.begin, expr_node.range.end].min
+            high, low = normalize_slice_bounds(high: high, low: low, width: expr_node.base.width)
             "bits(#{base}, #{high}, #{low})"
           when IR::Resize
             inner = expr_with_mem_reads(expr_node.expr, memory_reads, mem_read_index, output_regs: output_regs, rom_read_wires: rom_read_wires)
@@ -500,7 +562,7 @@ module RHDL
           end
         end
 
-        def binary_op_str(op, left, right, right_stripped: nil)
+        def binary_op_str(op, left, right, right_stripped: nil, right_width: nil, left_width: nil)
           case op
           when :& then "and(#{left}, #{right})"
           when :| then "or(#{left}, #{right})"
@@ -510,8 +572,8 @@ module RHDL
           when :* then "mul(#{left}, #{right})"
           when :/ then "div(#{left}, #{right})"
           when :% then "rem(#{left}, #{right})"
-          when :<< then "dshl(#{left}, #{right_stripped || right})"
-          when :>> then "dshr(#{left}, #{right_stripped || right})"
+          when :<< then "dshl(#{left}, #{normalize_shift_amount_expr(right_stripped || right, right_width, left_width)})"
+          when :>> then "dshr(#{left}, #{normalize_shift_amount_expr(right_stripped || right, right_width, left_width)})"
           when :== then "eq(#{left}, #{right})"
           when :!= then "neq(#{left}, #{right})"
           when :< then "lt(#{left}, #{right})"
@@ -541,7 +603,20 @@ module RHDL
           when IR::If
             stmt.then_statements.each { |s| collect_targets_from_stmt(s, targets) }
             stmt.else_statements.each { |s| collect_targets_from_stmt(s, targets) }
+          when IR::CaseStmt
+            stmt.branches.each { |branch| branch.statements.each { |s| collect_targets_from_stmt(s, targets) } }
+            stmt.default_statements.each { |s| collect_targets_from_stmt(s, targets) }
           end
+        end
+
+        def collect_self_referential_assign_targets(module_def)
+          targets = Set.new
+          module_def.assigns.each do |assign|
+            refs = Set.new
+            collect_expr_signal_refs(assign.expr, refs)
+            targets.add(assign.target) if refs.include?(assign.target.to_s)
+          end
+          targets
         end
 
         # Collect all signal names referenced in expressions throughout the module
@@ -552,9 +627,18 @@ module RHDL
             collect_expr_signal_refs(a.expr, refs)
           end
           module_def.processes.each do |p|
+            if p.respond_to?(:clock) && p.clock
+              clock_name = normalize_clock_reference(p.clock)
+              refs.add(clock_name) if clock_name
+            end
+            refs.add(p.reset.to_s) if p.respond_to?(:reset) && p.reset
             p.statements.each { |s| collect_stmt_signal_refs(s, refs) }
           end
           module_def.write_ports.each do |wp|
+            if wp.respond_to?(:clock) && wp.clock
+              clock_name = normalize_clock_reference(wp.clock)
+              refs.add(clock_name) if clock_name
+            end
             collect_expr_signal_refs(wp.enable, refs)
             collect_expr_signal_refs(wp.addr, refs)
             collect_expr_signal_refs(wp.data, refs)
@@ -593,12 +677,20 @@ module RHDL
             collect_expr_signal_refs(stmt.condition, refs)
             stmt.then_statements.each { |s| collect_stmt_signal_refs(s, refs) }
             stmt.else_statements.each { |s| collect_stmt_signal_refs(s, refs) }
+          when IR::CaseStmt
+            collect_expr_signal_refs(stmt.selector, refs)
+            stmt.branches.each do |branch|
+              branch.values.each { |value| collect_expr_signal_refs(value, refs) }
+              branch.statements.each { |s| collect_stmt_signal_refs(s, refs) }
+            end
+            stmt.default_statements.each { |s| collect_stmt_signal_refs(s, refs) }
           end
         end
 
         def find_clock_for_reg(module_def, reg_name)
           module_def.processes.each do |process|
-            return process.clock if process.clocked && process.clock
+            next unless process.clocked && process.clock
+            return normalize_clock_reference(process.clock)
           end
           nil
         end
@@ -612,6 +704,18 @@ module RHDL
         # since all signals are declared as UInt<1>, not Clock type
         def clock_expr(name)
           "asClock(#{sanitize(name)})"
+        end
+
+        def normalize_clock_reference(clock_name)
+          return nil if clock_name.nil?
+
+          raw = clock_name.to_s.strip
+          return nil if raw.empty?
+
+          edge_match = raw.match(/(?:^|__)pos(?:edge)?(?:\s+|_)([A-Za-z_][A-Za-z0-9_]*)/i) ||
+            raw.match(/(?:^|__)neg(?:edge)?(?:\s+|_)([A-Za-z_][A-Za-z0-9_]*)/i)
+          normalized = edge_match ? edge_match[1] : raw
+          normalized.casecmp("clk").zero? ? "clk" : normalized
         end
 
         # Generate a combinational lookup expression for a ROM memory
@@ -646,15 +750,138 @@ module RHDL
           when IR::If
             lines = []
             lines << "#{pad}when #{expr_with_mem_reads(stmt.condition, memory_reads, mem_read_index, output_regs: output_regs, rom_read_wires: rom_read_wires)}:"
-            stmt.then_statements.each { |s| lines.concat(statement(s, indent: indent + 2, output_regs: output_regs, memory_reads: memory_reads, mem_read_index: mem_read_index, rom_read_wires: rom_read_wires)) }
+            then_lines = stmt.then_statements.flat_map do |s|
+              statement(
+                s,
+                indent: indent + 2,
+                output_regs: output_regs,
+                memory_reads: memory_reads,
+                mem_read_index: mem_read_index,
+                rom_read_wires: rom_read_wires
+              )
+            end
+            if then_lines.empty?
+              lines << "#{" " * (indent + 2)}skip"
+            else
+              lines.concat(then_lines)
+            end
             unless stmt.else_statements.empty?
               lines << "#{pad}else:"
-              stmt.else_statements.each { |s| lines.concat(statement(s, indent: indent + 2, output_regs: output_regs, memory_reads: memory_reads, mem_read_index: mem_read_index, rom_read_wires: rom_read_wires)) }
+              else_lines = stmt.else_statements.flat_map do |s|
+                statement(
+                  s,
+                  indent: indent + 2,
+                  output_regs: output_regs,
+                  memory_reads: memory_reads,
+                  mem_read_index: mem_read_index,
+                  rom_read_wires: rom_read_wires
+                )
+              end
+              if else_lines.empty?
+                lines << "#{" " * (indent + 2)}skip"
+              else
+                lines.concat(else_lines)
+              end
             end
             lines
+          when IR::CaseStmt
+            emit_case_statement(
+              stmt,
+              indent: indent,
+              output_regs: output_regs,
+              memory_reads: memory_reads,
+              mem_read_index: mem_read_index,
+              rom_read_wires: rom_read_wires
+            )
           else
             []
           end
+        end
+
+        def emit_case_statement(stmt, indent:, output_regs:, memory_reads:, mem_read_index:, rom_read_wires:)
+          selector = expr_with_mem_reads(
+            stmt.selector,
+            memory_reads,
+            mem_read_index,
+            output_regs: output_regs,
+            rom_read_wires: rom_read_wires
+          )
+
+          lines = []
+          branches = stmt.branches || []
+          default_statements = stmt.default_statements || []
+          current_indent = indent
+
+          branches.each_with_index do |branch, index|
+            values = Array(branch.values)
+            condition_terms = values.map do |value|
+              value_expr = expr_with_mem_reads(
+                value,
+                memory_reads,
+                mem_read_index,
+                output_regs: output_regs,
+                rom_read_wires: rom_read_wires
+              )
+              "eq(#{selector}, #{value_expr})"
+            end
+            condition = if condition_terms.empty?
+              literal(0, 1)
+            elsif condition_terms.length == 1
+              condition_terms.first
+            else
+              condition_terms.reduce { |memo, item| "or(#{memo}, #{item})" }
+            end
+
+            pad = " " * current_indent
+            lines << "#{pad}when #{condition}:"
+            branch_lines = Array(branch.statements).flat_map do |nested|
+              statement(
+                nested,
+                indent: current_indent + 2,
+                output_regs: output_regs,
+                memory_reads: memory_reads,
+                mem_read_index: mem_read_index,
+                rom_read_wires: rom_read_wires
+              )
+            end
+            if branch_lines.empty?
+              lines << "#{" " * (current_indent + 2)}skip"
+            else
+              lines.concat(branch_lines)
+            end
+
+            has_else = (index < branches.length - 1) || !default_statements.empty?
+            if has_else
+              lines << "#{pad}else:"
+              current_indent += 2
+            end
+          end
+
+          if default_statements.empty?
+            if branches.empty?
+              lines << "#{" " * current_indent}skip"
+            end
+            return lines
+          end
+
+          default_lines = default_statements.flat_map do |nested|
+            statement(
+              nested,
+              indent: current_indent,
+              output_regs: output_regs,
+              memory_reads: memory_reads,
+              mem_read_index: mem_read_index,
+              rom_read_wires: rom_read_wires
+            )
+          end
+          if branches.empty?
+            lines.concat(default_lines)
+          elsif default_lines.empty?
+            lines << "#{" " * current_indent}skip"
+          else
+            lines.concat(default_lines)
+          end
+          lines
         end
 
         def expr(expr_node, output_regs: Set.new)
@@ -692,6 +919,44 @@ module RHDL
             "not(#{expr(node.operand, output_regs: output_regs)})"
           when :!
             "not(#{expr(node.operand, output_regs: output_regs)})"
+          when :&
+            "andr(#{expr(node.operand, output_regs: output_regs)})"
+          when :|
+            "orr(#{expr(node.operand, output_regs: output_regs)})"
+          when :^
+            "xorr(#{expr(node.operand, output_regs: output_regs)})"
+          when :-
+            operand = expr(node.operand, output_regs: output_regs)
+            unary_neg_expr(operand, node.operand.width, node.width)
+          when :+
+            expr(node.operand, output_regs: output_regs)
+          else
+            raise ArgumentError, "Unsupported unary op: #{node.op}"
+          end
+        end
+
+        def unary_expr_with_mem_reads(node, memory_reads:, mem_read_index:, output_regs:, rom_read_wires:)
+          operand = expr_with_mem_reads(
+            node.operand,
+            memory_reads,
+            mem_read_index,
+            output_regs: output_regs,
+            rom_read_wires: rom_read_wires
+          )
+
+          case node.op
+          when :~, :!
+            "not(#{operand})"
+          when :&
+            "andr(#{operand})"
+          when :|
+            "orr(#{operand})"
+          when :^
+            "xorr(#{operand})"
+          when :-
+            unary_neg_expr(operand, node.operand.width, node.width)
+          when :+
+            operand
           else
             raise ArgumentError, "Unsupported unary op: #{node.op}"
           end
@@ -700,6 +965,7 @@ module RHDL
         def binary_expr(node, output_regs: Set.new)
           left = expr(node.left, output_regs: output_regs)
           right = expr(node.right, output_regs: output_regs)
+          right_width = effective_shift_width(node.right)
 
           case node.op
           when :&
@@ -720,10 +986,10 @@ module RHDL
             "rem(#{left}, #{right})"
           when :<<
             shift_amt = strip_shift_resize(right, node.right, output_regs: output_regs)
-            "dshl(#{left}, #{shift_amt})"
+            "dshl(#{left}, #{normalize_shift_amount_expr(shift_amt, right_width, node.left.width)})"
           when :>>
             shift_amt = strip_shift_resize(right, node.right, output_regs: output_regs)
-            "dshr(#{left}, #{shift_amt})"
+            "dshr(#{left}, #{normalize_shift_amount_expr(shift_amt, right_width, node.left.width)})"
           when :==
             "eq(#{left}, #{right})"
           when :!=
@@ -753,12 +1019,87 @@ module RHDL
           end
         end
 
+        def effective_shift_width(ir_node)
+          if ir_node.is_a?(IR::Resize) && ir_node.width > ir_node.expr.width
+            ir_node.expr.width
+          else
+            ir_node.width
+          end
+        end
+
+        def normalize_shift_amount_expr(expr_string, shift_width, left_width = nil)
+          shift_width_i = Integer(shift_width || 1)
+          return expr_string if shift_width_i <= 0
+
+          left_width_i = Integer(left_width || 1)
+          left_width_i = 1 if left_width_i <= 0
+
+          max_shift = left_width_i
+          safe_shift_width = [1, Math.log2([max_shift, 1].max).floor + 1].max
+          return expr_string if shift_width_i <= safe_shift_width
+
+          compare_width = [shift_width_i, bit_width(max_shift)].max
+          compare_expr = if shift_width_i < compare_width
+            "pad(#{expr_string}, #{compare_width})"
+          else
+            expr_string
+          end
+          limit_expr = "UInt<#{compare_width}>(#{max_shift})"
+          truncated_expr = "bits(#{expr_string}, #{safe_shift_width - 1}, 0)"
+          saturated_expr = "UInt<#{safe_shift_width}>(#{max_shift})"
+          "mux(geq(#{compare_expr}, #{limit_expr}), #{saturated_expr}, #{truncated_expr})"
+        rescue ArgumentError, TypeError
+          expr_string
+        end
+
+        def bit_width(value)
+          value_i = Integer(value)
+          return 1 if value_i <= 0
+
+          Math.log2(value_i).floor + 1
+        rescue ArgumentError, TypeError
+          1
+        end
+
+        def unary_neg_expr(operand_expr, operand_width, target_width)
+          source_width = Integer(operand_width || 1) + 1
+          expected_width = Integer(target_width || source_width)
+          raw = "asUInt(neg(asSInt(#{operand_expr})))"
+          fit_width(raw, source_width, expected_width)
+        rescue ArgumentError, TypeError
+          "asUInt(neg(asSInt(#{operand_expr})))"
+        end
+
+        def fit_width(expr_string, source_width, target_width)
+          return expr_string if source_width == target_width
+          return "pad(#{expr_string}, #{target_width})" if target_width > source_width
+
+          "bits(#{expr_string}, #{target_width - 1}, 0)"
+        end
+
         def slice_expr(node, output_regs: Set.new)
           base = expr(node.base, output_regs: output_regs)
           high = [node.range.begin, node.range.end].max
           low = [node.range.begin, node.range.end].min
+          high, low = normalize_slice_bounds(high: high, low: low, width: node.base.width)
 
           "bits(#{base}, #{high}, #{low})"
+        end
+
+        def normalize_slice_bounds(high:, low:, width:)
+          high_i = Integer(high)
+          low_i = Integer(low)
+          width_i = Integer(width || 1)
+          width_i = 1 if width_i <= 0
+
+          high_i = width_i - 1 if high_i >= width_i
+          low_i = width_i - 1 if low_i >= width_i
+          low_i = 0 if low_i.negative?
+          high_i = low_i if high_i < low_i
+
+          [high_i, low_i]
+        rescue ArgumentError, TypeError
+          [0, 0]
         end
 
         def resize_expr(node, output_regs: Set.new)

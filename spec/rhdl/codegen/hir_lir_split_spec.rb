@@ -72,6 +72,26 @@ module RHDL
       end
     end
 
+    class HIRMemoryLikeIndexedSliceWriteComponent
+      include RHDL::DSL
+
+      input :clk, width: 1
+      input :wr_en, width: 1
+      input :addr, width: 6
+      input :din, width: 8
+
+      signal :mem, width: 16
+
+      process :write_logic, sensitivity: [:clk], clocked: true do
+        if_stmt(RHDL::DSL::SignalRef.new(:wr_en, width: 1)) do
+          assign(
+            RHDL::DSL::SignalRef.new(:mem, width: 16)[RHDL::DSL::SignalRef.new(:addr, width: 6)][7..0],
+            :din
+          )
+        end
+      end
+    end
+
     class HIRDynamicSliceExprComponent
       include RHDL::DSL
 
@@ -171,5 +191,30 @@ RSpec.describe "HIR/LIR split" do
     expect(verilog).to include("reg [9:0] mem [0:63];")
     expect(verilog).to include("mem[addr] <= din;")
     expect(verilog).to include("dout = mem[addr];")
+  end
+
+  it "lowers memory-like indexed slice writes to IR::MemoryWrite in HIR" do
+    hir = RHDL::Codegen::HIR::Lower.new(
+      RHDL::Spec::HIRMemoryLikeIndexedSliceWriteComponent,
+      top_name: "hir_memory_like_indexed_slice_write"
+    ).build
+
+    write_process = hir.processes.find { |process| process.name.to_s == "write_logic" }
+    expect(write_process).not_to be_nil
+
+    conditional = write_process.statements.first
+    expect(conditional).to be_a(RHDL::Codegen::IR::If)
+    expect(conditional.then_statements.first).to be_a(RHDL::Codegen::IR::MemoryWrite)
+  end
+
+  it "exports memory-like indexed slice writes without dropping address index" do
+    verilog = RHDL::Codegen.verilog(
+      RHDL::Spec::HIRMemoryLikeIndexedSliceWriteComponent,
+      top_name: "hir_memory_like_indexed_slice_export"
+    )
+
+    expect(verilog).to include("reg [15:0] mem [0:63];")
+    expect(verilog).to include("mem[addr] <=")
+    expect(verilog).not_to include("mem[7:0] <=")
   end
 end

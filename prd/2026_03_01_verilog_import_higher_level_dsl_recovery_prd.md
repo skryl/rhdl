@@ -340,6 +340,28 @@ Exit criteria:
      - when explicit `surelog_hints` / `surelog_hints_path` are absent, adapter now runs Surelog parse and consumes UHDM dump output (`uhdm-dump`) to extract canonical hints.
      - extracted hints include process intent (`always_*`) and case qualifier (`case_unique`/`case_priority`) records with module/span metadata.
      - existing explicit hint inputs still take precedence and skip auto-extraction.
+10. Phase 10 in progress (metadata uplift tranche):
+   - Added import IR metadata fields for hint-enriched nodes:
+     - `IR::Process`: `intent`, `origin`, `provenance`.
+     - `IR::CaseStatement`: `qualifier`, `origin`, `provenance`.
+   - Extended mapper preservation from normalized payload to import IR:
+     - process-level `intent`/`origin`/`provenance`,
+     - case-level `qualifier`/`origin`/`provenance`.
+   - Extended hint fusion to attach deterministic provenance payloads on hint-applied nodes:
+     - `source`, `construct_family`, `construct_kind`, `confidence`, `span`.
+   - Added red/green coverage for mapper/IR/project provenance preservation and case qualifier propagation.
+   - Added hint metadata forwarding on mapper unsupported diagnostics when source nodes carry hint origin/provenance.
+11. Phase 11 in progress (readability uplift started):
+   - Added red/green translator emission support for flattening nested `if` chains into `if_stmt + elsif_block + else_block` output.
+   - Preserves fallback behavior when chain flattening is not possible.
+   - Added red/green translator + DSL support for case qualifiers:
+     - importer-emitted `case_stmt(..., qualifier: :unique|:priority)` when metadata is present,
+     - DSL contexts accept `case_stmt(..., qualifier:)`,
+     - `RHDL::DSL::CaseStatement#to_verilog` emits `unique case` / `priority case`.
+   - Added red/green process intent uplift in translator emission:
+     - `intent: always_ff` now promotes clocked process inference when edge sensitivity is missing,
+     - auto process naming now reflects promoted sequential intent (`process :sequential...`).
+   - Added red/green process naming uplift for `always_comb` intent when domain/kind do not already imply combinational.
 
 ## Validation Sweep (2026-03-01)
 1. Targeted red/green set:
@@ -374,6 +396,76 @@ Exit criteria:
    - `bundle exec rspec spec/rhdl/import/frontend/surelog_hint_adapter_spec.rb`
    - `bundle exec rspec spec/rhdl/import/project_spec.rb spec/rhdl/import/report_spec.rb spec/rhdl/import/pipeline_spec.rb spec/rhdl/cli/import_spec.rb`
    - green verification: `58 examples, 0 failures`
+10. Phase 10 metadata provenance red/green:
+   - red baseline:
+     - `bundle exec rspec spec/rhdl/import/mapper/statement_mapper_spec.rb spec/rhdl/import/mapper_spec.rb spec/rhdl/import/ir_spec.rb spec/rhdl/import/project_spec.rb -e "provenance" -e "preserves case qualifier and provenance metadata"`
+     - `3 examples, 3 failures`
+   - green verification:
+     - same command after implementation
+     - `3 examples, 0 failures`
+   - broader phase gate:
+     - `bundle exec rspec spec/rhdl/import/project_spec.rb spec/rhdl/import/frontend/surelog_hint_adapter_spec.rb spec/rhdl/import/report_spec.rb spec/rhdl/cli/import_spec.rb`
+     - `32 examples, 0 failures`
+11. Phase 11 elsif emission red/green:
+   - red baseline:
+     - `bundle exec rspec spec/rhdl/import/translator/module_emitter_spec.rb -e "elsif_block for nested if/else-if chains"`
+     - `1 example, 1 failure`
+   - green verification:
+     - same command after implementation
+     - `1 example, 0 failures`
+   - broader translator + import regression:
+     - `bundle exec rspec spec/rhdl/import/translator/module_emitter_spec.rb`
+     - `30 examples, 0 failures`
+     - `bundle exec rspec spec/rhdl/import/mapper/statement_mapper_spec.rb spec/rhdl/import/mapper_spec.rb spec/rhdl/import/ir_spec.rb spec/rhdl/import/project_spec.rb spec/rhdl/import/translator/module_emitter_spec.rb`
+     - `57 examples, 0 failures`
+12. Phase 11 case-qualifier emission red/green:
+   - red baseline:
+     - `bundle exec rspec spec/rhdl/import/translator/module_emitter_spec.rb -e "emits case_stmt qualifier keyword when case metadata includes a qualifier"`
+     - `1 example, 1 failure`
+   - green verification:
+     - same command after implementation
+     - `1 example, 0 failures`
+   - DSL/export + importer regression:
+     - `bundle exec rspec spec/rhdl/dsl_spec.rb -e "qualified case statement" spec/rhdl/verilog_export_spec.rb -e "unique case statement"`
+     - `2 examples, 0 failures`
+     - `bundle exec rspec spec/rhdl/import/translator/module_emitter_spec.rb spec/rhdl/import/mapper/statement_mapper_spec.rb spec/rhdl/import/mapper_spec.rb spec/rhdl/import/ir_spec.rb spec/rhdl/import/project_spec.rb spec/rhdl/dsl_spec.rb spec/rhdl/verilog_export_spec.rb`
+     - `158 examples, 0 failures`
+13. Phase 11 always_ff intent inference red/green:
+   - red baseline:
+     - `bundle exec rspec spec/rhdl/import/translator/module_emitter_spec.rb -e "treats always_ff process intent as clocked when sensitivity edges are absent"`
+     - `1 example, 1 failure`
+   - green verification:
+     - same command after implementation
+     - `1 example, 0 failures`
+   - broader translator + DSL/export + importer regression:
+     - `bundle exec rspec spec/rhdl/import/translator/module_emitter_spec.rb spec/rhdl/import/mapper/statement_mapper_spec.rb spec/rhdl/import/mapper_spec.rb spec/rhdl/import/ir_spec.rb spec/rhdl/import/project_spec.rb spec/rhdl/dsl_spec.rb spec/rhdl/verilog_export_spec.rb`
+     - `159 examples, 0 failures`
+14. Phase 10 unsupported-diagnostic metadata red/green:
+   - red baseline:
+     - `bundle exec rspec spec/rhdl/import/mapper/statement_mapper_spec.rb -e "includes hint metadata on unsupported diagnostics when present on the source node"`
+     - `1 example, 1 failure`
+   - green verification:
+     - same command after implementation
+     - `1 example, 0 failures`
+   - mapper/import regression:
+     - `bundle exec rspec spec/rhdl/import/mapper/statement_mapper_spec.rb spec/rhdl/import/mapper/expression_mapper_spec.rb spec/rhdl/import/mapper/declaration_mapper_spec.rb spec/rhdl/import/mapper_spec.rb spec/rhdl/import/ir_spec.rb spec/rhdl/import/project_spec.rb`
+     - `32 examples, 0 failures`
+15. Phase 11 always_comb naming uplift red/green:
+   - red baseline:
+     - `bundle exec rspec spec/rhdl/import/translator/module_emitter_spec.rb -e "uses always_comb process intent for combinational naming when domain is absent"`
+     - `1 example, 1 failure`
+   - green verification:
+     - same command after implementation
+     - `1 example, 0 failures`
+   - broader translator + importer + DSL/export regression:
+     - `bundle exec rspec spec/rhdl/import/translator/module_emitter_spec.rb spec/rhdl/import/mapper/statement_mapper_spec.rb spec/rhdl/import/mapper/expression_mapper_spec.rb spec/rhdl/import/mapper/declaration_mapper_spec.rb spec/rhdl/import/mapper_spec.rb spec/rhdl/import/ir_spec.rb spec/rhdl/import/project_spec.rb spec/rhdl/dsl_spec.rb spec/rhdl/verilog_export_spec.rb`
+     - `165 examples, 0 failures`
+16. Broader importer sweep note (current baseline):
+   - `bundle exec rspec spec/rhdl/import spec/rhdl/cli/import_spec.rb`
+   - `199 examples, 2 failures`
+   - failing examples:
+     - `spec/rhdl/import/pipeline_spec.rb:1230` (`runs ao486_program_parity checks for ao486 top`)
+     - `spec/rhdl/import/pipeline_spec.rb:1302` (`prunes prior profile report artifacts across consecutive runs`)
 
 ## Uplift Metrics (New Tranche Targets)
 1. `hints.summary.extracted_count > 0` on supported Surelog fixture designs.

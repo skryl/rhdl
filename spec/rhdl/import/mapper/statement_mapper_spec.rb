@@ -74,6 +74,36 @@ RSpec.describe RHDL::Import::Mapper::StatementMapper do
       expect(diagnostics).to eq([])
     end
 
+    it "preserves case qualifier and provenance metadata" do
+      diagnostics = []
+      expression_mapper = RHDL::Import::Mapper::ExpressionMapper.new(diagnostics: diagnostics)
+      mapper = described_class.new(expression_mapper: expression_mapper, diagnostics: diagnostics)
+
+      case_node = {
+        kind: "case",
+        qualifier: "unique",
+        origin: "hint",
+        provenance: {
+          source: "surelog_hint",
+          construct_kind: "case_from_if"
+        },
+        selector: { kind: "identifier", name: "op" },
+        items: [],
+        default: []
+      }
+
+      mapped_case = mapper.map(case_node, module_name: "stmt_mod")
+
+      expect(mapped_case).to be_a(RHDL::Import::IR::CaseStatement)
+      expect(mapped_case.qualifier).to eq("unique")
+      expect(mapped_case.origin).to eq("hint")
+      expect(mapped_case.provenance).to eq(
+        source: "surelog_hint",
+        construct_kind: "case_from_if"
+      )
+      expect(diagnostics).to eq([])
+    end
+
     it "emits unsupported diagnostics tags for unknown statement kinds" do
       diagnostics = []
       expression_mapper = RHDL::Import::Mapper::ExpressionMapper.new(diagnostics: diagnostics)
@@ -86,6 +116,36 @@ RSpec.describe RHDL::Import::Mapper::StatementMapper do
       expect(diagnostics.first[:code]).to eq("unsupported_construct")
       expect(diagnostics.first[:tags]).to include("mapper", "unsupported_construct", "statement")
       expect(diagnostics.first[:module]).to eq("stmt_mod")
+    end
+
+    it "includes hint metadata on unsupported diagnostics when present on the source node" do
+      diagnostics = []
+      expression_mapper = RHDL::Import::Mapper::ExpressionMapper.new(diagnostics: diagnostics)
+      mapper = described_class.new(expression_mapper: expression_mapper, diagnostics: diagnostics)
+
+      result = mapper.map(
+        {
+          kind: "unsupported_stmt",
+          origin: "hint",
+          provenance: {
+            source: "surelog_hint",
+            construct_kind: "case_from_if",
+            confidence: "high"
+          }
+        },
+        module_name: "stmt_mod"
+      )
+
+      expect(result).to be_nil
+      expect(diagnostics.length).to eq(1)
+      expect(diagnostics.first[:code]).to eq("unsupported_construct")
+      expect(diagnostics.first[:origin]).to eq("hint")
+      expect(diagnostics.first[:confidence]).to eq("high")
+      expect(diagnostics.first[:provenance]).to include(
+        source: "surelog_hint",
+        construct_kind: "case_from_if",
+        confidence: "high"
+      )
     end
   end
 

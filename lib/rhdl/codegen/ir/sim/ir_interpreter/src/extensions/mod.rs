@@ -6,13 +6,16 @@
 //! - mos6502: MOS6502 CPU standalone simulation
 //! - cpu8bit: examples/8bit CPU standalone simulation
 //! - riscv: RISC-V CPU + MMIO system simulation
+//! - ao486: AO486 CPU standalone simulation
 
+pub mod ao486;
 pub mod apple2;
 pub mod cpu8bit;
 pub mod gameboy;
 pub mod mos6502;
 pub mod riscv;
 
+pub use ao486::Ao486Extension;
 pub use apple2::Apple2Extension;
 pub use cpu8bit::Cpu8BitExtension;
 pub use gameboy::GameBoyExtension;

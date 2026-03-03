@@ -707,6 +707,11 @@ RSpec.describe RHDL::Import do
                 construct_family: "statement",
                 construct_kind: "case_from_if",
                 confidence: "high",
+                span: {
+                  source_path: source_file,
+                  line: 1,
+                  column: 1
+                },
                 data: {
                   process_index: 0,
                   statement_index: 0,
@@ -796,6 +801,11 @@ RSpec.describe RHDL::Import do
         statement = captured_payload.dig(:design, :modules, 0, :processes, 0, :statements, 0)
         expect(statement[:kind]).to eq("case")
         expect(statement[:origin]).to eq("hint")
+        expect(statement[:provenance]).to include(
+          source: "surelog_hint",
+          construct_kind: "case_from_if",
+          confidence: "high"
+        )
 
         normalized_report = assert_import_report_skeleton!(result.report, status: :success)
         expect(normalized_report.dig("hints", "summary", "applied_count")).to eq(1)

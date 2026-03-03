@@ -12,9 +12,11 @@ pub mod cpu8bit;
 pub mod gameboy;
 pub mod mos6502;
 pub mod riscv;
+pub mod ao486;
 
 pub use apple2::Apple2Extension;
 pub use cpu8bit::Cpu8BitExtension;
 pub use gameboy::GameBoyExtension;
 pub use mos6502::Mos6502Extension;
 pub use riscv::RiscvExtension;
+pub use ao486::Ao486Extension;

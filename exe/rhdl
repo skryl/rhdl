@@ -19,7 +19,7 @@ def show_help
       export        Export components to Verilog
       import        Import Verilog/SystemVerilog projects
       gates         Gate-level synthesis
-      examples      Run example emulators (mos6502, apple2)
+      examples      Run example emulators (mos6502, apple2, gameboy, riscv, ao486)
       disk          Disk image utilities for Apple II
       generate      Generate all output files (diagrams + HDL exports)
       clean         Clean all generated files
@@ -394,6 +394,7 @@ def show_examples_help
         apple2        Apple II HDL emulator (cycle-accurate, supports netlist mode)
         gameboy       Game Boy HDL emulator (cycle-accurate with terminal renderers)
         riscv         RISC-V ISA emulator (with xv6 and interactive debugger support)
+        ao486         AO486 x86 core runner (IR/Verilator/Arcilator backends)
 
       Examples:
         rhdl examples mos6502 --demo
@@ -402,6 +403,7 @@ def show_examples_help
         rhdl examples apple2 --mode netlist --sim jit --demo
         rhdl examples gameboy --demo
         rhdl examples riscv --xv6
+        rhdl examples ao486 --headless examples/ao486/software/bin/01_add_ax_cx_and_store.bin
 
     Run 'rhdl examples <subcommand> --help' for more information.
   HELP
@@ -593,6 +595,11 @@ def handle_examples_riscv(args)
   exec(script, *args)
 end
 
+def handle_examples_ao486(args)
+  script = File.expand_path('../examples/ao486/bin/ao486', __dir__)
+  exec(script, *args)
+end
+
 def handle_examples_gameboy(args)
   script = File.expand_path('../examples/gameboy/bin/gameboy', __dir__)
   exec(script, *args)
@@ -610,6 +617,8 @@ def handle_examples(args)
     handle_examples_gameboy(args)
   when 'riscv'
     handle_examples_riscv(args)
+  when 'ao486'
+    handle_examples_ao486(args)
   when '-h', '--help', 'help', nil
     show_examples_help
     exit 0

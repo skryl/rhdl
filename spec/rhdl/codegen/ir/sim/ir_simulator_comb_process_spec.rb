@@ -318,6 +318,58 @@ RSpec.describe "IR simulator combinational process lowering" do
     expect(sim.peek("y")).to eq(expected)
   end
 
+  it "preserves absolute slice semantics for non-zero lsb packed ranges" do
+    range_ir = ir::ModuleDef.new(
+      name: "non_zero_lsb_slice",
+      ports: [
+        ir::Port.new(name: :a, direction: :in, width: 30),
+        ir::Port.new(name: :y, direction: :out, width: 30)
+      ],
+      nets: [],
+      regs: [],
+      assigns: [
+        ir::Assign.new(
+          target: :y,
+          expr: ir::Concat.new(
+            parts: [
+              ir::Slice.new(
+                base: ir::Signal.new(name: :a, width: 30),
+                range: (31..21),
+                width: 11
+              ),
+              ir::Concat.new(
+                parts: [
+                  ir::Slice.new(
+                    base: ir::Signal.new(name: :a, width: 30),
+                    range: (20..20),
+                    width: 1
+                  ),
+                  ir::Slice.new(
+                    base: ir::Signal.new(name: :a, width: 30),
+                    range: (19..2),
+                    width: 18
+                  )
+                ],
+                width: 19
+              )
+            ],
+            width: 30
+          )
+        )
+      ],
+      processes: []
+    )
+
+    json = RHDL::Codegen::IR::IRToJson.convert(range_ir)
+    sim = RHDL::Codegen::IR::RubyIrSim.new(json)
+
+    value = 0x003F_FF8
+    sim.poke("a", value)
+    sim.evaluate
+
+    expect(sim.peek("y")).to eq(value)
+  end
+
   it "preserves nonblocking clocked semantics when flattening process statements" do
     seq_ir = ir::ModuleDef.new(
       name: "nb_swap",

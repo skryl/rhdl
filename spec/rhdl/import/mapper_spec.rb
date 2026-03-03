@@ -85,6 +85,47 @@ RSpec.describe RHDL::Import::Mapper do
       expect(program.diagnostics.none? { |diag| diag[:code] == "unsupported_construct" && diag[:family] == "process" }).to be(true)
     end
 
+    it "preserves process intent and provenance metadata from normalized payload" do
+      program = described_class.map(
+        {
+          schema_version: 1,
+          design: {
+            modules: [
+              {
+                name: "hinted_proc",
+                source_id: 1,
+                span: { source_id: 1, source_path: "rtl/hinted_proc.sv", line: 1, column: 1, end_line: 3, end_column: 3 },
+                processes: [
+                  {
+                    kind: "always",
+                    domain: "sequential",
+                    intent: "always_ff",
+                    origin: "hint",
+                    provenance: {
+                      source: "surelog_hint",
+                      construct_kind: "always_ff"
+                    },
+                    sensitivity: [],
+                    statements: []
+                  }
+                ]
+              }
+            ]
+          },
+          diagnostics: []
+        }
+      )
+
+      process = program.modules.first.processes.first
+
+      expect(process.intent).to eq("always_ff")
+      expect(process.origin).to eq("hint")
+      expect(process.provenance).to eq(
+        source: "surelog_hint",
+        construct_kind: "always_ff"
+      )
+    end
+
     it "preserves open instance connections when signal expressions are absent" do
       program = described_class.map(
         {

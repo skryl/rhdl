@@ -230,7 +230,28 @@ module RHDL
         end
 
         def normalize_width(width)
-          value = Integer(width || 1)
+          value = case width
+          when Range
+            begin_value = Integer(width.begin)
+            end_value = Integer(width.end)
+            (begin_value - end_value).abs + 1
+          when String
+            text = width.strip
+            if (match = text.match(/\A(-?\d+)\s*\.\.\s*(-?\d+)\z/))
+              (match[1].to_i - match[2].to_i).abs + 1
+            else
+              Integer(text)
+            end
+          else
+            Integer(width || 1)
+          end
+          value <= 0 ? 1 : value
+        rescue ArgumentError, TypeError
+          1
+        end
+
+        def normalize_depth(depth)
+          value = Integer(depth || 1)
           value <= 0 ? 1 : value
         rescue ArgumentError, TypeError
           1
@@ -623,6 +644,7 @@ module RHDL
             module_def: RHDL::Codegen::LIR::Lower.new(component_class, top_name: top_name).build,
             component_index: component_index
           )
+          populate_missing_sensitivity_lists!(ir_module)
           ir_json = RHDL::Codegen::IR::IRToJson.convert(ir_module)
           # Use Ruby IR simulation for component parity to preserve >64-bit signal
           # semantics that are truncated by native u64 backends.
@@ -687,16 +709,16 @@ module RHDL
 
           flattened = RHDL::Codegen::IR::ModuleDef.new(
             name: module_def.name,
-            ports: module_def.ports.dup,
-            nets: module_def.nets.dup,
-            regs: module_def.regs.dup,
+            ports: module_def.ports.map { |entry| clone_ir_port(entry) },
+            nets: module_def.nets.map { |entry| clone_ir_net(entry) },
+            regs: module_def.regs.map { |entry| clone_ir_reg(entry) },
             assigns: module_def.assigns.dup,
             processes: module_def.processes.dup,
             reg_ports: module_def.reg_ports.dup,
             instances: [],
-            memories: module_def.memories.dup,
-            write_ports: module_def.write_ports.dup,
-            sync_read_ports: module_def.sync_read_ports.dup,
+            memories: module_def.memories.map { |entry| clone_ir_memory(entry) },
+            write_ports: module_def.write_ports.map { |entry| clone_ir_write_port(entry) },
+            sync_read_ports: module_def.sync_read_ports.map { |entry| clone_ir_sync_read_port(entry) },
             parameters: module_def.parameters
           )
 
@@ -743,6 +765,15 @@ module RHDL
           child.nets.each do |net|
             add_net_unless_present(parent, name: "#{prefix}#{net.name}", width: net.width)
           end
+          child.memories.each do |memory|
+            add_memory_unless_present(
+              parent,
+              name: "#{prefix}#{memory.name}",
+              depth: memory.depth,
+              width: memory.width,
+              initial_data: memory.initial_data
+            )
+          end
 
           output_ports.each do |port|
             local_name = "#{prefix}#{port.name}"
@@ -770,7 +801,26 @@ module RHDL
               end,
               statements: Array(process.statements).map do |statement|
                 rewrite_ir_statement(statement, prefix: prefix, input_bindings: input_bindings)
-              end.compact
+              end.compact,
+              initial: process.respond_to?(:initial) ? process.initial : false
+            )
+          end
+          child.write_ports.each do |write_port|
+            parent.write_ports << RHDL::Codegen::IR::MemoryWritePort.new(
+              memory: "#{prefix}#{write_port.memory}",
+              clock: rewrite_signal_name(write_port.clock, prefix: prefix, input_bindings: input_bindings),
+              addr: rewrite_ir_expression(write_port.addr, prefix: prefix, input_bindings: input_bindings),
+              data: rewrite_ir_expression(write_port.data, prefix: prefix, input_bindings: input_bindings),
+              enable: rewrite_ir_expression(write_port.enable, prefix: prefix, input_bindings: input_bindings)
+            )
+          end
+          child.sync_read_ports.each do |read_port|
+            parent.sync_read_ports << RHDL::Codegen::IR::MemorySyncReadPort.new(
+              memory: "#{prefix}#{read_port.memory}",
+              clock: rewrite_signal_name(read_port.clock, prefix: prefix, input_bindings: input_bindings),
+              addr: rewrite_ir_expression(read_port.addr, prefix: prefix, input_bindings: input_bindings),
+              data: rewrite_signal_name(read_port.data, prefix: prefix, input_bindings: input_bindings),
+              enable: read_port.enable ? rewrite_ir_expression(read_port.enable, prefix: prefix, input_bindings: input_bindings) : nil
             )
           end
 
@@ -837,6 +887,29 @@ module RHDL
                 rewrite_ir_statement(inner, prefix: prefix, input_bindings: input_bindings)
               end.compact
             )
+          when RHDL::Codegen::IR::CaseStmt
+            RHDL::Codegen::IR::CaseStmt.new(
+              selector: rewrite_ir_expression(statement.selector, prefix: prefix, input_bindings: input_bindings),
+              branches: Array(statement.branches).map do |branch|
+                RHDL::Codegen::IR::CaseBranch.new(
+                  values: Array(branch.values).map do |value|
+                    rewrite_ir_expression(value, prefix: prefix, input_bindings: input_bindings)
+                  end,
+                  statements: Array(branch.statements).map do |inner|
+                    rewrite_ir_statement(inner, prefix: prefix, input_bindings: input_bindings)
+                  end.compact
+                )
+              end,
+              default_statements: Array(statement.default_statements).map do |inner|
+                rewrite_ir_statement(inner, prefix: prefix, input_bindings: input_bindings)
+              end.compact
+            )
+          when RHDL::Codegen::IR::MemoryWrite
+            RHDL::Codegen::IR::MemoryWrite.new(
+              memory: "#{prefix}#{statement.memory}",
+              addr: rewrite_ir_expression(statement.addr, prefix: prefix, input_bindings: input_bindings),
+              data: rewrite_ir_expression(statement.data, prefix: prefix, input_bindings: input_bindings)
+            )
           else
             statement
           end
@@ -882,6 +955,13 @@ module RHDL
               range: expression.range,
               width: expression.width
             )
+          when RHDL::Codegen::IR::DynamicSlice
+            RHDL::Codegen::IR::DynamicSlice.new(
+              base: rewrite_ir_expression(expression.base, prefix: prefix, input_bindings: input_bindings),
+              msb: rewrite_ir_expression(expression.msb, prefix: prefix, input_bindings: input_bindings),
+              lsb: rewrite_ir_expression(expression.lsb, prefix: prefix, input_bindings: input_bindings),
+              width: expression.width
+            )
           when RHDL::Codegen::IR::Resize
             RHDL::Codegen::IR::Resize.new(
               expr: rewrite_ir_expression(expression.expr, prefix: prefix, input_bindings: input_bindings),
@@ -891,6 +971,25 @@ module RHDL
             RHDL::Codegen::IR::MemoryRead.new(
               memory: "#{prefix}#{expression.memory}",
               addr: rewrite_ir_expression(expression.addr, prefix: prefix, input_bindings: input_bindings),
+              width: expression.width
+            )
+          when RHDL::Codegen::IR::Case
+            rewritten_cases = {}
+            Array(expression.cases).each do |raw_values, case_expr|
+              values = Array(raw_values).map do |value|
+                if value.is_a?(RHDL::Codegen::IR::Expr)
+                  rewrite_ir_expression(value, prefix: prefix, input_bindings: input_bindings)
+                else
+                  value
+                end
+              end
+              rewritten_cases[values] = rewrite_ir_expression(case_expr, prefix: prefix, input_bindings: input_bindings)
+            end
+
+            RHDL::Codegen::IR::Case.new(
+              selector: rewrite_ir_expression(expression.selector, prefix: prefix, input_bindings: input_bindings),
+              cases: rewritten_cases,
+              default: expression.default ? rewrite_ir_expression(expression.default, prefix: prefix, input_bindings: input_bindings) : nil,
               width: expression.width
             )
           else
@@ -920,6 +1019,167 @@ module RHDL
           return if exists
 
           module_def.nets << RHDL::Codegen::IR::Net.new(name: name.to_s, width: normalize_width(width))
+        end
+
+        def add_memory_unless_present(module_def, name:, depth:, width:, initial_data:)
+          exists = Array(module_def.memories).any? { |entry| entry.name.to_s == name.to_s }
+          return if exists
+
+          module_def.memories << RHDL::Codegen::IR::Memory.new(
+            name: name.to_s,
+            depth: normalize_depth(depth),
+            width: normalize_width(width),
+            initial_data: initial_data.nil? ? nil : Array(initial_data).dup
+          )
+        rescue TypeError
+          nil
+        end
+
+        def clone_ir_port(entry)
+          RHDL::Codegen::IR::Port.new(
+            name: entry.name,
+            direction: entry.direction,
+            width: normalize_width(entry.width),
+            default: entry.respond_to?(:default) ? entry.default : nil
+          )
+        end
+
+        def clone_ir_net(entry)
+          RHDL::Codegen::IR::Net.new(
+            name: entry.name,
+            width: normalize_width(entry.width)
+          )
+        end
+
+        def clone_ir_reg(entry)
+          RHDL::Codegen::IR::Reg.new(
+            name: entry.name,
+            width: normalize_width(entry.width),
+            reset_value: entry.reset_value
+          )
+        end
+
+        def clone_ir_memory(entry)
+          RHDL::Codegen::IR::Memory.new(
+            name: entry.name.to_s,
+            depth: normalize_depth(entry.depth),
+            width: normalize_width(entry.width),
+            read_ports: Array(entry.read_ports).dup,
+            write_ports: Array(entry.write_ports).dup,
+            initial_data: entry.initial_data.nil? ? nil : Array(entry.initial_data).dup
+          )
+        end
+
+        def clone_ir_write_port(entry)
+          RHDL::Codegen::IR::MemoryWritePort.new(
+            memory: entry.memory.to_s,
+            clock: entry.clock.to_s,
+            addr: entry.addr,
+            data: entry.data,
+            enable: entry.enable
+          )
+        end
+
+        def clone_ir_sync_read_port(entry)
+          RHDL::Codegen::IR::MemorySyncReadPort.new(
+            memory: entry.memory.to_s,
+            clock: entry.clock.to_s,
+            addr: entry.addr,
+            data: entry.data.to_s,
+            enable: entry.enable
+          )
+        end
+
+        def populate_missing_sensitivity_lists!(module_def)
+          normalized = Array(module_def.processes).map { |process| normalize_process_sensitivity(process) }
+          module_def.processes.clear
+          module_def.processes.concat(normalized)
+          module_def
+        end
+
+        def normalize_process_sensitivity(process)
+          initial = process.respond_to?(:initial) ? process.initial : false
+          return process if process.clocked || initial
+
+          sensitivity = Array(process.sensitivity_list).map(&:to_s).reject(&:empty?)
+          return process unless sensitivity.empty?
+
+          inferred = infer_sensitivity_from_statements(process.statements)
+          return process if inferred.empty?
+
+          RHDL::Codegen::IR::Process.new(
+            name: process.name,
+            clocked: process.clocked,
+            clock: process.clock,
+            sensitivity_list: inferred,
+            statements: process.statements,
+            initial: initial
+          )
+        end
+
+        def infer_sensitivity_from_statements(statements)
+          names = []
+          Array(statements).each { |statement| collect_statement_sensitivity(statement, names) }
+          names.uniq.sort
+        end
+
+        def collect_statement_sensitivity(statement, names)
+          case statement
+          when RHDL::Codegen::IR::SeqAssign
+            collect_expression_sensitivity(statement.expr, names)
+          when RHDL::Codegen::IR::If
+            collect_expression_sensitivity(statement.condition, names)
+            Array(statement.then_statements).each { |inner| collect_statement_sensitivity(inner, names) }
+            Array(statement.else_statements).each { |inner| collect_statement_sensitivity(inner, names) }
+          when RHDL::Codegen::IR::CaseStmt
+            collect_expression_sensitivity(statement.selector, names)
+            Array(statement.branches).each do |branch|
+              Array(branch.values).each { |value| collect_expression_sensitivity(value, names) }
+              Array(branch.statements).each { |inner| collect_statement_sensitivity(inner, names) }
+            end
+            Array(statement.default_statements).each { |inner| collect_statement_sensitivity(inner, names) }
+          when RHDL::Codegen::IR::MemoryWrite
+            collect_expression_sensitivity(statement.addr, names)
+            collect_expression_sensitivity(statement.data, names)
+          end
+        end
+
+        def collect_expression_sensitivity(expression, names)
+          case expression
+          when RHDL::Codegen::IR::Signal
+            token = expression.name.to_s
+            names << token unless token.empty?
+          when RHDL::Codegen::IR::UnaryOp
+            collect_expression_sensitivity(expression.operand, names)
+          when RHDL::Codegen::IR::BinaryOp
+            collect_expression_sensitivity(expression.left, names)
+            collect_expression_sensitivity(expression.right, names)
+          when RHDL::Codegen::IR::Mux
+            collect_expression_sensitivity(expression.condition, names)
+            collect_expression_sensitivity(expression.when_true, names)
+            collect_expression_sensitivity(expression.when_false, names)
+          when RHDL::Codegen::IR::Concat
+            Array(expression.parts).each { |part| collect_expression_sensitivity(part, names) }
+          when RHDL::Codegen::IR::Slice
+            collect_expression_sensitivity(expression.base, names)
+          when RHDL::Codegen::IR::DynamicSlice
+            collect_expression_sensitivity(expression.base, names)
+            collect_expression_sensitivity(expression.msb, names)
+            collect_expression_sensitivity(expression.lsb, names)
+          when RHDL::Codegen::IR::Resize
+            collect_expression_sensitivity(expression.expr, names)
+          when RHDL::Codegen::IR::MemoryRead
+            collect_expression_sensitivity(expression.addr, names)
+          when RHDL::Codegen::IR::Case
+            collect_expression_sensitivity(expression.selector, names)
+            Array(expression.cases).each do |raw_values, case_expr|
+              Array(raw_values).each do |value|
+                collect_expression_sensitivity(value, names) if value.is_a?(RHDL::Codegen::IR::Expr)
+              end
+              collect_expression_sensitivity(case_expr, names)
+            end
+            collect_expression_sensitivity(expression.default, names) if expression.default
+          end
         end
 
         def signal_width_in_module(module_def, signal_name)

@@ -10,6 +10,31 @@ module RHDL
           value.is_a?(Hash) ? value : {}
         end
 
+        def deep_symbolize(value)
+          case value
+          when Hash
+            value.each_with_object({}) do |(key, inner), memo|
+              memo[key.to_sym] = deep_symbolize(inner)
+            end
+          when Array
+            value.map { |inner| deep_symbolize(inner) }
+          else
+            value
+          end
+        end
+
+        def normalize_metadata_hash(value)
+          hash = normalize_hash(value)
+          return nil if hash.empty?
+
+          deep_symbolize(hash)
+        end
+
+        def optional_string(value)
+          text = value.to_s.strip
+          text.empty? ? nil : text
+        end
+
         def value_for(hash, key)
           return nil unless hash.is_a?(Hash)
 
@@ -57,9 +82,13 @@ module RHDL
 
         def unsupported_construct!(diagnostics:, family:, construct:, node:, module_name:)
           normalized_construct = construct.to_s.empty? ? "unknown" : construct.to_s
-          span = normalize_span(value_for(normalize_hash(node), :span))
+          node_hash = normalize_hash(node)
+          span = normalize_span(value_for(node_hash, :span))
+          origin = optional_string(value_for(node_hash, :origin))
+          provenance = normalize_metadata_hash(value_for(node_hash, :provenance))
+          confidence = optional_string(value_for(provenance, :confidence) || value_for(node_hash, :confidence))
 
-          diagnostics << {
+          diagnostic = {
             severity: "error",
             code: "unsupported_construct",
             message: "Unsupported #{family} construct: #{normalized_construct}",
@@ -68,6 +97,11 @@ module RHDL
             construct: normalized_construct,
             span: span_to_hash(span)
           }
+          diagnostic[:origin] = origin unless origin.nil?
+          diagnostic[:provenance] = provenance unless provenance.nil?
+          diagnostic[:confidence] = confidence unless confidence.nil?
+
+          diagnostics << diagnostic
 
           nil
         end

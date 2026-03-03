@@ -132,20 +132,32 @@ module RHDL
         end
       end
 
-      class Process < Struct.new(:domain, :sensitivity, :statements, :span, keyword_init: true)
+      class Process < Struct.new(:domain, :sensitivity, :statements, :span, :intent, :origin, :provenance, keyword_init: true)
         include Serializable
 
-        def initialize(domain:, sensitivity:, statements:, span: nil)
-          super(domain: domain, sensitivity: Array(sensitivity), statements: Array(statements), span: span)
+        def initialize(domain:, sensitivity:, statements:, span: nil, intent: nil, origin: nil, provenance: nil)
+          super(
+            domain: domain,
+            sensitivity: Array(sensitivity),
+            statements: Array(statements),
+            span: span,
+            intent: intent,
+            origin: origin,
+            provenance: provenance
+          )
         end
 
         def to_h
-          {
+          hash = {
             domain: domain,
             sensitivity: serialize(sensitivity),
             statements: serialize(statements),
             span: serialize(span)
           }
+          hash[:intent] = intent unless intent.nil?
+          hash[:origin] = origin unless origin.nil?
+          hash[:provenance] = serialize(provenance) unless provenance.nil?
+          hash
         end
       end
 
@@ -282,26 +294,33 @@ module RHDL
         end
       end
 
-      class CaseStatement < Struct.new(:selector, :items, :default_body, :span, keyword_init: true)
+      class CaseStatement < Struct.new(:selector, :items, :default_body, :span, :qualifier, :origin, :provenance, keyword_init: true)
         include Serializable
 
-        def initialize(selector:, items:, default_body:, span: nil)
+        def initialize(selector:, items:, default_body:, span: nil, qualifier: nil, origin: nil, provenance: nil)
           super(
             selector: selector,
             items: Array(items),
             default_body: Array(default_body),
-            span: span
+            span: span,
+            qualifier: qualifier,
+            origin: origin,
+            provenance: provenance
           )
         end
 
         def to_h
-          {
+          hash = {
             kind: "case",
             selector: serialize(selector),
             items: serialize(items),
             default_body: serialize(default_body),
             span: serialize(span)
           }
+          hash[:qualifier] = qualifier unless qualifier.nil?
+          hash[:origin] = origin unless origin.nil?
+          hash[:provenance] = serialize(provenance) unless provenance.nil?
+          hash
         end
       end
 

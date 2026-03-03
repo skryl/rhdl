@@ -117,7 +117,9 @@ module RHDL
             # Keep high aliases deterministic when bus addresses are sign-extended.
             {
               0xFFFF_FFF0 => 0x000F_FFF0,
-              0xFFFF_FFF4 => 0x000F_FFF4
+              0xFFFF_FFF4 => 0x000F_FFF4,
+              0xFFFF_FFF8 => 0x000F_FFF8,
+              0xFFFF_FFFC => 0x000F_FFFC
             }.each do |alias_address, canonical_address|
               next unless memory_words.key?(canonical_address)
 
@@ -127,6 +129,8 @@ module RHDL
             fetch_addresses = program_word_addresses.dup
             fetch_addresses << 0xFFFF_FFF0 if memory_words.key?(0xFFFF_FFF0)
             fetch_addresses << 0xFFFF_FFF4 if memory_words.key?(0xFFFF_FFF4)
+            fetch_addresses << 0xFFFF_FFF8 if memory_words.key?(0xFFFF_FFF8)
+            fetch_addresses << 0xFFFF_FFFC if memory_words.key?(0xFFFF_FFFC)
             required_instruction_addresses = [0x000F_FFF0, 0x000F_FFF4, 0x000F_FFF8]
             required_instruction_words = required_instruction_addresses.filter_map { |word_address| memory_words[word_address] }
 
@@ -177,9 +181,9 @@ module RHDL
             Array(bytes).each_with_index do |value, index|
               bytes_by_address[(base + index) & 0xFFFF_FFFF] = Integer(value) & 0xFF
             end
+            inject_reset_vector!(bytes_by_address: bytes_by_address, target_linear_address: base) unless base == PROGRAM_BASE_ADDRESS
 
-            max_address = (bytes_by_address.keys.max || base)
-            program_word_addresses = (base..max_address).step(4).map { |entry| entry & 0xFFFF_FFFC }.uniq
+            program_word_addresses = bytes_by_address.keys.map { |entry| entry & 0xFFFF_FFFC }.uniq.sort
             tracked_addresses = (program_word_addresses + Array(data_addresses).map { |entry| Integer(entry) & 0xFFFF_FFFF }).uniq.sort
 
             tracked_addresses.each do |word_address|
@@ -204,13 +208,28 @@ module RHDL
 
           private
 
+          def inject_reset_vector!(bytes_by_address:, target_linear_address:)
+            target = Integer(target_linear_address) & 0xFFFF_FFFF
+            offset = target & 0x0000_000F
+            segment = (target >> 4) & 0x0000_FFFF
+            reset_vector = [0xEA, offset & 0xFF, (offset >> 8) & 0xFF, segment & 0xFF, (segment >> 8) & 0xFF]
+            reset_vector += Array.new(11, 0x90)
+
+            reset_vector.each_with_index do |value, index|
+              address = (PROGRAM_BASE_ADDRESS + index) & 0xFFFF_FFFF
+              bytes_by_address[address] = Integer(value) & 0xFF
+            end
+          end
+
           def fetch_addresses_for_binary(base:, memory_words:, program_word_addresses:)
             program_addresses = program_word_addresses.dup
             program_addresses << (base | 0x000F_0000) if base == 0x000F_FFF0
 
             canonical_alias = {
               0xFFFF_FFF0 => 0x000F_FFF0,
-              0xFFFF_FFF4 => 0x000F_FFF4
+              0xFFFF_FFF4 => 0x000F_FFF4,
+              0xFFFF_FFF8 => 0x000F_FFF8,
+              0xFFFF_FFFC => 0x000F_FFFC
             }.each do |alias_address, canonical_address|
               next unless memory_words.key?(canonical_address)
 
@@ -222,7 +241,13 @@ module RHDL
           end
 
           def required_instruction_words_for_binary(base:, memory_words:)
-            [base, base + 4, base + 8]
+            instruction_addresses = if memory_words.key?(PROGRAM_BASE_ADDRESS)
+              [PROGRAM_BASE_ADDRESS, PROGRAM_BASE_ADDRESS + 4, PROGRAM_BASE_ADDRESS + 8]
+            else
+              [base, base + 4, base + 8]
+            end
+
+            instruction_addresses
               .map { |entry| memory_words.fetch(entry & 0xFFFF_FFFF, nil) }
               .compact
           end
@@ -307,20 +332,29 @@ module RHDL
             converted_contract = source_contract(mode: "converted", work_dir: File.join(work_dir, "converted_sources"))
             ir_simulator = build_ir_simulator
 
-            reference = run_verilog_program(
-              label: "reference",
-              source_files: reference_contract.fetch(:source_files),
-              include_dirs: reference_contract.fetch(:include_dirs),
-              work_dir: File.join(work_dir, "reference")
-            )
-            generated_verilog = run_verilog_program(
-              label: "generated_verilog",
-              source_files: converted_contract.fetch(:source_files),
-              include_dirs: converted_contract.fetch(:include_dirs),
-              work_dir: File.join(work_dir, "generated_verilog")
-            )
-            generated_ir = run_ir_program(sim: ir_simulator)
+            reference_thread = Thread.new do
+              run_verilog_program(
+                label: "reference",
+                source_files: reference_contract.fetch(:source_files),
+                include_dirs: reference_contract.fetch(:include_dirs),
+                work_dir: File.join(work_dir, "reference")
+              )
+            end
+            generated_verilog_thread = Thread.new do
+              run_verilog_program(
+                label: "generated_verilog",
+                source_files: converted_contract.fetch(:source_files),
+                include_dirs: converted_contract.fetch(:include_dirs),
+                work_dir: File.join(work_dir, "generated_verilog")
+              )
+            end
+            generated_ir_thread = Thread.new do
+              run_ir_program(sim: ir_simulator)
+            end
 
+            reference = reference_thread.value
+            generated_verilog = generated_verilog_thread.value
+            generated_ir = generated_ir_thread.value
             comparison = compare_runs(
               reference: reference,
               generated_verilog: generated_verilog,
@@ -559,6 +593,10 @@ module RHDL
         end
 
         def run_ir_program(sim:)
+          if ao486_runner_batched_supported?(sim)
+            return run_ir_program_batched(sim: sim)
+          end
+
           input_names = Array(sim.input_names).map(&:to_s).to_set
           state = initial_input_state(input_names: input_names)
           memory = program_memory_words.dup
@@ -639,6 +677,84 @@ module RHDL
             "memory_writes" => memory_writes,
             "memory_contents" => tracked_memory_snapshot(memory)
           }
+        end
+
+        def ao486_runner_batched_supported?(sim)
+          return false unless sim.respond_to?(:runner_kind)
+          return false unless sim.respond_to?(:runner_run_cycles)
+          return false unless sim.respond_to?(:runner_write_memory)
+          return false unless sim.respond_to?(:runner_read_memory)
+          return false unless sim.respond_to?(:runner_ao486_take_events)
+
+          sim.runner_kind == :ao486
+        rescue StandardError
+          false
+        end
+
+        def run_ir_program_batched(sim:)
+          sim.reset if sim.respond_to?(:reset)
+          load_runner_program_memory(sim: sim, memory_words: program_memory_words)
+          sim.runner_ao486_take_events # clear any reset/load residual events
+          sim.runner_run_cycles(@cycles + 1)
+
+          trace = parse_runner_events_trace(events_text: sim.runner_ao486_take_events.to_s)
+          trace["memory_contents"] = tracked_runner_memory_snapshot(sim: sim)
+          trace
+        end
+
+        def load_runner_program_memory(sim:, memory_words:)
+          memory_words.to_h.each do |address, value|
+            normalized_address = Integer(address) & bit_mask(32)
+            normalized_value = Integer(value) & bit_mask(32)
+            bytes = [normalized_value].pack("L<")
+            sim.runner_write_memory(normalized_address, bytes, mapped: false)
+          end
+        end
+
+        def parse_runner_events_trace(events_text:)
+          fetch_addresses = program_fetch_addresses.to_set
+          pc_sequence = []
+          instruction_sequence = []
+          memory_writes = []
+
+          events_text.to_s.each_line do |line|
+            text = line.to_s.strip
+            next if text.empty?
+
+            case text
+            when /\AEV IF (\d+) ([0-9A-Fa-f]+) ([0-9A-Fa-f]+)\z/
+              address = Regexp.last_match(2).to_i(16) & bit_mask(32)
+              next unless fetch_addresses.include?(address)
+
+              data = Regexp.last_match(3).to_i(16) & bit_mask(32)
+              pc_sequence << address
+              instruction_sequence << data
+            when /\AEV WR (\d+) ([0-9A-Fa-f]+) ([0-9A-Fa-f]+) ([0-9A-Fa-f]+)\z/
+              memory_writes << {
+                "cycle" => Integer(Regexp.last_match(1)),
+                "address" => Regexp.last_match(2).to_i(16) & bit_mask(32),
+                "data" => Regexp.last_match(3).to_i(16) & bit_mask(32),
+                "byteenable" => Regexp.last_match(4).to_i(16) & bit_mask(4)
+              }
+            end
+          end
+
+          {
+            "pc_sequence" => pc_sequence,
+            "instruction_sequence" => instruction_sequence,
+            "memory_writes" => memory_writes
+          }
+        end
+
+        def tracked_runner_memory_snapshot(sim:)
+          program_tracked_addresses.each_with_object({}) do |address, memo|
+            bytes = Array(sim.runner_read_memory(address & bit_mask(32), 4, mapped: false))
+            b0 = Integer(bytes[0] || 0) & 0xFF
+            b1 = Integer(bytes[1] || 0) & 0xFF
+            b2 = Integer(bytes[2] || 0) & 0xFF
+            b3 = Integer(bytes[3] || 0) & 0xFF
+            memo[format("%08x", address & bit_mask(32))] = b0 | (b1 << 8) | (b2 << 16) | (b3 << 24)
+          end
         end
 
         def compare_runs(reference:, generated_verilog:, generated_ir:)
@@ -923,7 +1039,10 @@ module RHDL
 
         def emit_stub_verilog(signature)
           name = value_for(signature, :name).to_s
-          ports = Array(value_for(signature, :ports)).map(&:to_s).reject(&:empty?).uniq.sort
+          ports = (
+            Array(value_for(signature, :ports)).map(&:to_s) +
+            known_stub_ports(module_name: name)
+          ).map(&:to_s).map(&:strip).reject(&:empty?).uniq.sort
           parameters = (
             Array(value_for(signature, :parameters)).map(&:to_s) +
             known_stub_parameters(module_name: name)
@@ -940,8 +1059,216 @@ module RHDL
             }
           end
 
+          module_key = name.downcase
+          if module_key == "altdpram"
+            return emit_altdpram_stub_verilog(name: name, parameter_specs: parameters, port_specs: port_specs)
+          end
+          if module_key == "altsyncram"
+            return emit_altsyncram_stub_verilog(name: name, parameter_specs: parameters, port_specs: port_specs)
+          end
+
+          emit_generic_stub_verilog(name: name, port_specs: port_specs, parameter_specs: parameters)
+        end
+
+        def emit_generic_stub_verilog(name:, port_specs:, parameter_specs:)
+          lines = stub_module_header_lines(name: name, port_specs: port_specs, parameter_specs: parameter_specs)
+          port_specs.each do |port|
+            width_decl = verilog_width_decl(port.fetch(:width))
+            lines << "  #{port.fetch(:direction)} #{width_decl}#{port.fetch(:name)};"
+          end
+          port_specs.select { |port| port.fetch(:direction) == "output" }.each do |port|
+            lines << "  assign #{port.fetch(:name)} = #{verilog_zero_literal(port.fetch(:width))};"
+          end
+          lines << "endmodule"
+          lines << ""
+          lines.join("\n")
+        end
+
+        def emit_altdpram_stub_verilog(name:, parameter_specs:, port_specs:)
+          lines = stub_module_header_lines(name: name, port_specs: port_specs, parameter_specs: parameter_specs)
+          port_specs.each do |port|
+            width_decl = verilog_width_decl(port.fetch(:width))
+            lines << "  #{port.fetch(:direction)} #{width_decl}#{port.fetch(:name)};"
+          end
+          lines << "  localparam integer SAFE_WIDTH = (width > 0) ? width : 1;"
+          lines << "  localparam integer SAFE_WIDTHAD = (widthad > 0) ? widthad : 1;"
+          lines << "  localparam integer SAFE_WIDTH_BYTEENA = (width_byteena > 0) ? width_byteena : 1;"
+          lines << "  localparam integer SAFE_DEPTH = (1 << SAFE_WIDTHAD);"
+          lines << "  localparam integer SAFE_BYTE_COUNT = (SAFE_WIDTH + 7) / 8;"
+          lines << ""
+          lines << "  reg [SAFE_WIDTH-1:0] mem [0:SAFE_DEPTH-1];"
+          lines << "  reg [SAFE_WIDTH-1:0] merged_word;"
+          lines << "  integer init_i;"
+          lines << "  integer byte_i;"
+          lines << ""
+          lines << "  wire [SAFE_WIDTHAD-1:0] wr_addr = wraddress;"
+          lines << "  wire [SAFE_WIDTHAD-1:0] rd_addr = rdaddress;"
+          lines << "  wire inclocken_en = (inclocken === 1'b0) ? 1'b0 : 1'b1;"
+          lines << "  wire outclocken_en = (outclocken === 1'b0) ? 1'b0 : 1'b1;"
+          lines << "  wire wr_stall = (wraddressstall === 1'b1) ? 1'b1 : 1'b0;"
+          lines << "  wire rd_stall = (rdaddressstall === 1'b1) ? 1'b1 : 1'b0;"
+          lines << "  wire wren_en = (wren === 1'b1) ? 1'b1 : 1'b0;"
+          lines << "  wire rden_en = (rden === 1'b0) ? 1'b0 : 1'b1;"
+          lines << "  wire wr_fire = wren_en && !wr_stall && inclocken_en;"
+          lines << "  wire rd_fire = rden_en && !rd_stall && outclocken_en;"
+          lines << ""
+          lines << "  initial begin"
+          lines << "    for (init_i = 0; init_i < SAFE_DEPTH; init_i = init_i + 1) begin"
+          lines << "      mem[init_i] = {SAFE_WIDTH{1'b0}};"
+          lines << "    end"
+          lines << "  end"
+          lines << ""
+          lines << "  always @* begin"
+          lines << "    merged_word = mem[wr_addr];"
+          lines << "    if (SAFE_WIDTH_BYTEENA <= 1 || SAFE_BYTE_COUNT <= 1) begin"
+          lines << "      merged_word = data;"
+          lines << "    end else begin"
+          lines << "      for (byte_i = 0; byte_i < SAFE_BYTE_COUNT; byte_i = byte_i + 1) begin"
+          lines << "        if (byte_i < SAFE_WIDTH_BYTEENA && byteena[byte_i]) begin"
+          lines << "          merged_word[(byte_i * 8) +: 8] = data[(byte_i * 8) +: 8];"
+          lines << "        end"
+          lines << "      end"
+          lines << "    end"
+          lines << "  end"
+          lines << ""
+          lines << "  always @(posedge inclock or posedge aclr or posedge sclr) begin"
+          lines << "    if (aclr || sclr) begin"
+          lines << "      // Leave memory contents unchanged on clear; Quartus primitive reset behavior"
+          lines << "      // is configuration-dependent, and cache logic only requires deterministic power-up."
+          lines << "    end else if (wr_fire) begin"
+          lines << "      mem[wr_addr] <= merged_word;"
+          lines << "    end"
+          lines << "  end"
+          lines << ""
+          lines << "  assign q = rd_fire ? mem[rd_addr] : mem[rd_addr];"
+          lines << "endmodule"
+          lines << ""
+          lines.join("\n")
+        end
+
+        def emit_altsyncram_stub_verilog(name:, parameter_specs:, port_specs:)
+          lines = stub_module_header_lines(name: name, port_specs: port_specs, parameter_specs: parameter_specs)
+          port_specs.each do |port|
+            width_decl = verilog_width_decl(port.fetch(:width))
+            lines << "  #{port.fetch(:direction)} #{width_decl}#{port.fetch(:name)};"
+          end
+          lines << "  localparam integer SAFE_WIDTH_A = (width_a > 0) ? width_a : 1;"
+          lines << "  localparam integer SAFE_WIDTH_B = (width_b > 0) ? width_b : 1;"
+          lines << "  localparam integer SAFE_WIDTHAD_A = (widthad_a > 0) ? widthad_a : 1;"
+          lines << "  localparam integer SAFE_WIDTHAD_B = (widthad_b > 0) ? widthad_b : 1;"
+          lines << "  localparam integer SAFE_WIDTH_BYTEENA_A = (width_byteena_a > 0) ? width_byteena_a : 1;"
+          lines << "  localparam integer SAFE_WIDTH_BYTEENA_B = (width_byteena_b > 0) ? width_byteena_b : 1;"
+          lines << "  localparam integer SAFE_DEPTH_A = (1 << SAFE_WIDTHAD_A);"
+          lines << "  localparam integer SAFE_BYTE_COUNT_A = (SAFE_WIDTH_A + 7) / 8;"
+          lines << "  localparam integer SAFE_BYTE_COUNT_B = (SAFE_WIDTH_B + 7) / 8;"
+          lines << "  localparam integer SAFE_SUBWORDS_PER_A_B = (SAFE_WIDTH_A >= SAFE_WIDTH_B && SAFE_WIDTH_B > 0) ? (SAFE_WIDTH_A / SAFE_WIDTH_B) : 1;"
+          lines << "  localparam integer SAFE_SUBWORD_BITS_B = (SAFE_SUBWORDS_PER_A_B <= 1) ? 1 : $clog2(SAFE_SUBWORDS_PER_A_B);"
+          lines << ""
+          lines << "  reg [SAFE_WIDTH_A-1:0] mem [0:SAFE_DEPTH_A-1];"
+          lines << "  reg [SAFE_WIDTH_A-1:0] merged_a;"
+          lines << "  reg [SAFE_WIDTH_A-1:0] merged_b_word;"
+          lines << "  reg [SAFE_WIDTH_B-1:0] read_b_data;"
+          lines << "  reg [SAFE_WIDTHAD_A-1:0] addr_b_word_reg;"
+          lines << "  reg [SAFE_SUBWORD_BITS_B-1:0] addr_b_lane_reg;"
+          lines << "  integer init_i;"
+          lines << "  integer byte_i;"
+          lines << ""
+          lines << "  wire [SAFE_WIDTHAD_A-1:0] addr_a = address_a;"
+          lines << "  wire [SAFE_WIDTHAD_B-1:0] addr_b_full = address_b;"
+          lines << "  wire [SAFE_WIDTHAD_A-1:0] addr_b_word = (SAFE_WIDTH_A >= SAFE_WIDTH_B) ? (addr_b_full / SAFE_SUBWORDS_PER_A_B) : addr_b_full[SAFE_WIDTHAD_A-1:0];"
+          lines << "  wire [SAFE_SUBWORD_BITS_B-1:0] addr_b_lane = (SAFE_WIDTH_A >= SAFE_WIDTH_B) ? (addr_b_full % SAFE_SUBWORDS_PER_A_B) : {SAFE_SUBWORD_BITS_B{1'b0}};"
+          lines << "  wire clocken0_en = (clocken0 === 1'b0) ? 1'b0 : 1'b1;"
+          lines << "  wire clocken1_en = (clocken1 === 1'b0) ? 1'b0 : 1'b1;"
+          lines << "  wire addrstall_a_en = (addressstall_a === 1'b1) ? 1'b1 : 1'b0;"
+          lines << "  wire addrstall_b_en = (addressstall_b === 1'b1) ? 1'b1 : 1'b0;"
+          lines << "  wire wren_a_en = (wren_a === 1'b1) ? 1'b1 : 1'b0;"
+          lines << "  wire wren_b_en = (wren_b === 1'b1) ? 1'b1 : 1'b0;"
+          lines << "  wire rden_a_en = (rden_a === 1'b0) ? 1'b0 : 1'b1;"
+          lines << "  wire rden_b_en = (rden_b === 1'b0) ? 1'b0 : 1'b1;"
+          lines << "  wire wren_a_fire = wren_a_en && clocken0_en && !addrstall_a_en;"
+          lines << "  wire wren_b_fire = wren_b_en && clocken1_en && !addrstall_b_en;"
+          lines << "  wire rden_a_fire = rden_a_en && clocken0_en && !addrstall_a_en;"
+          lines << "  wire rden_b_fire = rden_b_en && clocken1_en && !addrstall_b_en;"
+          lines << ""
+          lines << "  initial begin"
+          lines << "    for (init_i = 0; init_i < SAFE_DEPTH_A; init_i = init_i + 1) begin"
+          lines << "      mem[init_i] = {SAFE_WIDTH_A{1'b0}};"
+          lines << "    end"
+          lines << "    addr_b_word_reg = {SAFE_WIDTHAD_A{1'b0}};"
+          lines << "    addr_b_lane_reg = {SAFE_SUBWORD_BITS_B{1'b0}};"
+          lines << "  end"
+          lines << ""
+          lines << "  always @* begin"
+          lines << "    merged_a = mem[addr_a];"
+          lines << "    if (SAFE_WIDTH_BYTEENA_A <= 1 || SAFE_BYTE_COUNT_A <= 1) begin"
+          lines << "      merged_a = data_a;"
+          lines << "    end else begin"
+          lines << "      for (byte_i = 0; byte_i < SAFE_BYTE_COUNT_A; byte_i = byte_i + 1) begin"
+          lines << "        if (byte_i < SAFE_WIDTH_BYTEENA_A && byteena_a[byte_i]) begin"
+            lines << "          merged_a[(byte_i * 8) +: 8] = data_a[(byte_i * 8) +: 8];"
+          lines << "        end"
+          lines << "      end"
+          lines << "    end"
+          lines << "    merged_b_word = mem[addr_b_word];"
+          lines << "    if (SAFE_WIDTH_BYTEENA_B <= 1 || SAFE_BYTE_COUNT_B <= 1) begin"
+          lines << "      if (SAFE_WIDTH_A >= SAFE_WIDTH_B) begin"
+          lines << "        merged_b_word[(addr_b_lane * SAFE_WIDTH_B) +: SAFE_WIDTH_B] = data_b;"
+          lines << "      end else begin"
+          lines << "        merged_b_word[SAFE_WIDTH_B-1:0] = data_b;"
+          lines << "      end"
+          lines << "    end else begin"
+          lines << "      for (byte_i = 0; byte_i < SAFE_BYTE_COUNT_B; byte_i = byte_i + 1) begin"
+          lines << "        if (byte_i < SAFE_WIDTH_BYTEENA_B && byteena_b[byte_i]) begin"
+          lines << "          if (SAFE_WIDTH_A >= SAFE_WIDTH_B) begin"
+          lines << "            merged_b_word[(addr_b_lane * SAFE_WIDTH_B) + (byte_i * 8) +: 8] = data_b[(byte_i * 8) +: 8];"
+          lines << "          end else begin"
+          lines << "            merged_b_word[(byte_i * 8) +: 8] = data_b[(byte_i * 8) +: 8];"
+          lines << "          end"
+          lines << "        end"
+          lines << "      end"
+          lines << "    end"
+          lines << "    if (SAFE_WIDTH_A >= SAFE_WIDTH_B) begin"
+          lines << "      read_b_data = mem[addr_b_word_reg][(addr_b_lane_reg * SAFE_WIDTH_B) +: SAFE_WIDTH_B];"
+          lines << "    end else begin"
+          lines << "      read_b_data = mem[addr_b_word_reg][SAFE_WIDTH_B-1:0];"
+          lines << "    end"
+          lines << "  end"
+          lines << ""
+          lines << "  always @(posedge clock0 or posedge aclr0) begin"
+          lines << "    if (aclr0) begin"
+          lines << "      addr_b_word_reg <= {SAFE_WIDTHAD_A{1'b0}};"
+          lines << "      addr_b_lane_reg <= {SAFE_SUBWORD_BITS_B{1'b0}};"
+          lines << "      // Leave memory contents unchanged on clear; see note in altdpram stub."
+          lines << "    end else begin"
+          lines << "      if (clocken0_en && !addrstall_b_en) begin"
+          lines << "        addr_b_word_reg <= addr_b_word;"
+          lines << "        addr_b_lane_reg <= addr_b_lane;"
+          lines << "      end"
+          lines << "      if (wren_a_fire) begin"
+          lines << "        mem[addr_a] <= merged_a;"
+          lines << "      end"
+          lines << "    end"
+          lines << "  end"
+          lines << ""
+          lines << "  always @(posedge clock1 or posedge aclr1) begin"
+          lines << "    if (aclr1) begin"
+          lines << "      // Leave memory contents unchanged on clear; see note in altdpram stub."
+          lines << "    end else if (wren_b_fire) begin"
+          lines << "      mem[addr_b_word] <= merged_b_word;"
+          lines << "    end"
+          lines << "  end"
+          lines << ""
+          lines << "  assign q_a = rden_a_fire ? mem[addr_a] : mem[addr_a];"
+          lines << "  assign q_b = rden_b_fire ? read_b_data : read_b_data;"
+          lines << "  assign eccstatus = 3'b000;"
+          lines << "endmodule"
+          lines << ""
+          lines.join("\n")
+        end
+
+        def stub_module_header_lines(name:, port_specs:, parameter_specs:)
           lines = []
-          if parameters.empty?
+          if parameter_specs.empty?
             if port_specs.empty?
               lines << "module #{name};"
             else
@@ -954,8 +1281,8 @@ module RHDL
             end
           else
             lines << "module #{name} #("
-            parameters.each_with_index do |parameter, index|
-              suffix = index == parameters.length - 1 ? "" : ","
+            parameter_specs.each_with_index do |parameter, index|
+              suffix = index == parameter_specs.length - 1 ? "" : ","
               lines << "  parameter #{parameter} = 0#{suffix}"
             end
             if port_specs.empty?
@@ -969,17 +1296,29 @@ module RHDL
               lines << ");"
             end
           end
+          lines
+        end
 
-          port_specs.each do |port|
-            width_decl = verilog_width_decl(port.fetch(:width))
-            lines << "  #{port.fetch(:direction)} #{width_decl}#{port.fetch(:name)};"
+        def known_stub_ports(module_name:)
+          case module_name.to_s.downcase
+          when "altdpram"
+            %w[
+              aclr byteena data inclock inclocken outclock outclocken q
+              rdaddress rdaddressstall rden sclr wraddress wraddressstall wren
+            ]
+          when "altsyncram"
+            %w[
+              aclr0 aclr1 address_a address_b addressstall_a addressstall_b
+              byteena_a byteena_b clock0 clock1 clocken0 clocken1 clocken2 clocken3
+              data_a data_b eccstatus q_a q_b rden_a rden_b wren_a wren_b
+            ]
+          when "cpu_export"
+            %w[
+              clk rst_n new_export commandcount eax ebx ecx edx esp ebp esi edi eip
+            ]
+          else
+            []
           end
-          port_specs.select { |port| port.fetch(:direction) == "output" }.each do |port|
-            lines << "  assign #{port.fetch(:name)} = #{verilog_zero_literal(port.fetch(:width))};"
-          end
-          lines << "endmodule"
-          lines << ""
-          lines.join("\n")
         end
 
         def stub_port_hint(module_name:, port_name:)
@@ -996,12 +1335,18 @@ module RHDL
           if module_key == "altsyncram"
             return { direction: "output", width: "width_a" } if port_key == "q_a"
             return { direction: "output", width: "width_b" } if port_key == "q_b"
+            return { direction: "output", width: 3 } if port_key == "eccstatus"
             return { direction: "input", width: "widthad_a" } if port_key == "address_a"
             return { direction: "input", width: "widthad_b" } if port_key == "address_b"
             return { direction: "input", width: "width_a" } if port_key == "data_a"
             return { direction: "input", width: "width_b" } if port_key == "data_b"
             return { direction: "input", width: "width_byteena_a" } if port_key == "byteena_a"
             return { direction: "input", width: "width_byteena_b" } if port_key == "byteena_b"
+          end
+
+          if module_key == "cpu_export"
+            return { direction: "output", width: 32 } if port_key == "commandcount"
+            return { direction: "input", width: 32 } if %w[eax ebx ecx edx esp ebp esi edi eip].include?(port_key)
           end
 
           if port_key.match?(/\Aq(_[ab])?\z/) ||

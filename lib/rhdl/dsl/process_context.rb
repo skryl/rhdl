@@ -46,8 +46,8 @@ module RHDL
       end
 
       # Case statement
-      def case_stmt(selector, &block)
-        stmt = CaseStatement.new(selector)
+      def case_stmt(selector, qualifier: nil, &block)
+        stmt = CaseStatement.new(selector, qualifier: qualifier)
         ctx = CaseContext.new(stmt)
         ctx.instance_eval(&block)
         @process.add_statement(stmt)

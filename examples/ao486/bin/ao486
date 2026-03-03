@@ -1,0 +1,306 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+require "optparse"
+
+$LOAD_PATH.unshift File.expand_path("../../../lib", __dir__)
+$LOAD_PATH.unshift File.expand_path("../utilities", __dir__)
+
+require "rhdl"
+require_relative "../utilities/tasks/run_task"
+
+module RHDL
+  module Examples
+    module AO486
+      module CLI
+        module_function
+
+        def parse_u32(value)
+          Integer(value, 0) & 0xFFFF_FFFF
+        rescue ArgumentError
+          raise OptionParser::InvalidArgument, value
+        end
+
+        def normalize_sim(value)
+          case value.to_sym
+          when :compile then :compiler
+          when :interpret then :interpreter
+          else value.to_sym
+          end
+        end
+
+        def default_options
+          {
+            mode: :ir,
+            sim: nil,
+            debug: false,
+            headless: false,
+            cycles: nil,
+            speed: nil,
+            io: :vga,
+            address: nil,
+            bios: false,
+            dos: false,
+            bios_system: nil,
+            bios_video: nil,
+            boot_addr: nil,
+            disk: nil,
+            help: false
+          }
+        end
+
+        def build_parser(options, out:)
+          OptionParser.new do |opts|
+            opts.banner = "Usage: bin/ao486 [options] [program.bin]"
+            opts.separator ""
+            opts.separator "AO486 Runner"
+            opts.separator ""
+
+            opts.on("-m", "--mode TYPE", %i[ir verilator arcilator], "Simulation mode: ir (default), verilator, arcilator") do |value|
+              options[:mode] = value
+            end
+
+            opts.on("--sim TYPE", %i[interpret jit compile interpreter compiler], "IR backend: compile (default), interpret, jit") do |value|
+              options[:sim] = normalize_sim(value)
+            end
+
+            opts.on("-d", "--debug", "Show debug panel output") do
+              options[:debug] = true
+            end
+
+            opts.on("--headless", "Run once without interactive terminal loop") do
+              options[:headless] = true
+            end
+
+            opts.on("--cycles N", Integer, "Cycle count to execute (headless or replay window)") do |value|
+              options[:cycles] = value
+            end
+
+            opts.on("-s", "--speed N", Integer, "Cycles/events processed per interactive frame") do |value|
+              options[:speed] = value
+            end
+
+            opts.on("--io TYPE", %i[vga uart], "Display mode: vga (default), uart") do |value|
+              options[:io] = value
+            end
+
+            opts.on("-a", "--address ADDR", "Program load address (hex/dec, default: 0x000ffff0)") do |value|
+              options[:address] = parse_u32(value)
+            end
+
+            opts.on("--bios", "Enable BIOS-oriented boot flow (surface only in this phase)") do
+              options[:bios] = true
+            end
+
+            opts.on("--dos", "Boot bundled DOS image (enables --bios and default ROM/disk paths)") do
+              options[:dos] = true
+            end
+
+            opts.on("--bios-system FILE", "Override system BIOS ROM path") do |value|
+              options[:bios_system] = value
+            end
+
+            opts.on("--bios-video FILE", "Override video BIOS ROM path") do |value|
+              options[:bios_video] = value
+            end
+
+            opts.on("--boot-addr ADDR", "Initial boot/reset address (hex/dec)") do |value|
+              options[:boot_addr] = parse_u32(value)
+            end
+
+            opts.on("--disk FILE", "Attach disk image path (surface only in this phase)") do |value|
+              options[:disk] = value
+            end
+
+            opts.on("-h", "--help", "Show help") do
+              out.puts opts
+              options[:help] = true
+            end
+          end
+        end
+
+        def ensure_file(path, label, out:)
+          return true if File.file?(path)
+
+          out.puts "Error: #{label} not found: #{path}"
+          false
+        end
+
+        def find_project_root(invocation_cwd:)
+          cwd = File.expand_path(invocation_cwd.to_s)
+          script_root = File.expand_path("../../..", __dir__)
+          candidates = [
+            cwd,
+            File.expand_path("..", cwd),
+            File.expand_path("../..", cwd),
+            File.expand_path("../../..", cwd),
+            script_root
+          ].uniq
+
+          candidates.find do |candidate|
+            File.file?(File.join(candidate, RHDL::Examples::AO486::Tasks::RunTask::DEFAULT_BIOS_SYSTEM_RELATIVE_PATH))
+          end || script_root
+        end
+
+        def normalize_explicit_asset_paths!(options, invocation_cwd:)
+          %i[bios_system bios_video disk].each do |key|
+            value = options[key]
+            next if value.nil? || value.to_s.strip.empty?
+
+            options[key] = File.expand_path(value.to_s, invocation_cwd)
+          end
+        end
+
+        def apply_backend_defaults(options)
+          default_ir_backend =
+            if RHDL::Codegen::IR::IR_COMPILER_AVAILABLE
+              :compile
+            elsif RHDL::Codegen::IR::IR_INTERPRETER_AVAILABLE
+              :interpret
+            elsif RHDL::Codegen::IR::IR_JIT_AVAILABLE
+              :jit
+            else
+              :compile
+            end
+
+          options[:sim] = normalize_sim(options[:sim] || default_ir_backend)
+        end
+
+        def apply_dos_defaults(options, root:, out:)
+          return true unless options[:dos]
+
+          options[:bios] = true
+
+          if options[:bios_system].nil? || options[:bios_system].to_s.strip.empty?
+            options[:bios_system] = File.expand_path(
+              RHDL::Examples::AO486::Tasks::RunTask::DEFAULT_BIOS_SYSTEM_RELATIVE_PATH,
+              root
+            )
+          end
+          if options[:bios_video].nil? || options[:bios_video].to_s.strip.empty?
+            options[:bios_video] = File.expand_path(
+              RHDL::Examples::AO486::Tasks::RunTask::DEFAULT_BIOS_VIDEO_RELATIVE_PATH,
+              root
+            )
+          end
+          if options[:disk].nil? || options[:disk].to_s.strip.empty?
+            preferred_disk = File.expand_path(
+              RHDL::Examples::AO486::Tasks::RunTask::DEFAULT_DOS_IMAGE_RELATIVE_PATH,
+              root
+            )
+            fallback_disk = File.expand_path(
+              RHDL::Examples::AO486::Tasks::RunTask::FALLBACK_DOS_IMAGE_RELATIVE_PATH,
+              root
+            )
+            options[:disk] = File.file?(preferred_disk) ? preferred_disk : fallback_disk
+          end
+
+          unless ensure_file(options[:bios_system], "BIOS system ROM", out: out)
+            out.puts "Hint: default expected path #{RHDL::Examples::AO486::Tasks::RunTask::DEFAULT_BIOS_SYSTEM_RELATIVE_PATH}"
+            return false
+          end
+          unless ensure_file(options[:bios_video], "BIOS video ROM", out: out)
+            out.puts "Hint: default expected path #{RHDL::Examples::AO486::Tasks::RunTask::DEFAULT_BIOS_VIDEO_RELATIVE_PATH}"
+            return false
+          end
+          unless ensure_file(options[:disk], "DOS disk image", out: out)
+            out.puts "Hint: expected #{RHDL::Examples::AO486::Tasks::RunTask::DEFAULT_DOS_IMAGE_RELATIVE_PATH} or #{RHDL::Examples::AO486::Tasks::RunTask::FALLBACK_DOS_IMAGE_RELATIVE_PATH}"
+            return false
+          end
+
+          true
+        end
+
+        def apply_speed_defaults(options)
+          return unless options[:speed].nil?
+
+          options[:speed] = case options[:mode]
+                            when :ir
+                              options[:sim] == :compiler ? 100_000 : 10_000
+                            when :verilator, :arcilator
+                              100_000
+                            else
+                              256
+                            end
+        end
+
+        def run(argv = ARGV, out: $stdout, task_class: RHDL::Examples::AO486::Tasks::RunTask)
+          args = argv.dup
+          options = default_options
+          parser = build_parser(options, out: out)
+          invocation_cwd = File.expand_path(Dir.pwd)
+          root = find_project_root(invocation_cwd: invocation_cwd)
+
+          begin
+            parser.parse!(args)
+          rescue OptionParser::ParseError => e
+            out.puts "Error: #{e.message}"
+            out.puts parser
+            return 1
+          end
+
+          return 0 if options[:help]
+
+          normalize_explicit_asset_paths!(options, invocation_cwd: invocation_cwd)
+          apply_backend_defaults(options)
+          return 1 unless apply_dos_defaults(options, root: root, out: out)
+          apply_speed_defaults(options)
+          options[:cwd] = root
+
+          if options[:bios_system] && !ensure_file(options[:bios_system], "BIOS system ROM", out: out)
+            return 1
+          end
+          if options[:bios_video] && !ensure_file(options[:bios_video], "BIOS video ROM", out: out)
+            return 1
+          end
+          if options[:disk] && !ensure_file(options[:disk], "disk image", out: out)
+            return 1
+          end
+
+          program_file = args.shift
+          if args.any?
+            out.puts "Error: Unexpected extra arguments: #{args.join(' ')}"
+            out.puts parser
+            return 1
+          end
+
+          runner = task_class.new(options)
+
+          if program_file
+            if options[:dos]
+              out.puts "Error: --dos cannot be combined with an explicit program binary."
+              return 1
+            end
+            unless ensure_file(program_file, "Program file", out: out)
+              return 1
+            end
+
+            load_addr = options[:address] || RHDL::Examples::AO486::Tasks::RunTask::DEFAULT_PROGRAM_BASE_ADDRESS
+            runner.load_program(program_file, base_addr: load_addr)
+          elsif options[:bios]
+            # BIOS/DOS boot path is handled by RunTask when no direct program is loaded.
+          else
+            out.puts parser
+            out.puts ""
+            out.puts "Error: No program specified. Pass a binary file or use --bios."
+            return 1
+          end
+
+          runner.run
+          0
+        rescue Interrupt
+          out.puts "\nInterrupted."
+          0
+        rescue NotImplementedError => e
+          out.puts "Error: #{e.message}"
+          1
+        rescue StandardError => e
+          out.puts "Error: #{e.message}"
+          1
+        end
+      end
+    end
+  end
+end
+
+exit(RHDL::Examples::AO486::CLI.run(ARGV)) if __FILE__ == $PROGRAM_NAME

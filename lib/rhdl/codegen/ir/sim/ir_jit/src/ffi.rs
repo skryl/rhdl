@@ -12,7 +12,8 @@ use std::slice;
 
 use crate::core::CoreSimulator;
 use crate::extensions::{
-    Apple2Extension, Cpu8BitExtension, GameBoyExtension, Mos6502Extension, RiscvExtension,
+    Ao486Extension, Apple2Extension, Cpu8BitExtension, GameBoyExtension, Mos6502Extension,
+    RiscvExtension,
 };
 use crate::vcd::{TraceMode, VcdTracer};
 
@@ -28,6 +29,7 @@ pub struct JitSimContext {
     pub gameboy: Option<GameBoyExtension>,
     pub mos6502: Option<Mos6502Extension>,
     pub riscv: Option<RiscvExtension>,
+    pub ao486: Option<Ao486Extension>,
     pub tracer: VcdTracer,
 }
 
@@ -43,7 +45,13 @@ impl JitSimContext {
             None
         };
 
-        let apple2 = if riscv.is_none() && Apple2Extension::is_apple2_ir(&core.name_to_idx) {
+        let ao486 = if riscv.is_none() && Ao486Extension::is_ao486_ir(&core.name_to_idx) {
+            Some(Ao486Extension::new(&core))
+        } else {
+            None
+        };
+
+        let apple2 = if riscv.is_none() && ao486.is_none() && Apple2Extension::is_apple2_ir(&core.name_to_idx) {
             Some(Apple2Extension::new(&core, sub_cycles))
         } else {
             None
@@ -93,6 +101,7 @@ impl JitSimContext {
             gameboy,
             mos6502,
             riscv,
+            ao486,
             tracer,
         })
     }
@@ -114,6 +123,8 @@ pub const RUNNER_KIND_GAMEBOY: c_int = 3;
 pub const RUNNER_KIND_CPU8BIT: c_int = 4;
 /// RISC-V CPU extension
 pub const RUNNER_KIND_RISCV: c_int = 5;
+/// AO486 CPU extension
+pub const RUNNER_KIND_AO486: c_int = 6;
 
 pub const RUNNER_MEM_OP_LOAD: c_uint = 0;
 pub const RUNNER_MEM_OP_READ: c_uint = 1;
@@ -142,6 +153,7 @@ pub const RUNNER_CONTROL_RISCV_SET_IRQS: c_uint = 3;
 pub const RUNNER_CONTROL_RISCV_SET_PLIC_SOURCES: c_uint = 4;
 pub const RUNNER_CONTROL_RISCV_UART_PUSH_RX: c_uint = 5;
 pub const RUNNER_CONTROL_RISCV_CLEAR_UART_TX: c_uint = 6;
+pub const RUNNER_CONTROL_AO486_PUSH_KEYBOARD: c_uint = 7;
 
 pub const RUNNER_PROBE_KIND: c_uint = 0;
 pub const RUNNER_PROBE_IS_MODE: c_uint = 1;
@@ -223,6 +235,8 @@ unsafe fn runner_kind_impl(ctx: *const JitSimContext) -> c_int {
         RUNNER_KIND_CPU8BIT
     } else if ctx.riscv.is_some() {
         RUNNER_KIND_RISCV
+    } else if ctx.ao486.is_some() {
+        RUNNER_KIND_AO486
     } else {
         RUNNER_KIND_NONE
     }
@@ -292,6 +306,10 @@ unsafe fn runner_load_main_impl(
 
     if let Some(ref mut riscv) = ctx.riscv {
         return riscv.load_main(bytes, offset, is_rom);
+    }
+
+    if let Some(ref mut ao486) = ctx.ao486 {
+        return ao486.load_main(bytes, offset, is_rom);
     }
 
     0
@@ -372,6 +390,11 @@ unsafe fn runner_read_main_impl(
         return riscv.read_main(start, out, mapped);
     }
 
+    if let Some(ref ao486) = ctx.ao486 {
+        let out = slice::from_raw_parts_mut(out_data, len);
+        return ao486.read_main(start, out, mapped);
+    }
+
     0
 }
 
@@ -436,6 +459,10 @@ unsafe fn runner_write_main_impl(
         return riscv.write_main(start, bytes, mapped);
     }
 
+    if let Some(ref mut ao486) = ctx.ao486 {
+        return ao486.write_main(start, bytes, mapped);
+    }
+
     0
 }
 
@@ -479,6 +506,11 @@ unsafe fn runner_read_rom_impl(
     if let Some(ref riscv) = ctx.riscv {
         let out = slice::from_raw_parts_mut(out_data, len);
         return riscv.read_rom(start, out);
+    }
+
+    if let Some(ref ao486) = ctx.ao486 {
+        let out = slice::from_raw_parts_mut(out_data, len);
+        return ao486.read_rom(start, out);
     }
 
     0
@@ -833,6 +865,12 @@ unsafe fn runner_run_impl(
         return 1;
     }
 
+    if let Some(ref mut ao486) = ctx.ao486 {
+        let cycles_run = ao486.run_cycles(&mut ctx.core, cycles);
+        write_runner_run_result(result_out, false, false, cycles_run, 0, 0);
+        return 1;
+    }
+
     for _ in 0..cycles {
         ctx.core.tick();
     }
@@ -855,6 +893,7 @@ pub unsafe extern "C" fn runner_get_caps(
         || kind == RUNNER_KIND_MOS6502
         || kind == RUNNER_KIND_GAMEBOY
         || kind == RUNNER_KIND_CPU8BIT
+        || kind == RUNNER_KIND_AO486
         || kind == RUNNER_KIND_RISCV
     {
         mem_spaces |= bit(RUNNER_MEM_SPACE_MAIN) | bit(RUNNER_MEM_SPACE_ROM);
@@ -877,7 +916,8 @@ pub unsafe extern "C" fn runner_get_caps(
         | bit(RUNNER_CONTROL_RISCV_SET_IRQS)
         | bit(RUNNER_CONTROL_RISCV_SET_PLIC_SOURCES)
         | bit(RUNNER_CONTROL_RISCV_UART_PUSH_RX)
-        | bit(RUNNER_CONTROL_RISCV_CLEAR_UART_TX);
+        | bit(RUNNER_CONTROL_RISCV_CLEAR_UART_TX)
+        | bit(RUNNER_CONTROL_AO486_PUSH_KEYBOARD);
 
     let probe_ops = bit(RUNNER_PROBE_KIND)
         | bit(RUNNER_PROBE_IS_MODE)
@@ -1062,6 +1102,15 @@ pub unsafe extern "C" fn runner_control(
             let ctx = &mut *ctx;
             if let Some(ref mut ext) = ctx.riscv {
                 ext.clear_uart_tx_bytes();
+                1
+            } else {
+                0
+            }
+        }
+        RUNNER_CONTROL_AO486_PUSH_KEYBOARD => {
+            let ctx = &mut *ctx;
+            if let Some(ref mut ext) = ctx.ao486 {
+                ext.enqueue_keyboard_byte((arg0 & 0xFF) as u8);
                 1
             } else {
                 0
@@ -1491,6 +1540,9 @@ unsafe fn ir_sim_reset(ctx: *mut JitSimContext) {
     if !ctx.is_null() {
         let ctx = &mut *ctx;
         ctx.core.reset();
+        if let Some(ref mut ao486) = ctx.ao486 {
+            ao486.reset_runtime_state();
+        }
         if let Some(ref mut riscv) = ctx.riscv {
             riscv.reset_core(&mut ctx.core);
         }
@@ -1802,6 +1854,7 @@ pub const SIM_BLOB_OUTPUT_NAMES: c_uint = 1;
 pub const SIM_BLOB_TRACE_TO_VCD: c_uint = 2;
 pub const SIM_BLOB_TRACE_TAKE_LIVE_VCD: c_uint = 3;
 pub const SIM_BLOB_GENERATED_CODE: c_uint = 4;
+pub const SIM_BLOB_AO486_EVENTS: c_uint = 5;
 
 #[inline]
 unsafe fn write_out_ulong(out: *mut c_ulong, value: c_ulong) {
@@ -2055,6 +2108,25 @@ pub unsafe extern "C" fn sim_blob(
     out_len: usize,
 ) -> usize {
     if ctx.is_null() {
+        return 0;
+    }
+
+    // AO486 events are destructive on read (`take_event_lines`), so preserve
+    // two-phase blob semantics by making size probes non-destructive.
+    if op == SIM_BLOB_AO486_EVENTS {
+        let ctx_ref = &mut *ctx;
+        let required = ctx_ref
+            .ao486
+            .as_ref()
+            .map(|ext| ext.event_lines_len())
+            .unwrap_or(0);
+        if out_ptr.is_null() || out_len == 0 {
+            return required;
+        }
+        if let Some(ref mut ext) = ctx_ref.ao486 {
+            let text = ext.take_event_lines();
+            return copy_blob(out_ptr, out_len, text.as_bytes());
+        }
         return 0;
     }
 

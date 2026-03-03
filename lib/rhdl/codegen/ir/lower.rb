@@ -606,16 +606,18 @@ module RHDL
         Array(statements).each do |stmt|
           case stmt
           when RHDL::DSL::SequentialAssignment
-            if hir_memory_bitselect_candidate?(stmt.target)
+            if hir_dynamic_bitselect?(stmt.target)
               base_name = signal_name(stmt.target.signal)
               value_width = width_for(stmt.value)
               addr_width = width_for(stmt.target.index)
-              register_hir_memory_candidate(
-                name: base_name,
-                word_width: value_width,
-                addr_width: addr_width
-              )
-              target_width = value_width
+              if value_width.is_a?(Integer) && value_width > 1
+                register_hir_memory_candidate(
+                  name: base_name,
+                  word_width: value_width,
+                  addr_width: addr_width
+                )
+              end
+              target_width = [width_for(stmt.target), value_width].compact.max
             else
               target_width = width_for(stmt.target)
             end
@@ -649,7 +651,7 @@ module RHDL
 
         case expr
         when RHDL::DSL::BitSelect
-          if hir_memory_bitselect_candidate?(expr)
+          if hir_dynamic_bitselect?(expr)
             base_name = signal_name(expr.signal)
             register_hir_memory_candidate(
               name: base_name,
@@ -666,8 +668,15 @@ module RHDL
             collect_hir_memory_candidates_from_expression(expr.range.end, context_width: nil)
           end
         when RHDL::DSL::BinaryOp
-          collect_hir_memory_candidates_from_expression(expr.left, context_width: nil)
-          collect_hir_memory_candidates_from_expression(expr.right, context_width: nil)
+          left_width = normalize_positive_integer(width_for(expr.left))
+          right_width = normalize_positive_integer(width_for(expr.right))
+          shared_context = [
+            normalize_positive_integer(context_width),
+            left_width,
+            right_width
+          ].compact.max
+          collect_hir_memory_candidates_from_expression(expr.left, context_width: shared_context)
+          collect_hir_memory_candidates_from_expression(expr.right, context_width: shared_context)
         when RHDL::DSL::UnaryOp
           collect_hir_memory_candidates_from_expression(expr.operand, context_width: nil)
         when RHDL::DSL::TernaryOp
@@ -706,15 +715,23 @@ module RHDL
         hash[key.to_sym]
       end
 
-      def hir_memory_bitselect_candidate?(target)
+      def hir_dynamic_bitselect?(target)
         return false unless target.is_a?(RHDL::DSL::BitSelect)
         return false if target.index.is_a?(Integer)
         return false unless simple_hir_lvalue_base?(target.signal)
 
+        !signal_name(target.signal).nil?
+      rescue StandardError
+        false
+      end
+
+      def hir_memory_bitselect_candidate?(target)
+        return false unless hir_dynamic_bitselect?(target)
+
         base_width = hir_lvalue_base_width(target.signal)
         return false unless base_width.is_a?(Integer) && base_width <= 1
 
-        !signal_name(target.signal).nil?
+        true
       rescue StandardError
         false
       end
@@ -774,9 +791,12 @@ module RHDL
       end
 
       def hir_memory_write_target?(target, value:)
-        return false unless hir_memory_bitselect_candidate?(target)
+        return false unless hir_dynamic_bitselect?(target)
 
-        return true if hir_memory_candidate_name?(signal_name(target.signal))
+        base_name = signal_name(target.signal)
+        return false if base_name.nil?
+        return true if hir_memory_candidate_name?(base_name)
+        return false unless hir_memory_bitselect_candidate?(target)
 
         value_width = normalize_positive_integer(width_for(value))
         value_width.is_a?(Integer) && value_width > 1
@@ -784,8 +804,6 @@ module RHDL
 
       def lower_hir_memory_like_indexed_assignment(stmt, nonblocking:)
         target = stmt.target
-        return lower_indexed_assignment(stmt, nonblocking: nonblocking) if target_uses_loop_binding?(target)
-
         base_name = signal_name(target.signal)
         return lower_indexed_assignment(stmt, nonblocking: nonblocking) if base_name.nil?
 
@@ -793,9 +811,13 @@ module RHDL
         inferred_addr_width = hir_memory_addr_width_for(base_name, fallback: width_for(target.index))
         register_hir_memory_candidate(name: base_name, word_width: inferred_width, addr_width: inferred_addr_width)
 
-        expr = lower_expr(stmt.value, context_width: inferred_width)
-        expr = resize(expr, inferred_width)
-        IR::SeqAssign.new(target: target, expr: expr, nonblocking: nonblocking)
+        addr_expr = lower_expr(target.index, context_width: inferred_addr_width)
+        addr_expr = resize(addr_expr, inferred_addr_width)
+
+        data_expr = lower_expr(stmt.value, context_width: inferred_width)
+        data_expr = resize(data_expr, inferred_width)
+
+        IR::MemoryWrite.new(memory: base_name, addr: addr_expr, data: data_expr)
       end
 
       def target_uses_loop_binding?(target)
@@ -1066,10 +1088,11 @@ module RHDL
       end
 
       def lower_hir_memory_read_expr(expr, context_width:)
-        return nil unless hir_memory_bitselect_candidate?(expr)
+        return nil unless hir_dynamic_bitselect?(expr)
 
         base_name = signal_name(expr.signal)
         return nil if base_name.nil?
+        return nil unless hir_memory_candidate_name?(base_name) || hir_memory_bitselect_candidate?(expr)
 
         candidate_width = hir_memory_word_width_for(base_name, fallback: context_width)
         return nil unless candidate_width.is_a?(Integer) && candidate_width > 1
@@ -1397,6 +1420,15 @@ module RHDL
         base = target.signal
         base_name = signal_name(base)
         base_width = width_for(base)
+        if memory_like_word_slice_target?(base: base, range: range)
+          return lower_memory_word_slice_assignment(
+            base_select: base,
+            range: range,
+            value: value,
+            nonblocking: nonblocking
+          )
+        end
+
         if bit_slice_static?(range)
           bounds = static_range_bounds(range)
           return lower_dynamic_bit_slice_assignment(
@@ -1434,6 +1466,54 @@ module RHDL
           value: value,
           nonblocking: nonblocking
         )
+      end
+
+      def memory_like_word_slice_target?(base:, range:)
+        return false unless base.is_a?(RHDL::DSL::BitSelect)
+        return false unless bit_slice_static?(range)
+
+        memory_name = signal_name(base.signal)
+        return false if memory_name.nil?
+
+        word_width = width_for(base.signal)
+        return false unless word_width.is_a?(Integer) && word_width > 1
+
+        true
+      rescue StandardError
+        false
+      end
+
+      def lower_memory_word_slice_assignment(base_select:, range:, value:, nonblocking:)
+        memory_name = signal_name(base_select.signal)
+        word_width = width_for(base_select.signal)
+        bounds = static_range_bounds(range)
+        if memory_name.nil? || !word_width.is_a?(Integer) || word_width <= 1 || bounds.nil?
+          return lower_bit_select_assignment(target: base_select, value: value, nonblocking: nonblocking)
+        end
+
+        addr_width = width_for(base_select.index)
+        addr_width = 1 unless addr_width.is_a?(Integer) && addr_width.positive?
+
+        addr_expr = lower_expr(base_select.index, context_width: addr_width)
+        addr_expr = resize(addr_expr, addr_width)
+        current_word = IR::MemoryRead.new(memory: memory_name, addr: addr_expr, width: word_width)
+
+        high, low = bounds
+        slice_width = high - low + 1
+        shift_amount = IR::Literal.new(value: low, width: word_width)
+        slice_mask_value = ((1 << slice_width) - 1) << low
+        full_mask_value = (1 << word_width) - 1
+        keep_mask = IR::Literal.new(value: full_mask_value ^ slice_mask_value, width: word_width)
+        update_mask = IR::Literal.new(value: slice_mask_value, width: word_width)
+
+        cleared = IR::BinaryOp.new(op: :&, left: current_word, right: keep_mask, width: word_width)
+        value_expr = lower_expr(value, context_width: slice_width)
+        value_expr = resize(value_expr, word_width)
+        shifted = IR::BinaryOp.new(op: :<<, left: value_expr, right: shift_amount, width: word_width)
+        masked = IR::BinaryOp.new(op: :&, left: shifted, right: update_mask, width: word_width)
+        merged = IR::BinaryOp.new(op: :|, left: cleared, right: masked, width: word_width)
+
+        IR::MemoryWrite.new(memory: memory_name, addr: addr_expr, data: merged)
       end
 
       def seqassign_target_name(target)
