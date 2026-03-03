@@ -617,7 +617,7 @@ class ReadCommands < RHDL::Component
   # Signals
 
   signal :__VdfgBinToOneHot_Pre_hb4cc6da5_0_0, width: 7
-  signal :__VdfgBinToOneHot_Tab_hb4cc6da5_0_0, width: 116
+  signal :__VdfgBinToOneHot_Tab_hb4cc6da5_0_0, width: 128
   signal :__VdfgRegularize_h35124d34_0_0
   signal :__VdfgRegularize_h35124d34_0_1, width: 32
   signal :__VdfgRegularize_h35124d34_0_10
@@ -6483,14 +6483,12 @@ class ReadCommands < RHDL::Component
           sig(:rd_system_linear, width: 32),
           kind: :nonblocking
         )
-        else_block do
-          if_stmt(sig(:rd_ready, width: 1)) do
-            assign(
-              :rd_task_switch_linear_reg,
-              sig(:rd_task_switch_linear_next, width: 32),
-              kind: :nonblocking
-            )
-          end
+        elsif_block(sig(:rd_ready, width: 1)) do
+          assign(
+            :rd_task_switch_linear_reg,
+            sig(:rd_task_switch_linear_next, width: 32),
+            kind: :nonblocking
+          )
         end
       end
       else_block do

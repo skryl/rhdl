@@ -142,26 +142,22 @@ class Fetch < RHDL::Component
           lit(0, width: 4, base: "h", signed: false),
           kind: :nonblocking
         )
-        else_block do
-          if_stmt(sig(:prefetchfifo_accept_do, width: 1)) do
-            assign(
-              :fetch_count,
-              lit(0, width: 4, base: "h", signed: false),
-              kind: :nonblocking
-            )
-            else_block do
-              if_stmt(sig(:partial, width: 1)) do
-                assign(
-                  :fetch_count,
-                  (
-                      sig(:fetch_count, width: 4) +
-                      sig(:dec_acceptable, width: 4)
-                  ),
-                  kind: :nonblocking
-                )
-              end
-            end
-          end
+        elsif_block(sig(:prefetchfifo_accept_do, width: 1)) do
+          assign(
+            :fetch_count,
+            lit(0, width: 4, base: "h", signed: false),
+            kind: :nonblocking
+          )
+        end
+        elsif_block(sig(:partial, width: 1)) do
+          assign(
+            :fetch_count,
+            (
+                sig(:fetch_count, width: 4) +
+                sig(:dec_acceptable, width: 4)
+            ),
+            kind: :nonblocking
+          )
         end
       end
       else_block do

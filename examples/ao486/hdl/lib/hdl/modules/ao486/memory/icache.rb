@@ -281,14 +281,12 @@ class Icache < RHDL::Component
           lit(1, width: 1, base: "h", signed: false),
           kind: :nonblocking
         )
-        else_block do
-          if_stmt((~sig(:state, width: 1))) do
-            assign(
-              :reset_waiting,
-              lit(0, width: 1, base: "h", signed: false),
-              kind: :nonblocking
-            )
-          end
+        elsif_block((~sig(:state, width: 1))) do
+          assign(
+            :reset_waiting,
+            lit(0, width: 1, base: "h", signed: false),
+            kind: :nonblocking
+          )
         end
       end
       else_block do
@@ -324,36 +322,34 @@ class Icache < RHDL::Component
           sig(:icacheread_length, width: 5),
           kind: :nonblocking
         )
-        else_block do
-          if_stmt(sig(:state, width: 1)) do
-            if_stmt(((~sig(:reset_combined, width: 1)) & (~sig(:reset_waiting, width: 1)))) do
-              if_stmt(sig(:readcode_cache_valid, width: 1)) do
-                if_stmt(((lit(0, width: 3, base: "h", signed: false) < sig(:partial_length, width: 12)[2..0]) & (lit(0, width: 5, base: "h", signed: false) < sig(:length, width: 5)))) do
-                  assign(
-                    :length,
-                    (
-                        sig(:length, width: 5) -
-                        sig(:prefetched_length, width: 5)
-                    ),
-                    kind: :nonblocking
-                  )
-                  assign(
-                    :partial_length,
-                    lit(0, width: 3, base: "d", signed: false).concat(
-                      sig(:partial_length, width: 12)[11..3]
-                    ),
-                    kind: :nonblocking
-                  )
-                end
+        elsif_block(sig(:state, width: 1)) do
+          if_stmt(((~sig(:reset_combined, width: 1)) & (~sig(:reset_waiting, width: 1)))) do
+            if_stmt(sig(:readcode_cache_valid, width: 1)) do
+              if_stmt(((lit(0, width: 3, base: "h", signed: false) < sig(:partial_length, width: 12)[2..0]) & (lit(0, width: 5, base: "h", signed: false) < sig(:length, width: 5)))) do
+                assign(
+                  :length,
+                  (
+                      sig(:length, width: 5) -
+                      sig(:prefetched_length, width: 5)
+                  ),
+                  kind: :nonblocking
+                )
+                assign(
+                  :partial_length,
+                  lit(0, width: 3, base: "d", signed: false).concat(
+                    sig(:partial_length, width: 12)[11..3]
+                  ),
+                  kind: :nonblocking
+                )
               end
             end
-            if_stmt(sig(:readcode_cache_done, width: 1)) do
-              assign(
-                :state,
-                lit(0, width: 1, base: "h", signed: false),
-                kind: :nonblocking
-              )
-            end
+          end
+          if_stmt(sig(:readcode_cache_done, width: 1)) do
+            assign(
+              :state,
+              lit(0, width: 1, base: "h", signed: false),
+              kind: :nonblocking
+            )
           end
         end
       end

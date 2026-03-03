@@ -434,23 +434,19 @@ class DecodePrefix < RHDL::Component
           lit(0, width: 2, base: "h", signed: false),
           kind: :nonblocking
         )
-        else_block do
-          if_stmt((sig(:instr_prefix, width: 1) & (lit(242, width: 8, base: "h", signed: false) == sig(:decoder, width: 96)[7..0]))) do
-            assign(
-              :dec_prefix_group_1_rep,
-              lit(1, width: 2, base: "h", signed: false),
-              kind: :nonblocking
-            )
-            else_block do
-              if_stmt((sig(:instr_prefix, width: 1) & (lit(243, width: 8, base: "h", signed: false) == sig(:decoder, width: 96)[7..0]))) do
-                assign(
-                  :dec_prefix_group_1_rep,
-                  lit(2, width: 2, base: "h", signed: false),
-                  kind: :nonblocking
-                )
-              end
-            end
-          end
+        elsif_block((sig(:instr_prefix, width: 1) & (lit(242, width: 8, base: "h", signed: false) == sig(:decoder, width: 96)[7..0]))) do
+          assign(
+            :dec_prefix_group_1_rep,
+            lit(1, width: 2, base: "h", signed: false),
+            kind: :nonblocking
+          )
+        end
+        elsif_block((sig(:instr_prefix, width: 1) & (lit(243, width: 8, base: "h", signed: false) == sig(:decoder, width: 96)[7..0]))) do
+          assign(
+            :dec_prefix_group_1_rep,
+            lit(2, width: 2, base: "h", signed: false),
+            kind: :nonblocking
+          )
         end
       end
       else_block do
@@ -476,14 +472,12 @@ class DecodePrefix < RHDL::Component
           lit(0, width: 1, base: "h", signed: false),
           kind: :nonblocking
         )
-        else_block do
-          if_stmt((sig(:instr_prefix, width: 1) & (lit(240, width: 8, base: "h", signed: false) == sig(:decoder, width: 96)[7..0]))) do
-            assign(
-              :prefix_group_1_lock,
-              lit(1, width: 1, base: "h", signed: false),
-              kind: :nonblocking
-            )
-          end
+        elsif_block((sig(:instr_prefix, width: 1) & (lit(240, width: 8, base: "h", signed: false) == sig(:decoder, width: 96)[7..0]))) do
+          assign(
+            :prefix_group_1_lock,
+            lit(1, width: 1, base: "h", signed: false),
+            kind: :nonblocking
+          )
         end
       end
       else_block do
@@ -509,59 +503,47 @@ class DecodePrefix < RHDL::Component
           lit(7, width: 3, base: "h", signed: false),
           kind: :nonblocking
         )
-        else_block do
-          if_stmt((sig(:instr_prefix, width: 1) & (lit(38, width: 8, base: "h", signed: false) == sig(:decoder, width: 96)[7..0]))) do
-            assign(
-              :prefix_group_2,
-              lit(0, width: 3, base: "h", signed: false),
-              kind: :nonblocking
-            )
-            else_block do
-              if_stmt((sig(:instr_prefix, width: 1) & (lit(46, width: 8, base: "h", signed: false) == sig(:decoder, width: 96)[7..0]))) do
-                assign(
-                  :prefix_group_2,
-                  lit(1, width: 3, base: "h", signed: false),
-                  kind: :nonblocking
-                )
-                else_block do
-                  if_stmt((sig(:instr_prefix, width: 1) & (lit(54, width: 8, base: "h", signed: false) == sig(:decoder, width: 96)[7..0]))) do
-                    assign(
-                      :prefix_group_2,
-                      lit(2, width: 3, base: "h", signed: false),
-                      kind: :nonblocking
-                    )
-                    else_block do
-                      if_stmt((sig(:instr_prefix, width: 1) & (lit(62, width: 8, base: "h", signed: false) == sig(:decoder, width: 96)[7..0]))) do
-                        assign(
-                          :prefix_group_2,
-                          lit(3, width: 3, base: "h", signed: false),
-                          kind: :nonblocking
-                        )
-                        else_block do
-                          if_stmt((sig(:instr_prefix, width: 1) & (lit(100, width: 8, base: "h", signed: false) == sig(:decoder, width: 96)[7..0]))) do
-                            assign(
-                              :prefix_group_2,
-                              lit(4, width: 3, base: "h", signed: false),
-                              kind: :nonblocking
-                            )
-                            else_block do
-                              if_stmt((sig(:instr_prefix, width: 1) & (lit(101, width: 8, base: "h", signed: false) == sig(:decoder, width: 96)[7..0]))) do
-                                assign(
-                                  :prefix_group_2,
-                                  lit(5, width: 3, base: "h", signed: false),
-                                  kind: :nonblocking
-                                )
-                              end
-                            end
-                          end
-                        end
-                      end
-                    end
-                  end
-                end
-              end
-            end
-          end
+        elsif_block((sig(:instr_prefix, width: 1) & (lit(38, width: 8, base: "h", signed: false) == sig(:decoder, width: 96)[7..0]))) do
+          assign(
+            :prefix_group_2,
+            lit(0, width: 3, base: "h", signed: false),
+            kind: :nonblocking
+          )
+        end
+        elsif_block((sig(:instr_prefix, width: 1) & (lit(46, width: 8, base: "h", signed: false) == sig(:decoder, width: 96)[7..0]))) do
+          assign(
+            :prefix_group_2,
+            lit(1, width: 3, base: "h", signed: false),
+            kind: :nonblocking
+          )
+        end
+        elsif_block((sig(:instr_prefix, width: 1) & (lit(54, width: 8, base: "h", signed: false) == sig(:decoder, width: 96)[7..0]))) do
+          assign(
+            :prefix_group_2,
+            lit(2, width: 3, base: "h", signed: false),
+            kind: :nonblocking
+          )
+        end
+        elsif_block((sig(:instr_prefix, width: 1) & (lit(62, width: 8, base: "h", signed: false) == sig(:decoder, width: 96)[7..0]))) do
+          assign(
+            :prefix_group_2,
+            lit(3, width: 3, base: "h", signed: false),
+            kind: :nonblocking
+          )
+        end
+        elsif_block((sig(:instr_prefix, width: 1) & (lit(100, width: 8, base: "h", signed: false) == sig(:decoder, width: 96)[7..0]))) do
+          assign(
+            :prefix_group_2,
+            lit(4, width: 3, base: "h", signed: false),
+            kind: :nonblocking
+          )
+        end
+        elsif_block((sig(:instr_prefix, width: 1) & (lit(101, width: 8, base: "h", signed: false) == sig(:decoder, width: 96)[7..0]))) do
+          assign(
+            :prefix_group_2,
+            lit(5, width: 3, base: "h", signed: false),
+            kind: :nonblocking
+          )
         end
       end
       else_block do
@@ -587,14 +569,12 @@ class DecodePrefix < RHDL::Component
           lit(0, width: 1, base: "h", signed: false),
           kind: :nonblocking
         )
-        else_block do
-          if_stmt((sig(:instr_prefix, width: 1) & (lit(102, width: 8, base: "h", signed: false) == sig(:decoder, width: 96)[7..0]))) do
-            assign(
-              :prefix_group_3,
-              lit(1, width: 1, base: "h", signed: false),
-              kind: :nonblocking
-            )
-          end
+        elsif_block((sig(:instr_prefix, width: 1) & (lit(102, width: 8, base: "h", signed: false) == sig(:decoder, width: 96)[7..0]))) do
+          assign(
+            :prefix_group_3,
+            lit(1, width: 1, base: "h", signed: false),
+            kind: :nonblocking
+          )
         end
       end
       else_block do
@@ -620,14 +600,12 @@ class DecodePrefix < RHDL::Component
           lit(0, width: 1, base: "h", signed: false),
           kind: :nonblocking
         )
-        else_block do
-          if_stmt((sig(:instr_prefix, width: 1) & (lit(103, width: 8, base: "h", signed: false) == sig(:decoder, width: 96)[7..0]))) do
-            assign(
-              :prefix_group_4,
-              lit(1, width: 1, base: "h", signed: false),
-              kind: :nonblocking
-            )
-          end
+        elsif_block((sig(:instr_prefix, width: 1) & (lit(103, width: 8, base: "h", signed: false) == sig(:decoder, width: 96)[7..0]))) do
+          assign(
+            :prefix_group_4,
+            lit(1, width: 1, base: "h", signed: false),
+            kind: :nonblocking
+          )
         end
       end
       else_block do
@@ -653,14 +631,12 @@ class DecodePrefix < RHDL::Component
           lit(0, width: 1, base: "h", signed: false),
           kind: :nonblocking
         )
-        else_block do
-          if_stmt((sig(:instr_prefix, width: 1) & (lit(15, width: 8, base: "h", signed: false) == sig(:decoder, width: 96)[7..0]))) do
-            assign(
-              :dec_prefix_2byte,
-              lit(1, width: 1, base: "h", signed: false),
-              kind: :nonblocking
-            )
-          end
+        elsif_block((sig(:instr_prefix, width: 1) & (lit(15, width: 8, base: "h", signed: false) == sig(:decoder, width: 96)[7..0]))) do
+          assign(
+            :dec_prefix_2byte,
+            lit(1, width: 1, base: "h", signed: false),
+            kind: :nonblocking
+          )
         end
       end
       else_block do
@@ -686,17 +662,15 @@ class DecodePrefix < RHDL::Component
           lit(0, width: 4, base: "h", signed: false),
           kind: :nonblocking
         )
-        else_block do
-          if_stmt(sig(:instr_prefix, width: 1)) do
-            assign(
-              :prefix_count,
-              (
-                  lit(1, width: 4, base: "h", signed: false) +
-                  sig(:prefix_count, width: 4)
-              ),
-              kind: :nonblocking
-            )
-          end
+        elsif_block(sig(:instr_prefix, width: 1)) do
+          assign(
+            :prefix_count,
+            (
+                lit(1, width: 4, base: "h", signed: false) +
+                sig(:prefix_count, width: 4)
+            ),
+            kind: :nonblocking
+          )
         end
       end
       else_block do

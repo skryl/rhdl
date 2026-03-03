@@ -249,6 +249,6 @@ RSpec.describe RHDL::Examples::AO486::Tasks::RunTask do
 
     task.send(:process_keyboard_bytes, [65, 13, 127]) # A, Enter, Backspace
 
-    expect(runner.keyboard_bytes).to eq([65, 10, 8])
+    expect(runner.keyboard_bytes).to eq([65, 13, 8])
   end
 end

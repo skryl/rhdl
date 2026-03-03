@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-03-01T19:00:25Z",
+  "generated_at": "2026-03-03T13:48:20Z",
   "status": "success",
   "project": {
     "out_dir": "/Users/skryl/Documents/dev/projects/rhdl/codex-import/examples/ao486/hdl",
@@ -25,7 +25,7 @@
       "check": false,
       "trace_keys": [],
       "trace_cycles": 1024,
-      "keep_temp": false,
+      "keep_temp": true,
       "source_files": [
         "/Users/skryl/Documents/dev/projects/rhdl/codex-import/examples/ao486/reference/rtl/ao486/ao486.v",
         "/Users/skryl/Documents/dev/projects/rhdl/codex-import/examples/ao486/reference/rtl/ao486/exception.v",
@@ -157,12 +157,60 @@
       "exclude_patterns": [],
       "recovery": {
         "summary": {
-          "preserved_count": 12,
+          "preserved_count": 20,
           "lowered_count": 0,
           "nonrecoverable_count": 0,
           "hint_applied_count": 0
         },
         "events": [
+          {
+            "module": "altdpram__W14_WB7",
+            "construct": "for",
+            "status": "preserved",
+            "code": "recovery_preserved"
+          },
+          {
+            "module": "altdpram__W24",
+            "construct": "for",
+            "status": "preserved",
+            "code": "recovery_preserved"
+          },
+          {
+            "module": "altdpram__W2_WB7",
+            "construct": "for",
+            "status": "preserved",
+            "code": "recovery_preserved"
+          },
+          {
+            "module": "altdpram__W3e",
+            "construct": "for",
+            "status": "preserved",
+            "code": "recovery_preserved"
+          },
+          {
+            "module": "altdpram__W4_WB7",
+            "construct": "for",
+            "status": "preserved",
+            "code": "recovery_preserved"
+          },
+          {
+            "module": "altsyncram__Az1",
+            "construct": "for",
+            "status": "preserved",
+            "code": "recovery_preserved"
+          },
+          {
+            "module": "altsyncram__Az1",
+            "construct": "for",
+            "status": "preserved",
+            "code": "recovery_preserved"
+          },
+          {
+            "module": "altsyncram__Az1",
+            "construct": "for",
+            "status": "preserved",
+            "code": "recovery_preserved"
+          },
           {
             "module": "avalon_mem",
             "construct": "case",
@@ -262,15 +310,21 @@
     ]
   },
   "summary": {
-    "total_modules": 48,
-    "converted_modules": 48,
+    "total_modules": 54,
+    "converted_modules": 54,
     "failed_modules": 0,
-    "blackboxes_generated": 2,
+    "blackboxes_generated": 1,
     "checks_run": 0,
     "checks_failed": 0
   },
   "modules": {
     "converted": [
+      "altdpram__W14_WB7",
+      "altdpram__W24",
+      "altdpram__W2_WB7",
+      "altdpram__W3e",
+      "altdpram__W4_WB7",
+      "altsyncram__Az1",
       "ao486",
       "avalon_mem",
       "condition",
@@ -323,17 +377,64 @@
     "failed": []
   },
   "blackboxes_generated": [
-    "altdpram",
     "cpu_export"
   ],
   "recovery": {
     "summary": {
-      "preserved_count": 12,
+      "preserved_count": 20,
       "lowered_count": 0,
       "nonrecoverable_count": 0,
       "hint_applied_count": 0
     },
     "events": [
+      {
+        "module": "altdpram__W14_WB7",
+        "construct": "for",
+        "status": "preserved",
+        "code": "recovery_preserved"
+      },
+      {
+        "module": "altdpram__W24",
+        "construct": "for",
+        "status": "preserved",
+        "code": "recovery_preserved"
+      },
+      {
+        "module": "altdpram__W2_WB7",
+        "construct": "for",
+        "status": "preserved",
+        "code": "recovery_preserved"
+      },
+      {
+        "module": "altdpram__W3e",
+        "construct": "for",
+        "status": "preserved",
+        "code": "recovery_preserved"
+      },
+      {
+        "module": "altdpram__W4_WB7",
+        "construct": "for",
+        "status": "preserved",
+        "code": "recovery_preserved"
+      },
+      {
+        "module": "altsyncram__Az1",
+        "construct": "for",
+        "status": "preserved",
+        "code": "recovery_preserved"
+      },
+      {
+        "module": "altsyncram__Az1",
+        "construct": "for",
+        "status": "preserved",
+        "code": "recovery_preserved"
+      },
+      {
+        "module": "altsyncram__Az1",
+        "construct": "for",
+        "status": "preserved",
+        "code": "recovery_preserved"
+      },
       {
         "module": "avalon_mem",
         "construct": "case",

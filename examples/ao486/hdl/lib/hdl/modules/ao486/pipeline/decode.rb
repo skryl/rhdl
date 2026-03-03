@@ -292,14 +292,12 @@ class Decode < RHDL::Component
           lit(0, width: 1, base: "h", signed: false),
           kind: :nonblocking
         )
-        else_block do
-          if_stmt((sig(:gp_fault, width: 1) & sig(:gp_fault_last, width: 1))) do
-            assign(
-              :dec_gp_fault,
-              lit(1, width: 1, base: "h", signed: false),
-              kind: :nonblocking
-            )
-          end
+        elsif_block((sig(:gp_fault, width: 1) & sig(:gp_fault_last, width: 1))) do
+          assign(
+            :dec_gp_fault,
+            lit(1, width: 1, base: "h", signed: false),
+            kind: :nonblocking
+          )
         end
       end
       else_block do
@@ -325,14 +323,12 @@ class Decode < RHDL::Component
           lit(0, width: 1, base: "h", signed: false),
           kind: :nonblocking
         )
-        else_block do
-          if_stmt(sig(:dec_exception_ud, width: 1)) do
-            assign(
-              :dec_ud_fault,
-              lit(1, width: 1, base: "h", signed: false),
-              kind: :nonblocking
-            )
-          end
+        elsif_block(sig(:dec_exception_ud, width: 1)) do
+          assign(
+            :dec_ud_fault,
+            lit(1, width: 1, base: "h", signed: false),
+            kind: :nonblocking
+          )
         end
       end
       else_block do
@@ -374,14 +370,12 @@ class Decode < RHDL::Component
           lit(0, width: 1, base: "h", signed: false),
           kind: :nonblocking
         )
-        else_block do
-          if_stmt((sig(:pf_fault, width: 1) & sig(:pf_fault_last, width: 1))) do
-            assign(
-              :dec_pf_fault,
-              lit(1, width: 1, base: "h", signed: false),
-              kind: :nonblocking
-            )
-          end
+        elsif_block((sig(:pf_fault, width: 1) & sig(:pf_fault_last, width: 1))) do
+          assign(
+            :dec_pf_fault,
+            lit(1, width: 1, base: "h", signed: false),
+            kind: :nonblocking
+          )
         end
       end
       else_block do
@@ -407,14 +401,12 @@ class Decode < RHDL::Component
           sig(:prefetch_eip, width: 32),
           kind: :nonblocking
         )
-        else_block do
-          if_stmt(sig(:dec_ready, width: 1)) do
-            assign(
-              :eip,
-              sig(:dec_eip, width: 32),
-              kind: :nonblocking
-            )
-          end
+        elsif_block(sig(:dec_ready, width: 1)) do
+          assign(
+            :eip,
+            sig(:dec_eip, width: 32),
+            kind: :nonblocking
+          )
         end
       end
       else_block do

@@ -204,6 +204,72 @@ RSpec.describe RHDL::Import do
       end
     end
 
+    it "injects frontend blackbox stubs for known primitive modules under blackbox_stubs policy" do
+      Dir.mktmpdir do |dir|
+        out_dir = File.join(dir, "out")
+        source_file = File.join(dir, "top.v")
+        File.write(
+          source_file,
+          <<~VERILOG
+            module top;
+              altdpram #(.width(8), .widthad(4)) u_mem (
+                .data(8'h00),
+                .rdaddress(4'h0),
+                .wraddress(4'h0),
+                .wren(1'b0),
+                .q()
+              );
+            endmodule
+          VERILOG
+        )
+
+        captured_frontend_input = nil
+
+        frontend_adapter = lambda do |resolved_input:, **_kwargs|
+          captured_frontend_input = resolved_input
+          {
+            payload: {
+              sources: [{ id: 1, path: source_file }],
+              modules: [
+                {
+                  name: "top",
+                  source_id: 1,
+                  span: { line: 1, column: 1, end_line: 1, end_column: 3 }
+                }
+              ]
+            },
+            metadata: {}
+          }
+        end
+
+        result = described_class.project(
+          out: out_dir,
+          src: [dir],
+          resolved_input: {
+            source_files: [source_file],
+            include_dirs: [],
+            defines: []
+          },
+          missing_modules: "blackbox_stubs",
+          frontend_adapter: frontend_adapter,
+          keep_temp: true,
+          no_check: true
+        )
+
+        expect(result).to be_success
+        frontend_sources = Array(captured_frontend_input[:source_files]).map(&:to_s)
+        stub_path = frontend_sources.find { |path| path.end_with?("frontend_blackbox_stubs.v") }
+        expect(stub_path).not_to be_nil
+        expect(File.exist?(stub_path)).to be(true)
+        stub_source = File.read(stub_path)
+        expect(stub_source).to include("module altdpram #(")
+        expect(stub_source).to include("parameter width = 1")
+        expect(stub_source).to include("reg [SAFE_WIDTH-1:0] mem")
+        expect(stub_source).to include("assign q = mem[rd_addr];")
+        expect(stub_source).to include("module altsyncram #(")
+      end
+    end
+
     it "expands ao486 sibling source roots for ao486_program_parity input resolution" do
       Dir.mktmpdir do |dir|
         out_dir = File.join(dir, "out")

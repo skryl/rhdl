@@ -86,6 +86,30 @@ RSpec.describe "IR simulator combinational process lowering" do
     )
   end
 
+  let(:imported_empty_sensitivity_ir) do
+    ir::ModuleDef.new(
+      name: "imported_empty_sensitivity",
+      ports: [ir::Port.new(name: :y, direction: :out, width: 1)],
+      nets: [],
+      regs: [],
+      assigns: [],
+      declaration_kinds: { y: :wire },
+      processes: [
+        ir::Process.new(
+          name: :comb_imported,
+          clocked: false,
+          sensitivity_list: [],
+          statements: [
+            ir::SeqAssign.new(
+              target: :y,
+              expr: ir::Literal.new(value: 1, width: 1)
+            )
+          ]
+        )
+      ]
+    )
+  end
+
   let(:ordered_blocking_ir) do
     ir::ModuleDef.new(
       name: "ordered_blocking",
@@ -212,6 +236,23 @@ RSpec.describe "IR simulator combinational process lowering" do
 
     expect(payload.fetch("assigns")).to eq([])
     expect(payload.fetch("processes")).to eq([])
+  end
+
+  it "lowers empty-sensitivity combinational processes for imported modules into assigns" do
+    json = RHDL::Codegen::IR::IRToJson.convert(imported_empty_sensitivity_ir)
+    payload = JSON.parse(json)
+
+    expect(payload.fetch("processes")).to eq([])
+    expect(payload.fetch("assigns")).to eq([
+      {
+        "target" => "y",
+        "expr" => { "type" => "literal", "value" => 1, "width" => 1 }
+      }
+    ])
+
+    sim = RHDL::Codegen::IR::RubyIrSim.new(json)
+    sim.evaluate
+    expect(sim.peek("y")).to eq(1)
   end
 
   it "preserves blocking assignment ordering for repeated targets when flattening combinational logic" do

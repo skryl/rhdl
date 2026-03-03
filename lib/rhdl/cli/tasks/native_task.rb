@@ -171,6 +171,7 @@ module RHDL
           end
 
           FileUtils.cp(src_path, dst_path)
+          sign_fiddle_library_if_needed!(ext, dst_path)
 
           puts "  Built: #{dst_path}"
         end
@@ -233,6 +234,19 @@ module RHDL
           puts "    Y:  0x#{cpu.y.to_s(16).upcase}"
           puts "    SP: 0x#{cpu.sp.to_s(16).upcase}"
           puts "    P:  0x#{cpu.p.to_s(16).upcase}"
+        end
+
+        def sign_fiddle_library_if_needed!(ext, dst_path)
+          return unless ext[:artifact] == :fiddle_lib
+          return unless host_os.match?(/darwin/)
+          return unless command_available?('codesign')
+
+          unless system('codesign', '--force', '--sign', '-', dst_path, out: File::NULL, err: File::NULL)
+            puts "  Warning: codesign failed for #{dst_path}; dlopen may fail on macOS."
+            return
+          end
+
+          puts "  Signed: #{dst_path}"
         end
 
         def host_os

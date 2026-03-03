@@ -77,7 +77,6 @@ pub struct Ao486Extension {
 
     pending_read_words: u32,
     pending_read_address: u32,
-    pending_read_skip_first: bool,
     io_read_done_pending: bool,
     io_write_done_pending: bool,
     cycle_counter: u32,
@@ -143,7 +142,6 @@ impl Ao486Extension {
 
             pending_read_words: 0,
             pending_read_address: 0,
-            pending_read_skip_first: false,
             io_read_done_pending: false,
             io_write_done_pending: false,
             cycle_counter: 0,
@@ -236,7 +234,6 @@ impl Ao486Extension {
     pub fn reset_runtime_state(&mut self) {
         self.pending_read_words = 0;
         self.pending_read_address = 0;
-        self.pending_read_skip_first = false;
         self.io_read_done_pending = false;
         self.io_write_done_pending = false;
         self.cycle_counter = 0;
@@ -291,8 +288,6 @@ impl Ao486Extension {
             self.drive_cycle_inputs(core);
             core.evaluate();
 
-            self.tick_rising_edge(core);
-
             let avm_wait = self.signal(core, self.avm_waitrequest_idx) != 0;
             let avm_read = self.signal(core, self.avm_read_idx) & 1;
             let avm_write = self.signal(core, self.avm_write_idx) & 1;
@@ -305,11 +300,10 @@ impl Ao486Extension {
             let avm_burstcount = (self.signal(core, self.avm_burstcount_idx) & 0xF) as u32;
 
             if self.pending_read_words == 0 && avm_read != 0 && !avm_wait {
-                let address = (avm_address << 2).wrapping_add(0);
+                let address = avm_address.wrapping_shl(2);
                 let burst_words = if avm_burstcount == 0 { 1 } else { avm_burstcount };
-                self.pending_read_words = burst_words.saturating_add(1);
-                self.pending_read_address = address.wrapping_sub(WORD_BYTES as u32);
-                self.pending_read_skip_first = true;
+                self.pending_read_words = burst_words;
+                self.pending_read_address = address;
                 self.event_lines.push(format!(
                     "EV RD {} {:08x} {:01x} {:01x}",
                     self.cycle_counter, address, avm_burstcount, avm_byteenable
@@ -317,7 +311,7 @@ impl Ao486Extension {
             }
 
             if avm_write != 0 && !avm_wait {
-                let address = (avm_address << 2).wrapping_add(0);
+                let address = avm_address.wrapping_shl(2);
                 self.write_u32(address, avm_writedata, avm_byteenable);
                 self.event_lines.push(format!(
                     "EV WR {} {:08x} {:08x} {:01x}",
@@ -344,6 +338,7 @@ impl Ao486Extension {
                 ));
             }
 
+            self.tick_rising_edge(core);
             self.set_signal(core, self.clk_idx, 0);
             core.evaluate();
             self.cycle_counter = self.cycle_counter.wrapping_add(1);
@@ -373,10 +368,10 @@ impl Ao486Extension {
     }
 
     fn apply_platform_inputs(&self, core: &mut CoreSimulator) {
-        let rst_n = if self.cycle_counter >= 4 { 1 } else { 0 };
+        let rst_n = if self.cycle_counter < 3 { 0 } else { 1 };
         self.set_signal(core, self.rst_n_idx, rst_n);
         self.set_signal(core, self.a20_enable_idx, 1);
-        self.set_signal(core, self.cache_disable_idx, 1);
+        self.set_signal(core, self.cache_disable_idx, 0);
         self.set_signal(core, self.interrupt_do_idx, 0);
         self.set_signal(core, self.interrupt_vector_idx, 0);
         self.set_signal(core, self.avm_waitrequest_idx, 0);
@@ -410,14 +405,10 @@ impl Ao486Extension {
         let value = self.read_u32(address);
         self.set_signal(core, self.avm_readdata_idx, u64::from(value));
         self.set_signal(core, self.avm_readdatavalid_idx, 1);
-        if self.pending_read_skip_first {
-            self.pending_read_skip_first = false;
-        } else {
-            self.event_lines.push(format!(
-                "EV IF {} {:08x} {:08x}",
-                self.cycle_counter, address, value
-            ));
-        }
+        self.event_lines.push(format!(
+            "EV IF {} {:08x} {:08x}",
+            self.cycle_counter, address, value
+        ));
         self.pending_read_address = self.pending_read_address.wrapping_add(WORD_BYTES as u32);
         self.pending_read_words = self.pending_read_words.saturating_sub(1);
     }

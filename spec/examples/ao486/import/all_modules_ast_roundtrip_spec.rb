@@ -6,7 +6,7 @@ require "spec_helper"
 require "tmpdir"
 
 RSpec.describe "ao486 all-module AST roundtrip", :slow, timeout: 600 do
-  SOURCE_ROOT = File.expand_path("../../../../examples/ao486/reference/rtl", __dir__)
+  AST_SOURCE_ROOT = File.expand_path("../../../../examples/ao486/reference/rtl", __dir__)
   PACKAGE_DECLARATION_REGEX = /^\s*package\b/.freeze
   AST_FRONTEND_TOP = "system"
   AST_WARNING_FLAGS = %w[
@@ -121,6 +121,12 @@ RSpec.describe "ao486 all-module AST roundtrip", :slow, timeout: 600 do
             .reject(&:empty?)
             .sort,
           connections: Array(value_for(hash, :connections))
+            .map { |connection| canonical_value(connection) }
+            .select do |connection|
+              !value_for(connection, :signal).nil? ||
+                !value_for(connection, :expression).nil? ||
+                !value_for(connection, :expr).nil?
+            end
             .map { |connection| value_for(connection, :port).to_s }
             .reject(&:empty?)
             .sort
@@ -292,19 +298,19 @@ RSpec.describe "ao486 all-module AST roundtrip", :slow, timeout: 600 do
   end
 
   it "imports all ao486 RTL modules and preserves per-module canonical AST after re-export" do
-    skip "ao486 reference RTL is unavailable: #{SOURCE_ROOT}" unless Dir.exist?(SOURCE_ROOT)
+    skip "ao486 reference RTL is unavailable: #{AST_SOURCE_ROOT}" unless Dir.exist?(AST_SOURCE_ROOT)
     skip "Verilator not available" unless HdlToolchain.verilator_available?
 
     Dir.mktmpdir do |dir|
       out_dir = File.join(dir, "ao486_roundtrip_import")
 
       resolved_input = RHDL::Import::InputResolver.resolve(
-        src: [SOURCE_ROOT],
+        src: [AST_SOURCE_ROOT],
         dependency_resolution: "none",
         compile_unit_filter: "modules_only"
       )
       module_source_files = Array(resolved_input[:source_files]).map(&:to_s).reject(&:empty?)
-      package_files = package_compile_units(root: SOURCE_ROOT)
+      package_files = package_compile_units(root: AST_SOURCE_ROOT)
       source_files = (package_files + module_source_files).uniq
       include_dirs = Array(resolved_input[:include_dirs]).map(&:to_s).reject(&:empty?)
       defines = Array(resolved_input[:defines]).map(&:to_s).reject(&:empty?)
@@ -338,7 +344,7 @@ RSpec.describe "ao486 all-module AST roundtrip", :slow, timeout: 600 do
 
       result = RHDL::Import.project(
         out: out_dir,
-        src: [SOURCE_ROOT],
+        src: [AST_SOURCE_ROOT],
         resolved_input: resolved_input,
         dependency_resolution: "none",
         compile_unit_filter: "modules_only",

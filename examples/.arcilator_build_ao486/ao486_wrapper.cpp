@@ -33,26 +33,26 @@ static const SignalInfo SIGNALS[] = {
   {"io_read_data", 24, 32, 1},
   {"io_read_done", 28, 1, 1},
   {"io_write_done", 29, 1, 1},
-  {"interrupt_done", 3545, 1, 0},
-  {"avm_address", 3548, 30, 0},
-  {"avm_writedata", 3552, 32, 0},
-  {"avm_byteenable", 3556, 4, 0},
-  {"avm_burstcount", 3557, 4, 0},
-  {"avm_write", 3558, 1, 0},
-  {"avm_read", 3559, 1, 0},
-  {"dma_readdata", 3560, 16, 0},
-  {"dma_readdatavalid", 3562, 1, 0},
-  {"dma_waitrequest", 3563, 1, 0},
-  {"io_read_do", 3564, 1, 0},
-  {"io_read_address", 3566, 16, 0},
-  {"io_read_length", 3568, 3, 0},
-  {"io_write_do", 3569, 1, 0},
-  {"io_write_address", 3570, 16, 0},
-  {"io_write_length", 3572, 3, 0},
-  {"io_write_data", 3576, 32, 0}
+  {"interrupt_done", 3577, 1, 0},
+  {"avm_address", 3580, 30, 0},
+  {"avm_writedata", 3584, 32, 0},
+  {"avm_byteenable", 3588, 4, 0},
+  {"avm_burstcount", 3589, 4, 0},
+  {"avm_write", 3590, 1, 0},
+  {"avm_read", 3591, 1, 0},
+  {"dma_readdata", 3592, 16, 0},
+  {"dma_readdatavalid", 3594, 1, 0},
+  {"dma_waitrequest", 3595, 1, 0},
+  {"io_read_do", 3596, 1, 0},
+  {"io_read_address", 3598, 16, 0},
+  {"io_read_length", 3600, 3, 0},
+  {"io_write_do", 3601, 1, 0},
+  {"io_write_address", 3602, 16, 0},
+  {"io_write_length", 3604, 3, 0},
+  {"io_write_data", 3608, 32, 0}
 };
 static const size_t SIGNAL_COUNT = sizeof(SIGNALS) / sizeof(SIGNALS[0]);
-static const uint32_t STATE_SIZE = 3580;
+static const uint32_t STATE_SIZE = 3612;
 
 struct SimContext {
   uint8_t state[STATE_SIZE];
@@ -264,7 +264,7 @@ extern "C" {
     const SignalInfo* sig_io_write_do = find_signal("io_write_do");
 
     write_signal_if_input(ctx, sig_a20_enable, 1u);
-    write_signal_if_input(ctx, sig_cache_disable, 1u);
+    write_signal_if_input(ctx, sig_cache_disable, 0u);
     write_signal_if_input(ctx, sig_interrupt_do, 0u);
     write_signal_if_input(ctx, sig_interrupt_vector, 0u);
     write_signal_if_input(ctx, sig_avm_waitrequest, 0u);

@@ -666,7 +666,7 @@ class WriteCommands < RHDL::Component
   # Signals
 
   signal :__VdfgBinToOneHot_Pre_h3ef411c2_0_0, width: 7
-  signal :__VdfgBinToOneHot_Tab_h3ef411c2_0_0, width: 116
+  signal :__VdfgBinToOneHot_Tab_h3ef411c2_0_0, width: 128
   signal :__VdfgRegularize_hcdb8a1dc_0_0
   signal :__VdfgRegularize_hcdb8a1dc_0_1
   signal :__VdfgRegularize_hcdb8a1dc_0_10
@@ -7404,14 +7404,12 @@ class WriteCommands < RHDL::Component
           sig(:wr_task_switch_linear, width: 32),
           kind: :nonblocking
         )
-        else_block do
-          if_stmt(sig(:wr_ready, width: 1)) do
-            assign(
-              :wr_task_switch_linear_reg,
-              sig(:wr_task_switch_linear_next, width: 32),
-              kind: :nonblocking
-            )
-          end
+        elsif_block(sig(:wr_ready, width: 1)) do
+          assign(
+            :wr_task_switch_linear_reg,
+            sig(:wr_task_switch_linear_next, width: 32),
+            kind: :nonblocking
+          )
         end
       end
       else_block do

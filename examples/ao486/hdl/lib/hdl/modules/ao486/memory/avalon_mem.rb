@@ -762,61 +762,53 @@ class AvalonMem < RHDL::Component
                 ),
                 kind: :nonblocking
               )
-              else_block do
-                if_stmt(sig(:readburst_do, width: 1)) do
-                  assign(
-                    :state,
-                    lit(2, width: 3, base: "h", signed: false),
-                    kind: :nonblocking
-                  )
-                  assign(
-                    :counter,
-                    (
-                        lit(0, width: 1, base: "d", signed: false).concat(
-                          sig(:readburst_dword_length, width: 2)
-                        ) -
-                        lit(1, width: 3, base: "h", signed: false)
-                    ),
-                    kind: :nonblocking
-                  )
-                  assign(
-                    :save_readburst,
-                    sig(:readburst_dword_length, width: 2),
-                    kind: :nonblocking
-                  )
-                  else_block do
-                    if_stmt(sig(:readcode_do, width: 1)) do
-                      assign(
-                        :state,
-                        lit(3, width: 3, base: "h", signed: false),
-                        kind: :nonblocking
-                      )
-                      assign(
-                        :counter,
-                        lit(7, width: 3, base: "h", signed: false),
-                        kind: :nonblocking
-                      )
-                      else_block do
-                        if_stmt(sig(:dma_write, width: 1)) do
-                          assign(
-                            :state,
-                            lit(4, width: 3, base: "h", signed: false),
-                            kind: :nonblocking
-                          )
-                          else_block do
-                            if_stmt(sig(:dma_read, width: 1)) do
-                              assign(
-                                :state,
-                                lit(5, width: 3, base: "h", signed: false),
-                                kind: :nonblocking
-                              )
-                            end
-                          end
-                        end
-                      end
-                    end
-                  end
-                end
+              elsif_block(sig(:readburst_do, width: 1)) do
+                assign(
+                  :state,
+                  lit(2, width: 3, base: "h", signed: false),
+                  kind: :nonblocking
+                )
+                assign(
+                  :counter,
+                  (
+                      lit(0, width: 1, base: "d", signed: false).concat(
+                        sig(:readburst_dword_length, width: 2)
+                      ) -
+                      lit(1, width: 3, base: "h", signed: false)
+                  ),
+                  kind: :nonblocking
+                )
+                assign(
+                  :save_readburst,
+                  sig(:readburst_dword_length, width: 2),
+                  kind: :nonblocking
+                )
+              end
+              elsif_block(sig(:readcode_do, width: 1)) do
+                assign(
+                  :state,
+                  lit(3, width: 3, base: "h", signed: false),
+                  kind: :nonblocking
+                )
+                assign(
+                  :counter,
+                  lit(7, width: 3, base: "h", signed: false),
+                  kind: :nonblocking
+                )
+              end
+              elsif_block(sig(:dma_write, width: 1)) do
+                assign(
+                  :state,
+                  lit(4, width: 3, base: "h", signed: false),
+                  kind: :nonblocking
+                )
+              end
+              elsif_block(sig(:dma_read, width: 1)) do
+                assign(
+                  :state,
+                  lit(5, width: 3, base: "h", signed: false),
+                  kind: :nonblocking
+                )
               end
             end
           end

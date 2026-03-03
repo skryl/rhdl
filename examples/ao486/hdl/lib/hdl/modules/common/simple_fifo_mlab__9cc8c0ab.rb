@@ -39,7 +39,7 @@ class SimpleFifoMlabW24WB4 < RHDL::Component
 
   # Signals
 
-  signal :mem
+  signal :mem, width: 576
   signal :rd_index, width: 4
   signal :wr_index, width: 4
 
@@ -95,17 +95,15 @@ class SimpleFifoMlabW24WB4 < RHDL::Component
           lit(0, width: 4, base: "h", signed: false),
           kind: :nonblocking
         )
-        else_block do
-          if_stmt((sig(:rdreq, width: 1) & (~sig(:empty, width: 1)))) do
-            assign(
-              :rd_index,
-              (
-                  lit(1, width: 4, base: "h", signed: false) +
-                  sig(:rd_index, width: 4)
-              ),
-              kind: :nonblocking
-            )
-          end
+        elsif_block((sig(:rdreq, width: 1) & (~sig(:empty, width: 1)))) do
+          assign(
+            :rd_index,
+            (
+                lit(1, width: 4, base: "h", signed: false) +
+                sig(:rd_index, width: 4)
+            ),
+            kind: :nonblocking
+          )
         end
       end
       else_block do
@@ -131,17 +129,15 @@ class SimpleFifoMlabW24WB4 < RHDL::Component
           lit(0, width: 4, base: "h", signed: false),
           kind: :nonblocking
         )
-        else_block do
-          if_stmt((sig(:wrreq, width: 1) & ((~sig(:full, width: 1)) | sig(:rdreq, width: 1)))) do
-            assign(
-              :wr_index,
-              (
-                  lit(1, width: 4, base: "h", signed: false) +
-                  sig(:wr_index, width: 4)
-              ),
-              kind: :nonblocking
-            )
-          end
+        elsif_block((sig(:wrreq, width: 1) & ((~sig(:full, width: 1)) | sig(:rdreq, width: 1)))) do
+          assign(
+            :wr_index,
+            (
+                lit(1, width: 4, base: "h", signed: false) +
+                sig(:wr_index, width: 4)
+            ),
+            kind: :nonblocking
+          )
         end
       end
       else_block do
@@ -167,23 +163,19 @@ class SimpleFifoMlabW24WB4 < RHDL::Component
           lit(0, width: 1, base: "h", signed: false),
           kind: :nonblocking
         )
-        else_block do
-          if_stmt(((sig(:rdreq, width: 1) & (~sig(:wrreq, width: 1))) & sig(:full, width: 1))) do
-            assign(
-              :full,
-              lit(0, width: 1, base: "h", signed: false),
-              kind: :nonblocking
-            )
-            else_block do
-              if_stmt(((((~sig(:rdreq, width: 1)) & sig(:wrreq, width: 1)) & (~sig(:full, width: 1))) & (lit(15, width: 4, base: "h", signed: false) == sig(:usedw, width: 4)))) do
-                assign(
-                  :full,
-                  lit(1, width: 1, base: "h", signed: false),
-                  kind: :nonblocking
-                )
-              end
-            end
-          end
+        elsif_block(((sig(:rdreq, width: 1) & (~sig(:wrreq, width: 1))) & sig(:full, width: 1))) do
+          assign(
+            :full,
+            lit(0, width: 1, base: "h", signed: false),
+            kind: :nonblocking
+          )
+        end
+        elsif_block(((((~sig(:rdreq, width: 1)) & sig(:wrreq, width: 1)) & (~sig(:full, width: 1))) & (lit(15, width: 4, base: "h", signed: false) == sig(:usedw, width: 4)))) do
+          assign(
+            :full,
+            lit(1, width: 1, base: "h", signed: false),
+            kind: :nonblocking
+          )
         end
       end
       else_block do
@@ -209,38 +201,32 @@ class SimpleFifoMlabW24WB4 < RHDL::Component
           lit(0, width: 4, base: "h", signed: false),
           kind: :nonblocking
         )
-        else_block do
-          if_stmt(((sig(:rdreq, width: 1) & (~sig(:wrreq, width: 1))) & (~sig(:empty, width: 1)))) do
-            assign(
-              :usedw,
-              (
-                  sig(:usedw, width: 4) -
-                  lit(1, width: 4, base: "h", signed: false)
-              ),
-              kind: :nonblocking
-            )
-            else_block do
-              if_stmt((((~sig(:rdreq, width: 1)) & sig(:wrreq, width: 1)) & (~sig(:full, width: 1)))) do
-                assign(
-                  :usedw,
-                  (
-                      lit(1, width: 4, base: "h", signed: false) +
-                      sig(:usedw, width: 4)
-                  ),
-                  kind: :nonblocking
-                )
-                else_block do
-                  if_stmt(((sig(:rdreq, width: 1) & sig(:wrreq, width: 1)) & sig(:empty, width: 1))) do
-                    assign(
-                      :usedw,
-                      lit(1, width: 4, base: "h", signed: false),
-                      kind: :nonblocking
-                    )
-                  end
-                end
-              end
-            end
-          end
+        elsif_block(((sig(:rdreq, width: 1) & (~sig(:wrreq, width: 1))) & (~sig(:empty, width: 1)))) do
+          assign(
+            :usedw,
+            (
+                sig(:usedw, width: 4) -
+                lit(1, width: 4, base: "h", signed: false)
+            ),
+            kind: :nonblocking
+          )
+        end
+        elsif_block((((~sig(:rdreq, width: 1)) & sig(:wrreq, width: 1)) & (~sig(:full, width: 1)))) do
+          assign(
+            :usedw,
+            (
+                lit(1, width: 4, base: "h", signed: false) +
+                sig(:usedw, width: 4)
+            ),
+            kind: :nonblocking
+          )
+        end
+        elsif_block(((sig(:rdreq, width: 1) & sig(:wrreq, width: 1)) & sig(:empty, width: 1))) do
+          assign(
+            :usedw,
+            lit(1, width: 4, base: "h", signed: false),
+            kind: :nonblocking
+          )
         end
       end
       else_block do
@@ -255,6 +241,21 @@ class SimpleFifoMlabW24WB4 < RHDL::Component
 
   # Instances
 
-  instance :altdpram_component, "altdpram"
+  instance :altdpram_component, "altdpram__W24",
+    ports: {
+      inclock: :clk,
+      outclock: :clk,
+      rdaddress: :rd_index,
+      wraddress: :wr_index,
+      wren: (sig(:wrreq, width: 1) & ((~sig(:full, width: 1)) | sig(:rdreq, width: 1))),
+      aclr: lit(0, width: 1, base: "h", signed: false),
+      byteena: lit(1, width: 1, base: "h", signed: false),
+      inclocken: lit(1, width: 1, base: "h", signed: false),
+      outclocken: lit(1, width: 1, base: "h", signed: false),
+      rdaddressstall: lit(0, width: 1, base: "h", signed: false),
+      rden: lit(1, width: 1, base: "h", signed: false),
+      sclr: lit(0, width: 1, base: "h", signed: false),
+      wraddressstall: lit(0, width: 1, base: "h", signed: false)
+    }
 
 end

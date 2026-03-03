@@ -22,6 +22,7 @@ module RHDL
         slug = project_slug.to_s
         normalized_modules = normalize_modules(modules)
         source_root = infer_source_root(source_files: source_files, source_roots: source_roots)
+        expanded_source_files = expand_with_include_files(source_files: source_files, source_root: source_root)
         module_relpaths = build_module_relpaths(normalized_modules, source_root: source_root)
 
         module_files = write_module_files(
@@ -41,17 +42,17 @@ module RHDL
           modules: normalized_modules,
           module_relpaths: module_relpaths
         )
-        vendor_dir = copy_source_files(out_dir: out_dir, source_files: source_files, source_root: source_root)
+        vendor_dir = copy_source_files(out_dir: out_dir, source_files: expanded_source_files, source_root: source_root)
         removed_vendor_files = prune_stale_vendor_files(
           vendor_dir: vendor_dir,
-          source_files: source_files,
+          source_files: expanded_source_files,
           source_root: source_root
         )
         config_file = write_config_file(
           out_dir: out_dir,
           slug: slug,
           modules: normalized_modules,
-          source_files: source_files,
+          source_files: expanded_source_files,
           source_root: source_root
         )
 
@@ -149,6 +150,78 @@ module RHDL
         end
 
         vendor_dir
+      end
+
+      INCLUDE_DIRECTIVE = /^\s*`include\s+"([^"]+)"/.freeze
+
+      def expand_with_include_files(source_files:, source_root:)
+        root = source_root.to_s.empty? ? nil : File.expand_path(source_root.to_s)
+        queue = Array(source_files)
+          .map { |path| File.expand_path(path.to_s) }
+          .select { |path| File.file?(path) }
+        seen = Set.new
+        expanded = []
+
+        until queue.empty?
+          path = queue.shift
+          next if seen.include?(path)
+
+          seen << path
+          expanded << path
+          include_paths_for(path: path, source_root: root).each do |include_path|
+            next unless File.file?(include_path)
+            next if seen.include?(include_path)
+
+            queue << include_path
+          end
+        end
+
+        expanded.uniq.sort
+      end
+
+      def include_paths_for(path:, source_root:)
+        includes = []
+        File.foreach(path) do |line|
+          match = INCLUDE_DIRECTIVE.match(line.to_s)
+          next if match.nil?
+
+          include_name = match[1].to_s.strip
+          next if include_name.empty?
+
+          resolved = resolve_include_path(path: path, include_name: include_name, source_root: source_root)
+          includes << resolved if resolved
+        end
+        includes
+      rescue StandardError
+        []
+      end
+
+      def resolve_include_path(path:, include_name:, source_root:)
+        search_dirs = include_search_dirs(path: path, source_root: source_root)
+        search_dirs.each do |dir|
+          candidate = File.expand_path(include_name, dir)
+          return candidate if File.file?(candidate)
+        end
+        nil
+      end
+
+      def include_search_dirs(path:, source_root:)
+        file_dir = File.dirname(File.expand_path(path))
+        dirs = [file_dir]
+        root = source_root.to_s.empty? ? nil : File.expand_path(source_root)
+        return dirs if root.nil?
+
+        current = file_dir
+        while current.start_with?(root)
+          dirs << current
+          break if current == root
+
+          parent = File.dirname(current)
+          break if parent == current
+          current = parent
+        end
+        dirs << root
+        dirs.uniq
       end
 
       def prune_stale_vendor_files(vendor_dir:, source_files:, source_root:)

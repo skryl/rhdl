@@ -397,44 +397,36 @@ class WriteDebug < RHDL::Component
           sig(:wr_debug_read_reg, width: 4),
           kind: :nonblocking
         )
-        else_block do
-          if_stmt(sig(:wr_debug_trap_clear, width: 1)) do
-            assign(
-              :wr_debug_read_reg,
-              lit(0, width: 4, base: "h", signed: false),
-              kind: :nonblocking
-            )
-            else_block do
-              if_stmt((sig(:wr_finished, width: 1) & sig(:w_load, width: 1))) do
-                assign(
-                  :wr_debug_read_reg,
-                  sig(:wr_debug_read_current, width: 4),
-                  kind: :nonblocking
-                )
-                else_block do
-                  if_stmt((sig(:wr_finished, width: 1) & (~sig(:w_load, width: 1)))) do
-                    assign(
-                      :wr_debug_read_reg,
-                      lit(0, width: 4, base: "h", signed: false),
-                      kind: :nonblocking
-                    )
-                    else_block do
-                      if_stmt(sig(:w_load, width: 1)) do
-                        assign(
-                          :wr_debug_read_reg,
-                          (
-                              sig(:wr_debug_read_reg, width: 4) |
-                              sig(:wr_debug_read_current, width: 4)
-                          ),
-                          kind: :nonblocking
-                        )
-                      end
-                    end
-                  end
-                end
-              end
-            end
-          end
+        elsif_block(sig(:wr_debug_trap_clear, width: 1)) do
+          assign(
+            :wr_debug_read_reg,
+            lit(0, width: 4, base: "h", signed: false),
+            kind: :nonblocking
+          )
+        end
+        elsif_block((sig(:wr_finished, width: 1) & sig(:w_load, width: 1))) do
+          assign(
+            :wr_debug_read_reg,
+            sig(:wr_debug_read_current, width: 4),
+            kind: :nonblocking
+          )
+        end
+        elsif_block((sig(:wr_finished, width: 1) & (~sig(:w_load, width: 1)))) do
+          assign(
+            :wr_debug_read_reg,
+            lit(0, width: 4, base: "h", signed: false),
+            kind: :nonblocking
+          )
+        end
+        elsif_block(sig(:w_load, width: 1)) do
+          assign(
+            :wr_debug_read_reg,
+            (
+                sig(:wr_debug_read_reg, width: 4) |
+                sig(:wr_debug_read_current, width: 4)
+            ),
+            kind: :nonblocking
+          )
         end
       end
       else_block do
@@ -666,32 +658,26 @@ class WriteDebug < RHDL::Component
           sig(:wr_debug_write_reg, width: 4),
           kind: :nonblocking
         )
-        else_block do
-          if_stmt(sig(:wr_debug_trap_clear, width: 1)) do
-            assign(
-              :wr_debug_write_reg,
-              lit(0, width: 4, base: "h", signed: false),
-              kind: :nonblocking
-            )
-            else_block do
-              if_stmt((sig(:write_for_wr_ready, width: 1) | sig(:wr_debug_prepare, width: 1))) do
-                assign(
-                  :wr_debug_write_reg,
-                  sig(:wr_debug_write, width: 4),
-                  kind: :nonblocking
-                )
-                else_block do
-                  if_stmt(sig(:wr_finished, width: 1)) do
-                    assign(
-                      :wr_debug_write_reg,
-                      lit(0, width: 4, base: "h", signed: false),
-                      kind: :nonblocking
-                    )
-                  end
-                end
-              end
-            end
-          end
+        elsif_block(sig(:wr_debug_trap_clear, width: 1)) do
+          assign(
+            :wr_debug_write_reg,
+            lit(0, width: 4, base: "h", signed: false),
+            kind: :nonblocking
+          )
+        end
+        elsif_block((sig(:write_for_wr_ready, width: 1) | sig(:wr_debug_prepare, width: 1))) do
+          assign(
+            :wr_debug_write_reg,
+            sig(:wr_debug_write, width: 4),
+            kind: :nonblocking
+          )
+        end
+        elsif_block(sig(:wr_finished, width: 1)) do
+          assign(
+            :wr_debug_write_reg,
+            lit(0, width: 4, base: "h", signed: false),
+            kind: :nonblocking
+          )
         end
       end
       else_block do
@@ -765,14 +751,12 @@ class WriteDebug < RHDL::Component
           lit(0, width: 1, base: "h", signed: false),
           kind: :nonblocking
         )
-        else_block do
-          if_stmt(sig(:wr_finished, width: 1)) do
-            assign(
-              :wr_debug_step,
-              sig(:tflag_to_reg, width: 1),
-              kind: :nonblocking
-            )
-          end
+        elsif_block(sig(:wr_finished, width: 1)) do
+          assign(
+            :wr_debug_step,
+            sig(:tflag_to_reg, width: 1),
+            kind: :nonblocking
+          )
         end
       end
       else_block do

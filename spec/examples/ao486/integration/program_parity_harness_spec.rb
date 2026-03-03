@@ -227,6 +227,7 @@ RSpec.describe RHDL::Import::Checks::Ao486ProgramParityHarness, :no_vendor_reimp
               wraddress = 4'h3;
               data = 8'hA5;
               wren = 1'b1;
+              #1;
               inclock = 1'b1;
               #1;
               inclock = 1'b0;
@@ -329,7 +330,7 @@ RSpec.describe RHDL::Import::Checks::Ao486ProgramParityHarness, :no_vendor_reimp
       cycle if Integer(inputs.fetch("avm_readdatavalid", 0)) != 0
     end
 
-    expect(valid_cycles.first).to eq(11)
+    expect(valid_cycles.first).to eq(12)
     expect(result.fetch("pc_sequence")).to include(0x000F_FFF0)
   end
 
@@ -358,11 +359,11 @@ RSpec.describe RHDL::Import::Checks::Ao486ProgramParityHarness, :no_vendor_reimp
       cycle if Integer(inputs.fetch("avm_readdatavalid", 0)) != 0
     end
 
-    expect(valid_cycles.first).to eq(12)
-    expect(Integer(sim.tick_inputs[12].fetch("avm_readdata"))).to eq(0xDEAD_BEEF)
+    expect(valid_cycles.first).to eq(13)
+    expect(Integer(sim.tick_inputs[13].fetch("avm_readdata"))).to eq(0xDEAD_BEEF)
     expect(result.fetch("memory_writes")).to include(
       hash_including(
-        "cycle" => 10,
+        "cycle" => 11,
         "address" => data_address,
         "data" => 0xDEAD_BEEF,
         "byteenable" => 0xF
@@ -385,7 +386,7 @@ RSpec.describe RHDL::Import::Checks::Ao486ProgramParityHarness, :no_vendor_reimp
 
     result = harness.send(:run_ir_program, sim: sim)
 
-    expect(sim.run_cycles_calls).to eq([4, 13])
+    expect(sim.run_cycles_calls).to eq([17])
     expect(result.fetch("pc_sequence")).to include(0x000F_FFF0)
     expect(result.fetch("instruction_sequence")).to include(0xBB12_34B8)
     expect(result.fetch("memory_writes")).to include(

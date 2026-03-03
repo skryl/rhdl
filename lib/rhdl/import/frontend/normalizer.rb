@@ -11,11 +11,20 @@ module RHDL
         BINARY_OPERATORS = {
           "AND" => "&",
           "OR" => "|",
+          "LOGAND" => "&&",
+          "LOGOR" => "||",
           "XOR" => "^",
           "ADD" => "+",
           "SUB" => "-",
+          "MUL" => "*",
+          "MULS" => "*",
+          "DIV" => "/",
+          "MOD" => "%",
           "EQ" => "==",
+          # RHDL expressions are 2-state; lower Verilator case-equality to normal equality.
+          "EQCASE" => "==",
           "NEQ" => "!=",
+          "NEQCASE" => "!=",
           "LT" => "<",
           "LTE" => "<=",
           "LTES" => "<=",
@@ -218,9 +227,13 @@ module RHDL
         def normalize_modulesp_module(module_node, addr_index:)
           loc = parse_loc(value_for(module_node, :loc))
           statements = Array(value_for(module_node, :stmtsp))
-          var_nodes = statements.select { |node| value_for(node, :type).to_s == "VAR" }
+          module_nodes = collect_module_nodes(statements)
+          var_nodes = module_nodes.select { |node| value_for(node, :type).to_s == "VAR" }
+          previous_array_metadata = @current_array_array_metadata
+          @current_array_array_metadata = build_unpacked_array_metadata(var_nodes, addr_index: addr_index)
 
-          {
+          instances = module_nodes.filter_map { |node| normalize_instance(node, addr_index: addr_index) }
+          normalized = {
             name: value_for(module_node, :name).to_s,
             source_id: loc[:source_id],
             span: {
@@ -234,8 +247,40 @@ module RHDL
             declarations: var_nodes.filter_map { |node| normalize_var_declaration(node, addr_index: addr_index) },
             statements: extract_continuous_assignments(statements, addr_index: addr_index),
             processes: statements.filter_map { |node| normalize_process(node, addr_index: addr_index) },
-            instances: statements.filter_map { |node| normalize_instance(node, addr_index: addr_index) }
+            instances: deduplicate_instance_names(instances)
           }
+          normalized
+        ensure
+          @current_array_array_metadata = previous_array_metadata
+        end
+
+        def collect_module_nodes(nodes, accumulator = [])
+          Array(nodes).each do |node|
+            hash = normalize_hash(node)
+            next if hash.empty?
+
+            accumulator << hash
+            collect_module_nodes(value_for(hash, :stmtsp), accumulator)
+            collect_module_nodes(value_for(hash, :itemsp), accumulator)
+          end
+          accumulator
+        end
+
+        def deduplicate_instance_names(instances)
+          counts = Hash.new(0)
+          Array(instances).map do |entry|
+            hash = normalize_hash(entry)
+            name = value_for(hash, :name).to_s
+            if name.empty?
+              hash
+            else
+              suffix = counts[name]
+              counts[name] += 1
+              next hash if suffix.zero?
+
+              hash.merge(name: "#{name}__#{suffix}")
+            end
+          end
         end
 
         def normalize_var_port(var_node, addr_index:)
@@ -280,6 +325,31 @@ module RHDL
             kind: kind,
             name: name,
             width: width_from_var(var_node, addr_index: addr_index)
+          }
+        end
+
+        def build_unpacked_array_metadata(var_nodes, addr_index:)
+          Array(var_nodes).each_with_object({}) do |node, memo|
+            name = value_for(node, :name).to_s
+            next if name.empty?
+
+            metadata = unpacked_array_metadata(var_node: node, addr_index: addr_index)
+            memo[name] = metadata unless metadata.nil?
+          end
+        end
+
+        def unpacked_array_metadata(var_node:, addr_index:)
+          dtype_node = addr_index[value_for(var_node, :dtypep).to_s]
+          return nil unless value_for(dtype_node, :type).to_s == "UNPACKARRAYDTYPE"
+
+          element_width = unpacked_array_element_width(dtype_node: dtype_node, addr_index: addr_index)
+          dimension_size = unpacked_array_dimension_size(dtype_node: dtype_node, addr_index: addr_index)
+          return nil if element_width.nil? || dimension_size.nil?
+          return nil if element_width <= 0 || dimension_size <= 0
+
+          {
+            element_width: element_width,
+            dimension_size: dimension_size
           }
         end
 
@@ -707,15 +777,7 @@ module RHDL
           when "SEL"
             normalize_sel_expression(hash, addr_index: addr_index)
           when "ARRAYSEL"
-            base = normalize_expression(first_entry(hash, :fromp), addr_index: addr_index, parent_type: type)
-            index = normalize_expression(first_entry(hash, :bitp), addr_index: addr_index, parent_type: type)
-            return nil if base.nil? || index.nil?
-
-            {
-              kind: "index",
-              base: base,
-              index: index
-            }
+            normalize_array_select_expression(hash, addr_index: addr_index, parent_type: type)
           when "CONCAT"
             parts = Array(value_for(hash, :lhsp)) + Array(value_for(hash, :rhsp))
             normalized_parts = parts.filter_map { |part| normalize_expression(part, addr_index: addr_index, parent_type: type) }
@@ -738,6 +800,53 @@ module RHDL
           else
             nil
           end
+        end
+
+        def normalize_array_select_expression(hash, addr_index:, parent_type:)
+          base = normalize_expression(first_entry(hash, :fromp), addr_index: addr_index, parent_type: parent_type)
+          index = normalize_expression(first_entry(hash, :bitp), addr_index: addr_index, parent_type: parent_type)
+          return nil if base.nil? || index.nil?
+
+          metadata = unpacked_array_access_metadata(base)
+          return {
+            kind: "index",
+            base: base,
+            index: index
+          } if metadata.nil?
+
+          element_width = integer_or_default(value_for(metadata, :element_width), nil)
+          return {
+            kind: "index",
+            base: base,
+            index: index
+          } if element_width.nil? || element_width <= 1
+
+          lsb = multiply_expression(index, element_width)
+          msb = {
+            kind: "binary",
+            operator: "+",
+            left: lsb,
+            right: number_literal_node(element_width - 1)
+          }
+          {
+            kind: "slice",
+            base: base,
+            msb: msb,
+            lsb: lsb
+          }
+        end
+
+        def unpacked_array_access_metadata(base_expression)
+          return nil unless base_expression.is_a?(Hash)
+          return nil unless value_for(base_expression, :kind).to_s == "identifier"
+
+          name = value_for(base_expression, :name).to_s
+          return nil if name.empty?
+
+          metadata = @current_array_array_metadata
+          return nil unless metadata.is_a?(Hash)
+
+          metadata[name]
         end
 
         def normalize_extend_expression(hash, addr_index:, parent_type:)
@@ -809,6 +918,8 @@ module RHDL
 
         def parse_const(raw)
           text = raw.to_s.strip
+          return nil if text.empty?
+
           match = text.match(/\A(?:(\d+))?'([sS])?([bBoOdDhH])([0-9a-fA-F_xXzZ]+)\z/)
           if match
             {
@@ -840,6 +951,16 @@ module RHDL
         end
 
         def width_from_var(var_node, addr_index:)
+          flattened_width = unpacked_array_flattened_width(var_node: var_node, addr_index: addr_index)
+          unless flattened_width.nil?
+            return nil if flattened_width <= 1
+
+            return {
+              msb: number_literal_node(flattened_width - 1),
+              lsb: number_literal_node(0)
+            }
+          end
+
           range_text = value_for(var_node, :range)
           if range_text.to_s.strip.empty?
             dtype_node = addr_index[value_for(var_node, :dtypep).to_s]
@@ -847,6 +968,44 @@ module RHDL
           end
 
           parse_range_expression(range_text)
+        end
+
+        def unpacked_array_flattened_width(var_node:, addr_index:)
+          dtype_node = addr_index[value_for(var_node, :dtypep).to_s]
+          return nil unless value_for(dtype_node, :type).to_s == "UNPACKARRAYDTYPE"
+
+          element_width = unpacked_array_element_width(dtype_node: dtype_node, addr_index: addr_index)
+          dimension_size = unpacked_array_dimension_size(dtype_node: dtype_node, addr_index: addr_index)
+          return nil if element_width.nil? || dimension_size.nil?
+          return nil if element_width <= 0 || dimension_size <= 0
+
+          element_width * dimension_size
+        end
+
+        def unpacked_array_element_width(dtype_node:, addr_index:)
+          element_dtype = addr_index[value_for(dtype_node, :refDTypep).to_s]
+          return nil if element_dtype.nil?
+
+          element_range = parse_range_expression(value_for(element_dtype, :range))
+          width = bit_width_from_range(element_range)
+          return 1 if width.nil? && value_for(element_dtype, :type).to_s == "BASICDTYPE"
+
+          width
+        end
+
+        def unpacked_array_dimension_size(dtype_node:, addr_index:)
+          range_node = normalize_hash(Array(value_for(dtype_node, :rangep)).first)
+          return nil if range_node.empty?
+
+          left = normalize_expression(first_entry(range_node, :leftp), addr_index: addr_index)
+          right = normalize_expression(first_entry(range_node, :rightp), addr_index: addr_index)
+          return nil if left.nil? || right.nil?
+
+          left_value = integer_expression_value(left)
+          right_value = integer_expression_value(right)
+          return nil if left_value.nil? || right_value.nil?
+
+          (right_value - left_value).abs + 1
         end
 
         def parse_range_expression(range_text)
@@ -1238,6 +1397,7 @@ module RHDL
             case value_for(hash, :operator).to_s
             when "+" then left + right
             when "-" then left - right
+            when "*" then left * right
             else nil
             end
           else
@@ -1319,12 +1479,26 @@ module RHDL
               left + right
             when "-"
               left - right
+            when "*"
+              left * right
             else
               nil
             end
           else
             nil
           end
+        end
+
+        def multiply_expression(expression, factor)
+          constant = integer_expression_value(expression)
+          return number_literal_node(constant * factor) unless constant.nil?
+
+          {
+            kind: "binary",
+            operator: "*",
+            left: expression,
+            right: number_literal_node(factor)
+          }
         end
 
         def truncate_expression_to_width(expression, width:)

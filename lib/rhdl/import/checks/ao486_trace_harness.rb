@@ -561,7 +561,7 @@ module RHDL
           state = {}
           input_names.each { |name| state[name] = 0 }
           state["a20_enable"] = 1 if input_names.include?("a20_enable")
-          state["cache_disable"] = 0 if input_names.include?("cache_disable")
+          state["cache_disable"] = 1 if input_names.include?("cache_disable")
           state["interrupt_do"] = 0 if input_names.include?("interrupt_do")
           state["interrupt_vector"] = 0 if input_names.include?("interrupt_vector")
           state["rst_n"] = 0 if input_names.include?("rst_n")
@@ -829,6 +829,10 @@ module RHDL
         end
 
         def connection_signal_expr(signal:, width:, parent:)
+          if open_connection_signal?(signal)
+            return RHDL::Codegen::IR::Literal.new(value: 0, width: normalize_width(width))
+          end
+
           case signal
           when RHDL::Codegen::IR::Expr
             signal
@@ -852,6 +856,8 @@ module RHDL
         end
 
         def normalize_connection_target(signal)
+          return nil if open_connection_signal?(signal)
+
           case signal
           when Symbol
             { kind: :signal, name: signal.to_s }
@@ -867,6 +873,14 @@ module RHDL
           else
             nil
           end
+        end
+
+        def open_connection_signal?(signal)
+          return true if signal.nil?
+          return true if signal == :__rhdl_unconnected
+
+          token = signal.to_s.strip
+          token.empty? || token == "__rhdl_unconnected"
         end
 
         def normalize_slice_connection_target(signal)
@@ -1462,7 +1476,7 @@ module RHDL
               reg rst_n = 1'b0;
 
               reg a20_enable = 1'b1;
-              reg cache_disable = 1'b0;
+              reg cache_disable = 1'b1;
               reg interrupt_do = 1'b0;
               reg [7:0] interrupt_vector = 8'h00;
               wire interrupt_done;

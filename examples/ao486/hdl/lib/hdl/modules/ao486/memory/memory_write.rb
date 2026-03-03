@@ -416,14 +416,12 @@ class MemoryWrite < RHDL::Component
           lit(1, width: 1, base: "h", signed: false),
           kind: :nonblocking
         )
-        else_block do
-          if_stmt((lit(0, width: 2, base: "h", signed: false) == sig(:state, width: 2))) do
-            assign(
-              :reset_waiting,
-              lit(0, width: 1, base: "h", signed: false),
-              kind: :nonblocking
-            )
-          end
+        elsif_block((lit(0, width: 2, base: "h", signed: false) == sig(:state, width: 2))) do
+          assign(
+            :reset_waiting,
+            lit(0, width: 1, base: "h", signed: false),
+            kind: :nonblocking
+          )
         end
       end
       else_block do
@@ -449,14 +447,12 @@ class MemoryWrite < RHDL::Component
           lit(0, width: 1, base: "h", signed: false),
           kind: :nonblocking
         )
-        else_block do
-          if_stmt((sig(:tlbwrite_page_fault, width: 1) & (~sig(:reset_waiting, width: 1)))) do
-            assign(
-              :page_fault,
-              lit(1, width: 1, base: "h", signed: false),
-              kind: :nonblocking
-            )
-          end
+        elsif_block((sig(:tlbwrite_page_fault, width: 1) & (~sig(:reset_waiting, width: 1)))) do
+          assign(
+            :page_fault,
+            lit(1, width: 1, base: "h", signed: false),
+            kind: :nonblocking
+          )
         end
       end
       else_block do
@@ -482,14 +478,12 @@ class MemoryWrite < RHDL::Component
           lit(0, width: 1, base: "h", signed: false),
           kind: :nonblocking
         )
-        else_block do
-          if_stmt((sig(:tlbwrite_ac_fault, width: 1) & (~sig(:reset_waiting, width: 1)))) do
-            assign(
-              :ac_fault,
-              lit(1, width: 1, base: "h", signed: false),
-              kind: :nonblocking
-            )
-          end
+        elsif_block((sig(:tlbwrite_ac_fault, width: 1) & (~sig(:reset_waiting, width: 1)))) do
+          assign(
+            :ac_fault,
+            lit(1, width: 1, base: "h", signed: false),
+            kind: :nonblocking
+          )
         end
       end
       else_block do

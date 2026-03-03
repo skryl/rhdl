@@ -342,7 +342,7 @@ class Memory < RHDL::Component
   instance :prefetch_control_inst, "prefetch_control",
     ports: {
       pr_reset: (sig(:pr_reset, width: 1) | sig(:reset_prefetch, width: 1)),
-      icacheread_cache_disable: ""
+      icacheread_cache_disable: :__rhdl_unconnected
     }
   instance :tlb_inst, "tlb",
     ports: {

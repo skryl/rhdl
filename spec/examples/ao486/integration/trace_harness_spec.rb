@@ -387,6 +387,86 @@ RSpec.describe RHDL::Import::Checks::Ao486TraceHarness, :no_vendor_reimport do
       expect(rendered).to include("u_fifo__usedw")
     end
 
+    it "treats __rhdl_unconnected instance connections as open connections while flattening" do
+      parent = RHDL::Codegen::IR::ModuleDef.new(
+        name: "parent",
+        ports: [
+          RHDL::Codegen::IR::Port.new(name: "sink", direction: :out, width: 1)
+        ],
+        nets: [],
+        regs: [],
+        assigns: [],
+        processes: [],
+        reg_ports: [],
+        instances: [],
+        memories: [],
+        write_ports: [],
+        sync_read_ports: [],
+        parameters: {}
+      )
+
+      child = RHDL::Codegen::IR::ModuleDef.new(
+        name: "child",
+        ports: [
+          RHDL::Codegen::IR::Port.new(name: "in1", direction: :in, width: 1),
+          RHDL::Codegen::IR::Port.new(name: "out1", direction: :out, width: 1)
+        ],
+        nets: [],
+        regs: [],
+        assigns: [
+          RHDL::Codegen::IR::Assign.new(
+            target: "out1",
+            expr: RHDL::Codegen::IR::Signal.new(name: "in1", width: 1)
+          )
+        ],
+        processes: [],
+        reg_ports: [],
+        instances: [],
+        memories: [],
+        write_ports: [],
+        sync_read_ports: [],
+        parameters: {}
+      )
+
+      closed_output = RHDL::Codegen::IR::Instance.new(
+        name: "u_closed",
+        module_name: "child",
+        parameters: {},
+        connections: [
+          RHDL::Codegen::IR::PortConnection.new(port_name: :in1, signal: :__rhdl_unconnected, direction: :in),
+          RHDL::Codegen::IR::PortConnection.new(port_name: :out1, signal: :sink, direction: :out)
+        ]
+      )
+
+      open_output = RHDL::Codegen::IR::Instance.new(
+        name: "u_open",
+        module_name: "child",
+        parameters: {},
+        connections: [
+          RHDL::Codegen::IR::PortConnection.new(port_name: :in1, signal: :__rhdl_unconnected, direction: :in),
+          RHDL::Codegen::IR::PortConnection.new(port_name: :out1, signal: :__rhdl_unconnected, direction: :out)
+        ]
+      )
+
+      harness.send(:inline_child_instance, parent: parent, child: child, instance: closed_output)
+      harness.send(:inline_child_instance, parent: parent, child: child, instance: open_output)
+
+      assigns_to_unconnected = parent.assigns.select { |entry| entry.target.to_s == "__rhdl_unconnected" }
+      expect(assigns_to_unconnected).to be_empty
+
+      closed_assign = parent.assigns.find { |entry| entry.target.to_s == "u_closed__out1" }
+      open_assign = parent.assigns.find { |entry| entry.target.to_s == "u_open__out1" }
+      sink_assign = parent.assigns.find { |entry| entry.target.to_s == "sink" && entry.expr.is_a?(RHDL::Codegen::IR::Signal) && entry.expr.name.to_s == "u_closed__out1" }
+
+      expect(closed_assign).not_to be_nil
+      expect(open_assign).not_to be_nil
+      expect(closed_assign.expr).to be_a(RHDL::Codegen::IR::Literal)
+      expect(open_assign.expr).to be_a(RHDL::Codegen::IR::Literal)
+      expect(closed_assign.expr.value).to eq(0)
+      expect(open_assign.expr.value).to eq(0)
+      expect(sink_assign).not_to be_nil
+    end
+
     it "captures converted_ir traces using Ruby IR simulation without external simulators" do
       Dir.mktmpdir("ao486_trace_harness_ir_spec") do |root|
         out = File.join(root, "out")

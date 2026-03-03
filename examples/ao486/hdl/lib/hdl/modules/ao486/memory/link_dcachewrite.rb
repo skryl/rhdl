@@ -119,14 +119,12 @@ class LinkDcachewrite < RHDL::Component
           sig(:req_dcachewrite_do, width: 1),
           kind: :nonblocking
         )
-        else_block do
-          if_stmt(sig(:resp_dcachewrite_done, width: 1)) do
-            assign(
-              :current_do,
-              lit(0, width: 1, base: "h", signed: false),
-              kind: :nonblocking
-            )
-          end
+        elsif_block(sig(:resp_dcachewrite_done, width: 1)) do
+          assign(
+            :current_do,
+            lit(0, width: 1, base: "h", signed: false),
+            kind: :nonblocking
+          )
         end
       end
       else_block do

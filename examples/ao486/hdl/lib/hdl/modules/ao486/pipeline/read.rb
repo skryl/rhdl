@@ -1392,23 +1392,19 @@ class Read < RHDL::Component
           lit(0, width: 7, base: "h", signed: false),
           kind: :nonblocking
         )
-        else_block do
-          if_stmt(sig(:micro_ready, width: 1)) do
-            assign(
-              :rd_cmd,
-              sig(:micro_cmd, width: 7),
-              kind: :nonblocking
-            )
-            else_block do
-              if_stmt(sig(:rd_ready, width: 1)) do
-                assign(
-                  :rd_cmd,
-                  lit(0, width: 7, base: "h", signed: false),
-                  kind: :nonblocking
-                )
-              end
-            end
-          end
+        elsif_block(sig(:micro_ready, width: 1)) do
+          assign(
+            :rd_cmd,
+            sig(:micro_cmd, width: 7),
+            kind: :nonblocking
+          )
+        end
+        elsif_block(sig(:rd_ready, width: 1)) do
+          assign(
+            :rd_cmd,
+            lit(0, width: 7, base: "h", signed: false),
+            kind: :nonblocking
+          )
         end
       end
       else_block do
@@ -1470,14 +1466,12 @@ class Read < RHDL::Component
           lit(0, width: 1, base: "h", signed: false),
           kind: :nonblocking
         )
-        else_block do
-          if_stmt(sig(:io_read_done, width: 1)) do
-            assign(
-              :rd_one_io_read,
-              lit(1, width: 1, base: "h", signed: false),
-              kind: :nonblocking
-            )
-          end
+        elsif_block(sig(:io_read_done, width: 1)) do
+          assign(
+            :rd_one_io_read,
+            lit(1, width: 1, base: "h", signed: false),
+            kind: :nonblocking
+          )
         end
       end
       else_block do
@@ -1551,14 +1545,12 @@ class Read < RHDL::Component
           lit(0, width: 1, base: "h", signed: false),
           kind: :nonblocking
         )
-        else_block do
-          if_stmt(((sig(:read_done, width: 1) & (~sig(:read_page_fault, width: 1))) & (~sig(:read_ac_fault, width: 1)))) do
-            assign(
-              :rd_one_mem_read,
-              lit(1, width: 1, base: "h", signed: false),
-              kind: :nonblocking
-            )
-          end
+        elsif_block(((sig(:read_done, width: 1) & (~sig(:read_page_fault, width: 1))) & (~sig(:read_ac_fault, width: 1)))) do
+          assign(
+            :rd_one_mem_read,
+            lit(1, width: 1, base: "h", signed: false),
+            kind: :nonblocking
+          )
         end
       end
       else_block do

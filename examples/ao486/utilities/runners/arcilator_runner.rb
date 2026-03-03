@@ -542,7 +542,7 @@ module RHDL
                     write_signal(ctx, sig_avm_readdatavalid, 0u);
                   }
 
-                  write_signal_if_input(ctx, sig_clk, 1u);
+                  write_signal_if_input(ctx, sig_clk, 0u);
                   #{module_name}_eval(ctx->state);
 
                   uint32_t output_avm_read = read_signal_value(ctx, sig_avm_read) & 1u;
@@ -555,13 +555,13 @@ module RHDL
                   uint32_t output_io_write_do = read_signal_value(ctx, sig_io_write_do);
 
                   if(pending_read_words == 0u && output_avm_read != 0u && state_avm_waitrequest == 0u) {
-                    pending_read_address = (output_avm_address & 0x3FFFFFFFu) << 4u;
+                    pending_read_address = (output_avm_address & 0x3FFFFFFFu) << 2u;
                     uint32_t burst_words = output_avm_burstcount & bit_mask(4);
                     pending_read_words = burst_words == 0u ? 1u : burst_words;
                   }
 
                   if(output_avm_write != 0u && state_avm_waitrequest == 0u) {
-                    uint32_t address = (output_avm_address & 0x3FFFFFFFu) << 4u;
+                    uint32_t address = (output_avm_address & 0x3FFFFFFFu) << 2u;
                     write_memory_word(ctx->memory, address, output_avm_writedata, output_avm_byteenable);
                     write_trace_write(
                       trace,
@@ -591,6 +591,9 @@ module RHDL
                   write_signal_if_input(ctx, sig_io_read_done, state_io_read_done);
                   write_signal_if_input(ctx, sig_io_write_done, state_io_write_done);
                   write_signal_if_input(ctx, sig_io_read_data, state_io_read_data);
+                  write_signal_if_input(ctx, sig_clk, 1u);
+                  #{module_name}_eval(ctx->state);
+
                   write_signal_if_input(ctx, sig_clk, 0u);
                   #{module_name}_eval(ctx->state);
 
@@ -662,7 +665,7 @@ module RHDL
               program_memory.length,
               fetch_ptrs.fetch(:fetch_ptr),
               fetch_addresses.length,
-              cycles,
+              Integer(cycles) + 1,
               trace_path
             )
             raise "Arcilator trace generation failed (status #{status})" unless status.zero?
@@ -670,14 +673,9 @@ module RHDL
             harness.send(:parse_program_trace, stdout: File.read(trace_path))
           end
 
-          normalized = collapse_repeated_fetch_sequence(
-            pc_sequence: Array(trace.fetch("pc_sequence")),
-            instruction_sequence: Array(trace.fetch("instruction_sequence"))
-          )
-
           {
-            "pc_sequence" => normalized.fetch(:pc_sequence),
-            "instruction_sequence" => normalized.fetch(:instruction_sequence),
+            "pc_sequence" => Array(trace.fetch("pc_sequence")),
+            "instruction_sequence" => Array(trace.fetch("instruction_sequence")),
             "memory_writes" => Array(trace.fetch("memory_writes")),
             "memory_contents" => tracked_addresses.each_with_object({}) do |address, memo|
               key = format("%08x", Integer(address) & bit_mask(32))
@@ -734,84 +732,6 @@ module RHDL
           Integer(program_memory.fetch(Integer(address) & bit_mask(32), 0)) & bit_mask(32)
         rescue StandardError
           0
-        end
-
-        def collapse_repeated_fetch_sequence(pc_sequence:, instruction_sequence:)
-          pc = Array(pc_sequence)
-          insn = Array(instruction_sequence)
-          return { pc_sequence: pc, instruction_sequence: insn } if pc.empty? || pc.length != insn.length
-
-          period = repeated_period(pc, insn)
-          period ||= repeated_prefix_period(pc, insn)
-          period ||= repeated_first_event_tail_prefix(pc, insn)
-          return { pc_sequence: pc, instruction_sequence: insn } if period.nil?
-
-          {
-            pc_sequence: pc.first(period),
-            instruction_sequence: insn.first(period)
-          }
-        end
-
-        def repeated_period(pc_sequence, instruction_sequence)
-          length = pc_sequence.length
-          return nil if length < 2
-
-          (1..(length / 2)).each do |period|
-            next unless (length % period).zero?
-            pattern_pc = pc_sequence.first(period)
-            pattern_insn = instruction_sequence.first(period)
-            repeats = length / period
-            next if repeats < 2
-
-            expanded_pc = Array.new(repeats) { pattern_pc }.flatten
-            expanded_insn = Array.new(repeats) { pattern_insn }.flatten
-            return period if expanded_pc == pc_sequence && expanded_insn == instruction_sequence
-          end
-          nil
-        end
-
-        def repeated_prefix_period(pc_sequence, instruction_sequence)
-          length = pc_sequence.length
-          return nil if length < 2
-
-          max_period = length / 2
-          (1..max_period).each do |period|
-            pattern_pc = pc_sequence.first(period)
-            pattern_insn = instruction_sequence.first(period)
-            next unless pc_sequence[period, period] == pattern_pc
-            next unless instruction_sequence[period, period] == pattern_insn
-
-            matches = (0...length).all? do |index|
-              pc_sequence[index] == pattern_pc[index % period] &&
-                instruction_sequence[index] == pattern_insn[index % period]
-            end
-            return period if matches
-          end
-
-          nil
-        end
-
-        def repeated_first_event_tail_prefix(pc_sequence, instruction_sequence)
-          return nil if pc_sequence.length < 2
-
-          first_pc = pc_sequence.first
-          first_insn = instruction_sequence.first
-          restart_index = nil
-          (1...pc_sequence.length).each do |index|
-            if pc_sequence[index] == first_pc && instruction_sequence[index] == first_insn
-              restart_index = index
-              break
-            end
-          end
-          return nil if restart_index.nil?
-          return nil if restart_index <= 1
-
-          tail_is_first_event_only = (restart_index...pc_sequence.length).all? do |index|
-            pc_sequence[index] == first_pc && instruction_sequence[index] == first_insn
-          end
-          return nil unless tail_is_first_event_only
-
-          restart_index
         end
 
         def initial_input_state(input_names)

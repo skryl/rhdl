@@ -201,26 +201,22 @@ class ExecuteMultiply < RHDL::Component
           lit(0, width: 2, base: "h", signed: false),
           kind: :nonblocking
         )
-        else_block do
-          if_stmt(sig(:mult_start, width: 1)) do
-            assign(
-              :mult_counter,
-              lit(2, width: 2, base: "h", signed: false),
-              kind: :nonblocking
-            )
-            else_block do
-              if_stmt((lit(0, width: 2, base: "h", signed: false) != sig(:mult_counter, width: 2))) do
-                assign(
-                  :mult_counter,
-                  (
-                      sig(:mult_counter, width: 2) -
-                      lit(1, width: 2, base: "h", signed: false)
-                  ),
-                  kind: :nonblocking
-                )
-              end
-            end
-          end
+        elsif_block(sig(:mult_start, width: 1)) do
+          assign(
+            :mult_counter,
+            lit(2, width: 2, base: "h", signed: false),
+            kind: :nonblocking
+          )
+        end
+        elsif_block((lit(0, width: 2, base: "h", signed: false) != sig(:mult_counter, width: 2))) do
+          assign(
+            :mult_counter,
+            (
+                sig(:mult_counter, width: 2) -
+                lit(1, width: 2, base: "h", signed: false)
+            ),
+            kind: :nonblocking
+          )
         end
       end
       else_block do

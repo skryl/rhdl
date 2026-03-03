@@ -2517,14 +2517,12 @@ class Tlb < RHDL::Component
           lit(1, width: 1, base: "h", signed: false),
           kind: :nonblocking
         )
-        else_block do
-          if_stmt((lit(0, width: 5, base: "h", signed: false) == sig(:state, width: 5))) do
-            assign(
-              :pr_reset_waiting,
-              lit(0, width: 1, base: "h", signed: false),
-              kind: :nonblocking
-            )
-          end
+        elsif_block((lit(0, width: 5, base: "h", signed: false) == sig(:state, width: 5))) do
+          assign(
+            :pr_reset_waiting,
+            lit(0, width: 1, base: "h", signed: false),
+            kind: :nonblocking
+          )
         end
       end
       else_block do
@@ -2550,14 +2548,12 @@ class Tlb < RHDL::Component
           lit(1, width: 1, base: "h", signed: false),
           kind: :nonblocking
         )
-        else_block do
-          if_stmt(sig(:tlbregs_tlbflushall_do, width: 1)) do
-            assign(
-              :tlbflushall_do_waiting,
-              lit(0, width: 1, base: "h", signed: false),
-              kind: :nonblocking
-            )
-          end
+        elsif_block(sig(:tlbregs_tlbflushall_do, width: 1)) do
+          assign(
+            :tlbflushall_do_waiting,
+            lit(0, width: 1, base: "h", signed: false),
+            kind: :nonblocking
+          )
         end
       end
       else_block do

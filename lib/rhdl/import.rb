@@ -11,6 +11,8 @@ require_relative "import/translator"
 require_relative "import/pipeline"
 require_relative "import/result"
 require_relative "import/report"
+require_relative "import/missing_module_signature_extractor"
+require_relative "import/blackbox_stub_generator"
 
 module RHDL
   module Import
@@ -298,7 +300,7 @@ module RHDL
             frontend_adapter,
             method_name: :call,
             kwargs: {
-              resolved_input: build_frontend_input(options: options, resolved_input: resolved_input),
+              resolved_input: build_frontend_input(options: options, resolved_input: resolved_input, out_dir: out_dir),
               work_dir: value_for(options, :frontend_work_dir) || File.join(out_dir, "tmp", "frontend"),
               env: normalize_env(value_for(options, :frontend_env))
             }
@@ -306,7 +308,7 @@ module RHDL
         end
       end
 
-      def build_frontend_input(options:, resolved_input:)
+      def build_frontend_input(options:, resolved_input:, out_dir:)
         frontend_input = value_for(resolved_input, :frontend_input)
         input_hash = normalize_hash(frontend_input)
 
@@ -318,10 +320,499 @@ module RHDL
           }
         end
 
+        source_files = normalize_string_array(value_for(input_hash, :source_files))
+        include_dirs = normalize_string_array(value_for(input_hash, :include_dirs))
+        input_hash[:source_files] = source_files
+        input_hash[:include_dirs] = include_dirs
+
+        generated_stub = maybe_build_frontend_blackbox_stub(
+          options: options,
+          out_dir: out_dir,
+          source_files: source_files
+        )
+        unless generated_stub.nil?
+          input_hash[:source_files] = (source_files + [generated_stub]).uniq
+        end
+
         top_modules = normalize_string_array(value_for(options, :top))
         input_hash[:top_modules] = top_modules unless top_modules.empty?
         input_hash[:missing_modules] = value_for(options, :missing_modules) if option_provided?(options, :missing_modules)
         input_hash
+      end
+
+      def maybe_build_frontend_blackbox_stub(options:, out_dir:, source_files:)
+        return nil unless normalize_missing_modules_policy(value_for(options, :missing_modules)) == "blackbox_stubs"
+
+        known_missing = %w[altdpram altsyncram]
+        requested = known_missing.reject { |module_name| module_defined_in_sources?(module_name: module_name, source_files: source_files) }
+        return nil if requested.empty?
+
+        signatures = requested.map { |module_name| { name: module_name } }
+        augmented = MissingModuleSignatureExtractor.augment(signatures: signatures, source_files: source_files)
+        candidates = Array(augmented).filter_map do |entry|
+          hash = normalize_hash(entry)
+          name = value_for(hash, :name).to_s
+          next if name.empty?
+
+          ports = augment_frontend_stub_ports(
+            module_name: name,
+            ports: normalize_string_array(value_for(hash, :ports))
+          )
+          parameters = augment_frontend_stub_parameters(
+            module_name: name,
+            parameters: normalize_string_array(value_for(hash, :parameters)),
+            ports: ports
+          )
+          next if parameters.empty? && ports.empty?
+
+          { name: name, parameters: parameters, ports: ports }
+        end
+        return nil if candidates.empty?
+
+        stub_source = emit_frontend_blackbox_stub_source(candidates)
+        return nil if stub_source.to_s.strip.empty?
+
+        stub_dir = File.join(out_dir, "tmp", "frontend")
+        FileUtils.mkdir_p(stub_dir)
+        stub_path = File.join(stub_dir, "frontend_blackbox_stubs.v")
+        File.write(stub_path, stub_source)
+        stub_path
+      end
+
+      def module_defined_in_sources?(module_name:, source_files:)
+        pattern = /\bmodule\s+#{Regexp.escape(module_name)}\b/
+
+        Array(source_files).any? do |path|
+          next false unless File.file?(path)
+
+          content = File.read(path)
+          pattern.match?(content)
+        rescue StandardError
+          false
+        end
+      end
+
+      def emit_frontend_blackbox_stub_source(signatures)
+        lines = []
+        Array(signatures).each do |entry|
+          hash = normalize_hash(entry)
+          name = value_for(hash, :name).to_s
+          next if name.empty?
+          module_key = name.downcase
+
+          if module_key == "altdpram"
+            lines << emit_frontend_altdpram_stub(name: name).strip
+            lines << ""
+            next
+          end
+          if module_key == "altsyncram"
+            lines << emit_frontend_altsyncram_stub(name: name).strip
+            lines << ""
+            next
+          end
+
+          parameters = normalize_string_array(value_for(hash, :parameters))
+          ports = normalize_string_array(value_for(hash, :ports))
+
+          if parameters.empty?
+            lines << "module #{name}("
+          else
+            lines << "module #{name} #("
+            parameters.each_with_index do |parameter, index|
+              suffix = index == parameters.length - 1 ? "" : ","
+              lines << "  parameter #{parameter} = 1#{suffix}"
+            end
+            lines << ") ("
+          end
+
+          ports.each_with_index do |port, index|
+            suffix = index == ports.length - 1 ? "" : ","
+            lines << "  #{port}#{suffix}"
+          end
+          lines << ");"
+          ports.each do |port|
+            direction = frontend_stub_port_direction(module_name: name, port_name: port)
+            width = frontend_stub_port_width(module_name: name, port_name: port)
+            width_decl = width.nil? ? "" : "[#{width}-1:0] "
+            lines << "  #{direction} #{width_decl}#{port};"
+          end
+          ports.each do |port|
+            next unless frontend_stub_port_direction(module_name: name, port_name: port) == "output"
+
+            lines << "  assign #{port} = '0;"
+          end
+          lines << "endmodule"
+          lines << ""
+        end
+        lines.join("\n")
+      end
+
+      def emit_frontend_altdpram_stub(name:)
+        <<~VERILOG
+          /* verilator lint_off WIDTHEXPAND */
+          /* verilator lint_off WIDTHTRUNC */
+          /* verilator lint_off SELRANGE */
+          /* verilator lint_off UNUSEDPARAM */
+          /* verilator lint_off UNUSEDSIGNAL */
+          module #{name} #(
+            parameter indata_aclr = "OFF",
+            parameter indata_reg = "INCLOCK",
+            parameter intended_device_family = "Cyclone V",
+            parameter lpm_type = "altdpram",
+            parameter outdata_aclr = "OFF",
+            parameter outdata_reg = "UNREGISTERED",
+            parameter ram_block_type = "MLAB",
+            parameter rdaddress_aclr = "OFF",
+            parameter rdaddress_reg = "UNREGISTERED",
+            parameter rdcontrol_aclr = "OFF",
+            parameter rdcontrol_reg = "UNREGISTERED",
+            parameter read_during_write_mode_mixed_ports = "CONSTRAINED_DONT_CARE",
+            parameter width = 8,
+            parameter widthad = 4,
+            parameter width_byteena = 1,
+            parameter wraddress_aclr = "OFF",
+            parameter wraddress_reg = "INCLOCK",
+            parameter wrcontrol_aclr = "OFF",
+            parameter wrcontrol_reg = "INCLOCK"
+          ) (
+            input aclr,
+            input [width_byteena-1:0] byteena,
+            input [width-1:0] data,
+            input inclock,
+            input inclocken,
+            input outclock,
+            input outclocken,
+            output [width-1:0] q,
+            input [widthad-1:0] rdaddress,
+            input rdaddressstall,
+            input rden,
+            input sclr,
+            input [widthad-1:0] wraddress,
+            input wraddressstall,
+            input wren
+          );
+            localparam integer SAFE_WIDTH = (width > 0) ? width : 1;
+            localparam integer SAFE_WIDTHAD = (widthad > 0) ? widthad : 1;
+            localparam integer SAFE_WIDTH_BYTEENA = (width_byteena > 0) ? width_byteena : 1;
+            localparam integer SAFE_DEPTH = (1 << SAFE_WIDTHAD);
+            localparam integer SAFE_BYTE_COUNT = (SAFE_WIDTH + 7) / 8;
+
+            reg [SAFE_WIDTH-1:0] mem [0:SAFE_DEPTH-1];
+            reg [SAFE_WIDTH-1:0] merged_word;
+            integer init_i;
+            integer byte_i;
+
+            wire [SAFE_WIDTHAD-1:0] wr_addr = wraddress;
+            wire [SAFE_WIDTHAD-1:0] rd_addr = rdaddress;
+            wire inclocken_en = (inclocken === 1'b0) ? 1'b0 : 1'b1;
+            wire wr_stall = (wraddressstall === 1'b1) ? 1'b1 : 1'b0;
+            wire wren_en = (wren === 1'b1) ? 1'b1 : 1'b0;
+            wire wr_fire = wren_en && !wr_stall && inclocken_en;
+
+            initial begin
+              for (init_i = 0; init_i < SAFE_DEPTH; init_i = init_i + 1) begin
+                mem[init_i] = {SAFE_WIDTH{1'b0}};
+              end
+            end
+
+            always @* begin
+              merged_word = mem[wr_addr];
+              if (SAFE_WIDTH_BYTEENA <= 1 || SAFE_BYTE_COUNT <= 1) begin
+                merged_word = data;
+              end else begin
+                for (byte_i = 0; byte_i < SAFE_BYTE_COUNT; byte_i = byte_i + 1) begin
+                  if (byte_i < SAFE_WIDTH_BYTEENA && byteena[byte_i]) begin
+                    merged_word[(byte_i * 8) +: 8] = data[(byte_i * 8) +: 8];
+                  end
+                end
+              end
+            end
+
+            always @(posedge inclock or posedge aclr or posedge sclr) begin
+              if (aclr || sclr) begin
+                // Preserve memory contents on clear; deterministic power-up is enough.
+              end else if (wr_fire) begin
+                mem[wr_addr] <= merged_word;
+              end
+            end
+
+            assign q = mem[rd_addr];
+          endmodule
+          /* verilator lint_on UNUSEDSIGNAL */
+          /* verilator lint_on UNUSEDPARAM */
+          /* verilator lint_on SELRANGE */
+          /* verilator lint_on WIDTHTRUNC */
+          /* verilator lint_on WIDTHEXPAND */
+        VERILOG
+      end
+
+      def emit_frontend_altsyncram_stub(name:)
+        <<~VERILOG
+          /* verilator lint_off WIDTHEXPAND */
+          /* verilator lint_off WIDTHTRUNC */
+          /* verilator lint_off SELRANGE */
+          /* verilator lint_off UNUSEDPARAM */
+          /* verilator lint_off UNUSEDSIGNAL */
+          module #{name} #(
+            parameter operation_mode = "DUAL_PORT",
+            parameter ram_block_type = "AUTO",
+            parameter intended_device_family = "Cyclone V",
+            parameter lpm_type = "altsyncram",
+            parameter width_a = 32,
+            parameter widthad_a = 10,
+            parameter numwords_a = 1024,
+            parameter outdata_aclr_a = "NONE",
+            parameter outdata_reg_a = "UNREGISTERED",
+            parameter width_b = 32,
+            parameter widthad_b = 10,
+            parameter numwords_b = 1024,
+            parameter outdata_aclr_b = "NONE",
+            parameter outdata_reg_b = "UNREGISTERED",
+            parameter width_byteena_a = 4,
+            parameter width_byteena_b = 4,
+            parameter read_during_write_mode_mixed_ports = "DONT_CARE",
+            parameter read_during_write_mode_port_a = "NEW_DATA_NO_NBE_READ",
+            parameter read_during_write_mode_port_b = "NEW_DATA_NO_NBE_READ",
+            parameter address_reg_b = "UNREGISTERED",
+            parameter address_aclr_b = "NONE",
+            parameter indata_reg_b = "CLOCK1",
+            parameter wrcontrol_wraddress_reg_b = "CLOCK1",
+            parameter clock_enable_input_a = "BYPASS",
+            parameter clock_enable_input_b = "BYPASS",
+            parameter clock_enable_output_a = "BYPASS",
+            parameter clock_enable_output_b = "BYPASS",
+            parameter power_up_uninitialized = "FALSE",
+            parameter byte_size = 8
+          ) (
+            input aclr0,
+            input aclr1,
+            input [widthad_a-1:0] address_a,
+            input [widthad_b-1:0] address_b,
+            input addressstall_a,
+            input addressstall_b,
+            input [width_byteena_a-1:0] byteena_a,
+            input [width_byteena_b-1:0] byteena_b,
+            input clock0,
+            input clock1,
+            input clocken0,
+            input clocken1,
+            input clocken2,
+            input clocken3,
+            input [width_a-1:0] data_a,
+            input [width_b-1:0] data_b,
+            output [2:0] eccstatus,
+            output [width_a-1:0] q_a,
+            output [width_b-1:0] q_b,
+            input rden_a,
+            input rden_b,
+            input wren_a,
+            input wren_b
+          );
+            localparam integer SAFE_WIDTH_A = (width_a > 0) ? width_a : 1;
+            localparam integer SAFE_WIDTH_B = (width_b > 0) ? width_b : 1;
+            localparam integer SAFE_WIDTHAD_A = (widthad_a > 0) ? widthad_a : 1;
+            localparam integer SAFE_WIDTHAD_B = (widthad_b > 0) ? widthad_b : 1;
+            localparam integer SAFE_WIDTH_BYTEENA_A = (width_byteena_a > 0) ? width_byteena_a : 1;
+            localparam integer SAFE_WIDTH_BYTEENA_B = (width_byteena_b > 0) ? width_byteena_b : 1;
+            localparam integer SAFE_DEPTH_A = (1 << SAFE_WIDTHAD_A);
+            localparam integer SAFE_BYTE_COUNT_A = (SAFE_WIDTH_A + 7) / 8;
+            localparam integer SAFE_BYTE_COUNT_B = (SAFE_WIDTH_B + 7) / 8;
+            localparam integer SAFE_SUBWORDS_PER_A_B = (SAFE_WIDTH_A >= SAFE_WIDTH_B && SAFE_WIDTH_B > 0) ? (SAFE_WIDTH_A / SAFE_WIDTH_B) : 1;
+            localparam integer SAFE_SUBWORD_BITS_B = (SAFE_SUBWORDS_PER_A_B <= 1) ? 1 : $clog2(SAFE_SUBWORDS_PER_A_B);
+
+            reg [SAFE_WIDTH_A-1:0] mem [0:SAFE_DEPTH_A-1];
+            reg [SAFE_WIDTH_A-1:0] merged_a;
+            reg [SAFE_WIDTH_A-1:0] merged_b_word;
+            reg [SAFE_WIDTH_B-1:0] read_b_data;
+            reg [SAFE_WIDTHAD_A-1:0] addr_b_word_reg;
+            reg [SAFE_SUBWORD_BITS_B-1:0] addr_b_lane_reg;
+            integer init_i;
+            integer byte_i;
+
+            wire [SAFE_WIDTHAD_A-1:0] addr_a = address_a;
+            wire [SAFE_WIDTHAD_B-1:0] addr_b_full = address_b;
+            wire [SAFE_WIDTHAD_A-1:0] addr_b_word = (SAFE_WIDTH_A >= SAFE_WIDTH_B) ? (addr_b_full / SAFE_SUBWORDS_PER_A_B) : addr_b_full[SAFE_WIDTHAD_A-1:0];
+            wire [SAFE_SUBWORD_BITS_B-1:0] addr_b_lane = (SAFE_WIDTH_A >= SAFE_WIDTH_B) ? (addr_b_full % SAFE_SUBWORDS_PER_A_B) : {SAFE_SUBWORD_BITS_B{1'b0}};
+            wire clocken0_en = (clocken0 === 1'b0) ? 1'b0 : 1'b1;
+            wire clocken1_en = (clocken1 === 1'b0) ? 1'b0 : 1'b1;
+            wire addrstall_a_en = (addressstall_a === 1'b1) ? 1'b1 : 1'b0;
+            wire addrstall_b_en = (addressstall_b === 1'b1) ? 1'b1 : 1'b0;
+            wire wren_a_en = (wren_a === 1'b1) ? 1'b1 : 1'b0;
+            wire wren_b_en = (wren_b === 1'b1) ? 1'b1 : 1'b0;
+            wire rden_a_en = (rden_a === 1'b0) ? 1'b0 : 1'b1;
+            wire rden_b_en = (rden_b === 1'b0) ? 1'b0 : 1'b1;
+            wire wren_a_fire = wren_a_en && clocken0_en && !addrstall_a_en;
+            wire wren_b_fire = wren_b_en && clocken1_en && !addrstall_b_en;
+            wire rden_a_fire = rden_a_en && clocken0_en && !addrstall_a_en;
+            wire rden_b_fire = rden_b_en && clocken1_en && !addrstall_b_en;
+
+            initial begin
+              for (init_i = 0; init_i < SAFE_DEPTH_A; init_i = init_i + 1) begin
+                mem[init_i] = {SAFE_WIDTH_A{1'b0}};
+              end
+              addr_b_word_reg = {SAFE_WIDTHAD_A{1'b0}};
+              addr_b_lane_reg = {SAFE_SUBWORD_BITS_B{1'b0}};
+            end
+
+            always @* begin
+              merged_a = mem[addr_a];
+              if (SAFE_WIDTH_BYTEENA_A <= 1 || SAFE_BYTE_COUNT_A <= 1) begin
+                merged_a = data_a;
+              end else begin
+                for (byte_i = 0; byte_i < SAFE_BYTE_COUNT_A; byte_i = byte_i + 1) begin
+                  if (byte_i < SAFE_WIDTH_BYTEENA_A && byteena_a[byte_i]) begin
+                    merged_a[(byte_i * 8) +: 8] = data_a[(byte_i * 8) +: 8];
+                  end
+                end
+              end
+
+              merged_b_word = mem[addr_b_word];
+              if (SAFE_WIDTH_BYTEENA_B <= 1 || SAFE_BYTE_COUNT_B <= 1) begin
+                if (SAFE_WIDTH_A >= SAFE_WIDTH_B) begin
+                  merged_b_word[(addr_b_lane * SAFE_WIDTH_B) +: SAFE_WIDTH_B] = data_b;
+                end else begin
+                  merged_b_word[SAFE_WIDTH_B-1:0] = data_b;
+                end
+              end else begin
+                for (byte_i = 0; byte_i < SAFE_BYTE_COUNT_B; byte_i = byte_i + 1) begin
+                  if (byte_i < SAFE_WIDTH_BYTEENA_B && byteena_b[byte_i]) begin
+                    if (SAFE_WIDTH_A >= SAFE_WIDTH_B) begin
+                      merged_b_word[(addr_b_lane * SAFE_WIDTH_B) + (byte_i * 8) +: 8] = data_b[(byte_i * 8) +: 8];
+                    end else begin
+                      merged_b_word[(byte_i * 8) +: 8] = data_b[(byte_i * 8) +: 8];
+                    end
+                  end
+                end
+              end
+
+              if (SAFE_WIDTH_A >= SAFE_WIDTH_B) begin
+                read_b_data = mem[addr_b_word_reg][(addr_b_lane_reg * SAFE_WIDTH_B) +: SAFE_WIDTH_B];
+              end else begin
+                read_b_data = mem[addr_b_word_reg][SAFE_WIDTH_B-1:0];
+              end
+            end
+
+            always @(posedge clock0 or posedge aclr0) begin
+              if (aclr0) begin
+                addr_b_word_reg <= {SAFE_WIDTHAD_A{1'b0}};
+                addr_b_lane_reg <= {SAFE_SUBWORD_BITS_B{1'b0}};
+              end else begin
+                if (clocken0_en && !addrstall_b_en) begin
+                  addr_b_word_reg <= addr_b_word;
+                  addr_b_lane_reg <= addr_b_lane;
+                end
+                if (wren_a_fire) begin
+                  mem[addr_a] <= merged_a;
+                end
+              end
+            end
+
+            assign q_a = rden_a_fire ? mem[addr_a] : mem[addr_a];
+            assign q_b = rden_b_fire ? read_b_data : read_b_data;
+            assign eccstatus = 3'b000;
+          endmodule
+          /* verilator lint_on UNUSEDSIGNAL */
+          /* verilator lint_on UNUSEDPARAM */
+          /* verilator lint_on SELRANGE */
+          /* verilator lint_on WIDTHTRUNC */
+          /* verilator lint_on WIDTHEXPAND */
+        VERILOG
+      end
+
+      def frontend_stub_port_direction(module_name:, port_name:)
+        known = frontend_blackbox_port_hint(module_name: module_name, port_name: port_name)
+        direction = value_for(known, :direction).to_s.downcase
+        return "output" if direction == "output"
+        return "input" if direction == "input"
+
+        token = port_name.to_s
+        return "output" if token.match?(/\Aq(?:_[ab])?\z/i)
+        return "output" if token.match?(/\Aeccstatus\z/i)
+        return "output" if token.match?(/_out\z/i)
+
+        "input"
+      end
+
+      def frontend_stub_port_width(module_name:, port_name:)
+        known = frontend_blackbox_port_hint(module_name: module_name, port_name: port_name)
+        width = value_for(known, :width)
+        token = width.to_s.strip
+        return nil if token.empty? || token == "1"
+
+        token
+      end
+
+      def frontend_blackbox_port_hint(module_name:, port_name:)
+        by_module = RHDL::Import::BlackboxStubGenerator::KNOWN_BLACKBOX_PORTS
+        module_key = module_name.to_s.downcase
+        port_key = port_name.to_s.downcase
+        normalize_hash(value_for(by_module, module_key))[port_key] || {}
+      end
+
+      def augment_frontend_stub_ports(module_name:, ports:)
+        known_ports = frontend_known_stub_ports(module_name: module_name)
+        normalize_string_array(Array(ports) + known_ports)
+      end
+
+      def augment_frontend_stub_parameters(module_name:, parameters:, ports:)
+        known_parameters = frontend_known_stub_parameters(module_name: module_name)
+        required = Array(ports).filter_map do |port_name|
+          hint = frontend_blackbox_port_hint(module_name: module_name, port_name: port_name)
+          token = value_for(hint, :width).to_s.strip
+          next if token.empty?
+          next token if integer_string?(token)
+
+          token
+        end
+
+        normalize_string_array(Array(parameters) + known_parameters + required)
+      end
+
+      def frontend_known_stub_ports(module_name:)
+        case module_name.to_s.downcase
+        when "altdpram"
+          %w[
+            aclr byteena data inclock inclocken outclock outclocken q
+            rdaddress rdaddressstall rden sclr wraddress wraddressstall wren
+          ]
+        when "altsyncram"
+          %w[
+            aclr0 aclr1 address_a address_b addressstall_a addressstall_b
+            byteena_a byteena_b clock0 clock1 clocken0 clocken1 clocken2 clocken3
+            data_a data_b eccstatus q_a q_b rden_a rden_b wren_a wren_b
+          ]
+        else
+          []
+        end
+      end
+
+      def frontend_known_stub_parameters(module_name:)
+        case module_name.to_s.downcase
+        when "altdpram"
+          %w[
+            indata_aclr indata_reg intended_device_family lpm_type
+            outdata_aclr outdata_reg ram_block_type
+            rdaddress_aclr rdaddress_reg rdcontrol_aclr rdcontrol_reg
+            read_during_write_mode_mixed_ports
+            width widthad width_byteena
+            wraddress_aclr wraddress_reg wrcontrol_aclr wrcontrol_reg
+          ]
+        when "altsyncram"
+          %w[
+            operation_mode ram_block_type intended_device_family
+            lpm_type
+            width_a widthad_a numwords_a outdata_aclr_a outdata_reg_a
+            width_b widthad_b numwords_b outdata_aclr_b outdata_reg_b
+            width_byteena_a width_byteena_b
+            read_during_write_mode_mixed_ports read_during_write_mode_port_a read_during_write_mode_port_b
+            address_reg_b address_aclr_b indata_reg_b wrcontrol_wraddress_reg_b
+            clock_enable_input_a clock_enable_input_b
+            clock_enable_output_a clock_enable_output_b
+            power_up_uninitialized byte_size
+          ]
+        else
+          []
+        end
       end
 
       def apply_hints(options:, resolved_input:, normalized_payload:, out_dir:, hint_backend:, surelog_hint_adapter:)
@@ -334,7 +825,7 @@ module RHDL
               surelog_hint_adapter,
               method_name: :call,
               kwargs: {
-                resolved_input: build_frontend_input(options: options, resolved_input: resolved_input),
+                resolved_input: build_frontend_input(options: options, resolved_input: resolved_input, out_dir: out_dir),
                 work_dir: value_for(options, :hint_work_dir) || File.join(out_dir, "tmp", "hints"),
                 env: normalize_env(value_for(options, :hint_env) || value_for(options, :frontend_env))
               }
@@ -1452,6 +1943,17 @@ module RHDL
 
       def normalize_string_array(values)
         Array(values).map(&:to_s).map(&:strip).reject(&:empty?).uniq
+      end
+
+      def integer_string?(value)
+        value.to_s.match?(/\A\d+\z/)
+      end
+
+      def normalize_missing_modules_policy(value)
+        normalized = value.to_s.strip.downcase
+        return "blackbox_stubs" if normalized == "blackbox_stubs"
+
+        "fail"
       end
 
       def normalize_recovery_mode(value)

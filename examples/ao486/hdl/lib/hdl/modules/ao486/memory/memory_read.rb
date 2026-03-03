@@ -268,14 +268,12 @@ class MemoryRead < RHDL::Component
           lit(1, width: 1, base: "h", signed: false),
           kind: :nonblocking
         )
-        else_block do
-          if_stmt((lit(0, width: 2, base: "h", signed: false) == sig(:state, width: 2))) do
-            assign(
-              :reset_waiting,
-              lit(0, width: 1, base: "h", signed: false),
-              kind: :nonblocking
-            )
-          end
+        elsif_block((lit(0, width: 2, base: "h", signed: false) == sig(:state, width: 2))) do
+          assign(
+            :reset_waiting,
+            lit(0, width: 1, base: "h", signed: false),
+            kind: :nonblocking
+          )
         end
       end
       else_block do
@@ -301,14 +299,12 @@ class MemoryRead < RHDL::Component
           lit(0, width: 1, base: "h", signed: false),
           kind: :nonblocking
         )
-        else_block do
-          if_stmt((sig(:tlbread_page_fault, width: 1) & (~sig(:reset_waiting, width: 1)))) do
-            assign(
-              :read_page_fault,
-              lit(1, width: 1, base: "h", signed: false),
-              kind: :nonblocking
-            )
-          end
+        elsif_block((sig(:tlbread_page_fault, width: 1) & (~sig(:reset_waiting, width: 1)))) do
+          assign(
+            :read_page_fault,
+            lit(1, width: 1, base: "h", signed: false),
+            kind: :nonblocking
+          )
         end
       end
       else_block do
@@ -334,14 +330,12 @@ class MemoryRead < RHDL::Component
           lit(0, width: 1, base: "h", signed: false),
           kind: :nonblocking
         )
-        else_block do
-          if_stmt((sig(:tlbread_ac_fault, width: 1) & (~sig(:reset_waiting, width: 1)))) do
-            assign(
-              :read_ac_fault,
-              lit(1, width: 1, base: "h", signed: false),
-              kind: :nonblocking
-            )
-          end
+        elsif_block((sig(:tlbread_ac_fault, width: 1) & (~sig(:reset_waiting, width: 1)))) do
+          assign(
+            :read_ac_fault,
+            lit(1, width: 1, base: "h", signed: false),
+            kind: :nonblocking
+          )
         end
       end
       else_block do
@@ -404,19 +398,17 @@ class MemoryRead < RHDL::Component
               lit(0, width: 2, base: "h", signed: false),
               kind: :nonblocking
             )
-            else_block do
-              if_stmt(sig(:tlbread_done, width: 1)) do
-                assign(
-                  :state,
-                  lit(0, width: 2, base: "h", signed: false),
-                  kind: :nonblocking
-                )
-                assign(
-                  :read_data_next,
-                  sig(:tlbread_data, width: 64),
-                  kind: :nonblocking
-                )
-              end
+            elsif_block(sig(:tlbread_done, width: 1)) do
+              assign(
+                :state,
+                lit(0, width: 2, base: "h", signed: false),
+                kind: :nonblocking
+              )
+              assign(
+                :read_data_next,
+                sig(:tlbread_data, width: 64),
+                kind: :nonblocking
+              )
             end
           end
         end
@@ -427,19 +419,17 @@ class MemoryRead < RHDL::Component
               lit(0, width: 2, base: "h", signed: false),
               kind: :nonblocking
             )
-            else_block do
-              if_stmt(sig(:tlbread_done, width: 1)) do
-                assign(
-                  :buffer,
-                  sig(:tlbread_data, width: 64)[55..0],
-                  kind: :nonblocking
-                )
-                assign(
-                  :state,
-                  lit(3, width: 2, base: "h", signed: false),
-                  kind: :nonblocking
-                )
-              end
+            elsif_block(sig(:tlbread_done, width: 1)) do
+              assign(
+                :buffer,
+                sig(:tlbread_data, width: 64)[55..0],
+                kind: :nonblocking
+              )
+              assign(
+                :state,
+                lit(3, width: 2, base: "h", signed: false),
+                kind: :nonblocking
+              )
             end
           end
         end

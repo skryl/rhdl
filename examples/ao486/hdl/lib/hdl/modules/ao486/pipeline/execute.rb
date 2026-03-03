@@ -1068,23 +1068,19 @@ class Execute < RHDL::Component
           lit(0, width: 11, base: "h", signed: false),
           kind: :nonblocking
         )
-        else_block do
-          if_stmt(sig(:rd_ready, width: 1)) do
-            assign(
-              :exe_mutex,
-              sig(:rd_mutex_next, width: 11),
-              kind: :nonblocking
-            )
-            else_block do
-              if_stmt(sig(:exe_ready, width: 1)) do
-                assign(
-                  :exe_mutex,
-                  lit(0, width: 11, base: "h", signed: false),
-                  kind: :nonblocking
-                )
-              end
-            end
-          end
+        elsif_block(sig(:rd_ready, width: 1)) do
+          assign(
+            :exe_mutex,
+            sig(:rd_mutex_next, width: 11),
+            kind: :nonblocking
+          )
+        end
+        elsif_block(sig(:exe_ready, width: 1)) do
+          assign(
+            :exe_mutex,
+            lit(0, width: 11, base: "h", signed: false),
+            kind: :nonblocking
+          )
         end
       end
       else_block do
@@ -1110,23 +1106,19 @@ class Execute < RHDL::Component
           lit(0, width: 7, base: "h", signed: false),
           kind: :nonblocking
         )
-        else_block do
-          if_stmt(sig(:rd_ready, width: 1)) do
-            assign(
-              :exe_cmd,
-              sig(:rd_cmd, width: 7),
-              kind: :nonblocking
-            )
-            else_block do
-              if_stmt(sig(:exe_ready, width: 1)) do
-                assign(
-                  :exe_cmd,
-                  lit(0, width: 7, base: "h", signed: false),
-                  kind: :nonblocking
-                )
-              end
-            end
-          end
+        elsif_block(sig(:rd_ready, width: 1)) do
+          assign(
+            :exe_cmd,
+            sig(:rd_cmd, width: 7),
+            kind: :nonblocking
+          )
+        end
+        elsif_block(sig(:exe_ready, width: 1)) do
+          assign(
+            :exe_cmd,
+            lit(0, width: 7, base: "h", signed: false),
+            kind: :nonblocking
+          )
         end
       end
       else_block do

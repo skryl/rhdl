@@ -42,7 +42,7 @@ module RHDL
           checker,
           lib_path.to_s
         )
-        status.success? && stdout.to_s == "ok"
+        status.success? == true && stdout.to_s == "ok"
       rescue StandardError
         false
       end
@@ -1413,29 +1413,49 @@ module RHDL
       module IRToJson
         module_function
 
+        I64_MAX = (1 << 63) - 1
+        U64_MOD = (1 << 64)
+        U64_MASK = U64_MOD - 1
+
         def convert(ir)
+          timing = ir_to_json_timing_enabled?
+          convert_started = timing ? ::Process.clock_gettime(::Process::CLOCK_MONOTONIC) : nil
+          imported_module = ir.respond_to?(:declaration_kinds) && !ir.declaration_kinds.to_h.empty?
           previous_offsets = @slice_index_offsets
+          previous_expr_cache = @expr_to_hash_cache
           @slice_index_offsets = {}
+          @expr_to_hash_cache = {}
           assign_hashes = ir.assigns.map { |a| assign_to_hash(a) }
           initial_assign_hashes = []
           process_hashes = []
 
-          ir.processes.each do |process|
-            process_hash = process_to_hash(process)
-            if process.clocked
-              process_hashes << process_hash
-            elsif process.respond_to?(:initial) && process.initial
-              initial_assign_hashes.concat(
-                Array(process_hash[:statements]).map do |stmt|
-                  {
-                    target: stmt[:target],
-                    expr: stmt[:expr]
-                  }
-                end
-              )
-            else
-              next if Array(process.sensitivity_list).empty?
+          ir.processes.each_with_index do |process, index|
+            process_started = timing ? ::Process.clock_gettime(::Process::CLOCK_MONOTONIC) : nil
 
+            if process.clocked
+              process_hashes << process_to_hash(process)
+            elsif process.respond_to?(:initial) && process.initial
+              if simple_initial_process?(process)
+                initial_assign_hashes.concat(Array(process.statements).map { |stmt| seq_assign_to_hash(stmt) })
+              else
+                process_hash = process_to_hash(process)
+                initial_assign_hashes.concat(
+                  Array(process_hash[:statements]).map do |stmt|
+                    {
+                      target: stmt[:target],
+                      expr: stmt[:expr]
+                    }
+                  end
+                )
+              end
+            else
+              # Imported Verilog often models always @* blocks with an empty
+              # sensitivity list in IR metadata. Native backends do not execute
+              # non-clocked processes directly, so preserve imported behavior
+              # by lowering those blocks into combinational assigns as well.
+              next if Array(process.sensitivity_list).empty? && !imported_module
+
+              process_hash = process_to_hash(process)
               # The native IR simulators only execute clocked processes.
               # Lower combinational processes into explicit assigns so their
               # behavior is preserved during IR simulation.
@@ -1447,6 +1467,28 @@ module RHDL
                   }
                 end
               )
+            end
+
+            if timing
+              elapsed = ::Process.clock_gettime(::Process::CLOCK_MONOTONIC) - process_started
+              if elapsed >= 0.25
+                warn format(
+                  "[ir_to_json] process[%d/%d] %s clocked=%s initial=%s took=%.3fs",
+                  index + 1,
+                  ir.processes.length,
+                  process.name.to_s,
+                  process.clocked,
+                  process.respond_to?(:initial) && process.initial,
+                  elapsed
+                )
+              elsif ((index + 1) % 50).zero?
+                warn format(
+                  "[ir_to_json] process[%d/%d] %s",
+                  index + 1,
+                  ir.processes.length,
+                  process.name.to_s
+                )
+              end
             end
           end
 
@@ -1463,7 +1505,26 @@ module RHDL
             sync_read_ports: (ir.sync_read_ports || []).map { |rp| sync_read_port_to_hash(rp) }
           }.to_json(max_nesting: false)
         ensure
+          if timing && !convert_started.nil?
+            elapsed = ::Process.clock_gettime(::Process::CLOCK_MONOTONIC) - convert_started
+            warn format("[ir_to_json] total %.3fs", elapsed)
+          end
           @slice_index_offsets = previous_offsets
+          @expr_to_hash_cache = previous_expr_cache
+        end
+
+        def ir_to_json_timing_enabled?
+          raw = ENV["RHDL_IR_TO_JSON_TIMING"]
+          !raw.nil? && !raw.strip.empty? && !%w[0 false off no].include?(raw.strip.downcase)
+        end
+
+        def simple_initial_process?(process)
+          return false unless process.respond_to?(:initial) && process.initial
+
+          statements = Array(process.statements)
+          return false if statements.empty?
+
+          statements.all? { |stmt| stmt.is_a?(IR::SeqAssign) }
         end
 
         def port_to_hash(port)
@@ -1488,7 +1549,7 @@ module RHDL
             name: reg.name.to_s,
             width: reg.width
           }
-          hash[:reset_value] = reg.reset_value unless reg.reset_value.nil?
+          hash[:reset_value] = normalize_u64_integer(reg.reset_value) unless reg.reset_value.nil?
           hash
         end
 
@@ -1605,8 +1666,8 @@ module RHDL
                 {
                   type: 'binary_op',
                   op: '==',
-                  left: deep_clone_expr_hash(selector),
-                  right: deep_clone_expr_hash(value_hash),
+                  left: selector,
+                  right: value_hash,
                   width: 1
                 }
               end
@@ -1645,7 +1706,7 @@ module RHDL
             replacement = state[name]
             return expr_hash if replacement.nil? || stack.include?(name)
 
-            rewrite_expr_with_state(deep_clone_expr_hash(replacement), state, stack + [name])
+            rewrite_expr_with_state(replacement, state, stack + [name])
           when 'unary_op'
             expr_hash.merge(operand: rewrite_expr_with_state(expr_hash[:operand], state, stack))
           when 'binary_op'
@@ -1672,19 +1733,6 @@ module RHDL
           end
         end
 
-        def deep_clone_expr_hash(value)
-          case value
-          when Hash
-            value.each_with_object({}) do |(key, inner), memo|
-              memo[key] = deep_clone_expr_hash(inner)
-            end
-          when Array
-            value.map { |entry| deep_clone_expr_hash(entry) }
-          else
-            value
-          end
-        end
-
         def infer_target_width(*expr_hashes)
           Array(expr_hashes).each do |entry|
             width = entry&.dig(:width)
@@ -1706,7 +1754,7 @@ module RHDL
             depth: mem.depth,
             width: mem.width
           }
-          hash[:initial_data] = mem.initial_data if mem.initial_data
+          hash[:initial_data] = Array(mem.initial_data).map { |value| normalize_u64_integer(value) } if mem.initial_data
           hash
         end
 
@@ -1732,11 +1780,17 @@ module RHDL
         end
 
         def expr_to_hash(expr)
-          case expr
+          cacheable = !expr.is_a?(IR::Slice)
+          if cacheable
+            cached = @expr_to_hash_cache.fetch(expr.object_id, nil)
+            return cached unless cached.nil?
+          end
+
+          converted = case expr
           when IR::Signal
             { type: 'signal', name: expr.name.to_s, width: expr.width }
           when IR::Literal
-            { type: 'literal', value: expr.value, width: expr.width }
+            { type: 'literal', value: normalize_i64_literal(expr.value, width: expr.width), width: expr.width }
           when IR::UnaryOp
             { type: 'unary_op', op: expr.op.to_s, operand: expr_to_hash(expr.operand), width: expr.width }
           when IR::BinaryOp
@@ -1802,7 +1856,17 @@ module RHDL
               result = expr.default ? expr_to_hash(expr.default) : { type: 'literal', value: 0, width: expr.width }
               expr.cases.each do |values, case_expr|
                 values.each do |v|
-                  cond = { type: 'binary_op', op: '==', left: expr_to_hash(expr.selector), right: { type: 'literal', value: v, width: expr.selector.width }, width: 1 }
+                  cond = {
+                    type: 'binary_op',
+                    op: '==',
+                    left: expr_to_hash(expr.selector),
+                    right: {
+                      type: 'literal',
+                      value: normalize_i64_literal(v, width: expr.selector.width),
+                      width: expr.selector.width
+                    },
+                    width: 1
+                  }
                   result = { type: 'mux', condition: cond, when_true: expr_to_hash(case_expr), when_false: result, width: expr.width }
                 end
               end
@@ -1813,6 +1877,26 @@ module RHDL
           else
             { type: 'literal', value: 0, width: 1 }
           end
+          @expr_to_hash_cache[expr.object_id] = converted if cacheable
+          converted
+        end
+
+        def normalize_i64_literal(value, width:)
+          bits = Integer(width || 0)
+          bits = 64 if bits <= 0
+          bits = 64 if bits > 64
+          mask = bits == 64 ? U64_MASK : ((1 << bits) - 1)
+
+          unsigned = Integer(value) & mask
+          unsigned > I64_MAX ? (unsigned - U64_MOD) : unsigned
+        rescue ArgumentError, TypeError
+          0
+        end
+
+        def normalize_u64_integer(value)
+          Integer(value) & U64_MASK
+        rescue ArgumentError, TypeError
+          0
         end
       end
     end

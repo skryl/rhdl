@@ -1,6 +1,11 @@
 # frozen_string_literal: true
 
-require_relative "hdl/modules/altdpram"
+require_relative "hdl/modules/frontend_blackbox_stubs__f3f4c9e2"
+require_relative "hdl/modules/frontend_blackbox_stubs__97d99b1b"
+require_relative "hdl/modules/frontend_blackbox_stubs__2ed0d55d"
+require_relative "hdl/modules/frontend_blackbox_stubs__0ca43cc2"
+require_relative "hdl/modules/frontend_blackbox_stubs__9c0024d0"
+require_relative "hdl/modules/frontend_blackbox_stubs__b6204b27"
 require_relative "hdl/modules/ao486/memory/avalon_mem"
 require_relative "hdl/modules/ao486/pipeline/condition"
 require_relative "hdl/modules/cpu_export"

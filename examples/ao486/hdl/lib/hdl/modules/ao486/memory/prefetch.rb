@@ -142,41 +142,37 @@ class Prefetch < RHDL::Component
           ),
           kind: :nonblocking
         )
-        else_block do
-          if_stmt(sig(:reset_prefetch, width: 1)) do
-            assign(
-              :limit,
-              mux(
-                (
-                    sig(:cs_limit, width: 32) >=
-                    sig(:prefetch_eip, width: 32)
-                ),
-                (
-                    lit(1, width: 32, base: "h", signed: false) +
-                    (
-                        sig(:cs_limit, width: 32) -
-                        sig(:prefetch_eip, width: 32)
-                    )
-                ),
-                lit(0, width: 32, base: "h", signed: false)
+        elsif_block(sig(:reset_prefetch, width: 1)) do
+          assign(
+            :limit,
+            mux(
+              (
+                  sig(:cs_limit, width: 32) >=
+                  sig(:prefetch_eip, width: 32)
               ),
-              kind: :nonblocking
-            )
-            else_block do
-              if_stmt(sig(:prefetched_do, width: 1)) do
-                assign(
-                  :limit,
+              (
+                  lit(1, width: 32, base: "h", signed: false) +
                   (
-                      sig(:limit, width: 32) -
-                      lit(0, width: 27, base: "d", signed: false).concat(
-                      sig(:length, width: 5)
-                    )
-                  ),
-                  kind: :nonblocking
-                )
-              end
-            end
-          end
+                      sig(:cs_limit, width: 32) -
+                      sig(:prefetch_eip, width: 32)
+                  )
+              ),
+              lit(0, width: 32, base: "h", signed: false)
+            ),
+            kind: :nonblocking
+          )
+        end
+        elsif_block(sig(:prefetched_do, width: 1)) do
+          assign(
+            :limit,
+            (
+                sig(:limit, width: 32) -
+                lit(0, width: 27, base: "d", signed: false).concat(
+                sig(:length, width: 5)
+              )
+            ),
+            kind: :nonblocking
+          )
         end
       end
       else_block do
@@ -239,19 +235,17 @@ class Prefetch < RHDL::Component
               ),
               kind: :nonblocking
             )
-            else_block do
-              if_stmt(sig(:prefetched_do, width: 1)) do
-                assign(
-                  :linear,
-                  (
-                      sig(:linear, width: 32) +
-                      lit(0, width: 27, base: "d", signed: false).concat(
-                      sig(:length, width: 5)
-                    )
-                  ),
-                  kind: :nonblocking
-                )
-              end
+            elsif_block(sig(:prefetched_do, width: 1)) do
+              assign(
+                :linear,
+                (
+                    sig(:linear, width: 32) +
+                    lit(0, width: 27, base: "d", signed: false).concat(
+                    sig(:length, width: 5)
+                  )
+                ),
+                kind: :nonblocking
+              )
             end
           end
           if_stmt(sig(:prefetched_accept_do_1, width: 1)) do
@@ -291,14 +285,12 @@ class Prefetch < RHDL::Component
           lit(0, width: 1, base: "h", signed: false),
           kind: :nonblocking
         )
-        else_block do
-          if_stmt(sig(:prefetchfifo_signal_limit_do, width: 1)) do
-            assign(
-              :limit_signaled,
-              lit(1, width: 1, base: "h", signed: false),
-              kind: :nonblocking
-            )
-          end
+        elsif_block(sig(:prefetchfifo_signal_limit_do, width: 1)) do
+          assign(
+            :limit_signaled,
+            lit(1, width: 1, base: "h", signed: false),
+            kind: :nonblocking
+          )
         end
       end
       else_block do

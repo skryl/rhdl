@@ -451,23 +451,19 @@ class ExecuteDivide < RHDL::Component
           lit(0, width: 1, base: "h", signed: false),
           kind: :nonblocking
         )
-        else_block do
-          if_stmt(sig(:exe_ready, width: 1)) do
-            assign(
-              :div_one_time,
-              lit(0, width: 1, base: "h", signed: false),
-              kind: :nonblocking
-            )
-            else_block do
-              if_stmt((lit(1, width: 6, base: "h", signed: false) < sig(:div_counter, width: 6))) do
-                assign(
-                  :div_one_time,
-                  lit(1, width: 1, base: "h", signed: false),
-                  kind: :nonblocking
-                )
-              end
-            end
-          end
+        elsif_block(sig(:exe_ready, width: 1)) do
+          assign(
+            :div_one_time,
+            lit(0, width: 1, base: "h", signed: false),
+            kind: :nonblocking
+          )
+        end
+        elsif_block((lit(1, width: 6, base: "h", signed: false) < sig(:div_counter, width: 6))) do
+          assign(
+            :div_one_time,
+            lit(1, width: 1, base: "h", signed: false),
+            kind: :nonblocking
+          )
         end
       end
       else_block do
@@ -493,14 +489,12 @@ class ExecuteDivide < RHDL::Component
           lit(0, width: 1, base: "h", signed: false),
           kind: :nonblocking
         )
-        else_block do
-          if_stmt(((lit(1, width: 6, base: "h", signed: false) == sig(:div_counter, width: 6)) & sig(:div_overflow, width: 1))) do
-            assign(
-              :div_overflow_waiting,
-              lit(1, width: 1, base: "h", signed: false),
-              kind: :nonblocking
-            )
-          end
+        elsif_block(((lit(1, width: 6, base: "h", signed: false) == sig(:div_counter, width: 6)) & sig(:div_overflow, width: 1))) do
+          assign(
+            :div_overflow_waiting,
+            lit(1, width: 1, base: "h", signed: false),
+            kind: :nonblocking
+          )
         end
       end
       else_block do
@@ -526,44 +520,36 @@ class ExecuteDivide < RHDL::Component
           lit(0, width: 6, base: "h", signed: false),
           kind: :nonblocking
         )
-        else_block do
-          if_stmt((sig(:div_start, width: 1) & sig(:exe_is_8bit, width: 1))) do
-            assign(
-              :div_counter,
-              lit(10, width: 6, base: "h", signed: false),
-              kind: :nonblocking
-            )
-            else_block do
-              if_stmt((sig(:div_start, width: 1) & sig(:exe_operand_16bit, width: 1))) do
-                assign(
-                  :div_counter,
-                  lit(18, width: 6, base: "h", signed: false),
-                  kind: :nonblocking
-                )
-                else_block do
-                  if_stmt((sig(:div_start, width: 1) & sig(:exe_operand_32bit, width: 1))) do
-                    assign(
-                      :div_counter,
-                      lit(34, width: 6, base: "h", signed: false),
-                      kind: :nonblocking
-                    )
-                    else_block do
-                      if_stmt((lit(0, width: 6, base: "h", signed: false) != sig(:div_counter, width: 6))) do
-                        assign(
-                          :div_counter,
-                          (
-                              sig(:div_counter, width: 6) -
-                              lit(1, width: 6, base: "h", signed: false)
-                          ),
-                          kind: :nonblocking
-                        )
-                      end
-                    end
-                  end
-                end
-              end
-            end
-          end
+        elsif_block((sig(:div_start, width: 1) & sig(:exe_is_8bit, width: 1))) do
+          assign(
+            :div_counter,
+            lit(10, width: 6, base: "h", signed: false),
+            kind: :nonblocking
+          )
+        end
+        elsif_block((sig(:div_start, width: 1) & sig(:exe_operand_16bit, width: 1))) do
+          assign(
+            :div_counter,
+            lit(18, width: 6, base: "h", signed: false),
+            kind: :nonblocking
+          )
+        end
+        elsif_block((sig(:div_start, width: 1) & sig(:exe_operand_32bit, width: 1))) do
+          assign(
+            :div_counter,
+            lit(34, width: 6, base: "h", signed: false),
+            kind: :nonblocking
+          )
+        end
+        elsif_block((lit(0, width: 6, base: "h", signed: false) != sig(:div_counter, width: 6))) do
+          assign(
+            :div_counter,
+            (
+                sig(:div_counter, width: 6) -
+                lit(1, width: 6, base: "h", signed: false)
+            ),
+            kind: :nonblocking
+          )
         end
       end
       else_block do
@@ -589,25 +575,21 @@ class ExecuteDivide < RHDL::Component
           sig(:div_numer, width: 65)[63..0],
           kind: :nonblocking
         )
-        else_block do
-          if_stmt((sig(:div_start, width: 1) & sig(:div_numer, width: 65)[64])) do
-            assign(
-              :div_dividend,
-              (
-                -sig(:div_numer, width: 65)[63..0]
-              ),
-              kind: :nonblocking
-            )
-            else_block do
-              if_stmt((sig(:div_working, width: 1) & (~sig(:div_diff, width: 65)[64]))) do
-                assign(
-                  :div_dividend,
-                  sig(:div_diff, width: 65)[63..0],
-                  kind: :nonblocking
-                )
-              end
-            end
-          end
+        elsif_block((sig(:div_start, width: 1) & sig(:div_numer, width: 65)[64])) do
+          assign(
+            :div_dividend,
+            (
+              -sig(:div_numer, width: 65)[63..0]
+            ),
+            kind: :nonblocking
+          )
+        end
+        elsif_block((sig(:div_working, width: 1) & (~sig(:div_diff, width: 65)[64]))) do
+          assign(
+            :div_dividend,
+            sig(:div_diff, width: 65)[63..0],
+            kind: :nonblocking
+          )
         end
       end
       else_block do
@@ -637,77 +619,65 @@ class ExecuteDivide < RHDL::Component
           ),
           kind: :nonblocking
         )
-        else_block do
-          if_stmt(((sig(:div_start, width: 1) & sig(:div_denom, width: 33)[32]) & sig(:exe_is_8bit, width: 1))) do
-            assign(
-              :div_divisor,
-              lit(0, width: 48, base: "d", signed: false).concat(
-                sig(:div_denom_neg, width: 33)[7..0]
-              ).concat(
-                lit(0, width: 8, base: "h", signed: false)
-              ),
-              kind: :nonblocking
-            )
-            else_block do
-              if_stmt(((sig(:div_start, width: 1) & (~sig(:div_denom, width: 33)[32])) & sig(:exe_operand_16bit, width: 1))) do
-                assign(
-                  :div_divisor,
-                  lit(0, width: 32, base: "d", signed: false).concat(
-                    sig(:div_denom, width: 33)[15..0]
-                  ).concat(
-                    lit(0, width: 16, base: "h", signed: false)
-                  ),
-                  kind: :nonblocking
-                )
-                else_block do
-                  if_stmt(((sig(:div_start, width: 1) & sig(:div_denom, width: 33)[32]) & sig(:exe_operand_16bit, width: 1))) do
-                    assign(
-                      :div_divisor,
-                      lit(0, width: 32, base: "d", signed: false).concat(
-                        sig(:div_denom_neg, width: 33)[15..0]
-                      ).concat(
-                        lit(0, width: 16, base: "h", signed: false)
-                      ),
-                      kind: :nonblocking
-                    )
-                    else_block do
-                      if_stmt(((sig(:div_start, width: 1) & (~sig(:div_denom, width: 33)[32])) & sig(:exe_operand_32bit, width: 1))) do
-                        assign(
-                          :div_divisor,
-                          sig(:div_denom, width: 33)[31..0].concat(
-                            lit(0, width: 32, base: "h", signed: false)
-                          ),
-                          kind: :nonblocking
-                        )
-                        else_block do
-                          if_stmt(((sig(:div_start, width: 1) & sig(:div_denom, width: 33)[32]) & sig(:exe_operand_32bit, width: 1))) do
-                            assign(
-                              :div_divisor,
-                              sig(:div_denom_neg, width: 33)[31..0].concat(
-                                lit(0, width: 32, base: "h", signed: false)
-                              ),
-                              kind: :nonblocking
-                            )
-                            else_block do
-                              if_stmt(sig(:div_working, width: 1)) do
-                                assign(
-                                  :div_divisor,
-                                  lit(0, width: 1, base: "d", signed: false).concat(
-                                    sig(:div_divisor, width: 64)[63..1]
-                                  ),
-                                  kind: :nonblocking
-                                )
-                              end
-                            end
-                          end
-                        end
-                      end
-                    end
-                  end
-                end
-              end
-            end
-          end
+        elsif_block(((sig(:div_start, width: 1) & sig(:div_denom, width: 33)[32]) & sig(:exe_is_8bit, width: 1))) do
+          assign(
+            :div_divisor,
+            lit(0, width: 48, base: "d", signed: false).concat(
+              sig(:div_denom_neg, width: 33)[7..0]
+            ).concat(
+              lit(0, width: 8, base: "h", signed: false)
+            ),
+            kind: :nonblocking
+          )
+        end
+        elsif_block(((sig(:div_start, width: 1) & (~sig(:div_denom, width: 33)[32])) & sig(:exe_operand_16bit, width: 1))) do
+          assign(
+            :div_divisor,
+            lit(0, width: 32, base: "d", signed: false).concat(
+              sig(:div_denom, width: 33)[15..0]
+            ).concat(
+              lit(0, width: 16, base: "h", signed: false)
+            ),
+            kind: :nonblocking
+          )
+        end
+        elsif_block(((sig(:div_start, width: 1) & sig(:div_denom, width: 33)[32]) & sig(:exe_operand_16bit, width: 1))) do
+          assign(
+            :div_divisor,
+            lit(0, width: 32, base: "d", signed: false).concat(
+              sig(:div_denom_neg, width: 33)[15..0]
+            ).concat(
+              lit(0, width: 16, base: "h", signed: false)
+            ),
+            kind: :nonblocking
+          )
+        end
+        elsif_block(((sig(:div_start, width: 1) & (~sig(:div_denom, width: 33)[32])) & sig(:exe_operand_32bit, width: 1))) do
+          assign(
+            :div_divisor,
+            sig(:div_denom, width: 33)[31..0].concat(
+              lit(0, width: 32, base: "h", signed: false)
+            ),
+            kind: :nonblocking
+          )
+        end
+        elsif_block(((sig(:div_start, width: 1) & sig(:div_denom, width: 33)[32]) & sig(:exe_operand_32bit, width: 1))) do
+          assign(
+            :div_divisor,
+            sig(:div_denom_neg, width: 33)[31..0].concat(
+              lit(0, width: 32, base: "h", signed: false)
+            ),
+            kind: :nonblocking
+          )
+        end
+        elsif_block(sig(:div_working, width: 1)) do
+          assign(
+            :div_divisor,
+            lit(0, width: 1, base: "d", signed: false).concat(
+              sig(:div_divisor, width: 64)[63..1]
+            ),
+            kind: :nonblocking
+          )
         end
       end
       else_block do
@@ -733,27 +703,23 @@ class ExecuteDivide < RHDL::Component
           lit(0, width: 33, base: "h", signed: false),
           kind: :nonblocking
         )
-        else_block do
-          if_stmt((sig(:div_working, width: 1) & (~sig(:div_diff, width: 65)[64]))) do
-            assign(
-              :div_quotient,
-              sig(:div_quotient, width: 33)[31..0].concat(
-                lit(1, width: 1, base: "h", signed: false)
-              ),
-              kind: :nonblocking
-            )
-            else_block do
-              if_stmt((sig(:div_working, width: 1) & sig(:div_diff, width: 65)[64])) do
-                assign(
-                  :div_quotient,
-                  sig(:div_quotient, width: 33)[31..0].concat(
-                    lit(0, width: 1, base: "h", signed: false)
-                  ),
-                  kind: :nonblocking
-                )
-              end
-            end
-          end
+        elsif_block((sig(:div_working, width: 1) & (~sig(:div_diff, width: 65)[64]))) do
+          assign(
+            :div_quotient,
+            sig(:div_quotient, width: 33)[31..0].concat(
+              lit(1, width: 1, base: "h", signed: false)
+            ),
+            kind: :nonblocking
+          )
+        end
+        elsif_block((sig(:div_working, width: 1) & sig(:div_diff, width: 65)[64])) do
+          assign(
+            :div_quotient,
+            sig(:div_quotient, width: 33)[31..0].concat(
+              lit(0, width: 1, base: "h", signed: false)
+            ),
+            kind: :nonblocking
+          )
         end
       end
       else_block do

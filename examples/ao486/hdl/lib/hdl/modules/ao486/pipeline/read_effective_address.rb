@@ -846,23 +846,19 @@ class ReadEffectiveAddress < RHDL::Component
           ),
           kind: :nonblocking
         )
-        else_block do
-          if_stmt(sig(:rd_ready, width: 1)) do
-            assign(
-              :stack_saved,
-              sig(:stack_next, width: 32),
-              kind: :nonblocking
-            )
-            else_block do
-              if_stmt(sig(:address_stack_save, width: 1)) do
-                assign(
-                  :stack_saved,
-                  sig(:stack_offset, width: 32),
-                  kind: :nonblocking
-                )
-              end
-            end
-          end
+        elsif_block(sig(:rd_ready, width: 1)) do
+          assign(
+            :stack_saved,
+            sig(:stack_next, width: 32),
+            kind: :nonblocking
+          )
+        end
+        elsif_block(sig(:address_stack_save, width: 1)) do
+          assign(
+            :stack_saved,
+            sig(:stack_offset, width: 32),
+            kind: :nonblocking
+          )
         end
       end
       else_block do
@@ -888,14 +884,12 @@ class ReadEffectiveAddress < RHDL::Component
           sig(:ebp, width: 32),
           kind: :nonblocking
         )
-        else_block do
-          if_stmt(sig(:rd_ready, width: 1)) do
-            assign(
-              :ebp_for_enter,
-              sig(:ebp_for_enter_offset, width: 32),
-              kind: :nonblocking
-            )
-          end
+        elsif_block(sig(:rd_ready, width: 1)) do
+          assign(
+            :ebp_for_enter,
+            sig(:ebp_for_enter_offset, width: 32),
+            kind: :nonblocking
+          )
         end
       end
       else_block do
@@ -945,14 +939,12 @@ class ReadEffectiveAddress < RHDL::Component
           lit(0, width: 1, base: "h", signed: false),
           kind: :nonblocking
         )
-        else_block do
-          if_stmt(sig(:rd_address_effective_do, width: 1)) do
-            assign(
-              :rd_address_effective_ready,
-              lit(1, width: 1, base: "h", signed: false),
-              kind: :nonblocking
-            )
-          end
+        elsif_block(sig(:rd_address_effective_do, width: 1)) do
+          assign(
+            :rd_address_effective_ready,
+            lit(1, width: 1, base: "h", signed: false),
+            kind: :nonblocking
+          )
         end
       end
       else_block do

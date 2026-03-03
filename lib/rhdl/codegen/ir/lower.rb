@@ -22,6 +22,8 @@ module RHDL
         @processes = []
         @reg_ports = []
         @memories = []
+        @write_ports = []
+        @sync_read_ports = []
         @instances = []
         @loop_bindings = {}
       end
@@ -29,6 +31,10 @@ module RHDL
       def build
         collect_parameters
         collect_ports
+
+        primitive_model = build_lir_primitive_memory_model
+        return primitive_model unless primitive_model.nil?
+
         collect_signals
         infer_hir_memory_candidates if hir_mode?
         collect_memories
@@ -46,6 +52,8 @@ module RHDL
           processes: @processes,
           reg_ports: @reg_ports,
           memories: @memories,
+          write_ports: @write_ports,
+          sync_read_ports: @sync_read_ports,
           instances: @instances,
           declaration_kinds: imported_declaration_kinds
         )
@@ -103,6 +111,237 @@ module RHDL
           @ports << IR::Port.new(name: port.name, direction: port.direction, width: port.width, default: port.default)
           @widths[port.name.to_sym] = port.width
         end
+      end
+
+      def build_lir_primitive_memory_model
+        return nil if hir_mode?
+
+        token = module_name.to_s.downcase
+        return build_lir_altdpram_model if token.start_with?("altdpram__")
+        return build_lir_altsyncram_model if token.start_with?("altsyncram__")
+
+        nil
+      end
+
+      def build_lir_altdpram_model
+        width = primitive_positive_integer(:width, fallback: primitive_port_width(:data, fallback: 1))
+        widthad = primitive_positive_integer(:widthad, fallback: primitive_port_width(:rdaddress, fallback: 1))
+        depth = 1 << widthad
+
+        memory_name = "__mem"
+        read_addr = primitive_port_signal(:rdaddress, widthad)
+        write_addr = primitive_port_signal(:wraddress, widthad)
+        data_expr = resize(primitive_port_signal(:data, width), width)
+        q_width = primitive_port_width(:q, fallback: width)
+
+        @memories << IR::Memory.new(name: memory_name, depth: depth, width: width, initial_data: nil)
+        @assigns << IR::Assign.new(
+          target: :q,
+          expr: IR::MemoryRead.new(memory: memory_name, addr: read_addr, width: q_width)
+        )
+
+        @write_ports << IR::MemoryWritePort.new(
+          memory: memory_name,
+          clock: "inclock",
+          addr: write_addr,
+          data: data_expr,
+          enable: primitive_and(
+            primitive_cmp(:==, primitive_port_signal(:wren, 1), primitive_literal(1, 1)),
+            primitive_and(
+              primitive_cmp(:!=, primitive_port_signal(:wraddressstall, 1), primitive_literal(1, 1)),
+              primitive_cmp(:!=, primitive_port_signal(:inclocken, 1), primitive_literal(0, 1))
+            )
+          )
+        )
+
+        IR::ModuleDef.new(
+          name: module_name,
+          parameters: @parameters,
+          ports: @ports,
+          nets: @nets,
+          regs: @regs,
+          assigns: @assigns,
+          processes: [],
+          reg_ports: [],
+          memories: @memories,
+          write_ports: @write_ports,
+          sync_read_ports: [],
+          instances: [],
+          declaration_kinds: imported_declaration_kinds
+        )
+      end
+
+      def build_lir_altsyncram_model
+        width_a = primitive_positive_integer(:width_a, fallback: primitive_port_width(:data_a, fallback: 1))
+        width_b = primitive_positive_integer(:width_b, fallback: primitive_port_width(:q_b, fallback: width_a))
+        widthad_a = primitive_positive_integer(:widthad_a, fallback: primitive_port_width(:address_a, fallback: 1))
+        widthad_b = primitive_positive_integer(:widthad_b, fallback: primitive_port_width(:address_b, fallback: widthad_a))
+        depth = 1 << widthad_a
+
+        memory_name = "__mem"
+        address_a = primitive_port_signal(:address_a, widthad_a)
+        address_b = primitive_port_signal(:address_b, widthad_b)
+        data_a = resize(primitive_port_signal(:data_a, width_a), width_a)
+        byteena_width = primitive_port_width(:byteena_a, fallback: 1)
+        merged_data =
+          if byteena_width > 1
+            primitive_merge_byteenable_data(
+              memory_name: memory_name,
+              addr_expr: address_a,
+              old_width: width_a,
+              data_expr: data_a,
+              byteena_expr: primitive_port_signal(:byteena_a, byteena_width),
+              byteena_width: byteena_width
+            )
+          else
+            data_a
+          end
+
+        read_expr = IR::MemoryRead.new(
+          memory: memory_name,
+          addr: primitive_memory_read_address_expr(
+            address_b_expr: address_b,
+            width_a: width_a,
+            width_b: width_b,
+            widthad_a: widthad_a
+          ),
+          width: width_a
+        )
+        q_b_expr = if width_b == width_a
+          read_expr
+        elsif width_b < width_a
+          IR::Slice.new(base: read_expr, range: (width_b - 1)..0, width: width_b)
+        else
+          resize(read_expr, width_b)
+        end
+
+        @memories << IR::Memory.new(name: memory_name, depth: depth, width: width_a, initial_data: nil)
+        @assigns << IR::Assign.new(target: :q_b, expr: q_b_expr)
+
+        @write_ports << IR::MemoryWritePort.new(
+          memory: memory_name,
+          clock: "clock0",
+          addr: resize(address_a, widthad_a),
+          data: merged_data,
+          enable: primitive_and(
+            primitive_cmp(:==, primitive_port_signal(:wren_a, 1), primitive_literal(1, 1)),
+            primitive_and(
+              primitive_cmp(:!=, primitive_port_signal(:addressstall_a, 1), primitive_literal(1, 1)),
+              primitive_cmp(:!=, primitive_port_signal(:clocken0, 1), primitive_literal(0, 1))
+            )
+          )
+        )
+
+        IR::ModuleDef.new(
+          name: module_name,
+          parameters: @parameters,
+          ports: @ports,
+          nets: @nets,
+          regs: @regs,
+          assigns: @assigns,
+          processes: [],
+          reg_ports: [],
+          memories: @memories,
+          write_ports: @write_ports,
+          sync_read_ports: [],
+          instances: [],
+          declaration_kinds: imported_declaration_kinds
+        )
+      end
+
+      def primitive_memory_read_address_expr(address_b_expr:, width_a:, width_b:, widthad_a:)
+        return resize(address_b_expr, widthad_a) if width_a <= width_b
+        return resize(address_b_expr, widthad_a) unless (width_a % width_b).zero?
+
+        lanes_per_word = [width_a / width_b, 1].max
+        return resize(address_b_expr, widthad_a) if lanes_per_word <= 1
+
+        shift_bits = [Math.log2(lanes_per_word).to_i, 1].max
+        shifted = IR::BinaryOp.new(
+          op: :>>,
+          left: resize(address_b_expr, widthad_a),
+          right: primitive_literal(shift_bits, widthad_a),
+          width: widthad_a
+        )
+        resize(shifted, widthad_a)
+      rescue StandardError
+        resize(address_b_expr, widthad_a)
+      end
+
+      def primitive_merge_byteenable_data(memory_name:, addr_expr:, old_width:, data_expr:, byteena_expr:, byteena_width:)
+        old_expr = IR::MemoryRead.new(memory: memory_name, addr: resize(addr_expr, width_for(addr_expr)), width: old_width)
+        byte_count = ((old_width + 7) / 8)
+
+        parts = (0...byte_count).map do |byte_index|
+          range = ((byte_index * 8) + 7)..(byte_index * 8)
+          old_byte = IR::Slice.new(base: old_expr, range: range, width: 8)
+          new_byte = IR::Slice.new(base: data_expr, range: range, width: 8)
+          if byte_index < byteena_width
+            enabled = IR::Slice.new(base: byteena_expr, range: byte_index..byte_index, width: 1)
+            IR::Mux.new(condition: enabled, when_true: new_byte, when_false: old_byte, width: 8)
+          else
+            old_byte
+          end
+        end
+
+        expr = IR::Concat.new(parts: parts.reverse, width: byte_count * 8)
+        resize(expr, old_width)
+      end
+
+      def primitive_port_signal(name, fallback_width)
+        width = primitive_port_width(name, fallback: fallback_width)
+        IR::Signal.new(name: name.to_s, width: width)
+      end
+
+      def primitive_port_width(name, fallback:)
+        port = @ports.find { |entry| entry.name.to_s == name.to_s }
+        width = width_value_to_integer(port&.width)
+        width = fallback if width.nil? || width <= 0
+        width
+      end
+
+      def primitive_positive_integer(name, fallback:)
+        value = @parameters[name.to_sym]
+        value = @parameters[name.to_s] if value.nil?
+
+        parsed = primitive_numeric_value(value)
+        parsed = fallback if parsed.nil? || parsed <= 0
+        parsed
+      end
+
+      def primitive_numeric_value(value)
+        case value
+        when Integer
+          value
+        when String
+          token = value.strip
+          return Integer(token) if token.match?(/\A[+-]?\d+\z/)
+          return token.to_i(16) if token.match?(/\A0x[0-9a-fA-F]+\z/)
+
+          literal = token.match(/\A(\d+)?'([sS])?([bBoOdDhH])([0-9a-fA-F_xXzZ]+)\z/)
+          return nil if literal.nil?
+
+          base = literal[3].downcase
+          digits = literal[4].gsub(/[_xXzZ]/, "0")
+          radix = { "b" => 2, "o" => 8, "d" => 10, "h" => 16 }.fetch(base, 10)
+          Integer(digits, radix)
+        else
+          nil
+        end
+      rescue ArgumentError, TypeError
+        nil
+      end
+
+      def primitive_literal(value, width)
+        IR::Literal.new(value: value, width: width)
+      end
+
+      def primitive_cmp(op, left, right)
+        IR::BinaryOp.new(op: op, left: left, right: right, width: 1)
+      end
+
+      def primitive_and(left, right)
+        IR::BinaryOp.new(op: :&, left: left, right: right, width: 1)
       end
 
       def collect_signals
@@ -281,7 +520,7 @@ module RHDL
           statements.each { |stmt| collect_sequential_targets(stmt, sequential_targets) }
 
           if process.is_clocked
-            clock = sensitivity.first
+            clock = select_clock_sensitivity(sensitivity)
             @processes << IR::Process.new(
               name: process.name,
               statements: statements,
@@ -318,6 +557,49 @@ module RHDL
         end
 
         inferred.reject { |signal| assigned_targets.include?(signal.to_sym) }
+      end
+
+      def select_clock_sensitivity(sensitivity)
+        entries = Array(sensitivity).compact
+        return nil if entries.empty?
+        return entries.first if entries.length == 1
+
+        non_reset_entries = entries.reject { |entry| reset_like_sensitivity_entry?(entry) }
+        clock_named_entries = non_reset_entries.select { |entry| clock_like_sensitivity_entry?(entry) }
+
+        return clock_named_entries.first unless clock_named_entries.empty?
+        return non_reset_entries.first unless non_reset_entries.empty?
+
+        entries.first
+      end
+
+      def sensitivity_signal_token(entry)
+        text = entry.to_s.strip
+        return text if text.empty?
+
+        if (match = text.match(/\A(?:posedge|negedge)\s+(.+)\z/i))
+          return match[1].to_s.strip
+        end
+
+        text
+      end
+
+      def reset_like_sensitivity_entry?(entry)
+        name = sensitivity_signal_token(entry).downcase
+        return false if name.empty?
+
+        name.include?("rst") ||
+          name.include?("reset") ||
+          name.include?("aclr") ||
+          name.include?("sclr") ||
+          name.include?("clear")
+      end
+
+      def clock_like_sensitivity_entry?(entry)
+        name = sensitivity_signal_token(entry).downcase
+        return false if name.empty?
+
+        name.include?("clk") || name.include?("clock")
       end
 
       def collect_statement_read_signals(stmt, seen:, signals:)
@@ -470,8 +752,13 @@ module RHDL
         return unless @component_class.respond_to?(:_instances)
 
         @component_class._instances.each do |instance|
-          port_directions = instance_port_directions(instance)
-          port_map = resolved_instance_port_map(instance, port_directions: port_directions)
+          port_metadata = instance_port_metadata(instance)
+          port_directions = instance_port_directions(instance, port_metadata: port_metadata)
+          port_map = resolved_instance_port_map(
+            instance,
+            port_directions: port_directions,
+            port_metadata: port_metadata
+          )
           connections = port_map.map do |port_name, signal|
             IR::PortConnection.new(
               port_name: port_name,
@@ -1170,7 +1457,21 @@ module RHDL
           left = resize(aligned[0], width)
           right = resize(aligned[1], width)
           IR::BinaryOp.new(op: op, left: left, right: right, width: width)
-        when :-, :&, :|, :^
+        when :-
+          aligned = align_operands(left, right)
+          width = aligned.map(&:width).max
+          left = resize(aligned[0], width)
+          right = resize(aligned[1], width)
+          IR::BinaryOp.new(op: op, left: left, right: right, width: width)
+        when :*
+          # Keep full-precision product width in lowered IR so dynamic index math
+          # (e.g. unpacked-array flattening) is preserved without truncation.
+          # Do not force RHS through left-width context; that can truncate
+          # constants like 32 into 2-bit literals when multiplying index signals.
+          right_full = lower_expr(expr.right)
+          width = left.width + right_full.width
+          IR::BinaryOp.new(op: op, left: left, right: right_full, width: width)
+        when :&, :|, :^
           aligned = align_operands(left, right)
           width = aligned.map(&:width).max
           left = resize(aligned[0], width)
@@ -1860,10 +2161,15 @@ module RHDL
         return targets unless @component_class.respond_to?(:_instances)
 
         @component_class._instances.each do |instance|
-          port_directions = instance_port_directions(instance)
+          port_metadata = instance_port_metadata(instance)
+          port_directions = instance_port_directions(instance, port_metadata: port_metadata)
           next if port_directions.empty?
 
-          port_map = resolved_instance_port_map(instance, port_directions: port_directions)
+          port_map = resolved_instance_port_map(
+            instance,
+            port_directions: port_directions,
+            port_metadata: port_metadata
+          )
           port_map.each do |port_name, signal|
             direction = port_directions.fetch(port_name.to_sym, :in)
             next unless direction == :out || direction == :inout
@@ -1876,16 +2182,41 @@ module RHDL
         targets
       end
 
-      def resolved_instance_port_map(instance, port_directions:)
+      def resolved_instance_port_map(instance, port_directions:, port_metadata:)
         explicit = normalize_instance_port_map(instance.port_map)
         return explicit if port_directions.empty?
 
-        available = implicit_instance_connection_names
-        port_directions.each_key do |port_name|
-          next if explicit.key?(port_name)
-          next unless available.include?(port_name.to_sym)
+        explicit.select! { |port_name, _| port_metadata.key?(port_name) } unless port_metadata.empty?
 
-          explicit[port_name] = port_name.to_sym
+        explicit.each do |port_name, signal|
+          next unless open_instance_connection_signal?(signal)
+
+          metadata = port_metadata[port_name]
+          next if metadata.nil?
+
+          direction = metadata.fetch(:direction, :in)
+          default = metadata[:default]
+          if (direction == :in || direction == :inout) && !default.nil?
+            explicit[port_name] = default
+          else
+            explicit[port_name] = :__rhdl_unconnected
+          end
+        end
+
+        available = implicit_instance_connection_names
+        port_metadata.each do |port_name, metadata|
+          next if explicit.key?(port_name)
+
+          if available.include?(port_name.to_sym)
+            explicit[port_name] = port_name.to_sym
+            next
+          end
+
+          direction = metadata.fetch(:direction, :in)
+          default = metadata[:default]
+          if (direction == :in || direction == :inout) && !default.nil?
+            explicit[port_name] = default
+          end
         end
 
         explicit
@@ -1897,15 +2228,16 @@ module RHDL
           port_map.each_with_object({}) do |(port_name, signal), memo|
             next if port_name.to_s.strip.empty?
 
-            normalized_signal = case signal
-                               when nil
-                                 nil
-                               when String
-                                 signal.strip
-                               else
-                                 signal
-                               end
-            next if normalized_signal.nil?
+            normalized_signal =
+              if signal.nil?
+                :__rhdl_unconnected
+              elsif open_instance_connection_signal?(signal)
+                :__rhdl_unconnected
+              elsif signal.is_a?(String)
+                signal.strip
+              else
+                signal
+              end
 
             memo[port_name.to_sym] = normalized_signal
           end
@@ -1924,7 +2256,7 @@ module RHDL
       end
 
       def instance_connection_target_name(signal)
-        return nil if signal == :__rhdl_unconnected
+        return nil if open_instance_connection_signal?(signal)
         case signal
         when Symbol
           signal.to_sym
@@ -1938,12 +2270,25 @@ module RHDL
         end
       end
 
-      def instance_port_directions(instance)
+      def instance_port_directions(instance, port_metadata: nil)
+        metadata = port_metadata || instance_port_metadata(instance)
+        return {} if metadata.empty?
+
+        metadata.each_with_object({}) do |(port_name, entry), memo|
+          memo[port_name.to_sym] = entry.fetch(:direction, :in)
+        end
+      end
+
+      def instance_port_metadata(instance)
         component_class = resolve_instance_component_class(instance.component_type)
         return {} unless component_class&.respond_to?(:_ports)
 
         Array(component_class._ports).each_with_object({}) do |port, memo|
-          memo[port.name.to_sym] = normalize_port_direction(port.direction)
+          name = port.name.to_sym
+          memo[name] = {
+            direction: normalize_port_direction(port.direction),
+            default: port.respond_to?(:default) ? port.default : nil
+          }
         end
       end
 
@@ -2055,7 +2400,7 @@ module RHDL
       end
 
       def normalize_instance_signal(signal)
-        return :__rhdl_unconnected if signal.to_s.empty?
+        return :__rhdl_unconnected if open_instance_connection_signal?(signal)
 
         case signal
         when Symbol
@@ -2075,6 +2420,24 @@ module RHDL
           lower_expr(signal)
         else
           signal.to_s
+        end
+      end
+
+      def open_instance_connection_signal?(signal)
+        return true if signal.nil?
+
+        case signal
+        when String
+          normalized = signal.strip
+          normalized.empty? || normalized == "__rhdl_unconnected"
+        when Symbol
+          normalized = signal.to_s.strip
+          normalized.empty? || normalized == "__rhdl_unconnected"
+        when RHDL::DSL::SignalRef
+          normalized = signal.name.to_s.strip
+          normalized.empty? || normalized == "__rhdl_unconnected"
+        else
+          false
         end
       end
 

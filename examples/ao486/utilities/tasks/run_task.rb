@@ -377,7 +377,7 @@ module RHDL
             Array(bytes).map do |value|
               byte = Integer(value) & 0xFF
               case byte
-              when 13 then 10
+              when 10, 13 then 13
               when 127 then 8
               else byte
               end

@@ -54,6 +54,12 @@ lib/rhdl/codegen/ir/sim/ir_compiler/*.json
 # AO486 importer scratch outputs
 /examples/ao486/tmp/*
 !/examples/ao486/tmp/.gitkeep
+/examples/ao486/hdl/tmp/
+/examples/ao486/hdl/lib/hdl/modules/frontend_blackbox_stubs__*.rb
+/examples/ao486/hdl/vendor/source_hdl/ao486/autogen/
+/examples/ao486/hdl/vendor/source_hdl/ao486/defines.v
+/examples/ao486/hdl/vendor/source_hdl/ao486/startup_default.v
+/examples/ao486/reference/
 
 # Web simulator generated artifacts
 web/assets/fixtures/*

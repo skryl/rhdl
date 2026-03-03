@@ -1242,32 +1242,26 @@ class ImportedException < RHDL::Component
           sig(:wr_eip, width: 32),
           kind: :nonblocking
         )
-        else_block do
-          if_stmt(sig(:active_exe, width: 1)) do
-            assign(
-              :trap_eip,
-              sig(:exe_eip, width: 32),
-              kind: :nonblocking
-            )
-            else_block do
-              if_stmt(sig(:active_rd, width: 1)) do
-                assign(
-                  :trap_eip,
-                  sig(:rd_eip, width: 32),
-                  kind: :nonblocking
-                )
-                else_block do
-                  if_stmt(sig(:active_dec, width: 1)) do
-                    assign(
-                      :trap_eip,
-                      sig(:dec_eip, width: 32),
-                      kind: :nonblocking
-                    )
-                  end
-                end
-              end
-            end
-          end
+        elsif_block(sig(:active_exe, width: 1)) do
+          assign(
+            :trap_eip,
+            sig(:exe_eip, width: 32),
+            kind: :nonblocking
+          )
+        end
+        elsif_block(sig(:active_rd, width: 1)) do
+          assign(
+            :trap_eip,
+            sig(:rd_eip, width: 32),
+            kind: :nonblocking
+          )
+        end
+        elsif_block(sig(:active_dec, width: 1)) do
+          assign(
+            :trap_eip,
+            sig(:dec_eip, width: 32),
+            kind: :nonblocking
+          )
         end
       end
       else_block do
@@ -1341,14 +1335,12 @@ class ImportedException < RHDL::Component
           lit(1, width: 1, base: "h", signed: false),
           kind: :nonblocking
         )
-        else_block do
-          if_stmt(sig(:wr_interrupt_possible, width: 1)) do
-            assign(
-              :interrupt_string_in_progress,
-              lit(0, width: 1, base: "h", signed: false),
-              kind: :nonblocking
-            )
-          end
+        elsif_block(sig(:wr_interrupt_possible, width: 1)) do
+          assign(
+            :interrupt_string_in_progress,
+            lit(0, width: 1, base: "h", signed: false),
+            kind: :nonblocking
+          )
         end
       end
       else_block do

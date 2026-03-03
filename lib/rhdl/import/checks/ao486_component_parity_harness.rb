@@ -836,6 +836,10 @@ module RHDL
         end
 
         def connection_signal_expr(signal:, width:, parent:)
+          if open_connection_signal?(signal)
+            return RHDL::Codegen::IR::Literal.new(value: 0, width: normalize_width(width))
+          end
+
           case signal
           when RHDL::Codegen::IR::Expr
             signal
@@ -859,6 +863,8 @@ module RHDL
         end
 
         def connection_target_name(signal)
+          return "" if open_connection_signal?(signal)
+
           case signal
           when Symbol
             signal.to_s
@@ -867,6 +873,14 @@ module RHDL
           else
             ""
           end
+        end
+
+        def open_connection_signal?(signal)
+          return true if signal.nil?
+          return true if signal == :__rhdl_unconnected
+
+          token = signal.to_s.strip
+          token.empty? || token == "__rhdl_unconnected"
         end
 
         def rewrite_ir_statement(statement, prefix:, input_bindings:)

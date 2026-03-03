@@ -46,6 +46,35 @@ module RHDL
 
         attr_reader :mapped_module
 
+        ALTDPRAM_INPUT_DEFAULTS = {
+          "aclr" => 0,
+          "sclr" => 0,
+          "inclocken" => 1,
+          "outclocken" => 1,
+          "rdaddressstall" => 0,
+          "wraddressstall" => 0,
+          "rden" => 1,
+          "byteena" => :ones
+        }.freeze
+
+        ALTSYNCRAM_INPUT_DEFAULTS = {
+          "aclr0" => 0,
+          "aclr1" => 0,
+          "addressstall_a" => 0,
+          "addressstall_b" => 0,
+          "byteena_a" => :ones,
+          "byteena_b" => :ones,
+          "clock1" => 1,
+          "clocken0" => 1,
+          "clocken1" => 1,
+          "clocken2" => 1,
+          "clocken3" => 1,
+          "data_b" => 0,
+          "rden_a" => 1,
+          "rden_b" => 1,
+          "wren_b" => 0
+        }.freeze
+
         def module_name
           value_for(mapped_module, :name).to_s
         end
@@ -87,6 +116,13 @@ module RHDL
             end
             width = format_width(width_value)
             explicit_default = value_for(port, :default)
+            if explicit_default.nil?
+              explicit_default = known_module_port_default(
+                direction: direction,
+                port_name: name,
+                width_value: width_value
+              )
+            end
             default = explicit_default.nil? ? nil : format_signal_default(explicit_default)
 
             line = +"  #{direction} :#{name}"
@@ -95,6 +131,48 @@ module RHDL
             lines << line
           end
           lines << ""
+        end
+
+        def known_module_port_default(direction:, port_name:, width_value:)
+          return nil unless direction == "input"
+
+          defaults =
+            if module_name.downcase.start_with?("altdpram__")
+              ALTDPRAM_INPUT_DEFAULTS
+            elsif module_name.downcase.start_with?("altsyncram__")
+              ALTSYNCRAM_INPUT_DEFAULTS
+            end
+          return nil if defaults.nil?
+
+          token = defaults[port_name.to_s]
+          return nil if token.nil?
+
+          return token unless token == :ones
+
+          width = infer_port_width_integer(width_value)
+          return 1 if width.nil? || width <= 1
+          return nil if width > 62
+
+          (1 << width) - 1
+        end
+
+        def infer_port_width_integer(width_value)
+          return width_value.to_i if width_value.is_a?(Integer)
+
+          width_hash = normalize_hash(width_value)
+          unless width_hash.empty?
+            msb = numeric_expression_value(value_for(width_hash, :msb))
+            lsb = numeric_expression_value(value_for(width_hash, :lsb))
+            return (msb - lsb).abs + 1 if msb.is_a?(Integer) && lsb.is_a?(Integer)
+          end
+
+          token = width_value.to_s.strip
+          return nil if token.empty?
+          return Integer(token) if integer_string?(token)
+
+          nil
+        rescue ArgumentError, TypeError
+          nil
         end
 
         def emit_signals(lines)
@@ -762,6 +840,8 @@ module RHDL
         end
 
         def render_instance_value_verilog(value)
+          return "" if open_connection_signal?(value)
+
           text = expression_to_verilog(value)
           return text unless text.nil?
 
@@ -1608,7 +1688,10 @@ module RHDL
           case connections
           when Hash
             connections.each_with_object({}) do |(key, value), memo|
-              memo[key.to_s] = value
+              port = key.to_s
+              next if port.empty?
+
+              memo[port] = normalize_connection_signal(value)
             end
           else
             Array(connections).each_with_object({}) do |entry, memo|
@@ -1616,9 +1699,30 @@ module RHDL
               port = value_for(hash, :port).to_s
               next if port.empty?
 
-              memo[port] = value_for(hash, :signal)
+              memo[port] = normalize_connection_signal(value_for(hash, :signal))
             end
           end
+        end
+
+        def normalize_connection_signal(signal)
+          return :__rhdl_unconnected if open_connection_signal?(signal)
+
+          signal
+        end
+
+        def open_connection_signal?(signal)
+          return true if signal.nil?
+
+          if signal.is_a?(String)
+            return true if signal.strip.empty?
+          end
+
+          hash = normalize_hash(signal)
+          return false if hash.empty?
+
+          return false unless value_for(hash, :kind).to_s == "number"
+
+          value_for(hash, :value).to_s.strip.empty?
         end
 
         def prune_identity_instance_connections(connections)

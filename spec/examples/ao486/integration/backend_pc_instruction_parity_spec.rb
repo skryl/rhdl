@@ -5,7 +5,7 @@ require "spec_helper"
 require_relative "../../../../examples/ao486/utilities/runners/headless_runner"
 
 RSpec.describe "ao486 backend PC/instruction parity", :slow, :no_vendor_reimport do
-  PROGRAMS = [
+  BACKEND_PARITY_PROGRAMS = [
     {
       name: "01_add_ax_cx_and_store",
       binary: "01_add_ax_cx_and_store.bin",
@@ -63,7 +63,7 @@ RSpec.describe "ao486 backend PC/instruction parity", :slow, :no_vendor_reimport
       cwd: cwd
     )
 
-    PROGRAMS.each do |program|
+    BACKEND_PARITY_PROGRAMS.each do |program|
       binary = File.join(program_root, program.fetch(:binary))
       expect(File.file?(binary)).to be(true), "missing program binary #{binary}"
 

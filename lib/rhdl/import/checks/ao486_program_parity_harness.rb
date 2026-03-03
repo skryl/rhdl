@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "fileutils"
+require "json"
 require "open3"
 require "set"
 require "tmpdir"
@@ -18,6 +19,8 @@ module RHDL
         DATA_CHECK_ADDRESS = 0x0000_0200
         DEFAULT_VERILOG_TOOL = "iverilog"
         PROGRAM_BASE_ADDRESS = 0x000F_FFF0
+        DEFAULT_IR_BACKEND = :compiler
+        DEFAULT_IR_ALLOW_FALLBACK = false
 
         class << self
           def run(**kwargs)
@@ -298,6 +301,8 @@ module RHDL
           program_binary: nil,
           program_binary_data_addresses: [DATA_CHECK_ADDRESS],
           program_base_address: PROGRAM_BASE_ADDRESS,
+          ir_backend: DEFAULT_IR_BACKEND,
+          ir_allow_fallback: DEFAULT_IR_ALLOW_FALLBACK,
           verilog_tool: DEFAULT_VERILOG_TOOL,
           data_check_addresses: nil
         )
@@ -312,6 +317,8 @@ module RHDL
             program_binary_data_addresses: program_binary_data_addresses,
             program_base_address: program_base_address
           )
+          @ir_backend = ir_backend.to_sym
+          @ir_allow_fallback = !!ir_allow_fallback
           @verilog_tool = verilog_tool.to_s.strip.downcase
           @data_check_addresses = if data_check_addresses.nil?
             Array(program_binary_data_addresses)
@@ -520,7 +527,57 @@ module RHDL
           top_component = component_index[@top]
           raise ArgumentError, "converted component #{@top.inspect} not found under #{@out}" if top_component.nil?
 
-          helper.send(:build_ir_simulator, component: top_component, component_index: component_index)
+          module_def = RHDL::Codegen::LIR::Lower.new(top_component.fetch(:component_class), top_name: @top).build
+          flattened = helper.send(:flatten_ir_module, module_def: module_def, component_index: component_index)
+          helper.send(:populate_missing_sensitivity_lists!, flattened)
+          ir_json = RHDL::Codegen::IR::IRToJson.convert(flattened)
+          normalized_ir_json = normalize_i64_compatible_json(ir_json)
+          normalized_ir_json = if normalized_ir_json.is_a?(String)
+            normalized_ir_json
+          else
+            JSON.generate(normalized_ir_json, max_nesting: false)
+          end
+
+          sim = RHDL::Codegen::IR::IrSimulator.new(
+            normalized_ir_json,
+            backend: @ir_backend,
+            allow_fallback: @ir_allow_fallback
+          )
+          unless sim.respond_to?(:runner_kind) && sim.runner_kind == :ao486
+            raise ArgumentError,
+              "ao486 IR runner extension unavailable for backend=#{@ir_backend.inspect} " \
+              "(runner_kind=#{sim.respond_to?(:runner_kind) ? sim.runner_kind.inspect : 'none'})"
+          end
+
+          sim.reset if sim.respond_to?(:reset)
+          sim
+        end
+
+        def normalize_i64_compatible_json(value)
+          case value
+          when String
+            text = value.lstrip
+            return value unless text.start_with?("{", "[")
+
+            parsed = JSON.parse(value, max_nesting: false)
+            normalize_i64_compatible_json(parsed)
+          when Hash
+            value.each_with_object({}) do |(key, entry), memo|
+              memo[key] = normalize_i64_compatible_json(entry)
+            end
+          when Array
+            value.map { |entry| normalize_i64_compatible_json(entry) }
+          when Integer
+            if value > ((1 << 63) - 1)
+              (value & ((1 << 64) - 1)) - (1 << 64)
+            elsif value < -(1 << 63)
+              value % (1 << 63)
+            else
+              value
+            end
+          else
+            value
+          end
         end
 
         def run_verilog_program(label:, source_files:, include_dirs:, work_dir:)
@@ -615,7 +672,7 @@ module RHDL
             drive["avm_readdatavalid"] = 0 if input_names.include?("avm_readdatavalid")
             drive["io_read_done"] = 0 if input_names.include?("io_read_done")
             drive["io_write_done"] = 0 if input_names.include?("io_write_done")
-            drive["rst_n"] = 1 if cycle == 4 && input_names.include?("rst_n")
+            drive["rst_n"] = rst_n_for_cycle(cycle) if input_names.include?("rst_n")
 
             if pending_read_words.positive?
               read_value = read_memory_word(memory, pending_read_address)
@@ -631,9 +688,8 @@ module RHDL
               pending_read_words -= 1
             end
 
-            apply_ir_inputs(sim: sim, input_names: input_names, inputs: drive.merge("clk" => 1))
-            sim.tick
-
+            apply_ir_inputs(sim: sim, input_names: input_names, inputs: drive.merge("clk" => 0))
+            sim.evaluate
             outputs = sample_ir_outputs(sim: sim)
             next_state = drive.dup
 
@@ -664,6 +720,9 @@ module RHDL
               next_state["io_read_done"] = 1 if input_names.include?("io_read_done")
             end
             next_state["io_write_done"] = 1 if outputs[:io_write_do] != 0 && input_names.include?("io_write_done")
+
+            apply_ir_inputs(sim: sim, input_names: input_names, inputs: drive.merge("clk" => 1))
+            sim.tick
 
             state = next_state
             apply_ir_inputs(sim: sim, input_names: input_names, inputs: state.merge("clk" => 0))
@@ -1101,16 +1160,11 @@ module RHDL
           lines << "  integer init_i;"
           lines << "  integer byte_i;"
           lines << ""
-          lines << "  wire [SAFE_WIDTHAD-1:0] wr_addr = wraddress;"
-          lines << "  wire [SAFE_WIDTHAD-1:0] rd_addr = rdaddress;"
-          lines << "  wire inclocken_en = (inclocken === 1'b0) ? 1'b0 : 1'b1;"
-          lines << "  wire outclocken_en = (outclocken === 1'b0) ? 1'b0 : 1'b1;"
-          lines << "  wire wr_stall = (wraddressstall === 1'b1) ? 1'b1 : 1'b0;"
-          lines << "  wire rd_stall = (rdaddressstall === 1'b1) ? 1'b1 : 1'b0;"
-          lines << "  wire wren_en = (wren === 1'b1) ? 1'b1 : 1'b0;"
-          lines << "  wire rden_en = (rden === 1'b0) ? 1'b0 : 1'b1;"
-          lines << "  wire wr_fire = wren_en && !wr_stall && inclocken_en;"
-          lines << "  wire rd_fire = rden_en && !rd_stall && outclocken_en;"
+          lines << "  wire [SAFE_WIDTHAD-1:0] wr_addr = wraddress[SAFE_WIDTHAD-1:0];"
+          lines << "  wire [SAFE_WIDTHAD-1:0] rd_addr = rdaddress[SAFE_WIDTHAD-1:0];"
+          lines << "  wire wr_clock_en = (inclocken === 1'b0) ? 1'b0 : 1'b1;"
+          lines << "  wire wr_addr_stall = (wraddressstall === 1'b1) ? 1'b1 : 1'b0;"
+          lines << "  wire wr_en = (wren === 1'b1) && wr_clock_en && !wr_addr_stall;"
           lines << ""
           lines << "  initial begin"
           lines << "    for (init_i = 0; init_i < SAFE_DEPTH; init_i = init_i + 1) begin"
@@ -1131,16 +1185,13 @@ module RHDL
           lines << "    end"
           lines << "  end"
           lines << ""
-          lines << "  always @(posedge inclock or posedge aclr or posedge sclr) begin"
-          lines << "    if (aclr || sclr) begin"
-          lines << "      // Leave memory contents unchanged on clear; Quartus primitive reset behavior"
-          lines << "      // is configuration-dependent, and cache logic only requires deterministic power-up."
-          lines << "    end else if (wr_fire) begin"
+          lines << "  always @(posedge inclock) begin"
+          lines << "    if (wr_en) begin"
           lines << "      mem[wr_addr] <= merged_word;"
           lines << "    end"
           lines << "  end"
           lines << ""
-          lines << "  assign q = rd_fire ? mem[rd_addr] : mem[rd_addr];"
+          lines << "  assign q = mem[rd_addr];"
           lines << "endmodule"
           lines << ""
           lines.join("\n")
@@ -1167,28 +1218,22 @@ module RHDL
           lines << "  reg [SAFE_WIDTH_A-1:0] mem [0:SAFE_DEPTH_A-1];"
           lines << "  reg [SAFE_WIDTH_A-1:0] merged_a;"
           lines << "  reg [SAFE_WIDTH_A-1:0] merged_b_word;"
-          lines << "  reg [SAFE_WIDTH_B-1:0] read_b_data;"
           lines << "  reg [SAFE_WIDTHAD_A-1:0] addr_b_word_reg;"
           lines << "  reg [SAFE_SUBWORD_BITS_B-1:0] addr_b_lane_reg;"
+          lines << "  reg [SAFE_WIDTH_B-1:0] q_b_reg;"
           lines << "  integer init_i;"
           lines << "  integer byte_i;"
           lines << ""
-          lines << "  wire [SAFE_WIDTHAD_A-1:0] addr_a = address_a;"
-          lines << "  wire [SAFE_WIDTHAD_B-1:0] addr_b_full = address_b;"
-          lines << "  wire [SAFE_WIDTHAD_A-1:0] addr_b_word = (SAFE_WIDTH_A >= SAFE_WIDTH_B) ? (addr_b_full / SAFE_SUBWORDS_PER_A_B) : addr_b_full[SAFE_WIDTHAD_A-1:0];"
-          lines << "  wire [SAFE_SUBWORD_BITS_B-1:0] addr_b_lane = (SAFE_WIDTH_A >= SAFE_WIDTH_B) ? (addr_b_full % SAFE_SUBWORDS_PER_A_B) : {SAFE_SUBWORD_BITS_B{1'b0}};"
+          lines << "  wire [SAFE_WIDTHAD_A-1:0] addr_a = address_a[SAFE_WIDTHAD_A-1:0];"
+          lines << "  wire [SAFE_WIDTHAD_B-1:0] addr_b_full = address_b[SAFE_WIDTHAD_B-1:0];"
+          lines << "  wire [SAFE_WIDTHAD_A-1:0] addr_b_word_next = (SAFE_WIDTH_A >= SAFE_WIDTH_B) ?"
+          lines << "    (addr_b_full / SAFE_SUBWORDS_PER_A_B) : addr_b_full[SAFE_WIDTHAD_A-1:0];"
+          lines << "  wire [SAFE_SUBWORD_BITS_B-1:0] addr_b_lane_next = (SAFE_WIDTH_A >= SAFE_WIDTH_B) ?"
+          lines << "    (addr_b_full % SAFE_SUBWORDS_PER_A_B) : {SAFE_SUBWORD_BITS_B{1'b0}};"
           lines << "  wire clocken0_en = (clocken0 === 1'b0) ? 1'b0 : 1'b1;"
           lines << "  wire clocken1_en = (clocken1 === 1'b0) ? 1'b0 : 1'b1;"
-          lines << "  wire addrstall_a_en = (addressstall_a === 1'b1) ? 1'b1 : 1'b0;"
-          lines << "  wire addrstall_b_en = (addressstall_b === 1'b1) ? 1'b1 : 1'b0;"
-          lines << "  wire wren_a_en = (wren_a === 1'b1) ? 1'b1 : 1'b0;"
-          lines << "  wire wren_b_en = (wren_b === 1'b1) ? 1'b1 : 1'b0;"
-          lines << "  wire rden_a_en = (rden_a === 1'b0) ? 1'b0 : 1'b1;"
-          lines << "  wire rden_b_en = (rden_b === 1'b0) ? 1'b0 : 1'b1;"
-          lines << "  wire wren_a_fire = wren_a_en && clocken0_en && !addrstall_a_en;"
-          lines << "  wire wren_b_fire = wren_b_en && clocken1_en && !addrstall_b_en;"
-          lines << "  wire rden_a_fire = rden_a_en && clocken0_en && !addrstall_a_en;"
-          lines << "  wire rden_b_fire = rden_b_en && clocken1_en && !addrstall_b_en;"
+          lines << "  wire addressstall_a_en = (addressstall_a === 1'b1) ? 1'b1 : 1'b0;"
+          lines << "  wire addressstall_b_en = (addressstall_b === 1'b1) ? 1'b1 : 1'b0;"
           lines << ""
           lines << "  initial begin"
           lines << "    for (init_i = 0; init_i < SAFE_DEPTH_A; init_i = init_i + 1) begin"
@@ -1196,6 +1241,7 @@ module RHDL
           lines << "    end"
           lines << "    addr_b_word_reg = {SAFE_WIDTHAD_A{1'b0}};"
           lines << "    addr_b_lane_reg = {SAFE_SUBWORD_BITS_B{1'b0}};"
+          lines << "    q_b_reg = {SAFE_WIDTH_B{1'b0}};"
           lines << "  end"
           lines << ""
           lines << "  always @* begin"
@@ -1209,10 +1255,10 @@ module RHDL
           lines << "        end"
           lines << "      end"
           lines << "    end"
-          lines << "    merged_b_word = mem[addr_b_word];"
+          lines << "    merged_b_word = mem[addr_b_word_next];"
           lines << "    if (SAFE_WIDTH_BYTEENA_B <= 1 || SAFE_BYTE_COUNT_B <= 1) begin"
           lines << "      if (SAFE_WIDTH_A >= SAFE_WIDTH_B) begin"
-          lines << "        merged_b_word[(addr_b_lane * SAFE_WIDTH_B) +: SAFE_WIDTH_B] = data_b;"
+          lines << "        merged_b_word[(addr_b_lane_next * SAFE_WIDTH_B) +: SAFE_WIDTH_B] = data_b;"
           lines << "      end else begin"
           lines << "        merged_b_word[SAFE_WIDTH_B-1:0] = data_b;"
           lines << "      end"
@@ -1220,46 +1266,42 @@ module RHDL
           lines << "      for (byte_i = 0; byte_i < SAFE_BYTE_COUNT_B; byte_i = byte_i + 1) begin"
           lines << "        if (byte_i < SAFE_WIDTH_BYTEENA_B && byteena_b[byte_i]) begin"
           lines << "          if (SAFE_WIDTH_A >= SAFE_WIDTH_B) begin"
-          lines << "            merged_b_word[(addr_b_lane * SAFE_WIDTH_B) + (byte_i * 8) +: 8] = data_b[(byte_i * 8) +: 8];"
+          lines << "            merged_b_word[(addr_b_lane_next * SAFE_WIDTH_B) + (byte_i * 8) +: 8] = data_b[(byte_i * 8) +: 8];"
           lines << "          end else begin"
           lines << "            merged_b_word[(byte_i * 8) +: 8] = data_b[(byte_i * 8) +: 8];"
           lines << "          end"
           lines << "        end"
           lines << "      end"
           lines << "    end"
-          lines << "    if (SAFE_WIDTH_A >= SAFE_WIDTH_B) begin"
-          lines << "      read_b_data = mem[addr_b_word_reg][(addr_b_lane_reg * SAFE_WIDTH_B) +: SAFE_WIDTH_B];"
-          lines << "    end else begin"
-          lines << "      read_b_data = mem[addr_b_word_reg][SAFE_WIDTH_B-1:0];"
-          lines << "    end"
           lines << "  end"
           lines << ""
-          lines << "  always @(posedge clock0 or posedge aclr0) begin"
-          lines << "    if (aclr0) begin"
-          lines << "      addr_b_word_reg <= {SAFE_WIDTHAD_A{1'b0}};"
-          lines << "      addr_b_lane_reg <= {SAFE_SUBWORD_BITS_B{1'b0}};"
-          lines << "      // Leave memory contents unchanged on clear; see note in altdpram stub."
-          lines << "    end else begin"
-          lines << "      if (clocken0_en && !addrstall_b_en) begin"
-          lines << "        addr_b_word_reg <= addr_b_word;"
-          lines << "        addr_b_lane_reg <= addr_b_lane;"
+          lines << "  always @(posedge clock0) begin"
+          lines << "    if (clocken0_en) begin"
+          lines << "      if (!addressstall_b_en) begin"
+          lines << "        addr_b_word_reg <= addr_b_word_next;"
+          lines << "        addr_b_lane_reg <= addr_b_lane_next;"
+          lines << "        if (rden_b === 1'b1) begin"
+          lines << "          if (SAFE_WIDTH_A >= SAFE_WIDTH_B) begin"
+          lines << "            q_b_reg <= mem[addr_b_word_next][(addr_b_lane_next * SAFE_WIDTH_B) +: SAFE_WIDTH_B];"
+          lines << "          end else begin"
+          lines << "            q_b_reg <= mem[addr_b_word_next][SAFE_WIDTH_B-1:0];"
+          lines << "          end"
+          lines << "        end"
           lines << "      end"
-          lines << "      if (wren_a_fire) begin"
+          lines << "      if ((wren_a === 1'b1) && !addressstall_a_en) begin"
           lines << "        mem[addr_a] <= merged_a;"
           lines << "      end"
           lines << "    end"
           lines << "  end"
           lines << ""
-          lines << "  always @(posedge clock1 or posedge aclr1) begin"
-          lines << "    if (aclr1) begin"
-          lines << "      // Leave memory contents unchanged on clear; see note in altdpram stub."
-          lines << "    end else if (wren_b_fire) begin"
-          lines << "      mem[addr_b_word] <= merged_b_word;"
+          lines << "  always @(posedge clock1) begin"
+          lines << "    if (clocken1_en && (wren_b === 1'b1) && !addressstall_b_en) begin"
+          lines << "      mem[addr_b_word_next] <= merged_b_word;"
           lines << "    end"
           lines << "  end"
           lines << ""
-          lines << "  assign q_a = rden_a_fire ? mem[addr_a] : mem[addr_a];"
-          lines << "  assign q_b = rden_b_fire ? read_b_data : read_b_data;"
+          lines << "  assign q_a = mem[addr_a];"
+          lines << "  assign q_b = q_b_reg;"
           lines << "  assign eccstatus = 3'b000;"
           lines << "endmodule"
           lines << ""
@@ -1465,7 +1507,7 @@ module RHDL
           state = {}
           input_names.each { |name| state[name] = 0 }
           state["a20_enable"] = 1 if input_names.include?("a20_enable")
-          state["cache_disable"] = 1 if input_names.include?("cache_disable")
+          state["cache_disable"] = 0 if input_names.include?("cache_disable")
           state["interrupt_do"] = 0 if input_names.include?("interrupt_do")
           state["interrupt_vector"] = 0 if input_names.include?("interrupt_vector")
           state["rst_n"] = 0 if input_names.include?("rst_n")
@@ -1481,6 +1523,11 @@ module RHDL
           state["io_read_done"] = 0 if input_names.include?("io_read_done")
           state["io_write_done"] = 0 if input_names.include?("io_write_done")
           state
+        end
+
+        def rst_n_for_cycle(cycle)
+          index = Integer(cycle)
+          index < 3 ? 0 : 1
         end
 
         def sample_ir_outputs(sim:)
@@ -1654,7 +1701,7 @@ module RHDL
               reg rst_n = 1'b0;
 
               reg a20_enable = 1'b1;
-              reg cache_disable = 1'b1;
+              reg cache_disable = 1'b0;
               reg interrupt_do = 1'b0;
               reg [7:0] interrupt_vector = 8'h00;
               wire interrupt_done;
@@ -1784,7 +1831,8 @@ module RHDL
                 for (cycle = 0; cycle <= #{cycles}; cycle = cycle + 1) begin
                   io_read_done = 1'b0;
                   io_write_done = 1'b0;
-                  if (cycle == 4) rst_n = 1'b1;
+                  if (cycle < 3) rst_n = 1'b0;
+                  else rst_n = 1'b1;
 
                   avm_readdatavalid = 1'b0;
                   if (pending_read_words > 0) begin
@@ -1800,8 +1848,6 @@ module RHDL
                   end
 
                   clk = 1'b0;
-                  #1;
-                  clk = 1'b1;
                   #1;
 
                   if (avm_read && !avm_waitrequest && pending_read_words == 0) begin
@@ -1823,6 +1869,9 @@ module RHDL
                   if (io_write_do) begin
                     io_write_done = 1'b1;
                   end
+
+                  clk = 1'b1;
+                  #1;
 
                   clk = 1'b0;
                   #1;

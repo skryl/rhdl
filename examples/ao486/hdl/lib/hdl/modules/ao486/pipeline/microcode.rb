@@ -285,14 +285,12 @@ class Microcode < RHDL::Component
           sig(:dec_operand_32bit, width: 1),
           kind: :nonblocking
         )
-        else_block do
-          if_stmt(sig(:exc_init, width: 1)) do
-            assign(
-              :mc_operand_32bit,
-              lit(0, width: 1, base: "h", signed: false),
-              kind: :nonblocking
-            )
-          end
+        elsif_block(sig(:exc_init, width: 1)) do
+          assign(
+            :mc_operand_32bit,
+            lit(0, width: 1, base: "h", signed: false),
+            kind: :nonblocking
+          )
         end
       end
       else_block do
@@ -318,14 +316,12 @@ class Microcode < RHDL::Component
           sig(:dec_address_32bit, width: 1),
           kind: :nonblocking
         )
-        else_block do
-          if_stmt(sig(:exc_init, width: 1)) do
-            assign(
-              :mc_address_32bit,
-              lit(0, width: 1, base: "h", signed: false),
-              kind: :nonblocking
-            )
-          end
+        elsif_block(sig(:exc_init, width: 1)) do
+          assign(
+            :mc_address_32bit,
+            lit(0, width: 1, base: "h", signed: false),
+            kind: :nonblocking
+          )
         end
       end
       else_block do
@@ -351,14 +347,12 @@ class Microcode < RHDL::Component
           sig(:dec_prefix_group_1_rep, width: 2),
           kind: :nonblocking
         )
-        else_block do
-          if_stmt(sig(:exc_init, width: 1)) do
-            assign(
-              :mc_prefix_group_1_rep,
-              lit(0, width: 2, base: "h", signed: false),
-              kind: :nonblocking
-            )
-          end
+        elsif_block(sig(:exc_init, width: 1)) do
+          assign(
+            :mc_prefix_group_1_rep,
+            lit(0, width: 2, base: "h", signed: false),
+            kind: :nonblocking
+          )
         end
       end
       else_block do
@@ -384,14 +378,12 @@ class Microcode < RHDL::Component
           sig(:dec_prefix_group_1_lock, width: 1),
           kind: :nonblocking
         )
-        else_block do
-          if_stmt(sig(:exc_init, width: 1)) do
-            assign(
-              :mc_prefix_group_1_lock,
-              lit(0, width: 1, base: "h", signed: false),
-              kind: :nonblocking
-            )
-          end
+        elsif_block(sig(:exc_init, width: 1)) do
+          assign(
+            :mc_prefix_group_1_lock,
+            lit(0, width: 1, base: "h", signed: false),
+            kind: :nonblocking
+          )
         end
       end
       else_block do
@@ -417,14 +409,12 @@ class Microcode < RHDL::Component
           sig(:dec_prefix_group_2_seg, width: 3),
           kind: :nonblocking
         )
-        else_block do
-          if_stmt(sig(:exc_init, width: 1)) do
-            assign(
-              :mc_prefix_group_2_seg,
-              lit(3, width: 3, base: "h", signed: false),
-              kind: :nonblocking
-            )
-          end
+        elsif_block(sig(:exc_init, width: 1)) do
+          assign(
+            :mc_prefix_group_2_seg,
+            lit(3, width: 3, base: "h", signed: false),
+            kind: :nonblocking
+          )
         end
       end
       else_block do
@@ -450,14 +440,12 @@ class Microcode < RHDL::Component
           sig(:dec_prefix_2byte, width: 1),
           kind: :nonblocking
         )
-        else_block do
-          if_stmt(sig(:exc_init, width: 1)) do
-            assign(
-              :mc_prefix_2byte,
-              lit(0, width: 1, base: "h", signed: false),
-              kind: :nonblocking
-            )
-          end
+        elsif_block(sig(:exc_init, width: 1)) do
+          assign(
+            :mc_prefix_2byte,
+            lit(0, width: 1, base: "h", signed: false),
+            kind: :nonblocking
+          )
         end
       end
       else_block do
@@ -483,14 +471,12 @@ class Microcode < RHDL::Component
           sig(:decoder, width: 96)[87..0],
           kind: :nonblocking
         )
-        else_block do
-          if_stmt(sig(:exc_init, width: 1)) do
-            assign(
-              :mc_decoder,
-              lit(0, width: 88, base: "h", signed: false),
-              kind: :nonblocking
-            )
-          end
+        elsif_block(sig(:exc_init, width: 1)) do
+          assign(
+            :mc_decoder,
+            lit(0, width: 88, base: "h", signed: false),
+            kind: :nonblocking
+          )
         end
       end
       else_block do
@@ -516,14 +502,12 @@ class Microcode < RHDL::Component
           sig(:dec_modregrm_len, width: 3),
           kind: :nonblocking
         )
-        else_block do
-          if_stmt(sig(:exc_init, width: 1)) do
-            assign(
-              :mc_modregrm_len,
-              lit(0, width: 3, base: "h", signed: false),
-              kind: :nonblocking
-            )
-          end
+        elsif_block(sig(:exc_init, width: 1)) do
+          assign(
+            :mc_modregrm_len,
+            lit(0, width: 3, base: "h", signed: false),
+            kind: :nonblocking
+          )
         end
       end
       else_block do
@@ -549,14 +533,12 @@ class Microcode < RHDL::Component
           sig(:dec_is_8bit, width: 1),
           kind: :nonblocking
         )
-        else_block do
-          if_stmt(sig(:exc_init, width: 1)) do
-            assign(
-              :mc_is_8bit,
-              lit(0, width: 1, base: "h", signed: false),
-              kind: :nonblocking
-            )
-          end
+        elsif_block(sig(:exc_init, width: 1)) do
+          assign(
+            :mc_is_8bit,
+            lit(0, width: 1, base: "h", signed: false),
+            kind: :nonblocking
+          )
         end
       end
       else_block do
@@ -582,32 +564,26 @@ class Microcode < RHDL::Component
           lit(28, width: 7, base: "h", signed: false),
           kind: :nonblocking
         )
-        else_block do
-          if_stmt(sig(:micro_reset, width: 1)) do
-            assign(
-              :mc_cmd,
-              lit(0, width: 7, base: "h", signed: false),
-              kind: :nonblocking
-            )
-            else_block do
-              if_stmt(sig(:m_load, width: 1)) do
-                assign(
-                  :mc_cmd,
-                  sig(:dec_cmd, width: 7),
-                  kind: :nonblocking
-                )
-                else_block do
-                  if_stmt(sig(:micro_ready, width: 1)) do
-                    assign(
-                      :mc_cmd,
-                      sig(:mc_cmd_next, width: 7),
-                      kind: :nonblocking
-                    )
-                  end
-                end
-              end
-            end
-          end
+        elsif_block(sig(:micro_reset, width: 1)) do
+          assign(
+            :mc_cmd,
+            lit(0, width: 7, base: "h", signed: false),
+            kind: :nonblocking
+          )
+        end
+        elsif_block(sig(:m_load, width: 1)) do
+          assign(
+            :mc_cmd,
+            sig(:dec_cmd, width: 7),
+            kind: :nonblocking
+          )
+        end
+        elsif_block(sig(:micro_ready, width: 1)) do
+          assign(
+            :mc_cmd,
+            sig(:mc_cmd_next, width: 7),
+            kind: :nonblocking
+          )
         end
       end
       else_block do
@@ -633,14 +609,12 @@ class Microcode < RHDL::Component
           sig(:dec_cmdex, width: 4),
           kind: :nonblocking
         )
-        else_block do
-          if_stmt(sig(:exc_init, width: 1)) do
-            assign(
-              :mc_cmdex,
-              lit(0, width: 4, base: "h", signed: false),
-              kind: :nonblocking
-            )
-          end
+        elsif_block(sig(:exc_init, width: 1)) do
+          assign(
+            :mc_cmdex,
+            lit(0, width: 4, base: "h", signed: false),
+            kind: :nonblocking
+          )
         end
       end
       else_block do
@@ -666,23 +640,19 @@ class Microcode < RHDL::Component
           sig(:dec_consumed, width: 4),
           kind: :nonblocking
         )
-        else_block do
-          if_stmt(sig(:task_start, width: 1)) do
-            assign(
-              :mc_consumed,
-              lit(0, width: 4, base: "h", signed: false),
-              kind: :nonblocking
-            )
-            else_block do
-              if_stmt(sig(:exc_load, width: 1)) do
-                assign(
-                  :mc_consumed,
-                  lit(0, width: 4, base: "h", signed: false),
-                  kind: :nonblocking
-                )
-              end
-            end
-          end
+        elsif_block(sig(:task_start, width: 1)) do
+          assign(
+            :mc_consumed,
+            lit(0, width: 4, base: "h", signed: false),
+            kind: :nonblocking
+          )
+        end
+        elsif_block(sig(:exc_load, width: 1)) do
+          assign(
+            :mc_consumed,
+            lit(0, width: 4, base: "h", signed: false),
+            kind: :nonblocking
+          )
         end
       end
       else_block do
@@ -708,23 +678,19 @@ class Microcode < RHDL::Component
           sig(:dec_eip, width: 32),
           kind: :nonblocking
         )
-        else_block do
-          if_stmt(sig(:task_start, width: 1)) do
-            assign(
-              :mc_eip,
-              sig(:task_eip, width: 32),
-              kind: :nonblocking
-            )
-            else_block do
-              if_stmt(sig(:exc_load, width: 1)) do
-                assign(
-                  :mc_eip,
-                  sig(:exc_eip, width: 32),
-                  kind: :nonblocking
-                )
-              end
-            end
-          end
+        elsif_block(sig(:task_start, width: 1)) do
+          assign(
+            :mc_eip,
+            sig(:task_eip, width: 32),
+            kind: :nonblocking
+          )
+        end
+        elsif_block(sig(:exc_load, width: 1)) do
+          assign(
+            :mc_eip,
+            sig(:exc_eip, width: 32),
+            kind: :nonblocking
+          )
         end
       end
       else_block do
@@ -750,26 +716,22 @@ class Microcode < RHDL::Component
           lit(1, width: 6, base: "h", signed: false),
           kind: :nonblocking
         )
-        else_block do
-          if_stmt(sig(:micro_ready, width: 1)) do
-            assign(
-              :mc_step,
-              (
-                  lit(1, width: 6, base: "h", signed: false) +
-                  sig(:mc_step, width: 6)
-              ),
-              kind: :nonblocking
-            )
-            else_block do
-              if_stmt(sig(:exc_init, width: 1)) do
-                assign(
-                  :mc_step,
-                  lit(1, width: 6, base: "h", signed: false),
-                  kind: :nonblocking
-                )
-              end
-            end
-          end
+        elsif_block(sig(:micro_ready, width: 1)) do
+          assign(
+            :mc_step,
+            (
+                lit(1, width: 6, base: "h", signed: false) +
+                sig(:mc_step, width: 6)
+            ),
+            kind: :nonblocking
+          )
+        end
+        elsif_block(sig(:exc_init, width: 1)) do
+          assign(
+            :mc_step,
+            lit(1, width: 6, base: "h", signed: false),
+            kind: :nonblocking
+          )
         end
       end
       else_block do
@@ -795,14 +757,12 @@ class Microcode < RHDL::Component
           sig(:micro_cmdex, width: 4),
           kind: :nonblocking
         )
-        else_block do
-          if_stmt(sig(:exc_init, width: 1)) do
-            assign(
-              :mc_cmdex_last,
-              lit(0, width: 4, base: "h", signed: false),
-              kind: :nonblocking
-            )
-          end
+        elsif_block(sig(:exc_init, width: 1)) do
+          assign(
+            :mc_cmdex_last,
+            lit(0, width: 4, base: "h", signed: false),
+            kind: :nonblocking
+          )
         end
       end
       else_block do

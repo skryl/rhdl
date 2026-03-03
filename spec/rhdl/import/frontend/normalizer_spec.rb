@@ -301,6 +301,381 @@ RSpec.describe RHDL::Import::Frontend::Normalizer do
       )
     end
 
+    it "treats empty CONST instance pin expressions as open connections" do
+      raw = {
+        "payload" => {
+          "version" => "5.044",
+          "type" => "NETLIST",
+          "modulesp" => [
+            {
+              "type" => "MODULE",
+              "name" => "top_open_const",
+              "addr" => "(M1)",
+              "loc" => "e,1:1,1:3",
+              "stmtsp" => [
+                { "type" => "VAR", "name" => "clk", "direction" => "INPUT", "varType" => "PORT", "dtypep" => "(DT1)" },
+                {
+                  "type" => "CELL",
+                  "name" => "u0",
+                  "modp" => "(M2)",
+                  "paramsp" => [],
+                  "pinsp" => [
+                    { "type" => "PIN", "name" => "clk", "exprp" => [{ "type" => "VARREF", "name" => "clk" }] },
+                    { "type" => "PIN", "name" => "unused", "exprp" => [{ "type" => "CONST", "name" => "" }] }
+                  ]
+                }
+              ]
+            },
+            {
+              "type" => "MODULE",
+              "name" => "child",
+              "addr" => "(M2)",
+              "loc" => "f,1:1,1:5",
+              "stmtsp" => [
+                { "type" => "VAR", "name" => "clk", "direction" => "INPUT", "varType" => "PORT", "dtypep" => "(DT1)" },
+                { "type" => "VAR", "name" => "unused", "direction" => "OUTPUT", "varType" => "PORT", "dtypep" => "(DT1)" }
+              ]
+            }
+          ],
+          "typeTablep" => [
+            { "type" => "BASICDTYPE", "addr" => "(DT1)", "name" => "logic" }
+          ]
+        },
+        "metadata" => {
+          "frontend_meta" => {
+            "files" => {
+              "e" => { "filename" => "rtl/top_open_const.sv" },
+              "f" => { "filename" => "rtl/child.sv" }
+            }
+          }
+        }
+      }
+
+      normalized = described_class.normalize(raw)
+      top = normalized.dig(:design, :modules).find { |entry| entry[:name] == "top_open_const" }
+
+      expect(top.fetch(:instances).fetch(0).fetch(:connections)).to eq(
+        [
+          { port: "clk", signal: { kind: "identifier", name: "clk" } },
+          { port: "unused", signal: nil }
+        ]
+      )
+    end
+
+    it "maps EQCASE/NEQCASE expressions in cont_assign nodes without dropping statements" do
+      raw = {
+        "payload" => {
+          "version" => "5.044",
+          "type" => "NETLIST",
+          "modulesp" => [
+            {
+              "type" => "MODULE",
+              "name" => "eqcase_top",
+              "loc" => "e,1:1,1:10",
+              "stmtsp" => [
+                { "type" => "VAR", "name" => "wren", "direction" => "INPUT", "varType" => "PORT", "dtypep" => "(DT1)" },
+                { "type" => "VAR", "name" => "wraddressstall", "direction" => "INPUT", "varType" => "PORT", "dtypep" => "(DT1)" },
+                { "type" => "VAR", "name" => "inclocken", "direction" => "INPUT", "varType" => "PORT", "dtypep" => "(DT1)" },
+                { "type" => "VAR", "name" => "wr_fire", "direction" => "NONE", "varType" => "WIRE", "dtypep" => "(DT1)" },
+                {
+                  "type" => "ALWAYS",
+                  "keyword" => "cont_assign",
+                  "stmtsp" => [
+                    {
+                      "type" => "ASSIGNW",
+                      "lhsp" => [{ "type" => "VARREF", "name" => "wr_fire" }],
+                      "rhsp" => [
+                        {
+                          "type" => "AND",
+                          "lhsp" => [
+                            {
+                              "type" => "EQCASE",
+                              "lhsp" => [{ "type" => "CONST", "name" => "1'h1" }],
+                              "rhsp" => [{ "type" => "VARREF", "name" => "wren" }]
+                            }
+                          ],
+                          "rhsp" => [
+                            {
+                              "type" => "AND",
+                              "lhsp" => [
+                                {
+                                  "type" => "NEQCASE",
+                                  "lhsp" => [{ "type" => "CONST", "name" => "1'h1" }],
+                                  "rhsp" => [{ "type" => "VARREF", "name" => "wraddressstall" }]
+                                }
+                              ],
+                              "rhsp" => [
+                                {
+                                  "type" => "NEQCASE",
+                                  "lhsp" => [{ "type" => "CONST", "name" => "1'h0" }],
+                                  "rhsp" => [{ "type" => "VARREF", "name" => "inclocken" }]
+                                }
+                              ]
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ],
+          "typeTablep" => [
+            { "type" => "BASICDTYPE", "addr" => "(DT1)", "name" => "logic" }
+          ]
+        },
+        "metadata" => {
+          "frontend_meta" => {
+            "files" => {
+              "e" => { "filename" => "rtl/eqcase_top.sv" }
+            }
+          }
+        }
+      }
+
+      normalized = described_class.normalize(raw)
+      top = normalized.dig(:design, :modules).find { |entry| entry[:name] == "eqcase_top" }
+      stmt = Array(top[:statements]).first
+
+      expect(Array(top[:statements]).length).to eq(1)
+      expect(stmt).to include(
+        kind: "continuous_assign",
+        target: { kind: "identifier", name: "wr_fire" }
+      )
+      expect(stmt.dig(:value, :operator)).to eq("&")
+      expect(stmt.dig(:value, :left, :operator)).to eq("==")
+      expect(stmt.dig(:value, :right, :operator)).to eq("&")
+      expect(stmt.dig(:value, :right, :left, :operator)).to eq("!=")
+      expect(stmt.dig(:value, :right, :right, :operator)).to eq("!=")
+    end
+
+    it "flattens unpacked-array declarations and maps ARRAYSEL into element slices" do
+      raw = {
+        "payload" => {
+          "version" => "5.044",
+          "type" => "NETLIST",
+          "modulesp" => [
+            {
+              "type" => "MODULE",
+              "name" => "array_top",
+              "addr" => "(M1)",
+              "loc" => "e,1:1,1:9",
+              "stmtsp" => [
+                { "type" => "VAR", "name" => "sel", "direction" => "INPUT", "varType" => "PORT", "dtypep" => "(DT2)" },
+                { "type" => "VAR", "name" => "out_data", "direction" => "OUTPUT", "varType" => "PORT", "dtypep" => "(DT32)" },
+                { "type" => "VAR", "name" => "cache_data", "direction" => "NONE", "varType" => "WIRE", "dtypep" => "(ARR)" },
+                {
+                  "type" => "ASSIGNW",
+                  "lhsp" => [{ "type" => "VARREF", "name" => "out_data" }],
+                  "rhsp" => [
+                    {
+                      "type" => "ARRAYSEL",
+                      "fromp" => [{ "type" => "VARREF", "name" => "cache_data" }],
+                      "bitp" => [{ "type" => "VARREF", "name" => "sel" }]
+                    }
+                  ]
+                }
+              ]
+            }
+          ],
+          "typeTablep" => [
+            { "type" => "BASICDTYPE", "addr" => "(DT2)", "name" => "logic", "range" => "1:0" },
+            { "type" => "BASICDTYPE", "addr" => "(DT32)", "name" => "logic", "range" => "31:0" },
+            {
+              "type" => "UNPACKARRAYDTYPE",
+              "addr" => "(ARR)",
+              "refDTypep" => "(DT32)",
+              "rangep" => [
+                {
+                  "type" => "RANGE",
+                  "leftp" => [{ "type" => "CONST", "name" => "32'h0" }],
+                  "rightp" => [{ "type" => "CONST", "name" => "32'h3" }]
+                }
+              ]
+            }
+          ]
+        },
+        "metadata" => {
+          "frontend_meta" => {
+            "files" => {
+              "e" => { "filename" => "rtl/array_top.sv" }
+            }
+          }
+        }
+      }
+
+      normalized = described_class.normalize(raw)
+      top = normalized.dig(:design, :modules).find { |entry| entry[:name] == "array_top" }
+
+      declaration = top.fetch(:declarations).find { |entry| entry[:name] == "cache_data" }
+      expect(declaration).to eq(
+        {
+          kind: "wire",
+          name: "cache_data",
+          width: {
+            msb: { kind: "number", value: 127, base: 10, width: nil, signed: false },
+            lsb: { kind: "number", value: 0, base: 10, width: nil, signed: false }
+          }
+        }
+      )
+
+      expect(top.fetch(:statements)).to eq(
+        [
+          {
+            kind: "continuous_assign",
+            target: { kind: "identifier", name: "out_data" },
+            value: {
+              kind: "slice",
+              base: { kind: "identifier", name: "cache_data" },
+              msb: {
+                kind: "binary",
+                operator: "+",
+                left: {
+                  kind: "binary",
+                  operator: "*",
+                  left: { kind: "identifier", name: "sel" },
+                  right: { kind: "number", value: 32, base: 10, width: nil, signed: false }
+                },
+                right: { kind: "number", value: 31, base: 10, width: nil, signed: false }
+              },
+              lsb: {
+                kind: "binary",
+                operator: "*",
+                left: { kind: "identifier", name: "sel" },
+                right: { kind: "number", value: 32, base: 10, width: nil, signed: false }
+              }
+            }
+          }
+        ]
+      )
+    end
+
+    it "collects CELL instances declared under GENBLOCK itemsp" do
+      raw = {
+        "payload" => {
+          "version" => "5.044",
+          "type" => "NETLIST",
+          "modulesp" => [
+            {
+              "type" => "MODULE",
+              "name" => "gen_top",
+              "addr" => "(M1)",
+              "loc" => "e,1:1,1:7",
+              "stmtsp" => [
+                { "type" => "VAR", "name" => "in_sig", "direction" => "INPUT", "varType" => "PORT", "dtypep" => "(DT1)" },
+                {
+                  "type" => "GENBLOCK",
+                  "name" => "g0",
+                  "itemsp" => [
+                    {
+                      "type" => "CELL",
+                      "name" => "u_child",
+                      "modp" => "(M2)",
+                      "paramsp" => [],
+                      "pinsp" => [
+                        { "type" => "PIN", "name" => "a", "exprp" => [{ "type" => "VARREF", "name" => "in_sig" }] }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type" => "MODULE",
+              "name" => "child",
+              "addr" => "(M2)",
+              "loc" => "f,1:1,1:5",
+              "stmtsp" => [
+                { "type" => "VAR", "name" => "a", "direction" => "INPUT", "varType" => "PORT", "dtypep" => "(DT1)" }
+              ]
+            }
+          ],
+          "typeTablep" => [
+            { "type" => "BASICDTYPE", "addr" => "(DT1)", "name" => "logic" }
+          ]
+        },
+        "metadata" => {
+          "frontend_meta" => {
+            "files" => {
+              "e" => { "filename" => "rtl/gen_top.sv" },
+              "f" => { "filename" => "rtl/child.sv" }
+            }
+          }
+        }
+      }
+
+      normalized = described_class.normalize(raw)
+      top = normalized.dig(:design, :modules).find { |entry| entry[:name] == "gen_top" }
+
+      expect(top.fetch(:instances)).to eq(
+        [
+          {
+            name: "u_child",
+            module_name: "child",
+            parameter_overrides: [],
+            connections: [
+              { port: "a", signal: { kind: "identifier", name: "in_sig" } }
+            ]
+          }
+        ]
+      )
+    end
+
+    it "deduplicates repeated instance names produced by generate expansion" do
+      raw = {
+        "payload" => {
+          "version" => "5.044",
+          "type" => "NETLIST",
+          "modulesp" => [
+            {
+              "type" => "MODULE",
+              "name" => "dup_top",
+              "addr" => "(M1)",
+              "loc" => "e,1:1,1:7",
+              "stmtsp" => [
+                {
+                  "type" => "GENBLOCK",
+                  "name" => "g0",
+                  "itemsp" => [
+                    { "type" => "CELL", "name" => "u_dup", "modp" => "(M2)", "pinsp" => [], "paramsp" => [] }
+                  ]
+                },
+                {
+                  "type" => "GENBLOCK",
+                  "name" => "g1",
+                  "itemsp" => [
+                    { "type" => "CELL", "name" => "u_dup", "modp" => "(M2)", "pinsp" => [], "paramsp" => [] }
+                  ]
+                }
+              ]
+            },
+            {
+              "type" => "MODULE",
+              "name" => "child",
+              "addr" => "(M2)",
+              "loc" => "f,1:1,1:5",
+              "stmtsp" => []
+            }
+          ]
+        },
+        "metadata" => {
+          "frontend_meta" => {
+            "files" => {
+              "e" => { "filename" => "rtl/dup_top.sv" },
+              "f" => { "filename" => "rtl/child.sv" }
+            }
+          }
+        }
+      }
+
+      normalized = described_class.normalize(raw)
+      top = normalized.dig(:design, :modules).find { |entry| entry[:name] == "dup_top" }
+      instance_names = top.fetch(:instances).map { |entry| entry[:name] }
+
+      expect(instance_names).to eq(%w[u_dup u_dup__1])
+    end
+
     it "normalizes additional expression node families used by verilator modulesp" do
       raw = {
         "payload" => {

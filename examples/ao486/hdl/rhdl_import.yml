@@ -1,8 +1,13 @@
 ---
 project: hdl
-generated_at: '2026-03-01T19:00:25Z'
+generated_at: '2026-03-03T13:48:20Z'
 modules:
-- altdpram
+- altdpram__W14_WB7
+- altdpram__W24
+- altdpram__W2_WB7
+- altdpram__W3e
+- altdpram__W4_WB7
+- altsyncram__Az1
 - ao486
 - avalon_mem
 - condition
@@ -54,6 +59,16 @@ modules:
 - write_string
 source_files:
 - ao486/ao486.v
+- ao486/autogen/decode_commands.v
+- ao486/autogen/defines.v
+- ao486/autogen/exception.v
+- ao486/autogen/execute_commands.v
+- ao486/autogen/memory_write.v
+- ao486/autogen/microcode_commands.v
+- ao486/autogen/prefetch_control.v
+- ao486/autogen/read_commands.v
+- ao486/autogen/write_commands.v
+- ao486/defines.v
 - ao486/exception.v
 - ao486/global_regs.v
 - ao486/memory/avalon_mem.v
@@ -97,6 +112,7 @@ source_files:
 - ao486/pipeline/write_register.v
 - ao486/pipeline/write_stack.v
 - ao486/pipeline/write_string.v
+- ao486/startup_default.v
 - cache/l1_icache.v
 - cache/l2_cache.v
 - common/cdc_vector_handshake_continuous.sv

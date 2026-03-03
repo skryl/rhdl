@@ -371,8 +371,8 @@ module RHDL
               reg [31:0] read_addr;
               reg [31:0] read_data;
               integer pending_read_words = 0;
+              integer pending_read_delay = 0;
               reg [31:0] pending_read_addr = 32'h0;
-              reg pending_read_skip_first = 1'b0;
 
               #{top} dut (
                 .clk(clk),
@@ -609,18 +609,18 @@ module RHDL
                   end
                   io_read_done = 1'b0;
                   io_write_done = 1'b0;
+                  avm_waitrequest = 1'b0;
 
                   avm_readdatavalid = 1'b0;
-                  if (pending_read_words > 0) begin
+                  if (pending_read_delay > 0) begin
+                    pending_read_delay = pending_read_delay - 1;
+                  end else if (pending_read_words > 0) begin
                     read_addr = pending_read_addr;
                     read_data = mem_read_word(read_addr);
                     avm_readdata = read_data;
                     avm_readdatavalid = 1'b1;
-                    if (!pending_read_skip_first && is_program_address(read_addr)) begin
+                    if (is_program_address(read_addr)) begin
                       $display("EV IF %0d %08x %08x", cycle, read_addr, read_data);
-                    end
-                    if (pending_read_skip_first) begin
-                      pending_read_skip_first = 1'b0;
                     end
                     pending_read_addr = pending_read_addr + 32'h00000004;
                     pending_read_words = pending_read_words - 1;
@@ -631,11 +631,11 @@ module RHDL
                   clk = 1'b1;
                   #1;
 
-                  if (avm_read && !avm_waitrequest && pending_read_words == 0) begin
+                  if (avm_read && !avm_waitrequest && pending_read_words == 0 && pending_read_delay == 0) begin
                     read_addr = {avm_address, 2'b00};
-                    pending_read_addr = read_addr - 32'h00000004;
-                    pending_read_words = ((avm_burstcount == 4'b0000) ? 1 : avm_burstcount) + 1;
-                    pending_read_skip_first = 1'b1;
+                    pending_read_addr = read_addr;
+                    pending_read_words = (avm_burstcount == 4'b0000) ? 1 : avm_burstcount;
+                    pending_read_delay = 1;
                     $display("EV RD %0d %08x %1x %1x", cycle, read_addr, avm_burstcount, avm_byteenable);
                   end
 
@@ -651,6 +651,49 @@ module RHDL
                   end
                   if (io_write_do) begin
                     io_write_done = 1'b1;
+                  end
+
+                  if (cycle < 220) begin
+                    $display(
+                      "DBG %0d avm_r=%0d avm_w=%0d addr=%08x burst=%0d rv=%0d wait=%0d am_state=%0d am_ctr=%0d l1_state=%0d l1_mem_req=%0d l1_mem_done=%0d l1_force=%0d l1_force_n=%0d l1_mux=%b l1_tg_w0=%b l1_dirty=%0x l1_tag_we=%0d l1_idx=%b l1_raddr=%08x l1_tag0=%08x l1_tag1=%08x l1_tag2=%08x l1_tag3=%08x eip=%08x fv=%0d pf_empty=%0d ic_do=%0d ic_state=%0d ic_valid=%0d pf_wr=%0d rc_do=%0d rc_dn=%0d am_rc_dn=%0d rd_do=%0d rd_done=%0d",
+                      cycle,
+                      avm_read,
+                      avm_write,
+                      {avm_address, 2'b00},
+                      avm_burstcount,
+                      avm_readdatavalid,
+                      avm_waitrequest,
+                      dut.memory_inst.avalon_mem_inst.state,
+                      dut.memory_inst.avalon_mem_inst.counter,
+                      dut.memory_inst.icache_inst.l1_icache_inst.state,
+                      dut.memory_inst.icache_inst.l1_icache_inst.MEM_REQ,
+                      dut.memory_inst.icache_inst.l1_icache_inst.MEM_DONE,
+                      dut.memory_inst.icache_inst.l1_icache_inst.force_fetch,
+                      dut.memory_inst.icache_inst.l1_icache_inst.force_next,
+                      dut.memory_inst.icache_inst.l1_icache_inst.cache_mux,
+                      (dut.memory_inst.icache_inst.l1_icache_inst.state == 3'd5) &&
+                        (dut.memory_inst.icache_inst.l1_icache_inst.cache_mux == 2'd0),
+                      dut.memory_inst.icache_inst.l1_icache_inst.tags_dirty_out,
+                      dut.memory_inst.icache_inst.l1_icache_inst.update_tag_we,
+                      dut.memory_inst.icache_inst.l1_icache_inst.read_addr[9:3],
+                      dut.memory_inst.icache_inst.l1_icache_inst.read_addr,
+                      dut.memory_inst.icache_inst.l1_icache_inst.tags_read[0],
+                      dut.memory_inst.icache_inst.l1_icache_inst.tags_read[1],
+                      dut.memory_inst.icache_inst.l1_icache_inst.tags_read[2],
+                      dut.memory_inst.icache_inst.l1_icache_inst.tags_read[3],
+                      dut.pipeline_inst.write_inst.wr_eip,
+                      dut.pipeline_inst.fetch_inst.fetch_valid,
+                      dut.pipeline_inst.prefetchfifo_accept_empty,
+                      dut.memory_inst.icacheread_do,
+                      dut.memory_inst.icache_inst.state,
+                      dut.memory_inst.icache_inst.readcode_cache_valid,
+                      dut.memory_inst.prefetchfifo_write_do,
+                      dut.memory_inst.icache_inst.readcode_do,
+                      dut.memory_inst.icache_inst.readcode_done,
+                      dut.memory_inst.avalon_mem_inst.readcode_done,
+                      dut.pipeline_inst.read_do,
+                      dut.pipeline_inst.read_done
+                    );
                   end
 
                   clk = 1'b0;

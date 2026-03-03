@@ -55,6 +55,39 @@ RSpec.describe RHDL::Codegen::IR::Lower do
       expect(assign.nonblocking).to be(true)
     end
 
+    it 'selects the actual clock edge from mixed reset and clock sensitivity entries' do
+      component = Class.new do
+        include RHDL::DSL
+
+        input :aclr, width: 1
+        input :inclock, width: 1
+        input :sclr, width: 1
+        input :wren, width: 1
+        output :q, width: 1
+
+        process :sequential_posedge_aclr,
+          sensitivity: [
+            { edge: "posedge", signal: sig(:aclr, width: 1) },
+            { edge: "posedge", signal: sig(:inclock, width: 1) },
+            { edge: "posedge", signal: sig(:sclr, width: 1) }
+          ],
+          clocked: true do
+          if_stmt((sig(:aclr, width: 1) | sig(:sclr, width: 1))) do
+            elsif_block(sig(:wren, width: 1)) do
+              assign(:q, lit(1, width: 1, base: "d"), kind: :nonblocking)
+            end
+          end
+        end
+      end
+
+      ir = described_class.new(component, top_name: "mixed_edge_clock_select").build
+      process = ir.processes.first
+
+      expect(process.clocked).to be(true)
+      expect(process.sensitivity_list).to eq(["posedge aclr", "posedge inclock", "posedge sclr"])
+      expect(process.clock).to eq("posedge inclock")
+    end
+
     it 'marks DSL initial processes as IR initial processes' do
       component = Class.new do
         include RHDL::DSL
@@ -315,6 +348,48 @@ RSpec.describe RHDL::Codegen::IR::Lower do
       expect(assign.expr.right.signed).to be(true)
     end
 
+    it 'lowers multiplication operators to IR::BinaryOp with full product width' do
+      component = Class.new do
+        include RHDL::DSL
+
+        input :idx, width: 3
+        output :offset, width: 8
+
+        assign :offset, (sig(:idx, width: 3) * lit(16, width: 5, base: "d"))
+      end
+
+      ir = described_class.new(component, top_name: 'mul_lowering').build
+      assign = ir.assigns.find { |entry| entry.target == :offset }
+
+      expect(assign).not_to be_nil
+      expect(assign.expr).to be_a(RHDL::Codegen::IR::BinaryOp)
+      expect(assign.expr.op).to eq(:*)
+      expect(assign.expr.width).to eq(8)
+      expect(assign.expr.left.width).to eq(3)
+      expect(assign.expr.right.width).to eq(5)
+    end
+
+    it 'does not truncate multiplication RHS literals to LHS width' do
+      component = Class.new do
+        include RHDL::DSL
+
+        input :idx, width: 2
+        output :offset, width: 8
+
+        assign :offset, (sig(:idx, width: 2) * lit(32, width: nil, base: "d", signed: false))
+      end
+
+      ir = described_class.new(component, top_name: 'mul_rhs_width').build
+      assign = ir.assigns.find { |entry| entry.target == :offset }
+
+      expect(assign).not_to be_nil
+      expect(assign.expr).to be_a(RHDL::Codegen::IR::BinaryOp)
+      expect(assign.expr.op).to eq(:*)
+      expect(assign.expr.right).to be_a(RHDL::Codegen::IR::Literal)
+      expect(assign.expr.right.value).to eq(32)
+      expect(assign.expr.right.width).to be >= 6
+    end
+
     it 'preserves intrinsic unsized literal width for imported components in HIR mode' do
       component = Class.new do
         include RHDL::DSL
@@ -495,6 +570,94 @@ RSpec.describe RHDL::Codegen::IR::Lower do
       expect(ir.nets.map(&:name)).to include(:mid)
       expect(ir.regs.map(&:name)).not_to include(:mid)
       expect(ir.instances.first.connections.map { |conn| [conn.port_name, conn.signal] }).to include([:din, "din"], [:mid, "mid"])
+    end
+
+    it 'uses child input defaults when instance connections are omitted' do
+      stub_const('LowerDefaultInputChild', Class.new do
+        include RHDL::DSL
+
+        input :en, default: 1
+        output :y
+        assign :y, :en
+      end)
+
+      component = Class.new do
+        include RHDL::DSL
+
+        output :y
+        instance :u_child, 'lower_default_input_child'
+      end
+
+      ir = described_class.new(component, top_name: 'instance_default_input_connection').build
+      en_connection = ir.instances.first.connections.find { |entry| entry.port_name == :en }
+
+      expect(en_connection).not_to be_nil
+      expect(en_connection.direction).to eq(:in)
+      expect(en_connection.signal).to be_a(RHDL::Codegen::IR::Literal)
+      expect(en_connection.signal.value).to eq(1)
+    end
+
+    it 'applies child input defaults for explicit open connections while preserving open outputs' do
+      stub_const('LowerDefaultOpenChild', Class.new do
+        include RHDL::DSL
+
+        input :en, default: 1
+        output :y
+        output :unused
+        assign :y, :en
+        assign :unused, :en
+      end)
+
+      component = Class.new do
+        include RHDL::DSL
+
+        output :y
+        instance :u_child, 'lower_default_open_child',
+                 ports: {
+                   en: :__rhdl_unconnected,
+                   y: :y,
+                   unused: :__rhdl_unconnected
+                 }
+      end
+
+      ir = described_class.new(component, top_name: 'instance_default_open_connection').build
+      connections = ir.instances.first.connections.each_with_object({}) { |entry, memo| memo[entry.port_name] = entry.signal }
+
+      expect(connections.fetch(:en)).to be_a(RHDL::Codegen::IR::Literal)
+      expect(connections.fetch(:en).value).to eq(1)
+      expect(connections.fetch(:unused)).to eq(:__rhdl_unconnected)
+    end
+
+    it 'keeps expression instance port connections instead of treating them as open connections' do
+      stub_const('LowerExpressionInputChild', Class.new do
+        include RHDL::DSL
+
+        input :sel
+        output :y
+        assign :y, :sel
+      end)
+
+      component = Class.new do
+        include RHDL::DSL
+
+        signal :state, width: 3
+        signal :cache_mux, width: 2
+        output :y
+
+        instance :u_child, 'lower_expression_input_child',
+                 ports: {
+                   sel: ((lit(5, width: 3, base: 'h', signed: false) == :state) &
+                     (lit(0, width: 2, base: 'h', signed: false) == :cache_mux)),
+                   y: :y
+                 }
+      end
+
+      ir = described_class.new(component, top_name: 'instance_expression_input_connection').build
+      sel_connection = ir.instances.first.connections.find { |entry| entry.port_name == :sel }
+
+      expect(sel_connection).not_to be_nil
+      expect(sel_connection.direction).to eq(:in)
+      expect(sel_connection.signal).to be_a(RHDL::Codegen::IR::BinaryOp)
     end
 
     it 'propagates signal defaults into IR register reset values' do

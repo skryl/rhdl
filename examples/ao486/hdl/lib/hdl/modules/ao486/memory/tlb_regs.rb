@@ -2392,482 +2392,418 @@ class TlbRegs < RHDL::Component
           lit(0, width: 31, base: "h", signed: false),
           kind: :nonblocking
         )
-        else_block do
-          if_stmt((sig(:tlb0_write, width: 1) | sig(:tlb0_sel, width: 1))) do
-            assign(
-              :plru,
-              (
-                  lit(32907, width: 31, base: "h", signed: false) |
-                  (
-                      lit(2147450740, width: 31, base: "h", signed: false) &
-                      sig(:plru, width: 31)
-                  )
-              ),
-              kind: :nonblocking
-            )
-            else_block do
-              if_stmt((sig(:tlb1_write, width: 1) | sig(:tlb1_sel, width: 1))) do
-                assign(
-                  :plru,
-                  (
-                      lit(139, width: 31, base: "h", signed: false) |
-                      (
-                          lit(2147450740, width: 31, base: "h", signed: false) &
-                          sig(:plru, width: 31)
-                      )
-                  ),
-                  kind: :nonblocking
+        elsif_block((sig(:tlb0_write, width: 1) | sig(:tlb0_sel, width: 1))) do
+          assign(
+            :plru,
+            (
+                lit(32907, width: 31, base: "h", signed: false) |
+                (
+                    lit(2147450740, width: 31, base: "h", signed: false) &
+                    sig(:plru, width: 31)
                 )
-                else_block do
-                  if_stmt((sig(:tlb2_write, width: 1) | sig(:tlb2_sel, width: 1))) do
-                    assign(
-                      :plru,
-                      (
-                          lit(65547, width: 31, base: "h", signed: false) |
-                          (
-                              lit(2147417972, width: 31, base: "h", signed: false) &
-                              sig(:plru, width: 31)
-                          )
-                      ),
-                      kind: :nonblocking
-                    )
-                    else_block do
-                      if_stmt((sig(:tlb3_write, width: 1) | sig(:tlb3_sel, width: 1))) do
-                        assign(
-                          :plru,
-                          (
-                              lit(11, width: 31, base: "h", signed: false) |
-                              (
-                                  lit(2147417972, width: 31, base: "h", signed: false) &
-                                  sig(:plru, width: 31)
-                              )
-                          ),
-                          kind: :nonblocking
-                        )
-                        else_block do
-                          if_stmt((sig(:tlb4_write, width: 1) | sig(:tlb4_sel, width: 1))) do
-                            assign(
-                              :plru,
-                              (
-                                  lit(131331, width: 31, base: "h", signed: false) |
-                                  (
-                                      lit(2147352308, width: 31, base: "h", signed: false) &
-                                      sig(:plru, width: 31)
-                                  )
-                              ),
-                              kind: :nonblocking
-                            )
-                            else_block do
-                              if_stmt((sig(:tlb5_write, width: 1) | sig(:tlb5_sel, width: 1))) do
-                                assign(
-                                  :plru,
-                                  (
-                                      lit(259, width: 31, base: "h", signed: false) |
-                                      (
-                                          lit(2147352308, width: 31, base: "h", signed: false) &
-                                          sig(:plru, width: 31)
-                                      )
-                                  ),
-                                  kind: :nonblocking
-                                )
-                                else_block do
-                                  if_stmt((sig(:tlb6_write, width: 1) | sig(:tlb6_sel, width: 1))) do
-                                    assign(
-                                      :plru,
-                                      (
-                                          lit(262147, width: 31, base: "h", signed: false) |
-                                          (
-                                              lit(2147221236, width: 31, base: "h", signed: false) &
-                                              sig(:plru, width: 31)
-                                          )
-                                      ),
-                                      kind: :nonblocking
-                                    )
-                                    else_block do
-                                      if_stmt((sig(:tlb7_write, width: 1) | sig(:tlb7_sel, width: 1))) do
-                                        assign(
-                                          :plru,
-                                          (
-                                              lit(3, width: 31, base: "h", signed: false) |
-                                              (
-                                                  lit(2147221236, width: 31, base: "h", signed: false) &
-                                                  sig(:plru, width: 31)
-                                              )
-                                          ),
-                                          kind: :nonblocking
-                                        )
-                                        else_block do
-                                          if_stmt((sig(:tlb8_write, width: 1) | sig(:tlb8_sel, width: 1))) do
-                                            assign(
-                                              :plru,
-                                              (
-                                                  lit(524817, width: 31, base: "h", signed: false) |
-                                                  (
-                                                      lit(2146958828, width: 31, base: "h", signed: false) &
-                                                      sig(:plru, width: 31)
-                                                  )
-                                              ),
-                                              kind: :nonblocking
-                                            )
-                                            else_block do
-                                              if_stmt((sig(:tlb9_write, width: 1) | sig(:tlb9_sel, width: 1))) do
-                                                assign(
-                                                  :plru,
-                                                  (
-                                                      lit(529, width: 31, base: "h", signed: false) |
-                                                      (
-                                                          lit(2146958828, width: 31, base: "h", signed: false) &
-                                                          sig(:plru, width: 31)
-                                                      )
-                                                  ),
-                                                  kind: :nonblocking
-                                                )
-                                                else_block do
-                                                  if_stmt((sig(:tlb10_write, width: 1) | sig(:tlb10_sel, width: 1))) do
-                                                    assign(
-                                                      :plru,
-                                                      (
-                                                          lit(1048593, width: 31, base: "h", signed: false) |
-                                                          (
-                                                              lit(2146434540, width: 31, base: "h", signed: false) &
-                                                              sig(:plru, width: 31)
-                                                          )
-                                                      ),
-                                                      kind: :nonblocking
-                                                    )
-                                                    else_block do
-                                                      if_stmt((sig(:tlb11_write, width: 1) | sig(:tlb11_sel, width: 1))) do
-                                                        assign(
-                                                          :plru,
-                                                          (
-                                                              lit(17, width: 31, base: "h", signed: false) |
-                                                              (
-                                                                  lit(2146434540, width: 31, base: "h", signed: false) &
-                                                                  sig(:plru, width: 31)
-                                                              )
-                                                          ),
-                                                          kind: :nonblocking
-                                                        )
-                                                        else_block do
-                                                          if_stmt((sig(:tlb12_write, width: 1) | sig(:tlb12_sel, width: 1))) do
-                                                            assign(
-                                                              :plru,
-                                                              (
-                                                                  lit(2098177, width: 31, base: "h", signed: false) |
-                                                                  (
-                                                                      lit(2145385452, width: 31, base: "h", signed: false) &
-                                                                      sig(:plru, width: 31)
-                                                                  )
-                                                              ),
-                                                              kind: :nonblocking
-                                                            )
-                                                            else_block do
-                                                              if_stmt((sig(:tlb13_write, width: 1) | sig(:tlb13_sel, width: 1))) do
-                                                                assign(
-                                                                  :plru,
-                                                                  (
-                                                                      lit(1025, width: 31, base: "h", signed: false) |
-                                                                      (
-                                                                          lit(2145385452, width: 31, base: "h", signed: false) &
-                                                                          sig(:plru, width: 31)
-                                                                      )
-                                                                  ),
-                                                                  kind: :nonblocking
-                                                                )
-                                                                else_block do
-                                                                  if_stmt((sig(:tlb14_write, width: 1) | sig(:tlb14_sel, width: 1))) do
-                                                                    assign(
-                                                                      :plru,
-                                                                      (
-                                                                          lit(4194305, width: 31, base: "h", signed: false) |
-                                                                          (
-                                                                              lit(2143288300, width: 31, base: "h", signed: false) &
-                                                                              sig(:plru, width: 31)
-                                                                          )
-                                                                      ),
-                                                                      kind: :nonblocking
-                                                                    )
-                                                                    else_block do
-                                                                      if_stmt((sig(:tlb15_write, width: 1) | sig(:tlb15_sel, width: 1))) do
-                                                                        assign(
-                                                                          :plru,
-                                                                          (
-                                                                              lit(1, width: 31, base: "h", signed: false) |
-                                                                              (
-                                                                                  lit(2143288300, width: 31, base: "h", signed: false) &
-                                                                                  sig(:plru, width: 31)
-                                                                              )
-                                                                          ),
-                                                                          kind: :nonblocking
-                                                                        )
-                                                                        else_block do
-                                                                          if_stmt((sig(:tlb16_write, width: 1) | sig(:tlb16_sel, width: 1))) do
-                                                                            assign(
-                                                                              :plru,
-                                                                              (
-                                                                                  lit(8390692, width: 31, base: "h", signed: false) |
-                                                                                  (
-                                                                                      lit(2139092954, width: 31, base: "h", signed: false) &
-                                                                                      sig(:plru, width: 31)
-                                                                                  )
-                                                                              ),
-                                                                              kind: :nonblocking
-                                                                            )
-                                                                            else_block do
-                                                                              if_stmt((sig(:tlb17_write, width: 1) | sig(:tlb17_sel, width: 1))) do
-                                                                                assign(
-                                                                                  :plru,
-                                                                                  (
-                                                                                      lit(2084, width: 31, base: "h", signed: false) |
-                                                                                      (
-                                                                                          lit(2139092954, width: 31, base: "h", signed: false) &
-                                                                                          sig(:plru, width: 31)
-                                                                                      )
-                                                                                  ),
-                                                                                  kind: :nonblocking
-                                                                                )
-                                                                                else_block do
-                                                                                  if_stmt((sig(:tlb18_write, width: 1) | sig(:tlb18_sel, width: 1))) do
-                                                                                    assign(
-                                                                                      :plru,
-                                                                                      (
-                                                                                          lit(16777252, width: 31, base: "h", signed: false) |
-                                                                                          (
-                                                                                              lit(2130704346, width: 31, base: "h", signed: false) &
-                                                                                              sig(:plru, width: 31)
-                                                                                          )
-                                                                                      ),
-                                                                                      kind: :nonblocking
-                                                                                    )
-                                                                                    else_block do
-                                                                                      if_stmt((sig(:tlb19_write, width: 1) | sig(:tlb19_sel, width: 1))) do
-                                                                                        assign(
-                                                                                          :plru,
-                                                                                          (
-                                                                                              lit(36, width: 31, base: "h", signed: false) |
-                                                                                              (
-                                                                                                  lit(2130704346, width: 31, base: "h", signed: false) &
-                                                                                                  sig(:plru, width: 31)
-                                                                                              )
-                                                                                          ),
-                                                                                          kind: :nonblocking
-                                                                                        )
-                                                                                        else_block do
-                                                                                          if_stmt((sig(:tlb20_write, width: 1) | sig(:tlb20_sel, width: 1))) do
-                                                                                            assign(
-                                                                                              :plru,
-                                                                                              (
-                                                                                                  lit(33558532, width: 31, base: "h", signed: false) |
-                                                                                                  (
-                                                                                                      lit(2113925082, width: 31, base: "h", signed: false) &
-                                                                                                      sig(:plru, width: 31)
-                                                                                                  )
-                                                                                              ),
-                                                                                              kind: :nonblocking
-                                                                                            )
-                                                                                            else_block do
-                                                                                              if_stmt((sig(:tlb21_write, width: 1) | sig(:tlb21_sel, width: 1))) do
-                                                                                                assign(
-                                                                                                  :plru,
-                                                                                                  (
-                                                                                                      lit(4100, width: 31, base: "h", signed: false) |
-                                                                                                      (
-                                                                                                          lit(2113925082, width: 31, base: "h", signed: false) &
-                                                                                                          sig(:plru, width: 31)
-                                                                                                      )
-                                                                                                  ),
-                                                                                                  kind: :nonblocking
-                                                                                                )
-                                                                                                else_block do
-                                                                                                  if_stmt((sig(:tlb22_write, width: 1) | sig(:tlb22_sel, width: 1))) do
-                                                                                                    assign(
-                                                                                                      :plru,
-                                                                                                      (
-                                                                                                          lit(67108868, width: 31, base: "h", signed: false) |
-                                                                                                          (
-                                                                                                              lit(2080370650, width: 31, base: "h", signed: false) &
-                                                                                                              sig(:plru, width: 31)
-                                                                                                          )
-                                                                                                      ),
-                                                                                                      kind: :nonblocking
-                                                                                                    )
-                                                                                                    else_block do
-                                                                                                      if_stmt((sig(:tlb23_write, width: 1) | sig(:tlb23_sel, width: 1))) do
-                                                                                                        assign(
-                                                                                                          :plru,
-                                                                                                          (
-                                                                                                              lit(4, width: 31, base: "h", signed: false) |
-                                                                                                              (
-                                                                                                                  lit(2080370650, width: 31, base: "h", signed: false) &
-                                                                                                                  sig(:plru, width: 31)
-                                                                                                              )
-                                                                                                          ),
-                                                                                                          kind: :nonblocking
-                                                                                                        )
-                                                                                                        else_block do
-                                                                                                          if_stmt((sig(:tlb24_write, width: 1) | sig(:tlb24_sel, width: 1))) do
-                                                                                                            assign(
-                                                                                                              :plru,
-                                                                                                              (
-                                                                                                                  lit(134225984, width: 31, base: "h", signed: false) |
-                                                                                                                  (
-                                                                                                                      lit(2013257658, width: 31, base: "h", signed: false) &
-                                                                                                                      sig(:plru, width: 31)
-                                                                                                                  )
-                                                                                                              ),
-                                                                                                              kind: :nonblocking
-                                                                                                            )
-                                                                                                            else_block do
-                                                                                                              if_stmt((sig(:tlb25_write, width: 1) | sig(:tlb25_sel, width: 1))) do
-                                                                                                                assign(
-                                                                                                                  :plru,
-                                                                                                                  (
-                                                                                                                      lit(8256, width: 31, base: "h", signed: false) |
-                                                                                                                      (
-                                                                                                                          lit(2013257658, width: 31, base: "h", signed: false) &
-                                                                                                                          sig(:plru, width: 31)
-                                                                                                                      )
-                                                                                                                  ),
-                                                                                                                  kind: :nonblocking
-                                                                                                                )
-                                                                                                                else_block do
-                                                                                                                  if_stmt((sig(:tlb26_write, width: 1) | sig(:tlb26_sel, width: 1))) do
-                                                                                                                    assign(
-                                                                                                                      :plru,
-                                                                                                                      (
-                                                                                                                          lit(268435520, width: 31, base: "h", signed: false) |
-                                                                                                                          (
-                                                                                                                              lit(1879039930, width: 31, base: "h", signed: false) &
-                                                                                                                              sig(:plru, width: 31)
-                                                                                                                          )
-                                                                                                                      ),
-                                                                                                                      kind: :nonblocking
-                                                                                                                    )
-                                                                                                                    else_block do
-                                                                                                                      if_stmt((sig(:tlb27_write, width: 1) | sig(:tlb27_sel, width: 1))) do
-                                                                                                                        assign(
-                                                                                                                          :plru,
-                                                                                                                          (
-                                                                                                                              lit(64, width: 31, base: "h", signed: false) |
-                                                                                                                              (
-                                                                                                                                  lit(1879039930, width: 31, base: "h", signed: false) &
-                                                                                                                                  sig(:plru, width: 31)
-                                                                                                                              )
-                                                                                                                          ),
-                                                                                                                          kind: :nonblocking
-                                                                                                                        )
-                                                                                                                        else_block do
-                                                                                                                          if_stmt((sig(:tlb28_write, width: 1) | sig(:tlb28_sel, width: 1))) do
-                                                                                                                            assign(
-                                                                                                                              :plru,
-                                                                                                                              (
-                                                                                                                                  lit(536887296, width: 31, base: "h", signed: false) |
-                                                                                                                                  (
-                                                                                                                                      lit(1610596282, width: 31, base: "h", signed: false) &
-                                                                                                                                      sig(:plru, width: 31)
-                                                                                                                                  )
-                                                                                                                              ),
-                                                                                                                              kind: :nonblocking
-                                                                                                                            )
-                                                                                                                            else_block do
-                                                                                                                              if_stmt((sig(:tlb29_write, width: 1) | sig(:tlb29_sel, width: 1))) do
-                                                                                                                                assign(
-                                                                                                                                  :plru,
-                                                                                                                                  (
-                                                                                                                                      lit(16384, width: 31, base: "h", signed: false) |
-                                                                                                                                      (
-                                                                                                                                          lit(1610596282, width: 31, base: "h", signed: false) &
-                                                                                                                                          sig(:plru, width: 31)
-                                                                                                                                      )
-                                                                                                                                  ),
-                                                                                                                                  kind: :nonblocking
-                                                                                                                                )
-                                                                                                                                else_block do
-                                                                                                                                  if_stmt((sig(:tlb30_write, width: 1) | sig(:tlb30_sel, width: 1))) do
-                                                                                                                                    assign(
-                                                                                                                                      :plru,
-                                                                                                                                      (
-                                                                                                                                          lit(1073741824, width: 31, base: "h", signed: false) |
-                                                                                                                                          (
-                                                                                                                                              lit(1073725370, width: 31, base: "h", signed: false) &
-                                                                                                                                              sig(:plru, width: 31)
-                                                                                                                                          )
-                                                                                                                                      ),
-                                                                                                                                      kind: :nonblocking
-                                                                                                                                    )
-                                                                                                                                    else_block do
-                                                                                                                                      if_stmt((sig(:tlb31_write, width: 1) | sig(:tlb31_sel, width: 1))) do
-                                                                                                                                        assign(
-                                                                                                                                          :plru,
-                                                                                                                                          (
-                                                                                                                                              lit(1073725370, width: 31, base: "h", signed: false) &
-                                                                                                                                              sig(:plru, width: 31)
-                                                                                                                                          ),
-                                                                                                                                          kind: :nonblocking
-                                                                                                                                        )
-                                                                                                                                      end
-                                                                                                                                    end
-                                                                                                                                  end
-                                                                                                                                end
-                                                                                                                              end
-                                                                                                                            end
-                                                                                                                          end
-                                                                                                                        end
-                                                                                                                      end
-                                                                                                                    end
-                                                                                                                  end
-                                                                                                                end
-                                                                                                              end
-                                                                                                            end
-                                                                                                          end
-                                                                                                        end
-                                                                                                      end
-                                                                                                    end
-                                                                                                  end
-                                                                                                end
-                                                                                              end
-                                                                                            end
-                                                                                          end
-                                                                                        end
-                                                                                      end
-                                                                                    end
-                                                                                  end
-                                                                                end
-                                                                              end
-                                                                            end
-                                                                          end
-                                                                        end
-                                                                      end
-                                                                    end
-                                                                  end
-                                                                end
-                                                              end
-                                                            end
-                                                          end
-                                                        end
-                                                      end
-                                                    end
-                                                  end
-                                                end
-                                              end
-                                            end
-                                          end
-                                        end
-                                      end
-                                    end
-                                  end
-                                end
-                              end
-                            end
-                          end
-                        end
-                      end
-                    end
-                  end
-                end
-              end
-            end
-          end
+            ),
+            kind: :nonblocking
+          )
+        end
+        elsif_block((sig(:tlb1_write, width: 1) | sig(:tlb1_sel, width: 1))) do
+          assign(
+            :plru,
+            (
+                lit(139, width: 31, base: "h", signed: false) |
+                (
+                    lit(2147450740, width: 31, base: "h", signed: false) &
+                    sig(:plru, width: 31)
+                )
+            ),
+            kind: :nonblocking
+          )
+        end
+        elsif_block((sig(:tlb2_write, width: 1) | sig(:tlb2_sel, width: 1))) do
+          assign(
+            :plru,
+            (
+                lit(65547, width: 31, base: "h", signed: false) |
+                (
+                    lit(2147417972, width: 31, base: "h", signed: false) &
+                    sig(:plru, width: 31)
+                )
+            ),
+            kind: :nonblocking
+          )
+        end
+        elsif_block((sig(:tlb3_write, width: 1) | sig(:tlb3_sel, width: 1))) do
+          assign(
+            :plru,
+            (
+                lit(11, width: 31, base: "h", signed: false) |
+                (
+                    lit(2147417972, width: 31, base: "h", signed: false) &
+                    sig(:plru, width: 31)
+                )
+            ),
+            kind: :nonblocking
+          )
+        end
+        elsif_block((sig(:tlb4_write, width: 1) | sig(:tlb4_sel, width: 1))) do
+          assign(
+            :plru,
+            (
+                lit(131331, width: 31, base: "h", signed: false) |
+                (
+                    lit(2147352308, width: 31, base: "h", signed: false) &
+                    sig(:plru, width: 31)
+                )
+            ),
+            kind: :nonblocking
+          )
+        end
+        elsif_block((sig(:tlb5_write, width: 1) | sig(:tlb5_sel, width: 1))) do
+          assign(
+            :plru,
+            (
+                lit(259, width: 31, base: "h", signed: false) |
+                (
+                    lit(2147352308, width: 31, base: "h", signed: false) &
+                    sig(:plru, width: 31)
+                )
+            ),
+            kind: :nonblocking
+          )
+        end
+        elsif_block((sig(:tlb6_write, width: 1) | sig(:tlb6_sel, width: 1))) do
+          assign(
+            :plru,
+            (
+                lit(262147, width: 31, base: "h", signed: false) |
+                (
+                    lit(2147221236, width: 31, base: "h", signed: false) &
+                    sig(:plru, width: 31)
+                )
+            ),
+            kind: :nonblocking
+          )
+        end
+        elsif_block((sig(:tlb7_write, width: 1) | sig(:tlb7_sel, width: 1))) do
+          assign(
+            :plru,
+            (
+                lit(3, width: 31, base: "h", signed: false) |
+                (
+                    lit(2147221236, width: 31, base: "h", signed: false) &
+                    sig(:plru, width: 31)
+                )
+            ),
+            kind: :nonblocking
+          )
+        end
+        elsif_block((sig(:tlb8_write, width: 1) | sig(:tlb8_sel, width: 1))) do
+          assign(
+            :plru,
+            (
+                lit(524817, width: 31, base: "h", signed: false) |
+                (
+                    lit(2146958828, width: 31, base: "h", signed: false) &
+                    sig(:plru, width: 31)
+                )
+            ),
+            kind: :nonblocking
+          )
+        end
+        elsif_block((sig(:tlb9_write, width: 1) | sig(:tlb9_sel, width: 1))) do
+          assign(
+            :plru,
+            (
+                lit(529, width: 31, base: "h", signed: false) |
+                (
+                    lit(2146958828, width: 31, base: "h", signed: false) &
+                    sig(:plru, width: 31)
+                )
+            ),
+            kind: :nonblocking
+          )
+        end
+        elsif_block((sig(:tlb10_write, width: 1) | sig(:tlb10_sel, width: 1))) do
+          assign(
+            :plru,
+            (
+                lit(1048593, width: 31, base: "h", signed: false) |
+                (
+                    lit(2146434540, width: 31, base: "h", signed: false) &
+                    sig(:plru, width: 31)
+                )
+            ),
+            kind: :nonblocking
+          )
+        end
+        elsif_block((sig(:tlb11_write, width: 1) | sig(:tlb11_sel, width: 1))) do
+          assign(
+            :plru,
+            (
+                lit(17, width: 31, base: "h", signed: false) |
+                (
+                    lit(2146434540, width: 31, base: "h", signed: false) &
+                    sig(:plru, width: 31)
+                )
+            ),
+            kind: :nonblocking
+          )
+        end
+        elsif_block((sig(:tlb12_write, width: 1) | sig(:tlb12_sel, width: 1))) do
+          assign(
+            :plru,
+            (
+                lit(2098177, width: 31, base: "h", signed: false) |
+                (
+                    lit(2145385452, width: 31, base: "h", signed: false) &
+                    sig(:plru, width: 31)
+                )
+            ),
+            kind: :nonblocking
+          )
+        end
+        elsif_block((sig(:tlb13_write, width: 1) | sig(:tlb13_sel, width: 1))) do
+          assign(
+            :plru,
+            (
+                lit(1025, width: 31, base: "h", signed: false) |
+                (
+                    lit(2145385452, width: 31, base: "h", signed: false) &
+                    sig(:plru, width: 31)
+                )
+            ),
+            kind: :nonblocking
+          )
+        end
+        elsif_block((sig(:tlb14_write, width: 1) | sig(:tlb14_sel, width: 1))) do
+          assign(
+            :plru,
+            (
+                lit(4194305, width: 31, base: "h", signed: false) |
+                (
+                    lit(2143288300, width: 31, base: "h", signed: false) &
+                    sig(:plru, width: 31)
+                )
+            ),
+            kind: :nonblocking
+          )
+        end
+        elsif_block((sig(:tlb15_write, width: 1) | sig(:tlb15_sel, width: 1))) do
+          assign(
+            :plru,
+            (
+                lit(1, width: 31, base: "h", signed: false) |
+                (
+                    lit(2143288300, width: 31, base: "h", signed: false) &
+                    sig(:plru, width: 31)
+                )
+            ),
+            kind: :nonblocking
+          )
+        end
+        elsif_block((sig(:tlb16_write, width: 1) | sig(:tlb16_sel, width: 1))) do
+          assign(
+            :plru,
+            (
+                lit(8390692, width: 31, base: "h", signed: false) |
+                (
+                    lit(2139092954, width: 31, base: "h", signed: false) &
+                    sig(:plru, width: 31)
+                )
+            ),
+            kind: :nonblocking
+          )
+        end
+        elsif_block((sig(:tlb17_write, width: 1) | sig(:tlb17_sel, width: 1))) do
+          assign(
+            :plru,
+            (
+                lit(2084, width: 31, base: "h", signed: false) |
+                (
+                    lit(2139092954, width: 31, base: "h", signed: false) &
+                    sig(:plru, width: 31)
+                )
+            ),
+            kind: :nonblocking
+          )
+        end
+        elsif_block((sig(:tlb18_write, width: 1) | sig(:tlb18_sel, width: 1))) do
+          assign(
+            :plru,
+            (
+                lit(16777252, width: 31, base: "h", signed: false) |
+                (
+                    lit(2130704346, width: 31, base: "h", signed: false) &
+                    sig(:plru, width: 31)
+                )
+            ),
+            kind: :nonblocking
+          )
+        end
+        elsif_block((sig(:tlb19_write, width: 1) | sig(:tlb19_sel, width: 1))) do
+          assign(
+            :plru,
+            (
+                lit(36, width: 31, base: "h", signed: false) |
+                (
+                    lit(2130704346, width: 31, base: "h", signed: false) &
+                    sig(:plru, width: 31)
+                )
+            ),
+            kind: :nonblocking
+          )
+        end
+        elsif_block((sig(:tlb20_write, width: 1) | sig(:tlb20_sel, width: 1))) do
+          assign(
+            :plru,
+            (
+                lit(33558532, width: 31, base: "h", signed: false) |
+                (
+                    lit(2113925082, width: 31, base: "h", signed: false) &
+                    sig(:plru, width: 31)
+                )
+            ),
+            kind: :nonblocking
+          )
+        end
+        elsif_block((sig(:tlb21_write, width: 1) | sig(:tlb21_sel, width: 1))) do
+          assign(
+            :plru,
+            (
+                lit(4100, width: 31, base: "h", signed: false) |
+                (
+                    lit(2113925082, width: 31, base: "h", signed: false) &
+                    sig(:plru, width: 31)
+                )
+            ),
+            kind: :nonblocking
+          )
+        end
+        elsif_block((sig(:tlb22_write, width: 1) | sig(:tlb22_sel, width: 1))) do
+          assign(
+            :plru,
+            (
+                lit(67108868, width: 31, base: "h", signed: false) |
+                (
+                    lit(2080370650, width: 31, base: "h", signed: false) &
+                    sig(:plru, width: 31)
+                )
+            ),
+            kind: :nonblocking
+          )
+        end
+        elsif_block((sig(:tlb23_write, width: 1) | sig(:tlb23_sel, width: 1))) do
+          assign(
+            :plru,
+            (
+                lit(4, width: 31, base: "h", signed: false) |
+                (
+                    lit(2080370650, width: 31, base: "h", signed: false) &
+                    sig(:plru, width: 31)
+                )
+            ),
+            kind: :nonblocking
+          )
+        end
+        elsif_block((sig(:tlb24_write, width: 1) | sig(:tlb24_sel, width: 1))) do
+          assign(
+            :plru,
+            (
+                lit(134225984, width: 31, base: "h", signed: false) |
+                (
+                    lit(2013257658, width: 31, base: "h", signed: false) &
+                    sig(:plru, width: 31)
+                )
+            ),
+            kind: :nonblocking
+          )
+        end
+        elsif_block((sig(:tlb25_write, width: 1) | sig(:tlb25_sel, width: 1))) do
+          assign(
+            :plru,
+            (
+                lit(8256, width: 31, base: "h", signed: false) |
+                (
+                    lit(2013257658, width: 31, base: "h", signed: false) &
+                    sig(:plru, width: 31)
+                )
+            ),
+            kind: :nonblocking
+          )
+        end
+        elsif_block((sig(:tlb26_write, width: 1) | sig(:tlb26_sel, width: 1))) do
+          assign(
+            :plru,
+            (
+                lit(268435520, width: 31, base: "h", signed: false) |
+                (
+                    lit(1879039930, width: 31, base: "h", signed: false) &
+                    sig(:plru, width: 31)
+                )
+            ),
+            kind: :nonblocking
+          )
+        end
+        elsif_block((sig(:tlb27_write, width: 1) | sig(:tlb27_sel, width: 1))) do
+          assign(
+            :plru,
+            (
+                lit(64, width: 31, base: "h", signed: false) |
+                (
+                    lit(1879039930, width: 31, base: "h", signed: false) &
+                    sig(:plru, width: 31)
+                )
+            ),
+            kind: :nonblocking
+          )
+        end
+        elsif_block((sig(:tlb28_write, width: 1) | sig(:tlb28_sel, width: 1))) do
+          assign(
+            :plru,
+            (
+                lit(536887296, width: 31, base: "h", signed: false) |
+                (
+                    lit(1610596282, width: 31, base: "h", signed: false) &
+                    sig(:plru, width: 31)
+                )
+            ),
+            kind: :nonblocking
+          )
+        end
+        elsif_block((sig(:tlb29_write, width: 1) | sig(:tlb29_sel, width: 1))) do
+          assign(
+            :plru,
+            (
+                lit(16384, width: 31, base: "h", signed: false) |
+                (
+                    lit(1610596282, width: 31, base: "h", signed: false) &
+                    sig(:plru, width: 31)
+                )
+            ),
+            kind: :nonblocking
+          )
+        end
+        elsif_block((sig(:tlb30_write, width: 1) | sig(:tlb30_sel, width: 1))) do
+          assign(
+            :plru,
+            (
+                lit(1073741824, width: 31, base: "h", signed: false) |
+                (
+                    lit(1073725370, width: 31, base: "h", signed: false) &
+                    sig(:plru, width: 31)
+                )
+            ),
+            kind: :nonblocking
+          )
+        end
+        elsif_block((sig(:tlb31_write, width: 1) | sig(:tlb31_sel, width: 1))) do
+          assign(
+            :plru,
+            (
+                lit(1073725370, width: 31, base: "h", signed: false) &
+                sig(:plru, width: 31)
+            ),
+            kind: :nonblocking
+          )
         end
       end
       else_block do
@@ -2893,14 +2829,12 @@ class TlbRegs < RHDL::Component
           lit(0, width: 46, base: "h", signed: false),
           kind: :nonblocking
         )
-        else_block do
-          if_stmt(sig(:tlb0_write, width: 1)) do
-            assign(
-              :tlb0,
-              sig(:write_data, width: 46),
-              kind: :nonblocking
-            )
-          end
+        elsif_block(sig(:tlb0_write, width: 1)) do
+          assign(
+            :tlb0,
+            sig(:write_data, width: 46),
+            kind: :nonblocking
+          )
         end
       end
       else_block do
@@ -2926,14 +2860,12 @@ class TlbRegs < RHDL::Component
           lit(0, width: 46, base: "h", signed: false),
           kind: :nonblocking
         )
-        else_block do
-          if_stmt(sig(:tlb1_write, width: 1)) do
-            assign(
-              :tlb1,
-              sig(:write_data, width: 46),
-              kind: :nonblocking
-            )
-          end
+        elsif_block(sig(:tlb1_write, width: 1)) do
+          assign(
+            :tlb1,
+            sig(:write_data, width: 46),
+            kind: :nonblocking
+          )
         end
       end
       else_block do
@@ -2959,14 +2891,12 @@ class TlbRegs < RHDL::Component
           lit(0, width: 46, base: "h", signed: false),
           kind: :nonblocking
         )
-        else_block do
-          if_stmt(sig(:tlb2_write, width: 1)) do
-            assign(
-              :tlb2,
-              sig(:write_data, width: 46),
-              kind: :nonblocking
-            )
-          end
+        elsif_block(sig(:tlb2_write, width: 1)) do
+          assign(
+            :tlb2,
+            sig(:write_data, width: 46),
+            kind: :nonblocking
+          )
         end
       end
       else_block do
@@ -2992,14 +2922,12 @@ class TlbRegs < RHDL::Component
           lit(0, width: 46, base: "h", signed: false),
           kind: :nonblocking
         )
-        else_block do
-          if_stmt(sig(:tlb3_write, width: 1)) do
-            assign(
-              :tlb3,
-              sig(:write_data, width: 46),
-              kind: :nonblocking
-            )
-          end
+        elsif_block(sig(:tlb3_write, width: 1)) do
+          assign(
+            :tlb3,
+            sig(:write_data, width: 46),
+            kind: :nonblocking
+          )
         end
       end
       else_block do
@@ -3025,14 +2953,12 @@ class TlbRegs < RHDL::Component
           lit(0, width: 46, base: "h", signed: false),
           kind: :nonblocking
         )
-        else_block do
-          if_stmt(sig(:tlb4_write, width: 1)) do
-            assign(
-              :tlb4,
-              sig(:write_data, width: 46),
-              kind: :nonblocking
-            )
-          end
+        elsif_block(sig(:tlb4_write, width: 1)) do
+          assign(
+            :tlb4,
+            sig(:write_data, width: 46),
+            kind: :nonblocking
+          )
         end
       end
       else_block do
@@ -3058,14 +2984,12 @@ class TlbRegs < RHDL::Component
           lit(0, width: 46, base: "h", signed: false),
           kind: :nonblocking
         )
-        else_block do
-          if_stmt(sig(:tlb5_write, width: 1)) do
-            assign(
-              :tlb5,
-              sig(:write_data, width: 46),
-              kind: :nonblocking
-            )
-          end
+        elsif_block(sig(:tlb5_write, width: 1)) do
+          assign(
+            :tlb5,
+            sig(:write_data, width: 46),
+            kind: :nonblocking
+          )
         end
       end
       else_block do
@@ -3091,14 +3015,12 @@ class TlbRegs < RHDL::Component
           lit(0, width: 46, base: "h", signed: false),
           kind: :nonblocking
         )
-        else_block do
-          if_stmt(sig(:tlb6_write, width: 1)) do
-            assign(
-              :tlb6,
-              sig(:write_data, width: 46),
-              kind: :nonblocking
-            )
-          end
+        elsif_block(sig(:tlb6_write, width: 1)) do
+          assign(
+            :tlb6,
+            sig(:write_data, width: 46),
+            kind: :nonblocking
+          )
         end
       end
       else_block do
@@ -3124,14 +3046,12 @@ class TlbRegs < RHDL::Component
           lit(0, width: 46, base: "h", signed: false),
           kind: :nonblocking
         )
-        else_block do
-          if_stmt(sig(:tlb7_write, width: 1)) do
-            assign(
-              :tlb7,
-              sig(:write_data, width: 46),
-              kind: :nonblocking
-            )
-          end
+        elsif_block(sig(:tlb7_write, width: 1)) do
+          assign(
+            :tlb7,
+            sig(:write_data, width: 46),
+            kind: :nonblocking
+          )
         end
       end
       else_block do
@@ -3157,14 +3077,12 @@ class TlbRegs < RHDL::Component
           lit(0, width: 46, base: "h", signed: false),
           kind: :nonblocking
         )
-        else_block do
-          if_stmt(sig(:tlb8_write, width: 1)) do
-            assign(
-              :tlb8,
-              sig(:write_data, width: 46),
-              kind: :nonblocking
-            )
-          end
+        elsif_block(sig(:tlb8_write, width: 1)) do
+          assign(
+            :tlb8,
+            sig(:write_data, width: 46),
+            kind: :nonblocking
+          )
         end
       end
       else_block do
@@ -3190,14 +3108,12 @@ class TlbRegs < RHDL::Component
           lit(0, width: 46, base: "h", signed: false),
           kind: :nonblocking
         )
-        else_block do
-          if_stmt(sig(:tlb9_write, width: 1)) do
-            assign(
-              :tlb9,
-              sig(:write_data, width: 46),
-              kind: :nonblocking
-            )
-          end
+        elsif_block(sig(:tlb9_write, width: 1)) do
+          assign(
+            :tlb9,
+            sig(:write_data, width: 46),
+            kind: :nonblocking
+          )
         end
       end
       else_block do
@@ -3223,14 +3139,12 @@ class TlbRegs < RHDL::Component
           lit(0, width: 46, base: "h", signed: false),
           kind: :nonblocking
         )
-        else_block do
-          if_stmt(sig(:tlb10_write, width: 1)) do
-            assign(
-              :tlb10,
-              sig(:write_data, width: 46),
-              kind: :nonblocking
-            )
-          end
+        elsif_block(sig(:tlb10_write, width: 1)) do
+          assign(
+            :tlb10,
+            sig(:write_data, width: 46),
+            kind: :nonblocking
+          )
         end
       end
       else_block do
@@ -3256,14 +3170,12 @@ class TlbRegs < RHDL::Component
           lit(0, width: 46, base: "h", signed: false),
           kind: :nonblocking
         )
-        else_block do
-          if_stmt(sig(:tlb11_write, width: 1)) do
-            assign(
-              :tlb11,
-              sig(:write_data, width: 46),
-              kind: :nonblocking
-            )
-          end
+        elsif_block(sig(:tlb11_write, width: 1)) do
+          assign(
+            :tlb11,
+            sig(:write_data, width: 46),
+            kind: :nonblocking
+          )
         end
       end
       else_block do
@@ -3289,14 +3201,12 @@ class TlbRegs < RHDL::Component
           lit(0, width: 46, base: "h", signed: false),
           kind: :nonblocking
         )
-        else_block do
-          if_stmt(sig(:tlb12_write, width: 1)) do
-            assign(
-              :tlb12,
-              sig(:write_data, width: 46),
-              kind: :nonblocking
-            )
-          end
+        elsif_block(sig(:tlb12_write, width: 1)) do
+          assign(
+            :tlb12,
+            sig(:write_data, width: 46),
+            kind: :nonblocking
+          )
         end
       end
       else_block do
@@ -3322,14 +3232,12 @@ class TlbRegs < RHDL::Component
           lit(0, width: 46, base: "h", signed: false),
           kind: :nonblocking
         )
-        else_block do
-          if_stmt(sig(:tlb13_write, width: 1)) do
-            assign(
-              :tlb13,
-              sig(:write_data, width: 46),
-              kind: :nonblocking
-            )
-          end
+        elsif_block(sig(:tlb13_write, width: 1)) do
+          assign(
+            :tlb13,
+            sig(:write_data, width: 46),
+            kind: :nonblocking
+          )
         end
       end
       else_block do
@@ -3355,14 +3263,12 @@ class TlbRegs < RHDL::Component
           lit(0, width: 46, base: "h", signed: false),
           kind: :nonblocking
         )
-        else_block do
-          if_stmt(sig(:tlb14_write, width: 1)) do
-            assign(
-              :tlb14,
-              sig(:write_data, width: 46),
-              kind: :nonblocking
-            )
-          end
+        elsif_block(sig(:tlb14_write, width: 1)) do
+          assign(
+            :tlb14,
+            sig(:write_data, width: 46),
+            kind: :nonblocking
+          )
         end
       end
       else_block do
@@ -3388,14 +3294,12 @@ class TlbRegs < RHDL::Component
           lit(0, width: 46, base: "h", signed: false),
           kind: :nonblocking
         )
-        else_block do
-          if_stmt(sig(:tlb15_write, width: 1)) do
-            assign(
-              :tlb15,
-              sig(:write_data, width: 46),
-              kind: :nonblocking
-            )
-          end
+        elsif_block(sig(:tlb15_write, width: 1)) do
+          assign(
+            :tlb15,
+            sig(:write_data, width: 46),
+            kind: :nonblocking
+          )
         end
       end
       else_block do
@@ -3421,14 +3325,12 @@ class TlbRegs < RHDL::Component
           lit(0, width: 46, base: "h", signed: false),
           kind: :nonblocking
         )
-        else_block do
-          if_stmt(sig(:tlb16_write, width: 1)) do
-            assign(
-              :tlb16,
-              sig(:write_data, width: 46),
-              kind: :nonblocking
-            )
-          end
+        elsif_block(sig(:tlb16_write, width: 1)) do
+          assign(
+            :tlb16,
+            sig(:write_data, width: 46),
+            kind: :nonblocking
+          )
         end
       end
       else_block do
@@ -3454,14 +3356,12 @@ class TlbRegs < RHDL::Component
           lit(0, width: 46, base: "h", signed: false),
           kind: :nonblocking
         )
-        else_block do
-          if_stmt(sig(:tlb17_write, width: 1)) do
-            assign(
-              :tlb17,
-              sig(:write_data, width: 46),
-              kind: :nonblocking
-            )
-          end
+        elsif_block(sig(:tlb17_write, width: 1)) do
+          assign(
+            :tlb17,
+            sig(:write_data, width: 46),
+            kind: :nonblocking
+          )
         end
       end
       else_block do
@@ -3487,14 +3387,12 @@ class TlbRegs < RHDL::Component
           lit(0, width: 46, base: "h", signed: false),
           kind: :nonblocking
         )
-        else_block do
-          if_stmt(sig(:tlb18_write, width: 1)) do
-            assign(
-              :tlb18,
-              sig(:write_data, width: 46),
-              kind: :nonblocking
-            )
-          end
+        elsif_block(sig(:tlb18_write, width: 1)) do
+          assign(
+            :tlb18,
+            sig(:write_data, width: 46),
+            kind: :nonblocking
+          )
         end
       end
       else_block do
@@ -3520,14 +3418,12 @@ class TlbRegs < RHDL::Component
           lit(0, width: 46, base: "h", signed: false),
           kind: :nonblocking
         )
-        else_block do
-          if_stmt(sig(:tlb19_write, width: 1)) do
-            assign(
-              :tlb19,
-              sig(:write_data, width: 46),
-              kind: :nonblocking
-            )
-          end
+        elsif_block(sig(:tlb19_write, width: 1)) do
+          assign(
+            :tlb19,
+            sig(:write_data, width: 46),
+            kind: :nonblocking
+          )
         end
       end
       else_block do
@@ -3553,14 +3449,12 @@ class TlbRegs < RHDL::Component
           lit(0, width: 46, base: "h", signed: false),
           kind: :nonblocking
         )
-        else_block do
-          if_stmt(sig(:tlb20_write, width: 1)) do
-            assign(
-              :tlb20,
-              sig(:write_data, width: 46),
-              kind: :nonblocking
-            )
-          end
+        elsif_block(sig(:tlb20_write, width: 1)) do
+          assign(
+            :tlb20,
+            sig(:write_data, width: 46),
+            kind: :nonblocking
+          )
         end
       end
       else_block do
@@ -3586,14 +3480,12 @@ class TlbRegs < RHDL::Component
           lit(0, width: 46, base: "h", signed: false),
           kind: :nonblocking
         )
-        else_block do
-          if_stmt(sig(:tlb21_write, width: 1)) do
-            assign(
-              :tlb21,
-              sig(:write_data, width: 46),
-              kind: :nonblocking
-            )
-          end
+        elsif_block(sig(:tlb21_write, width: 1)) do
+          assign(
+            :tlb21,
+            sig(:write_data, width: 46),
+            kind: :nonblocking
+          )
         end
       end
       else_block do
@@ -3619,14 +3511,12 @@ class TlbRegs < RHDL::Component
           lit(0, width: 46, base: "h", signed: false),
           kind: :nonblocking
         )
-        else_block do
-          if_stmt(sig(:tlb22_write, width: 1)) do
-            assign(
-              :tlb22,
-              sig(:write_data, width: 46),
-              kind: :nonblocking
-            )
-          end
+        elsif_block(sig(:tlb22_write, width: 1)) do
+          assign(
+            :tlb22,
+            sig(:write_data, width: 46),
+            kind: :nonblocking
+          )
         end
       end
       else_block do
@@ -3652,14 +3542,12 @@ class TlbRegs < RHDL::Component
           lit(0, width: 46, base: "h", signed: false),
           kind: :nonblocking
         )
-        else_block do
-          if_stmt(sig(:tlb23_write, width: 1)) do
-            assign(
-              :tlb23,
-              sig(:write_data, width: 46),
-              kind: :nonblocking
-            )
-          end
+        elsif_block(sig(:tlb23_write, width: 1)) do
+          assign(
+            :tlb23,
+            sig(:write_data, width: 46),
+            kind: :nonblocking
+          )
         end
       end
       else_block do
@@ -3685,14 +3573,12 @@ class TlbRegs < RHDL::Component
           lit(0, width: 46, base: "h", signed: false),
           kind: :nonblocking
         )
-        else_block do
-          if_stmt(sig(:tlb24_write, width: 1)) do
-            assign(
-              :tlb24,
-              sig(:write_data, width: 46),
-              kind: :nonblocking
-            )
-          end
+        elsif_block(sig(:tlb24_write, width: 1)) do
+          assign(
+            :tlb24,
+            sig(:write_data, width: 46),
+            kind: :nonblocking
+          )
         end
       end
       else_block do
@@ -3718,14 +3604,12 @@ class TlbRegs < RHDL::Component
           lit(0, width: 46, base: "h", signed: false),
           kind: :nonblocking
         )
-        else_block do
-          if_stmt(sig(:tlb25_write, width: 1)) do
-            assign(
-              :tlb25,
-              sig(:write_data, width: 46),
-              kind: :nonblocking
-            )
-          end
+        elsif_block(sig(:tlb25_write, width: 1)) do
+          assign(
+            :tlb25,
+            sig(:write_data, width: 46),
+            kind: :nonblocking
+          )
         end
       end
       else_block do
@@ -3751,14 +3635,12 @@ class TlbRegs < RHDL::Component
           lit(0, width: 46, base: "h", signed: false),
           kind: :nonblocking
         )
-        else_block do
-          if_stmt(sig(:tlb26_write, width: 1)) do
-            assign(
-              :tlb26,
-              sig(:write_data, width: 46),
-              kind: :nonblocking
-            )
-          end
+        elsif_block(sig(:tlb26_write, width: 1)) do
+          assign(
+            :tlb26,
+            sig(:write_data, width: 46),
+            kind: :nonblocking
+          )
         end
       end
       else_block do
@@ -3784,14 +3666,12 @@ class TlbRegs < RHDL::Component
           lit(0, width: 46, base: "h", signed: false),
           kind: :nonblocking
         )
-        else_block do
-          if_stmt(sig(:tlb27_write, width: 1)) do
-            assign(
-              :tlb27,
-              sig(:write_data, width: 46),
-              kind: :nonblocking
-            )
-          end
+        elsif_block(sig(:tlb27_write, width: 1)) do
+          assign(
+            :tlb27,
+            sig(:write_data, width: 46),
+            kind: :nonblocking
+          )
         end
       end
       else_block do
@@ -3817,14 +3697,12 @@ class TlbRegs < RHDL::Component
           lit(0, width: 46, base: "h", signed: false),
           kind: :nonblocking
         )
-        else_block do
-          if_stmt(sig(:tlb28_write, width: 1)) do
-            assign(
-              :tlb28,
-              sig(:write_data, width: 46),
-              kind: :nonblocking
-            )
-          end
+        elsif_block(sig(:tlb28_write, width: 1)) do
+          assign(
+            :tlb28,
+            sig(:write_data, width: 46),
+            kind: :nonblocking
+          )
         end
       end
       else_block do
@@ -3850,14 +3728,12 @@ class TlbRegs < RHDL::Component
           lit(0, width: 46, base: "h", signed: false),
           kind: :nonblocking
         )
-        else_block do
-          if_stmt(sig(:tlb29_write, width: 1)) do
-            assign(
-              :tlb29,
-              sig(:write_data, width: 46),
-              kind: :nonblocking
-            )
-          end
+        elsif_block(sig(:tlb29_write, width: 1)) do
+          assign(
+            :tlb29,
+            sig(:write_data, width: 46),
+            kind: :nonblocking
+          )
         end
       end
       else_block do
@@ -3883,14 +3759,12 @@ class TlbRegs < RHDL::Component
           lit(0, width: 46, base: "h", signed: false),
           kind: :nonblocking
         )
-        else_block do
-          if_stmt(sig(:tlb30_write, width: 1)) do
-            assign(
-              :tlb30,
-              sig(:write_data, width: 46),
-              kind: :nonblocking
-            )
-          end
+        elsif_block(sig(:tlb30_write, width: 1)) do
+          assign(
+            :tlb30,
+            sig(:write_data, width: 46),
+            kind: :nonblocking
+          )
         end
       end
       else_block do
@@ -3916,14 +3790,12 @@ class TlbRegs < RHDL::Component
           lit(0, width: 46, base: "h", signed: false),
           kind: :nonblocking
         )
-        else_block do
-          if_stmt(sig(:tlb31_write, width: 1)) do
-            assign(
-              :tlb31,
-              sig(:write_data, width: 46),
-              kind: :nonblocking
-            )
-          end
+        elsif_block(sig(:tlb31_write, width: 1)) do
+          assign(
+            :tlb31,
+            sig(:write_data, width: 46),
+            kind: :nonblocking
+          )
         end
       end
       else_block do

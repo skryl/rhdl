@@ -5,7 +5,7 @@ require "spec_helper"
 
 RSpec.describe "ao486 software program set", :no_vendor_reimport do
   ROOT = File.expand_path("../../../../examples/ao486/software", __dir__)
-  SOURCE_ROOT = File.join(ROOT, "source")
+  SOFTWARE_SOURCE_ROOT = File.join(ROOT, "source")
   BIN_ROOT = File.join(ROOT, "bin")
   IMAGE_ROOT = File.join(ROOT, "images")
   BUILD_SCRIPT = File.join(ROOT, "build_programs.sh")
@@ -20,7 +20,7 @@ RSpec.describe "ao486 software program set", :no_vendor_reimport do
     expect(File.file?(BUILD_SCRIPT)).to be(true), "missing build script #{BUILD_SCRIPT}"
 
     COMPLEX_PROGRAMS.each do |program|
-      source_path = File.join(SOURCE_ROOT, program.fetch(:source))
+      source_path = File.join(SOFTWARE_SOURCE_ROOT, program.fetch(:source))
       binary_path = File.join(BIN_ROOT, program.fetch(:binary))
 
       expect(File.file?(source_path)).to be(true), "missing source #{source_path}"

@@ -89,8 +89,8 @@ class L1Icache < RHDL::Component
   signal :Fifo_dout, width: 62
   signal :Fifo_empty
   signal :LRU_addr, width: 7
-  signal :LRU_in, width: 3
-  signal :LRU_out
+  signal :LRU_in, width: 8
+  signal :LRU_out, width: 8
   signal :LRU_we
   signal :burstleft, width: 2
   signal :cache_mux, width: 2
@@ -104,18 +104,18 @@ class L1Icache < RHDL::Component
   signal :memory_datain, width: 32
   signal :memory_we, width: (0..3)
   signal :read_addr, width: 30
-  signal :readdata_cache, width: 4
+  signal :readdata_cache, width: 128
   signal :state, width: 3
   signal :tags_dirty_in, width: 4
   signal :tags_dirty_out, width: 4
-  signal :tags_read
+  signal :tags_read, width: 80
   signal :update_tag_addr, width: 7
   signal :update_tag_we
 
   # Assignments
 
   assign :CPU_DATA,
-    sig(:readdata_cache, width: 4)[sig(:cache_mux, width: 2)]
+    sig(:readdata_cache, width: 128)[((sig(:cache_mux, width: 2) * lit(32, width: nil, base: "d", signed: false)) + lit(31, width: nil, base: "d", signed: false))..(sig(:cache_mux, width: 2) * lit(32, width: nil, base: "d", signed: false))]
 
   # Processes
 
@@ -191,30 +191,30 @@ class L1Icache < RHDL::Component
         )
         for_loop(:i, 0..3) do
           assign(
-            sig(:LRU_in, width: 3)[sig(:i, width: 2)[1..0]],
-            sig(:LRU_out, width: 1)[sig(:i, width: 2)[1..0]],
+            sig(:LRU_in, width: 8)[((sig(:i, width: 2)[1..0] * lit(2, width: nil, base: "d", signed: false)) + lit(1, width: nil, base: "d", signed: false))..(sig(:i, width: 2)[1..0] * lit(2, width: nil, base: "d", signed: false))],
+            sig(:LRU_out, width: 8)[((sig(:i, width: 2)[1..0] * lit(2, width: nil, base: "d", signed: false)) + lit(1, width: nil, base: "d", signed: false))..(sig(:i, width: 2)[1..0] * lit(2, width: nil, base: "d", signed: false))],
             kind: :nonblocking
           )
           if_stmt((sig(:cache_mux, width: 2) == sig(:i, width: 2)[1..0])) do
             assign(
               :match,
-              sig(:LRU_out, width: 1)[sig(:i, width: 2)[1..0]],
+              sig(:LRU_out, width: 8)[((sig(:i, width: 2)[1..0] * lit(2, width: nil, base: "d", signed: false)) + lit(1, width: nil, base: "d", signed: false))..(sig(:i, width: 2)[1..0] * lit(2, width: nil, base: "d", signed: false))],
               kind: :blocking
             )
             assign(
-              sig(:LRU_in, width: 3)[sig(:i, width: 2)[1..0]],
+              sig(:LRU_in, width: 8)[((sig(:i, width: 2)[1..0] * lit(2, width: nil, base: "d", signed: false)) + lit(1, width: nil, base: "d", signed: false))..(sig(:i, width: 2)[1..0] * lit(2, width: nil, base: "d", signed: false))],
               lit(0, width: 2, base: "h", signed: false),
               kind: :nonblocking
             )
           end
         end
         for_loop(:i, 0..3) do
-          if_stmt((sig(:LRU_out, width: 1)[sig(:i, width: 2)[1..0]] < sig(:match, width: 1))) do
+          if_stmt((sig(:LRU_out, width: 8)[((sig(:i, width: 2)[1..0] * lit(2, width: nil, base: "d", signed: false)) + lit(1, width: nil, base: "d", signed: false))..(sig(:i, width: 2)[1..0] * lit(2, width: nil, base: "d", signed: false))] < sig(:match, width: 1))) do
             assign(
-              sig(:LRU_in, width: 3)[sig(:i, width: 2)[1..0]],
+              sig(:LRU_in, width: 8)[((sig(:i, width: 2)[1..0] * lit(2, width: nil, base: "d", signed: false)) + lit(1, width: nil, base: "d", signed: false))..(sig(:i, width: 2)[1..0] * lit(2, width: nil, base: "d", signed: false))],
               (
                   lit(1, width: 2, base: "h", signed: false) +
-                  sig(:LRU_out, width: 1)[sig(:i, width: 2)[1..0]]
+                  sig(:LRU_out, width: 8)[((sig(:i, width: 2)[1..0] * lit(2, width: nil, base: "d", signed: false)) + lit(1, width: nil, base: "d", signed: false))..(sig(:i, width: 2)[1..0] * lit(2, width: nil, base: "d", signed: false))]
               ),
               kind: :nonblocking
             )
@@ -232,7 +232,7 @@ class L1Icache < RHDL::Component
             )
             for_loop(:i, 0..3) do
               assign(
-                sig(:LRU_in, width: 3)[sig(:i, width: 2)[1..0]],
+                sig(:LRU_in, width: 8)[((sig(:i, width: 2)[1..0] * lit(2, width: nil, base: "d", signed: false)) + lit(1, width: nil, base: "d", signed: false))..(sig(:i, width: 2)[1..0] * lit(2, width: nil, base: "d", signed: false))],
                 sig(:i, width: 2)[1..0],
                 kind: :nonblocking
               )
@@ -333,7 +333,7 @@ class L1Icache < RHDL::Component
             )
             for_loop(:i, 0..3) do
               if_stmt((~sig(:tags_dirty_out, width: 4)[sig(:i, width: 2)[1..0]])) do
-                if_stmt((sig(:tags_read, width: 1)[sig(:i, width: 2)[1..0]] == sig(:read_addr, width: 30)[29..10])) do
+                if_stmt((sig(:tags_read, width: 80)[((sig(:i, width: 2)[1..0] * lit(20, width: nil, base: "d", signed: false)) + lit(19, width: nil, base: "d", signed: false))..(sig(:i, width: 2)[1..0] * lit(20, width: nil, base: "d", signed: false))] == sig(:read_addr, width: 30)[29..10])) do
                   assign(
                     sig(:memory_we, width: 4)[(lit(3, width: 2, base: "h", signed: false) - ((lit(0, width: 29, base: "d", signed: false).concat(sig(:i, width: 2)) >> lit(0, width: 32, base: "h", signed: false)) & ((lit(1, width: 32, base: "d") << (((lit(0, width: 32, base: "h", signed: false) + lit(1, width: nil, base: "d", signed: false))) - (lit(0, width: 32, base: "h", signed: false)) + lit(1, width: 32, base: "d"))) - lit(1, width: 32, base: "d"))))],
                     lit(1, width: 1, base: "h", signed: false),
@@ -423,7 +423,7 @@ class L1Icache < RHDL::Component
                   else_block do
                     for_loop(:i, 0..3) do
                       if_stmt((~sig(:tags_dirty_out, width: 4)[sig(:i, width: 2)[1..0]])) do
-                        if_stmt((sig(:tags_read, width: 1)[sig(:i, width: 2)[1..0]] == sig(:read_addr, width: 30)[29..10])) do
+                        if_stmt((sig(:tags_read, width: 80)[((sig(:i, width: 2)[1..0] * lit(20, width: nil, base: "d", signed: false)) + lit(19, width: nil, base: "d", signed: false))..(sig(:i, width: 2)[1..0] * lit(20, width: nil, base: "d", signed: false))] == sig(:read_addr, width: 30)[29..10])) do
                           assign(
                             :MEM_REQ,
                             lit(0, width: 1, base: "h", signed: false),
@@ -484,7 +484,7 @@ class L1Icache < RHDL::Component
           end
           when_value(lit(4, width: 3, base: "h", signed: false)) do
             for_loop(:i, 0..3) do
-              if_stmt((lit(3, width: 2, base: "h", signed: false) == sig(:LRU_out, width: 1)[sig(:i, width: 2)[1..0]])) do
+              if_stmt((lit(3, width: 2, base: "h", signed: false) == sig(:LRU_out, width: 8)[((sig(:i, width: 2)[1..0] * lit(2, width: nil, base: "d", signed: false)) + lit(1, width: nil, base: "d", signed: false))..(sig(:i, width: 2)[1..0] * lit(2, width: nil, base: "d", signed: false))])) do
                 assign(
                   :cache_mux,
                   sig(:i, width: 2)[1..0],
@@ -581,9 +581,274 @@ class L1Icache < RHDL::Component
       q: :Fifo_dout,
       rdreq: ((lit(1, width: 3, base: "h", signed: false) == sig(:state, width: 3)) & (~sig(:Fifo_empty, width: 1))),
       empty: :Fifo_empty,
-      full: "",
-      usedw: ""
+      full: :__rhdl_unconnected,
+      usedw: :__rhdl_unconnected
     }
-  instance :dirtyram, "altdpram"
+  instance :dirtyram, "altdpram__W4_WB7",
+    ports: {
+      inclock: :CLK,
+      outclock: :CLK,
+      data: :tags_dirty_in,
+      rdaddress: sig(:read_addr, width: 30)[9..3],
+      wraddress: :update_tag_addr,
+      wren: :update_tag_we,
+      q: :tags_dirty_out,
+      aclr: :__rhdl_unconnected,
+      byteena: :__rhdl_unconnected,
+      inclocken: :__rhdl_unconnected,
+      outclocken: :__rhdl_unconnected,
+      rdaddressstall: :__rhdl_unconnected,
+      rden: :__rhdl_unconnected,
+      sclr: :__rhdl_unconnected,
+      wraddressstall: :__rhdl_unconnected
+    }
+  instance :tagram, "altdpram__W14_WB7",
+    ports: {
+      inclock: :CLK,
+      outclock: :CLK,
+      data: sig(:read_addr, width: 30)[29..10],
+      rdaddress: sig(:read_addr, width: 30)[9..3],
+      wraddress: sig(:read_addr, width: 30)[9..3],
+      wren: ((lit(5, width: 3, base: "h", signed: false) == sig(:state, width: 3)) & (lit(0, width: 2, base: "h", signed: false) == sig(:cache_mux, width: 2))),
+      q: sig(:tags_read, width: 80)[19..0],
+      aclr: :__rhdl_unconnected,
+      byteena: :__rhdl_unconnected,
+      inclocken: :__rhdl_unconnected,
+      outclocken: :__rhdl_unconnected,
+      rdaddressstall: :__rhdl_unconnected,
+      rden: :__rhdl_unconnected,
+      sclr: :__rhdl_unconnected,
+      wraddressstall: :__rhdl_unconnected
+    }
+  instance :LRUram, "altdpram__W2_WB7",
+    ports: {
+      inclock: :CLK,
+      outclock: :CLK,
+      data: sig(:LRU_in, width: 8)[1..0],
+      rdaddress: :LRU_addr,
+      wraddress: :LRU_addr,
+      wren: :LRU_we,
+      q: sig(:LRU_out, width: 8)[1..0],
+      aclr: :__rhdl_unconnected,
+      byteena: :__rhdl_unconnected,
+      inclocken: :__rhdl_unconnected,
+      outclocken: :__rhdl_unconnected,
+      rdaddressstall: :__rhdl_unconnected,
+      rden: :__rhdl_unconnected,
+      sclr: :__rhdl_unconnected,
+      wraddressstall: :__rhdl_unconnected
+    }
+  instance :ram, "altsyncram__Az1",
+    ports: {
+      clock0: :CLK,
+      address_a: :memory_addr_a,
+      byteena_a: :memory_be,
+      data_a: :memory_datain,
+      wren_a: sig(:memory_we, width: 4)[3],
+      address_b: sig(:read_addr, width: 30)[9..0],
+      q_b: sig(:readdata_cache, width: 128)[31..0],
+      aclr0: lit(0, width: 1, base: "h", signed: false),
+      aclr1: lit(0, width: 1, base: "h", signed: false),
+      addressstall_a: lit(0, width: 1, base: "h", signed: false),
+      addressstall_b: lit(0, width: 1, base: "h", signed: false),
+      byteena_b: lit(1, width: 4, base: "h", signed: false),
+      clock1: lit(1, width: 1, base: "h", signed: false),
+      clocken0: lit(1, width: 1, base: "h", signed: false),
+      clocken1: lit(1, width: 1, base: "h", signed: false),
+      clocken2: lit(1, width: 1, base: "h", signed: false),
+      clocken3: lit(1, width: 1, base: "h", signed: false),
+      data_b: lit(0, width: 32, base: "h", signed: false),
+      eccstatus: :__rhdl_unconnected,
+      q_a: :__rhdl_unconnected,
+      rden_a: lit(1, width: 1, base: "h", signed: false),
+      rden_b: lit(1, width: 1, base: "h", signed: false),
+      wren_b: lit(0, width: 1, base: "h", signed: false)
+    }
+  instance :tagram__1, "altdpram__W14_WB7",
+    ports: {
+      inclock: :CLK,
+      outclock: :CLK,
+      data: sig(:read_addr, width: 30)[29..10],
+      rdaddress: sig(:read_addr, width: 30)[9..3],
+      wraddress: sig(:read_addr, width: 30)[9..3],
+      wren: ((lit(5, width: 3, base: "h", signed: false) == sig(:state, width: 3)) & (lit(1, width: 2, base: "h", signed: false) == sig(:cache_mux, width: 2))),
+      q: sig(:tags_read, width: 80)[39..20],
+      aclr: :__rhdl_unconnected,
+      byteena: :__rhdl_unconnected,
+      inclocken: :__rhdl_unconnected,
+      outclocken: :__rhdl_unconnected,
+      rdaddressstall: :__rhdl_unconnected,
+      rden: :__rhdl_unconnected,
+      sclr: :__rhdl_unconnected,
+      wraddressstall: :__rhdl_unconnected
+    }
+  instance :LRUram__1, "altdpram__W2_WB7",
+    ports: {
+      inclock: :CLK,
+      outclock: :CLK,
+      data: sig(:LRU_in, width: 8)[3..2],
+      rdaddress: :LRU_addr,
+      wraddress: :LRU_addr,
+      wren: :LRU_we,
+      q: sig(:LRU_out, width: 8)[3..2],
+      aclr: :__rhdl_unconnected,
+      byteena: :__rhdl_unconnected,
+      inclocken: :__rhdl_unconnected,
+      outclocken: :__rhdl_unconnected,
+      rdaddressstall: :__rhdl_unconnected,
+      rden: :__rhdl_unconnected,
+      sclr: :__rhdl_unconnected,
+      wraddressstall: :__rhdl_unconnected
+    }
+  instance :ram__1, "altsyncram__Az1",
+    ports: {
+      clock0: :CLK,
+      address_a: :memory_addr_a,
+      byteena_a: :memory_be,
+      data_a: :memory_datain,
+      wren_a: sig(:memory_we, width: 4)[2],
+      address_b: sig(:read_addr, width: 30)[9..0],
+      q_b: sig(:readdata_cache, width: 128)[63..32],
+      aclr0: lit(0, width: 1, base: "h", signed: false),
+      aclr1: lit(0, width: 1, base: "h", signed: false),
+      addressstall_a: lit(0, width: 1, base: "h", signed: false),
+      addressstall_b: lit(0, width: 1, base: "h", signed: false),
+      byteena_b: lit(1, width: 4, base: "h", signed: false),
+      clock1: lit(1, width: 1, base: "h", signed: false),
+      clocken0: lit(1, width: 1, base: "h", signed: false),
+      clocken1: lit(1, width: 1, base: "h", signed: false),
+      clocken2: lit(1, width: 1, base: "h", signed: false),
+      clocken3: lit(1, width: 1, base: "h", signed: false),
+      data_b: lit(0, width: 32, base: "h", signed: false),
+      eccstatus: :__rhdl_unconnected,
+      q_a: :__rhdl_unconnected,
+      rden_a: lit(1, width: 1, base: "h", signed: false),
+      rden_b: lit(1, width: 1, base: "h", signed: false),
+      wren_b: lit(0, width: 1, base: "h", signed: false)
+    }
+  instance :tagram__2, "altdpram__W14_WB7",
+    ports: {
+      inclock: :CLK,
+      outclock: :CLK,
+      data: sig(:read_addr, width: 30)[29..10],
+      rdaddress: sig(:read_addr, width: 30)[9..3],
+      wraddress: sig(:read_addr, width: 30)[9..3],
+      wren: ((lit(5, width: 3, base: "h", signed: false) == sig(:state, width: 3)) & (lit(2, width: 2, base: "h", signed: false) == sig(:cache_mux, width: 2))),
+      q: sig(:tags_read, width: 80)[59..40],
+      aclr: :__rhdl_unconnected,
+      byteena: :__rhdl_unconnected,
+      inclocken: :__rhdl_unconnected,
+      outclocken: :__rhdl_unconnected,
+      rdaddressstall: :__rhdl_unconnected,
+      rden: :__rhdl_unconnected,
+      sclr: :__rhdl_unconnected,
+      wraddressstall: :__rhdl_unconnected
+    }
+  instance :LRUram__2, "altdpram__W2_WB7",
+    ports: {
+      inclock: :CLK,
+      outclock: :CLK,
+      data: sig(:LRU_in, width: 8)[5..4],
+      rdaddress: :LRU_addr,
+      wraddress: :LRU_addr,
+      wren: :LRU_we,
+      q: sig(:LRU_out, width: 8)[5..4],
+      aclr: :__rhdl_unconnected,
+      byteena: :__rhdl_unconnected,
+      inclocken: :__rhdl_unconnected,
+      outclocken: :__rhdl_unconnected,
+      rdaddressstall: :__rhdl_unconnected,
+      rden: :__rhdl_unconnected,
+      sclr: :__rhdl_unconnected,
+      wraddressstall: :__rhdl_unconnected
+    }
+  instance :ram__2, "altsyncram__Az1",
+    ports: {
+      clock0: :CLK,
+      address_a: :memory_addr_a,
+      byteena_a: :memory_be,
+      data_a: :memory_datain,
+      wren_a: sig(:memory_we, width: 4)[1],
+      address_b: sig(:read_addr, width: 30)[9..0],
+      q_b: sig(:readdata_cache, width: 128)[95..64],
+      aclr0: lit(0, width: 1, base: "h", signed: false),
+      aclr1: lit(0, width: 1, base: "h", signed: false),
+      addressstall_a: lit(0, width: 1, base: "h", signed: false),
+      addressstall_b: lit(0, width: 1, base: "h", signed: false),
+      byteena_b: lit(1, width: 4, base: "h", signed: false),
+      clock1: lit(1, width: 1, base: "h", signed: false),
+      clocken0: lit(1, width: 1, base: "h", signed: false),
+      clocken1: lit(1, width: 1, base: "h", signed: false),
+      clocken2: lit(1, width: 1, base: "h", signed: false),
+      clocken3: lit(1, width: 1, base: "h", signed: false),
+      data_b: lit(0, width: 32, base: "h", signed: false),
+      eccstatus: :__rhdl_unconnected,
+      q_a: :__rhdl_unconnected,
+      rden_a: lit(1, width: 1, base: "h", signed: false),
+      rden_b: lit(1, width: 1, base: "h", signed: false),
+      wren_b: lit(0, width: 1, base: "h", signed: false)
+    }
+  instance :tagram__3, "altdpram__W14_WB7",
+    ports: {
+      inclock: :CLK,
+      outclock: :CLK,
+      data: sig(:read_addr, width: 30)[29..10],
+      rdaddress: sig(:read_addr, width: 30)[9..3],
+      wraddress: sig(:read_addr, width: 30)[9..3],
+      wren: ((lit(5, width: 3, base: "h", signed: false) == sig(:state, width: 3)) & (lit(3, width: 2, base: "h", signed: false) == sig(:cache_mux, width: 2))),
+      q: sig(:tags_read, width: 80)[79..60],
+      aclr: :__rhdl_unconnected,
+      byteena: :__rhdl_unconnected,
+      inclocken: :__rhdl_unconnected,
+      outclocken: :__rhdl_unconnected,
+      rdaddressstall: :__rhdl_unconnected,
+      rden: :__rhdl_unconnected,
+      sclr: :__rhdl_unconnected,
+      wraddressstall: :__rhdl_unconnected
+    }
+  instance :LRUram__3, "altdpram__W2_WB7",
+    ports: {
+      inclock: :CLK,
+      outclock: :CLK,
+      data: sig(:LRU_in, width: 8)[7..6],
+      rdaddress: :LRU_addr,
+      wraddress: :LRU_addr,
+      wren: :LRU_we,
+      q: sig(:LRU_out, width: 8)[7..6],
+      aclr: :__rhdl_unconnected,
+      byteena: :__rhdl_unconnected,
+      inclocken: :__rhdl_unconnected,
+      outclocken: :__rhdl_unconnected,
+      rdaddressstall: :__rhdl_unconnected,
+      rden: :__rhdl_unconnected,
+      sclr: :__rhdl_unconnected,
+      wraddressstall: :__rhdl_unconnected
+    }
+  instance :ram__3, "altsyncram__Az1",
+    ports: {
+      clock0: :CLK,
+      address_a: :memory_addr_a,
+      byteena_a: :memory_be,
+      data_a: :memory_datain,
+      wren_a: sig(:memory_we, width: 4)[0],
+      address_b: sig(:read_addr, width: 30)[9..0],
+      q_b: sig(:readdata_cache, width: 128)[127..96],
+      aclr0: lit(0, width: 1, base: "h", signed: false),
+      aclr1: lit(0, width: 1, base: "h", signed: false),
+      addressstall_a: lit(0, width: 1, base: "h", signed: false),
+      addressstall_b: lit(0, width: 1, base: "h", signed: false),
+      byteena_b: lit(1, width: 4, base: "h", signed: false),
+      clock1: lit(1, width: 1, base: "h", signed: false),
+      clocken0: lit(1, width: 1, base: "h", signed: false),
+      clocken1: lit(1, width: 1, base: "h", signed: false),
+      clocken2: lit(1, width: 1, base: "h", signed: false),
+      clocken3: lit(1, width: 1, base: "h", signed: false),
+      data_b: lit(0, width: 32, base: "h", signed: false),
+      eccstatus: :__rhdl_unconnected,
+      q_a: :__rhdl_unconnected,
+      rden_a: lit(1, width: 1, base: "h", signed: false),
+      rden_b: lit(1, width: 1, base: "h", signed: false),
+      wren_b: lit(0, width: 1, base: "h", signed: false)
+    }
 
 end

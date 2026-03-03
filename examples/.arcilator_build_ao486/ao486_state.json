@@ -1,7 +1,7 @@
 [
   {
     "name": "ao486",
-    "numStateBytes": 3580,
+    "numStateBytes": 3612,
     "initialFnSym": "",
     "finalFnSym": "",
     "states": [
@@ -109,103 +109,103 @@
       },
       {
         "name": "interrupt_done",
-        "offset": 3545,
+        "offset": 3577,
         "numBits": 1,
         "type": "output"
       },
       {
         "name": "avm_address",
-        "offset": 3548,
+        "offset": 3580,
         "numBits": 30,
         "type": "output"
       },
       {
         "name": "avm_writedata",
-        "offset": 3552,
+        "offset": 3584,
         "numBits": 32,
         "type": "output"
       },
       {
         "name": "avm_byteenable",
-        "offset": 3556,
+        "offset": 3588,
         "numBits": 4,
         "type": "output"
       },
       {
         "name": "avm_burstcount",
-        "offset": 3557,
+        "offset": 3589,
         "numBits": 4,
         "type": "output"
       },
       {
         "name": "avm_write",
-        "offset": 3558,
+        "offset": 3590,
         "numBits": 1,
         "type": "output"
       },
       {
         "name": "avm_read",
-        "offset": 3559,
+        "offset": 3591,
         "numBits": 1,
         "type": "output"
       },
       {
         "name": "dma_readdata",
-        "offset": 3560,
+        "offset": 3592,
         "numBits": 16,
         "type": "output"
       },
       {
         "name": "dma_readdatavalid",
-        "offset": 3562,
+        "offset": 3594,
         "numBits": 1,
         "type": "output"
       },
       {
         "name": "dma_waitrequest",
-        "offset": 3563,
+        "offset": 3595,
         "numBits": 1,
         "type": "output"
       },
       {
         "name": "io_read_do",
-        "offset": 3564,
+        "offset": 3596,
         "numBits": 1,
         "type": "output"
       },
       {
         "name": "io_read_address",
-        "offset": 3566,
+        "offset": 3598,
         "numBits": 16,
         "type": "output"
       },
       {
         "name": "io_read_length",
-        "offset": 3568,
+        "offset": 3600,
         "numBits": 3,
         "type": "output"
       },
       {
         "name": "io_write_do",
-        "offset": 3569,
+        "offset": 3601,
         "numBits": 1,
         "type": "output"
       },
       {
         "name": "io_write_address",
-        "offset": 3570,
+        "offset": 3602,
         "numBits": 16,
         "type": "output"
       },
       {
         "name": "io_write_length",
-        "offset": 3572,
+        "offset": 3604,
         "numBits": 3,
         "type": "output"
       },
       {
         "name": "io_write_data",
-        "offset": 3576,
+        "offset": 3608,
         "numBits": 32,
         "type": "output"
       }

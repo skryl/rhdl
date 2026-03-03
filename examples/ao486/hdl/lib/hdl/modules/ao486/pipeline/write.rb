@@ -1834,23 +1834,19 @@ class Write < RHDL::Component
           lit(0, width: 7, base: "h", signed: false),
           kind: :nonblocking
         )
-        else_block do
-          if_stmt(sig(:exe_ready, width: 1)) do
-            assign(
-              :wr_cmd,
-              sig(:exe_cmd, width: 7),
-              kind: :nonblocking
-            )
-            else_block do
-              if_stmt(sig(:wr_ready, width: 1)) do
-                assign(
-                  :wr_cmd,
-                  lit(0, width: 7, base: "h", signed: false),
-                  kind: :nonblocking
-                )
-              end
-            end
-          end
+        elsif_block(sig(:exe_ready, width: 1)) do
+          assign(
+            :wr_cmd,
+            sig(:exe_cmd, width: 7),
+            kind: :nonblocking
+          )
+        end
+        elsif_block(sig(:wr_ready, width: 1)) do
+          assign(
+            :wr_cmd,
+            lit(0, width: 7, base: "h", signed: false),
+            kind: :nonblocking
+          )
         end
       end
       else_block do
@@ -1876,23 +1872,19 @@ class Write < RHDL::Component
           lit(0, width: 11, base: "h", signed: false),
           kind: :nonblocking
         )
-        else_block do
-          if_stmt(sig(:exe_ready, width: 1)) do
-            assign(
-              :wr_mutex,
-              sig(:exe_mutex, width: 11),
-              kind: :nonblocking
-            )
-            else_block do
-              if_stmt((sig(:wr_ready, width: 1) & (~sig(:wr_interrupt_possible_prepare, width: 1)))) do
-                assign(
-                  :wr_mutex,
-                  lit(0, width: 11, base: "h", signed: false),
-                  kind: :nonblocking
-                )
-              end
-            end
-          end
+        elsif_block(sig(:exe_ready, width: 1)) do
+          assign(
+            :wr_mutex,
+            sig(:exe_mutex, width: 11),
+            kind: :nonblocking
+          )
+        end
+        elsif_block((sig(:wr_ready, width: 1) & (~sig(:wr_interrupt_possible_prepare, width: 1)))) do
+          assign(
+            :wr_mutex,
+            lit(0, width: 11, base: "h", signed: false),
+            kind: :nonblocking
+          )
         end
       end
       else_block do
@@ -1942,23 +1934,19 @@ class Write < RHDL::Component
           lit(0, width: 1, base: "h", signed: false),
           kind: :nonblocking
         )
-        else_block do
-          if_stmt(sig(:wr_make_esp_commit, width: 1)) do
-            assign(
-              :wr_is_esp_speculative,
-              lit(0, width: 1, base: "h", signed: false),
-              kind: :nonblocking
-            )
-            else_block do
-              if_stmt(sig(:wr_make_esp_speculative, width: 1)) do
-                assign(
-                  :wr_is_esp_speculative,
-                  lit(1, width: 1, base: "h", signed: false),
-                  kind: :nonblocking
-                )
-              end
-            end
-          end
+        elsif_block(sig(:wr_make_esp_commit, width: 1)) do
+          assign(
+            :wr_is_esp_speculative,
+            lit(0, width: 1, base: "h", signed: false),
+            kind: :nonblocking
+          )
+        end
+        elsif_block(sig(:wr_make_esp_speculative, width: 1)) do
+          assign(
+            :wr_is_esp_speculative,
+            lit(1, width: 1, base: "h", signed: false),
+            kind: :nonblocking
+          )
         end
       end
       else_block do

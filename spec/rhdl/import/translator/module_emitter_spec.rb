@@ -194,7 +194,7 @@ RSpec.describe RHDL::Import::Translator::ModuleEmitter do
       expect(source).to include("ports: {")
       expect(source).not_to include("clk: :clk")
       expect(source).to include("data: :bus_data")
-      expect(source).to include('unused: ""')
+      expect(source).to include("unused: :__rhdl_unconnected")
     end
 
     it "preserves explicit scalar ranges from mapped width hashes" do

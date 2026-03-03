@@ -102,6 +102,44 @@ RSpec.describe RHDL::Import::ProjectWriter do
       end
     end
 
+    it "copies transitive include files used by copied source files" do
+      Dir.mktmpdir do |dir|
+        out = File.join(dir, "out")
+        rtl_root = File.join(dir, "rtl")
+        top_src = File.join(rtl_root, "ao486", "pipeline", "execute_commands.v")
+        include_defines = File.join(rtl_root, "ao486", "defines.v")
+        include_autogen = File.join(rtl_root, "ao486", "autogen", "execute_commands.v")
+        FileUtils.mkdir_p(File.dirname(top_src))
+        FileUtils.mkdir_p(File.dirname(include_autogen))
+        File.write(
+          top_src,
+          <<~VERILOG
+            `include "defines.v"
+            `include "autogen/execute_commands.v"
+            module execute_commands;
+            endmodule
+          VERILOG
+        )
+        File.write(include_defines, "`define FOO 1\n")
+        File.write(include_autogen, "wire autogen_signal = 1'b0;\n")
+
+        writer = described_class.new
+        result = writer.write(
+          out: out,
+          project_slug: "demo_import",
+          modules: [
+            { name: "ExecuteCommands", source_path: top_src, ruby_source: "class ExecuteCommands; end\n" }
+          ],
+          source_files: [top_src],
+          source_roots: [rtl_root]
+        )
+
+        expect(File.exist?(File.join(result[:vendor_dir], "ao486", "pipeline", "execute_commands.v"))).to be(true)
+        expect(File.exist?(File.join(result[:vendor_dir], "ao486", "defines.v"))).to be(true)
+        expect(File.exist?(File.join(result[:vendor_dir], "ao486", "autogen", "execute_commands.v"))).to be(true)
+      end
+    end
+
     it "prunes stale generated module and vendor files from prior runs" do
       Dir.mktmpdir do |dir|
         out = File.join(dir, "out")

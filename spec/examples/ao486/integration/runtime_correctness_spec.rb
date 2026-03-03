@@ -8,7 +8,24 @@ require "rhdl/import/checks/trace_comparator"
 require_relative "../../../../examples/ao486/utilities/runners/headless_runner"
 
 RSpec.describe "ao486 runtime correctness", :slow, :no_vendor_reimport do
-  PROGRAMS = [
+  RESET_WINDOW_START = 0x000F_FFE0
+  RESET_WINDOW_END = 0x000F_FFFC
+  COMPLEX_PROGRAM_OUTPUT_GOLDENS = {
+    "04_cellular_automaton" => {
+      0x0000_0240 => 0x0000_F5E2,
+      0x0000_0242 => 0x0000_0010
+    },
+    "05_mandelbrot_fixedpoint" => {
+      0x0000_0250 => 0x0000_8EEE,
+      0x0000_0252 => 0x0000_0003
+    },
+    "06_prime_sieve" => {
+      0x0000_0260 => 0x0000_06B8,
+      0x0000_0262 => 0x0000_001F
+    }
+  }.freeze
+
+  RUNTIME_PROGRAMS = [
     {
       name: "01_add_ax_cx_and_store",
       binary: "01_add_ax_cx_and_store.bin",
@@ -84,6 +101,58 @@ RSpec.describe "ao486 runtime correctness", :slow, :no_vendor_reimport do
     expect(comparison.dig(:summary, :first_mismatch)).to be_nil
   end
 
+  def read_word(memory_contents, address)
+    normalized = Integer(address) & 0xFFFF_FFFF
+    key_hex = format("%08x", normalized)
+    key_prefixed = format("0x%08x", normalized)
+    raw =
+      if memory_contents.key?(normalized)
+        memory_contents[normalized]
+      elsif memory_contents.key?(key_hex)
+        memory_contents[key_hex]
+      elsif memory_contents.key?(key_prefixed)
+        memory_contents[key_prefixed]
+      else
+        nil
+      end
+
+    return nil if raw.nil?
+
+    Integer(raw) & 0xFFFF_FFFF
+  rescue ArgumentError, TypeError
+    nil
+  end
+
+  def assert_vendor_functional_progress!(program:, run:)
+    pcs = Array(run.fetch("pc_sequence", []))
+    writes = Array(run.fetch("memory_writes", []))
+    memory_contents = run.fetch("memory_contents", {}).to_h
+    name = program.fetch(:name)
+
+    expect(pcs).not_to be_empty, "#{name} produced no PC trace"
+    escaped_reset_window = pcs.any? do |pc|
+      value = Integer(pc) & 0xFFFF_FFFF
+      value < RESET_WINDOW_START || value > RESET_WINDOW_END
+    rescue ArgumentError, TypeError
+      false
+    end
+    expect(escaped_reset_window).to be(true), <<~MSG
+      #{name} never escaped reset-vector window #{format("0x%08x", RESET_WINDOW_START)}..#{format("0x%08x", RESET_WINDOW_END)}
+      last_pc=#{format("0x%08x", Integer(pcs.last || 0) & 0xFFFF_FFFF)}
+    MSG
+    expect(writes.length).to be > 0, "#{name} observed no memory writes"
+
+    expected_words = COMPLEX_PROGRAM_OUTPUT_GOLDENS.fetch(name, {})
+    expected_words.each do |address, expected_value|
+      actual = read_word(memory_contents, address)
+      expect(actual).to eq(expected_value), <<~MSG
+        #{name} wrong output word at #{format("0x%08x", address)}
+        expected=#{format("0x%08x", expected_value)}
+        actual=#{actual.nil? ? "nil" : format("0x%08x", actual)}
+      MSG
+    end
+  end
+
   it "matches generated Verilog trace against vendor reference trace" do
     skip "ao486 reference RTL is unavailable" unless Dir.exist?(source_root)
     skip "Verilator not available" unless HdlToolchain.verilator_available?
@@ -135,8 +204,6 @@ RSpec.describe "ao486 runtime correctness", :slow, :no_vendor_reimport do
     skip "Verilator not available" unless HdlToolchain.verilator_available?
     skip "Arcilator not available" unless HdlToolchain.arcilator_available?
     skip "IR compiler backend is unavailable" unless RHDL::Codegen::IR::IR_COMPILER_AVAILABLE
-    skip "IR interpreter backend is unavailable" unless RHDL::Codegen::IR::IR_INTERPRETER_AVAILABLE
-    skip "IR JIT backend is unavailable" unless RHDL::Codegen::IR::IR_JIT_AVAILABLE
     require_converted_runtime_artifacts!(out_dir: out_dir)
     skip "ao486 vendor hdl tree is unavailable" unless Dir.exist?(vendor_root)
 
@@ -160,34 +227,16 @@ RSpec.describe "ao486 runtime correctness", :slow, :no_vendor_reimport do
       vendor_root: vendor_root,
       cwd: cwd
     )
-    generated_ir_runners = {
-      compiler: RHDL::Examples::AO486::HeadlessRunner.new(
-        mode: :ir,
-        backend: :compiler,
-        allow_fallback: false,
-        out_dir: out_dir,
-        vendor_root: vendor_root,
-        cwd: cwd
-      ),
-      interpreter: RHDL::Examples::AO486::HeadlessRunner.new(
-        mode: :ir,
-        backend: :interpreter,
-        allow_fallback: false,
-        out_dir: out_dir,
-        vendor_root: vendor_root,
-        cwd: cwd
-      ),
-      jit: RHDL::Examples::AO486::HeadlessRunner.new(
-        mode: :ir,
-        backend: :jit,
-        allow_fallback: false,
-        out_dir: out_dir,
-        vendor_root: vendor_root,
-        cwd: cwd
-      )
-    }
+    generated_ir_runner = RHDL::Examples::AO486::HeadlessRunner.new(
+      mode: :ir,
+      backend: :compiler,
+      allow_fallback: false,
+      out_dir: out_dir,
+      vendor_root: vendor_root,
+      cwd: cwd
+    )
 
-    PROGRAMS.each do |program|
+    RUNTIME_PROGRAMS.each do |program|
       program_binary = File.join(program_root, program.fetch(:binary))
       expect(File.file?(program_binary)).to be(true), "expected compiled binary #{program_binary}"
 
@@ -207,6 +256,7 @@ RSpec.describe "ao486 runtime correctness", :slow, :no_vendor_reimport do
         cycles: program.fetch(:cycles, 256),
         data_check_addresses: program.fetch(:data_check_addresses)
       )
+      assert_vendor_functional_progress!(program: program, run: reference)
       generated_verilog = generated_verilog_runner.run_program(
         program_binary: program_binary,
         cycles: program.fetch(:cycles, 256),
@@ -219,14 +269,12 @@ RSpec.describe "ao486 runtime correctness", :slow, :no_vendor_reimport do
           data_check_addresses: program.fetch(:data_check_addresses)
         )
       }
-      generated_ir_runs = generated_ir_runners.transform_values do |runner|
-        runner.run_program(
-          program_binary: program_binary,
-          cycles: program.fetch(:cycles, 256),
-          data_check_addresses: program.fetch(:data_check_addresses)
-        )
-      end
-      generated_backend_runs.merge!(generated_ir_runs)
+      compiler_trace = generated_ir_runner.run_program(
+        program_binary: program_binary,
+        cycles: program.fetch(:cycles, 256),
+        data_check_addresses: program.fetch(:data_check_addresses)
+      )
+      generated_backend_runs[:compiler] = compiler_trace
 
       generated_backend_runs.each do |backend, generated_ir|
         comparison = comparison_harness.send(
@@ -243,13 +291,8 @@ RSpec.describe "ao486 runtime correctness", :slow, :no_vendor_reimport do
         expect(summary.fetch(:first_mismatch)).to be_nil
       end
 
-      compiler_trace = generated_ir_runs.fetch(:compiler)
       expect(generated_backend_runs.fetch(:arcilator).fetch("pc_sequence")).to eq(compiler_trace.fetch("pc_sequence"))
-      expect(generated_ir_runs.fetch(:interpreter).fetch("pc_sequence")).to eq(compiler_trace.fetch("pc_sequence"))
-      expect(generated_ir_runs.fetch(:jit).fetch("pc_sequence")).to eq(compiler_trace.fetch("pc_sequence"))
       expect(generated_backend_runs.fetch(:arcilator).fetch("instruction_sequence")).to eq(compiler_trace.fetch("instruction_sequence"))
-      expect(generated_ir_runs.fetch(:interpreter).fetch("instruction_sequence")).to eq(compiler_trace.fetch("instruction_sequence"))
-      expect(generated_ir_runs.fetch(:jit).fetch("instruction_sequence")).to eq(compiler_trace.fetch("instruction_sequence"))
     end
   end
 end

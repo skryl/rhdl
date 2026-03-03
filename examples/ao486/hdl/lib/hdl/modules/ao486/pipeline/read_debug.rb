@@ -279,14 +279,12 @@ class ReadDebug < RHDL::Component
           lit(0, width: 1, base: "h", signed: false),
           kind: :nonblocking
         )
-        else_block do
-          if_stmt(sig(:rd_debug_b0_trigger, width: 1)) do
-            assign(
-              :rd_debug_b0_reg,
-              lit(1, width: 1, base: "h", signed: false),
-              kind: :nonblocking
-            )
-          end
+        elsif_block(sig(:rd_debug_b0_trigger, width: 1)) do
+          assign(
+            :rd_debug_b0_reg,
+            lit(1, width: 1, base: "h", signed: false),
+            kind: :nonblocking
+          )
         end
       end
       else_block do
@@ -312,14 +310,12 @@ class ReadDebug < RHDL::Component
           lit(0, width: 1, base: "h", signed: false),
           kind: :nonblocking
         )
-        else_block do
-          if_stmt(sig(:rd_debug_b1_trigger, width: 1)) do
-            assign(
-              :rd_debug_b1_reg,
-              lit(1, width: 1, base: "h", signed: false),
-              kind: :nonblocking
-            )
-          end
+        elsif_block(sig(:rd_debug_b1_trigger, width: 1)) do
+          assign(
+            :rd_debug_b1_reg,
+            lit(1, width: 1, base: "h", signed: false),
+            kind: :nonblocking
+          )
         end
       end
       else_block do
@@ -345,14 +341,12 @@ class ReadDebug < RHDL::Component
           lit(0, width: 1, base: "h", signed: false),
           kind: :nonblocking
         )
-        else_block do
-          if_stmt(sig(:rd_debug_b2_trigger, width: 1)) do
-            assign(
-              :rd_debug_b2_reg,
-              lit(1, width: 1, base: "h", signed: false),
-              kind: :nonblocking
-            )
-          end
+        elsif_block(sig(:rd_debug_b2_trigger, width: 1)) do
+          assign(
+            :rd_debug_b2_reg,
+            lit(1, width: 1, base: "h", signed: false),
+            kind: :nonblocking
+          )
         end
       end
       else_block do
@@ -378,14 +372,12 @@ class ReadDebug < RHDL::Component
           lit(0, width: 1, base: "h", signed: false),
           kind: :nonblocking
         )
-        else_block do
-          if_stmt(sig(:rd_debug_b3_trigger, width: 1)) do
-            assign(
-              :rd_debug_b3_reg,
-              lit(1, width: 1, base: "h", signed: false),
-              kind: :nonblocking
-            )
-          end
+        elsif_block(sig(:rd_debug_b3_trigger, width: 1)) do
+          assign(
+            :rd_debug_b3_reg,
+            lit(1, width: 1, base: "h", signed: false),
+            kind: :nonblocking
+          )
         end
       end
       else_block do

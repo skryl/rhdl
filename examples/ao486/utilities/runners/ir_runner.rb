@@ -1,11 +1,14 @@
 # frozen_string_literal: true
 
 require "json"
+require "digest"
+require "fileutils"
 require "set"
 require "tmpdir"
 
 require "rhdl/import/checks/ao486_program_parity_harness"
 require "rhdl/import/checks/ao486_trace_harness"
+require "rhdl/codegen/ir/sim/ir_simulator"
 require_relative "dos_boot_shim"
 require_relative "native_memory"
 
@@ -17,6 +20,7 @@ module RHDL
         DEFAULT_PROGRAM_BASE_ADDRESS = RHDL::Import::Checks::Ao486ProgramParityHarness::PROGRAM_BASE_ADDRESS
         DEFAULT_DATA_CHECK_ADDRESSES = [RHDL::Import::Checks::Ao486ProgramParityHarness::DATA_CHECK_ADDRESS].freeze
         DOS_BOOT_MAX_CYCLES = 131_072
+        DOS_BOOT_WARMUP_CYCLES = 1024
         EVENT_HISTORY_LIMIT = 131_072
         VGA_TEXT_BASE = 0x000B_8000
         VGA_TEXT_COLUMNS = 80
@@ -72,9 +76,11 @@ module RHDL
           program_base_address: DEFAULT_PROGRAM_BASE_ADDRESS,
           data_check_addresses: DEFAULT_DATA_CHECK_ADDRESSES
         )
+          effective_cycles = Integer(cycles) + 1
+
           harness = build_harness(
             program_binary: program_binary,
-            cycles: cycles,
+            cycles: effective_cycles,
             data_check_addresses: data_check_addresses,
             program_base_address: program_base_address,
             source_root: vendor_root
@@ -177,18 +183,18 @@ module RHDL
           )
 
           shim = RHDL::Examples::AO486::DosBootShim.new(disk_image_path: resolved_dos_image)
+          shim_binary = shim.binary
           harness = Dir.mktmpdir("ao486_dos_boot_ir_live") do |tmp_dir|
-            shim_binary = File.join(tmp_dir, "dos_boot_shim.bin")
-            File.binwrite(shim_binary, shim.binary)
+            shim_binary_path = File.join(tmp_dir, "dos_boot_shim.bin")
+            File.binwrite(shim_binary_path, shim_binary)
             build_harness(
-              program_binary: shim_binary,
+              program_binary: shim_binary_path,
               cycles: 1,
               data_check_addresses: DEFAULT_DATA_CHECK_ADDRESSES,
               program_base_address: RHDL::Examples::AO486::DosBootShim::LOAD_ADDRESS,
               source_root: vendor_root
             )
           end
-
           sim = simulator
           setup_live_session!(
             harness: harness,
@@ -197,7 +203,8 @@ module RHDL
             milestones: [
               "bios:system_loaded",
               "bios:video_loaded",
-              "disk:image_attached"
+              "disk:image_attached",
+              format("boot:reset_vector_far_jump->0x%08x", RHDL::Examples::AO486::DosBootShim::LOAD_ADDRESS)
             ],
             boot_metadata: {
               "bios_system_path" => resolved_bios_system,
@@ -207,13 +214,13 @@ module RHDL
           )
           load_disk_image!(sim: sim, disk_image_path: resolved_dos_image)
           # Probe early progress to avoid presenting a fake/stalled shell session.
-          sim.runner_run_cycles(8192)
+          sim.runner_run_cycles(DOS_BOOT_WARMUP_CYCLES)
           consume_live_events!(sim: sim)
-          @live_cycles += 8192
+          @live_cycles += DOS_BOOT_WARMUP_CYCLES
           if @live_pc_sequence.length <= 8 && @live_memory_writes.empty?
             raise NotImplementedError,
-              "AO486 core-only top does not progress past reset in DOS mode yet; " \
-              "a real DOS shell requires full-system integration."
+              "AO486 compiler runtime is still stuck in reset-vector fetch loop for DOS mode; " \
+              "cache-path unpacked-array lowering/import semantics must be fixed before real shell boot."
           end
         end
 
@@ -302,33 +309,72 @@ module RHDL
         def simulator
           return @simulator if @simulator
 
-          helper = RHDL::Import::Checks::Ao486TraceHarness.new(
-            mode: "converted_ir",
-            top: top,
-            out: out_dir,
-            cycles: 1,
-            source_root: vendor_root,
-            converted_export_mode: nil,
-            cwd: cwd
-          )
-          components = helper.send(:load_converted_components)
-          component_index = components.each_with_object({}) do |entry, memo|
-            memo[entry.fetch(:source_module_name)] = entry
+          if ir_cache_enabled?
+            cached_json = load_cached_ir_json
+            if cached_json
+              @simulator = build_simulator_from_ir_json(cached_json)
+              return @simulator
+            end
+          end
+
+          measure_step("build converted-ir helper") do
+            @ir_build_helper = RHDL::Import::Checks::Ao486TraceHarness.new(
+              mode: "converted_ir",
+              top: top,
+              out: out_dir,
+              cycles: 1,
+              source_root: vendor_root,
+              converted_export_mode: nil,
+              cwd: cwd
+            )
+          end
+          helper = @ir_build_helper
+          components = measure_step("load converted components") { helper.send(:load_converted_components) }
+          component_index = measure_step("build component index") do
+            components.each_with_object({}) do |entry, memo|
+              memo[entry.fetch(:source_module_name)] = entry
+            end
           end
           top_component = component_index[top]
           raise ArgumentError, "converted component #{top.inspect} not found under #{out_dir}" if top_component.nil?
 
-          module_def = RHDL::Codegen::LIR::Lower.new(top_component.fetch(:component_class), top_name: top).build
-          flattened = helper.send(:flatten_ir_module, module_def: module_def, component_index: component_index)
-          helper.send(:populate_missing_sensitivity_lists!, flattened)
-          ir_json = RHDL::Codegen::IR::IRToJson.convert(flattened)
+          module_def = measure_step("lower component to LIR") do
+            RHDL::Codegen::LIR::Lower.new(top_component.fetch(:component_class), top_name: top).build
+          end
+          flattened = measure_step("flatten LIR module") do
+            helper.send(:flatten_ir_module, module_def: module_def, component_index: component_index)
+          end
+          measure_step("populate sensitivity lists") do
+            helper.send(:populate_missing_sensitivity_lists!, flattened)
+          end
+          ir_json = measure_step("serialize IR to JSON") { RHDL::Codegen::IR::IRToJson.convert(flattened) }
 
-          normalized_ir = normalize_i64_compatible_json(ir_json)
+          normalized_ir = measure_step("normalize i64 JSON") { normalize_i64_compatible_json(ir_json) }
           normalized_ir_json = if normalized_ir.is_a?(String)
             normalized_ir
           else
             JSON.generate(normalized_ir, max_nesting: false)
           end
+
+          if ir_cache_enabled?
+            measure_step("write IR cache") { write_cached_ir_json(normalized_ir_json) }
+          end
+
+          @simulator = measure_step("instantiate IR simulator backend=#{@backend}") do
+            build_simulator_from_ir_json(normalized_ir_json)
+          end
+          @simulator
+        ensure
+          @ir_build_helper = nil
+        end
+
+        def build_simulator_from_ir_json(ir_json)
+          normalized_ir_json = if ir_json.is_a?(String)
+            ir_json
+          else
+            JSON.generate(ir_json, max_nesting: false)
+          end
+
           sim = RHDL::Codegen::IR::IrSimulator.new(
             normalized_ir_json,
             backend: @backend,
@@ -339,7 +385,98 @@ module RHDL
               "ao486 IR runner extension unavailable for backend=#{@backend.inspect} " \
               "(runner_kind=#{sim.respond_to?(:runner_kind) ? sim.runner_kind.inspect : 'none'})"
           end
-          @simulator = sim
+          sim
+        end
+
+        def ir_cache_enabled?
+          raw = ENV["RHDL_AO486_IR_CACHE"]
+          return true if raw.nil? || raw.strip.empty?
+
+          !%w[0 false off no].include?(raw.strip.downcase)
+        end
+
+        def ir_cache_dir
+          File.join(out_dir, "tmp")
+        end
+
+        def ir_cache_basename
+          "ao486_ir_#{top}_#{backend}"
+        end
+
+        def ir_cache_json_path
+          File.join(ir_cache_dir, "#{ir_cache_basename}.json")
+        end
+
+        def ir_cache_meta_path
+          File.join(ir_cache_dir, "#{ir_cache_basename}.meta.json")
+        end
+
+        def ir_cache_fingerprint
+          module_files = Dir.glob(File.join(out_dir, "lib", "**", "*.rb")).sort
+          max_mtime = module_files.map { |path| File.mtime(path).to_i }.max || 0
+          total_bytes = module_files.sum { |path| File.size(path) rescue 0 }
+          hdl_entry = File.join(out_dir, "lib", "hdl.rb")
+          import_report = File.join(out_dir, "reports", "import_report.json")
+          digest_input = [
+            top,
+            backend,
+            module_files.length,
+            max_mtime,
+            total_bytes,
+            File.file?(hdl_entry) ? File.mtime(hdl_entry).to_i : 0,
+            File.file?(import_report) ? File.mtime(import_report).to_i : 0
+          ].join(":")
+          Digest::SHA256.hexdigest(digest_input)
+        end
+
+        def load_cached_ir_json
+          return nil unless File.file?(ir_cache_json_path) && File.file?(ir_cache_meta_path)
+
+          metadata = JSON.parse(File.read(ir_cache_meta_path))
+          fingerprint = metadata.fetch("fingerprint", "").to_s
+          current = ir_cache_fingerprint
+          return nil unless !fingerprint.empty? && fingerprint == current
+
+          measure_step("load IR cache") { File.read(ir_cache_json_path) }
+        rescue JSON::ParserError, Errno::ENOENT
+          nil
+        end
+
+        def write_cached_ir_json(ir_json)
+          FileUtils.mkdir_p(ir_cache_dir)
+          fingerprint = ir_cache_fingerprint
+          json_tmp = "#{ir_cache_json_path}.tmp"
+          meta_tmp = "#{ir_cache_meta_path}.tmp"
+          File.write(json_tmp, ir_json)
+          File.write(
+            meta_tmp,
+            JSON.pretty_generate(
+              {
+                "fingerprint" => fingerprint,
+                "top" => top,
+                "backend" => backend.to_s,
+                "generated_at" => Time.now.utc.strftime("%Y-%m-%dT%H:%M:%SZ")
+              }
+            )
+          )
+          FileUtils.mv(json_tmp, ir_cache_json_path)
+          FileUtils.mv(meta_tmp, ir_cache_meta_path)
+          true
+        end
+
+        def timing_enabled?
+          raw = ENV["RHDL_AO486_IR_TIMING"]
+          !raw.nil? && !raw.strip.empty? && !%w[0 false off no].include?(raw.strip.downcase)
+        end
+
+        def measure_step(label)
+          return yield unless timing_enabled?
+
+          started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+          result = yield
+          elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - started
+          warn format("[ao486 ir_runner] %s %.3fs", label, elapsed)
+          result
         end
 
         def clear_touched_memory!(sim:, harness:)
@@ -386,7 +523,13 @@ module RHDL
           end
         end
 
-        def setup_live_session!(harness:, serial_output:, vga_text_lines:, milestones:, boot_metadata:)
+        def setup_live_session!(
+          harness:,
+          serial_output:,
+          vga_text_lines:,
+          milestones:,
+          boot_metadata:
+        )
           sim = simulator
           sim.reset
           clear_runner_event_buffer!(sim: sim)

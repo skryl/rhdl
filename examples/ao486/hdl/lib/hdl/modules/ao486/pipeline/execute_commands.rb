@@ -667,7 +667,7 @@ class ExecuteCommands < RHDL::Component
   # Signals
 
   signal :__VdfgBinToOneHot_Pre_ha6c45459_0_0, width: 7
-  signal :__VdfgBinToOneHot_Tab_ha6c45459_0_0, width: 118
+  signal :__VdfgBinToOneHot_Tab_ha6c45459_0_0, width: 128
   signal :__VdfgRegularize_h7a35cd6a_0_0, width: 15
   signal :__VdfgRegularize_h7a35cd6a_0_1
   signal :__VdfgRegularize_h7a35cd6a_0_10
@@ -7564,16 +7564,14 @@ class ExecuteCommands < RHDL::Component
           ),
           kind: :nonblocking
         )
-        else_block do
-          if_stmt(sig(:exe_buffer_shift_word, width: 1)) do
-            assign(
-              :exe_buffer_shifted,
-              sig(:exe_buffer_shifted, width: 464)[447..0].concat(
-                sig(:exe_buffer, width: 32)[15..0]
-              ),
-              kind: :nonblocking
-            )
-          end
+        elsif_block(sig(:exe_buffer_shift_word, width: 1)) do
+          assign(
+            :exe_buffer_shifted,
+            sig(:exe_buffer_shifted, width: 464)[447..0].concat(
+              sig(:exe_buffer, width: 32)[15..0]
+            ),
+            kind: :nonblocking
+          )
         end
       end
       else_block do
@@ -7611,23 +7609,19 @@ class ExecuteCommands < RHDL::Component
           lit(0, width: 1, base: "h", signed: false),
           kind: :nonblocking
         )
-        else_block do
-          if_stmt(sig(:exe_ready, width: 1)) do
-            assign(
-              :e_invd_code_done,
-              lit(0, width: 1, base: "h", signed: false),
-              kind: :nonblocking
-            )
-            else_block do
-              if_stmt(sig(:invdcode_done, width: 1)) do
-                assign(
-                  :e_invd_code_done,
-                  lit(1, width: 1, base: "h", signed: false),
-                  kind: :nonblocking
-                )
-              end
-            end
-          end
+        elsif_block(sig(:exe_ready, width: 1)) do
+          assign(
+            :e_invd_code_done,
+            lit(0, width: 1, base: "h", signed: false),
+            kind: :nonblocking
+          )
+        end
+        elsif_block(sig(:invdcode_done, width: 1)) do
+          assign(
+            :e_invd_code_done,
+            lit(1, width: 1, base: "h", signed: false),
+            kind: :nonblocking
+          )
         end
       end
       else_block do
@@ -7653,23 +7647,19 @@ class ExecuteCommands < RHDL::Component
           lit(0, width: 1, base: "h", signed: false),
           kind: :nonblocking
         )
-        else_block do
-          if_stmt(sig(:exe_ready, width: 1)) do
-            assign(
-              :e_invd_data_done,
-              lit(0, width: 1, base: "h", signed: false),
-              kind: :nonblocking
-            )
-            else_block do
-              if_stmt(sig(:invddata_done, width: 1)) do
-                assign(
-                  :e_invd_data_done,
-                  lit(1, width: 1, base: "h", signed: false),
-                  kind: :nonblocking
-                )
-              end
-            end
-          end
+        elsif_block(sig(:exe_ready, width: 1)) do
+          assign(
+            :e_invd_data_done,
+            lit(0, width: 1, base: "h", signed: false),
+            kind: :nonblocking
+          )
+        end
+        elsif_block(sig(:invddata_done, width: 1)) do
+          assign(
+            :e_invd_data_done,
+            lit(1, width: 1, base: "h", signed: false),
+            kind: :nonblocking
+          )
         end
       end
       else_block do
@@ -7695,23 +7685,19 @@ class ExecuteCommands < RHDL::Component
           lit(0, width: 1, base: "h", signed: false),
           kind: :nonblocking
         )
-        else_block do
-          if_stmt(sig(:exe_ready, width: 1)) do
-            assign(
-              :e_wbinvd_code_done,
-              lit(0, width: 1, base: "h", signed: false),
-              kind: :nonblocking
-            )
-            else_block do
-              if_stmt(sig(:invdcode_done, width: 1)) do
-                assign(
-                  :e_wbinvd_code_done,
-                  lit(1, width: 1, base: "h", signed: false),
-                  kind: :nonblocking
-                )
-              end
-            end
-          end
+        elsif_block(sig(:exe_ready, width: 1)) do
+          assign(
+            :e_wbinvd_code_done,
+            lit(0, width: 1, base: "h", signed: false),
+            kind: :nonblocking
+          )
+        end
+        elsif_block(sig(:invdcode_done, width: 1)) do
+          assign(
+            :e_wbinvd_code_done,
+            lit(1, width: 1, base: "h", signed: false),
+            kind: :nonblocking
+          )
         end
       end
       else_block do
@@ -7737,23 +7723,19 @@ class ExecuteCommands < RHDL::Component
           lit(0, width: 1, base: "h", signed: false),
           kind: :nonblocking
         )
-        else_block do
-          if_stmt(sig(:exe_ready, width: 1)) do
-            assign(
-              :e_wbinvd_data_done,
-              lit(0, width: 1, base: "h", signed: false),
-              kind: :nonblocking
-            )
-            else_block do
-              if_stmt(sig(:wbinvddata_done, width: 1)) do
-                assign(
-                  :e_wbinvd_data_done,
-                  lit(1, width: 1, base: "h", signed: false),
-                  kind: :nonblocking
-                )
-              end
-            end
-          end
+        elsif_block(sig(:exe_ready, width: 1)) do
+          assign(
+            :e_wbinvd_data_done,
+            lit(0, width: 1, base: "h", signed: false),
+            kind: :nonblocking
+          )
+        end
+        elsif_block(sig(:wbinvddata_done, width: 1)) do
+          assign(
+            :e_wbinvd_data_done,
+            lit(1, width: 1, base: "h", signed: false),
+            kind: :nonblocking
+          )
         end
       end
       else_block do

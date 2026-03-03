@@ -760,14 +760,12 @@ class Pipeline < RHDL::Component
           ),
           kind: :nonblocking
         )
-        else_block do
-          if_stmt((~sig(:pipeline_dec_idle, width: 1))) do
-            assign(
-              :pipeline_dec_idle_counter,
-              lit(0, width: 2, base: "h", signed: false),
-              kind: :nonblocking
-            )
-          end
+        elsif_block((~sig(:pipeline_dec_idle, width: 1))) do
+          assign(
+            :pipeline_dec_idle_counter,
+            lit(0, width: 2, base: "h", signed: false),
+            kind: :nonblocking
+          )
         end
       end
       else_block do
