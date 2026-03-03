@@ -10,6 +10,7 @@ import { bindD3Interactions } from '../renderers/interactions';
 import { buildElkGraph, applyElkResult } from '../renderers/elk_layout_adapter';
 import { updateRenderActivity } from '../renderers/render_activity';
 import { getThemePalette, drawLegend } from '../renderers/themes';
+import { createSchematicRenderWorkerClient } from './schematic_render_worker_client';
 import type {
   ComponentModel,
   ComponentNode,
@@ -50,6 +51,7 @@ interface InFlightGraphBuild {
 
 interface GraphRenderer {
   render: (renderList: RenderList, viewport: GraphViewport, palette: ThemePalette) => void;
+  setCanvasSize?: (pixelWidth: number, pixelHeight: number) => void;
   destroy: () => void;
 }
 
@@ -67,6 +69,8 @@ interface LocalGraphHandle extends ExplorerGraphLike {
   spatialIndex: SpatialIndex;
   renderList: RenderList;
   renderLegendOverlay: (palette: ThemePalette) => void;
+  containerCssWidth: number;
+  containerCssHeight: number;
   destroy: () => void;
 }
 
@@ -150,22 +154,51 @@ export function createExplorerGraphRuntimeService({
   requireFn('renderComponentViews', renderComponentViews);
   requireFn('createSchematicElements', createSchematicElements);
   requireFn('signalLiveValueByName', signalLiveValueByName);
+  void isTraceEnabled;
 
   let renderListRef: RenderList | null = null;
   let viewport: GraphViewport = { ...DEFAULT_GRAPH_VIEWPORT };
   let graphBuildVersion = 0;
   let graphBuildInFlight: InFlightGraphBuild | null = null;
 
+  function toCssPixelSize(value: unknown, fallback: number): number {
+    const numeric = Number(value);
+    if (Number.isFinite(numeric) && numeric > 0) {
+      return Math.max(1, Math.round(numeric));
+    }
+    return Math.max(1, Math.round(fallback || 1));
+  }
+
   function syncGraphCanvasSize(graph: LocalGraphHandle): boolean {
     if (!graph?.canvas) {
       return false;
     }
 
-    const fallbackWidth = Number((graph.canvas as unknown as { width?: unknown }).width) || 800;
-    const fallbackHeight = Number((graph.canvas as unknown as { height?: unknown }).height) || 600;
-    const targetWidth = toCanvasPixelSize(dom.componentVisual?.clientWidth, fallbackWidth);
-    const targetHeight = toCanvasPixelSize(dom.componentVisual?.clientHeight, fallbackHeight);
+    const fallbackCssWidth = Number((graph.canvas as unknown as { clientWidth?: unknown }).clientWidth) || 800;
+    const fallbackCssHeight = Number((graph.canvas as unknown as { clientHeight?: unknown }).clientHeight) || 600;
+    const cssWidth = toCssPixelSize(dom.componentVisual?.clientWidth, fallbackCssWidth);
+    const cssHeight = toCssPixelSize(dom.componentVisual?.clientHeight, fallbackCssHeight);
+    const prevCssWidth = Number(graph.containerCssWidth) || cssWidth;
+    const prevCssHeight = Number(graph.containerCssHeight) || cssHeight;
+    if (Math.abs(cssWidth - prevCssWidth) < 2 && Math.abs(cssHeight - prevCssHeight) < 2) {
+      return false;
+    }
+    graph.containerCssWidth = cssWidth;
+    graph.containerCssHeight = cssHeight;
+    const targetWidth = toCanvasPixelSize(cssWidth, cssWidth);
+    const targetHeight = toCanvasPixelSize(cssHeight, cssHeight);
     let resized = false;
+
+    const cssWidthPx = `${cssWidth}px`;
+    const cssHeightPx = `${cssHeight}px`;
+    if (graph.canvas.style.width !== cssWidthPx) {
+      graph.canvas.style.width = cssWidthPx;
+      resized = true;
+    }
+    if (graph.canvas.style.height !== cssHeightPx) {
+      graph.canvas.style.height = cssHeightPx;
+      resized = true;
+    }
 
     if (graph.canvas.width !== targetWidth || graph.canvas.height !== targetHeight) {
       graph.canvas.width = targetWidth;
@@ -174,11 +207,23 @@ export function createExplorerGraphRuntimeService({
     }
 
     if (graph.legendCanvas) {
+      if (graph.legendCanvas.style.width !== cssWidthPx) {
+        graph.legendCanvas.style.width = cssWidthPx;
+        resized = true;
+      }
+      if (graph.legendCanvas.style.height !== cssHeightPx) {
+        graph.legendCanvas.style.height = cssHeightPx;
+        resized = true;
+      }
       if (graph.legendCanvas.width !== targetWidth || graph.legendCanvas.height !== targetHeight) {
         graph.legendCanvas.width = targetWidth;
         graph.legendCanvas.height = targetHeight;
         resized = true;
       }
+    }
+
+    if (resized && typeof graph.renderer.setCanvasSize === 'function') {
+      graph.renderer.setCanvasSize(targetWidth, targetHeight);
     }
 
     return resized;
@@ -330,15 +375,42 @@ export function createExplorerGraphRuntimeService({
 
       dom.componentVisual.innerHTML = '';
 
+      const cssWidth = toCssPixelSize(dom.componentVisual.clientWidth, 800);
+      const cssHeight = toCssPixelSize(dom.componentVisual.clientHeight, 600);
       const canvas = document.createElement('canvas');
-      canvas.width = toCanvasPixelSize(dom.componentVisual.clientWidth, 800);
-      canvas.height = toCanvasPixelSize(dom.componentVisual.clientHeight, 600);
-      canvas.style.width = '100%';
-      canvas.style.height = '100%';
+      canvas.width = toCanvasPixelSize(cssWidth, cssWidth);
+      canvas.height = toCanvasPixelSize(cssHeight, cssHeight);
+      canvas.style.display = 'block';
+      canvas.style.verticalAlign = 'top';
+      canvas.style.width = `${cssWidth}px`;
+      canvas.style.height = `${cssHeight}px`;
       dom.componentVisual.appendChild(canvas);
 
-      const webglRenderer = createWebGLRenderer(canvas);
-      const renderer = webglRenderer || createCanvasRenderer(canvas);
+      let graphHandle: LocalGraphHandle | null = null;
+      let legendCanvas: HTMLCanvasElement | null = null;
+      let legendCtx: CanvasRenderingContext2D | null = null;
+      let showLegendOverlay = false;
+
+      const workerRenderer = createSchematicRenderWorkerClient({
+        canvas,
+        documentRef: globalThis.document,
+        globalRef: globalThis,
+        onBackend: (backend) => {
+          if (backend !== 'webgl' && backend !== 'canvas2d') {
+            return;
+          }
+          state.components.graphRenderBackend = backend;
+          showLegendOverlay = backend === 'webgl';
+          if (legendCanvas) {
+            legendCanvas.hidden = !showLegendOverlay;
+          }
+          if (graphHandle && state.components.graph === graphHandle && showLegendOverlay) {
+            graphHandle.renderLegendOverlay(getThemePalette(state.theme));
+          }
+        }
+      });
+      const webglRenderer = workerRenderer ? null : createWebGLRenderer(canvas);
+      const renderer = workerRenderer || webglRenderer || createCanvasRenderer(canvas);
       if (!renderer) {
         clearBuildInFlightIfCurrent(token, graphKey);
         state.components.graphLayoutEngine = 'error';
@@ -346,27 +418,29 @@ export function createExplorerGraphRuntimeService({
         return;
       }
 
-      state.components.graphRenderBackend = webglRenderer ? 'webgl' : 'canvas2d';
+      state.components.graphRenderBackend = workerRenderer ? 'webgl' : (webglRenderer ? 'webgl' : 'canvas2d');
+      showLegendOverlay = !!workerRenderer || !!webglRenderer;
 
-      let legendCanvas: HTMLCanvasElement | null = null;
-      let legendCtx: CanvasRenderingContext2D | null = null;
-      if (webglRenderer) {
+      if (showLegendOverlay) {
         legendCanvas = document.createElement('canvas');
         legendCanvas.width = canvas.width;
         legendCanvas.height = canvas.height;
-        legendCanvas.style.width = '100%';
-        legendCanvas.style.height = '100%';
+        legendCanvas.style.width = `${cssWidth}px`;
+        legendCanvas.style.height = `${cssHeight}px`;
         legendCanvas.style.position = 'absolute';
         legendCanvas.style.top = '0';
         legendCanvas.style.left = '0';
         legendCanvas.style.pointerEvents = 'none';
+        legendCanvas.style.display = 'block';
+        legendCanvas.style.verticalAlign = 'top';
+        legendCanvas.hidden = !showLegendOverlay;
         dom.componentVisual.style.position = 'relative';
         dom.componentVisual.appendChild(legendCanvas);
         legendCtx = legendCanvas.getContext('2d');
       }
 
       const renderLegendOverlay = (palette: ThemePalette) => {
-        if (!legendCtx || !legendCanvas) {
+        if (!showLegendOverlay || !legendCtx || !legendCanvas) {
           return;
         }
         legendCtx.clearRect(0, 0, legendCanvas.width, legendCanvas.height);
@@ -380,7 +454,6 @@ export function createExplorerGraphRuntimeService({
       }
 
       let spatialIndex = buildSpatialIndex(renderList);
-      let graphHandle: LocalGraphHandle | null = null;
 
       const interactions = bindD3Interactions({
         canvas,
@@ -407,6 +480,8 @@ export function createExplorerGraphRuntimeService({
         spatialIndex,
         renderList,
         renderLegendOverlay,
+        containerCssWidth: cssWidth,
+        containerCssHeight: cssHeight,
         destroy() {
           renderer.destroy();
           interactions.destroy();
@@ -506,11 +581,6 @@ export function createExplorerGraphRuntimeService({
       + `${schematicKey}:${focusNode.id}:${showChildren ? 1 : 0}:`
       + `${focusNode.children.length}:${focusNode.signals.length}:${elkAvailable ? 1 : 0}`;
 
-    if (!elkAvailable) {
-      state.components.graphLayoutEngine = 'missing';
-      return null;
-    }
-
     if (hasRenderableGraph(state.components.graph) && state.components.graphKey === graphKey) {
       return state.components.graph;
     }
@@ -579,13 +649,12 @@ export function createExplorerGraphRuntimeService({
 
     const renderList = renderListRef || graph.renderList;
 
-    const traceEnabled = typeof isTraceEnabled === 'function' ? isTraceEnabled() === true : true;
     const nextValues = updateRenderActivity({
       renderList,
-      signalLiveValueByName: traceEnabled ? signalLiveValueByName : (() => null),
+      signalLiveValueByName,
       toBigInt,
       highlightedSignal: state.components.graphHighlightedSignal,
-      previousValues: traceEnabled ? (state.components.graphLiveValues || new Map<string, string>()) : new Map<string, string>()
+      previousValues: state.components.graphLiveValues || new Map<string, string>()
     });
     state.components.graphLiveValues = nextValues;
 

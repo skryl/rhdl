@@ -8,13 +8,13 @@ const browser = await chromium.launch({ headless: true });
 const page = await browser.newPage();
 
 page.on('request', (req) => {
-  if (req.url().includes('kernel.bin')) {
+  if (req.url().includes('xv6_kernel.bin')) {
     console.log('request', req.method(), req.url());
   }
 });
 
 page.on('requestfinished', (req) => {
-  if (req.url().includes('kernel.bin')) {
+  if (req.url().includes('xv6_kernel.bin')) {
     const response = req.response();
     console.log('responseType', typeof response, response == null ? null : Object.getPrototypeOf(response).constructor.name);
     console.log('respKeys', response == null ? [] : Object.keys(response));
@@ -24,7 +24,7 @@ page.on('requestfinished', (req) => {
 
 page.on('console', (msg) => {
   const txt = msg.text();
-  if (txt.includes('kernel.bin') || txt.includes('Default bin') || txt.includes('Loaded default')) {
+  if (txt.includes('xv6_kernel.bin') || txt.includes('Default bin') || txt.includes('Loaded default')) {
     console.log('console:', txt);
   }
 });

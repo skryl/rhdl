@@ -75,11 +75,11 @@ module RHDL
               options[:linux] = true
             end
 
-            opts.on("--kernel FILE", "Kernel binary path (xv6 default: software/bin/kernel.bin, linux default: software/bin/linux_kernel.bin)") do |v|
+            opts.on("--kernel FILE", "Kernel binary path (xv6 default: software/bin/xv6_kernel.bin, linux default: software/bin/linux_kernel.bin)") do |v|
               options[:kernel] = v
             end
 
-            opts.on("--fs FILE", "xv6 filesystem image path (default: software/bin/fs.img)") do |v|
+            opts.on("--fs FILE", "xv6 filesystem image path (default: software/bin/xv6_fs.img)") do |v|
               options[:fs] = v
             end
 
@@ -87,7 +87,7 @@ module RHDL
               options[:initramfs] = v
             end
 
-            opts.on("--dtb FILE", "Linux device tree blob path (default: software/bin/rhdl_riscv_virt.dtb)") do |v|
+            opts.on("--dtb FILE", "Linux device tree blob path (default: software/bin/linux_virt.dtb)") do |v|
               options[:dtb] = v
             end
 
@@ -235,8 +235,8 @@ module RHDL
             runner = task_class.new(options)
 
             if options[:xv6]
-              kernel = options[:kernel] || runner.software_path('bin/kernel.bin')
-              fs = options[:fs] || runner.software_path('bin/fs.img')
+              kernel = options[:kernel] || runner.software_path('bin/xv6_kernel.bin')
+              fs = options[:fs] || runner.software_path('bin/xv6_fs.img')
 
               return 1 unless ensure_file(kernel, 'xv6 kernel', out: out, hint: 'run ./examples/riscv/software/build_xv6.sh')
               return 1 unless ensure_file(fs, 'xv6 fs image', out: out, hint: 'run ./examples/riscv/software/build_xv6.sh')
@@ -245,7 +245,7 @@ module RHDL
             elsif options[:linux]
               options[:kernel] ||= runner.software_path('bin/linux_kernel.bin')
               options[:initramfs] ||= runner.software_path('bin/linux_initramfs.cpio')
-              options[:dtb] ||= runner.software_path('bin/rhdl_riscv_virt.dtb')
+              options[:dtb] ||= runner.software_path('bin/linux_virt.dtb')
 
               kernel = options[:kernel]
               initramfs = options[:initramfs]

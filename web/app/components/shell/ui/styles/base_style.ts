@@ -150,24 +150,39 @@ export const SHELL_BASE_STYLE = String.raw`
 
   .dashboard-row-resize-handle {
     position: absolute;
-    height: 8px;
+    height: 14px;
     cursor: ns-resize;
-    z-index: 35;
-    border-radius: 999px;
+    touch-action: none;
+    z-index: 60;
+    border: 0;
     background: transparent;
+    box-shadow: none;
   }
 
   .dashboard-row-resize-handle::before {
     content: '';
     position: absolute;
-    left: 0;
-    right: 0;
-    top: 3px;
-    border-top: 1px solid rgba(191, 212, 235, 0.24);
+    left: 50%;
+    top: 50%;
+    width: 18px;
+    height: 6px;
+    transform: translate(-50%, -50%);
+    border-radius: 0;
+    background:
+      radial-gradient(circle, rgba(176, 197, 220, 0.62) 0 1.4px, transparent 1.5px)
+      center / 6px 6px repeat-x;
   }
 
-  .dashboard-row-resize-handle:hover {
-    background: transparent;
+  .dashboard-row-resize-handle:hover::before {
+    background:
+      radial-gradient(circle, rgba(193, 214, 236, 0.76) 0 1.5px, transparent 1.6px)
+      center / 6px 6px repeat-x;
+  }
+
+  .dashboard-row-resize-handle:active::before {
+    background:
+      radial-gradient(circle, rgba(61, 215, 194, 0.78) 0 1.5px, transparent 1.6px)
+      center / 6px 6px repeat-x;
   }
 
   .dashboard-panel.dashboard-drop-target.drop-left {
@@ -529,6 +544,9 @@ export const SHELL_BASE_STYLE = String.raw`
   .ghostty-terminal-host {
     padding: 0;
     overflow: hidden;
+    width: 100%;
+    height: 100%;
+    min-height: 0;
   }
 
   .ghostty-terminal-host canvas {
@@ -592,7 +610,34 @@ export const SHELL_BASE_STYLE = String.raw`
     display: grid;
     grid-template-columns: 1.2fr 0.9fr;
     gap: 10px;
-    align-items: start;
+    align-items: stretch;
+    min-height: 0;
+  }
+
+  .io-display-panel,
+  .io-event-log {
+    min-width: 0;
+    min-height: 470px;
+    height: 100%;
+  }
+
+  .io-display-panel {
+    display: grid;
+    grid-template-rows: auto auto minmax(0, 1fr) auto;
+  }
+
+  .io-event-log {
+    display: grid;
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+
+  #ioTab {
+    min-height: 0;
+  }
+
+  #ioTab.active {
+    min-height: 0;
+    height: 100%;
   }
 
   .subpanel {
@@ -600,12 +645,14 @@ export const SHELL_BASE_STYLE = String.raw`
     border-radius: 10px;
     padding: 10px;
     background: rgba(10, 20, 33, 0.75);
+    min-height: 0;
   }
 
   .screen-output {
     margin: 0;
-    min-height: 470px;
-    max-height: 64vh;
+    min-height: 0;
+    height: 100%;
+    max-height: none;
     overflow: auto;
     border: 1px solid #2a4a67;
     border-radius: 8px;
@@ -827,6 +874,12 @@ export const SHELL_BASE_STYLE = String.raw`
     height: 100%;
     overflow: hidden;
     padding: 0;
+    line-height: 0;
+  }
+
+  .component-graph-layout .component-visual > canvas {
+    display: block;
+    vertical-align: top;
   }
 
   .component-graph-layout .component-live-signals {
@@ -854,6 +907,12 @@ export const SHELL_BASE_STYLE = String.raw`
     height: 100%;
     overflow: hidden;
     padding: 0;
+    line-height: 0;
+  }
+
+  .component-visual-panel .component-visual > canvas {
+    display: block;
+    vertical-align: top;
   }
 
   .component-live-panel .component-live-signals {
@@ -970,12 +1029,15 @@ export const SHELL_BASE_STYLE = String.raw`
     font-family: 'IBM Plex Mono', monospace;
     font-size: 0.75rem;
     padding: 0.6rem;
-    max-height: 200px;
+    min-height: 0;
+    height: 100%;
+    max-height: none;
     overflow: auto;
     color: #bfcbda;
   }
 
   .io-event-log #eventLog {
-    min-height: 470px;
-    max-height: 64vh;
+    min-height: 0;
+    height: 100%;
+    max-height: none;
   }`;

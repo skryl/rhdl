@@ -10,7 +10,7 @@ import type {
   UnknownFn
 } from '../../types/services';
 
-const BACKEND_IDS = Object.freeze(['interpreter', 'compiler', 'arcilator']);
+const BACKEND_IDS = Object.freeze(['interpreter', 'compiler', 'arcilator', 'verilator']);
 
 function requireFn(name: string, fn: unknown): asserts fn is UnknownFn {
   if (typeof fn !== 'function') {

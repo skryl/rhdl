@@ -15,7 +15,7 @@ end
 LINUX_KERNEL_PATH = File.expand_path('../../../examples/riscv/software/bin/linux_kernel.bin', __dir__)
 LINUX_DTB_PATH = ENV.fetch(
   'RHDL_LINUX_DTB_PATH',
-  File.expand_path('../../../examples/riscv/software/bin/rhdl_riscv_virt.dtb', __dir__)
+  File.expand_path('../../../examples/riscv/software/bin/linux_virt.dtb', __dir__)
 )
 LINUX_INITRAMFS_PATH = ENV.fetch(
   'RHDL_LINUX_INITRAMFS_PATH',

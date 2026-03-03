@@ -69,4 +69,9 @@ export const SHELL_RESPONSIVE_STYLE = String.raw`  @media (max-width: 980px) {
     .component-code-viewer {
       min-height: 300px;
     }
+
+    .io-display-panel,
+    .io-event-log {
+      min-height: 300px;
+    }
   }`;

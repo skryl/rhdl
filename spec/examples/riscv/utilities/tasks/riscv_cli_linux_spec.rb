@@ -130,7 +130,7 @@ RSpec.describe RHDL::Examples::RISCV::CLI do
       Dir.mkdir(bin_dir)
       kernel_path = File.join(bin_dir, 'linux_kernel.bin')
       initramfs_path = File.join(bin_dir, 'linux_initramfs.cpio')
-      dtb_path = File.join(bin_dir, 'rhdl_riscv_virt.dtb')
+      dtb_path = File.join(bin_dir, 'linux_virt.dtb')
       File.binwrite(kernel_path, "KERN")
       File.binwrite(initramfs_path, "INIT")
       File.binwrite(dtb_path, "DTB!")
@@ -166,7 +166,7 @@ RSpec.describe RHDL::Examples::RISCV::CLI do
       bin_dir = File.join(software_root, 'bin')
       Dir.mkdir(bin_dir)
       File.binwrite(File.join(bin_dir, 'linux_kernel.bin'), "KERN")
-      File.binwrite(File.join(bin_dir, 'rhdl_riscv_virt.dtb'), "DTB!")
+      File.binwrite(File.join(bin_dir, 'linux_virt.dtb'), "DTB!")
       default_initramfs_path = File.join(bin_dir, 'linux_initramfs.cpio')
 
       out = StringIO.new
@@ -189,7 +189,7 @@ RSpec.describe RHDL::Examples::RISCV::CLI do
       Dir.mkdir(bin_dir)
       File.binwrite(File.join(bin_dir, 'linux_kernel.bin'), "KERN")
       File.binwrite(File.join(bin_dir, 'linux_initramfs.cpio'), "INIT")
-      default_dtb_path = File.join(bin_dir, 'rhdl_riscv_virt.dtb')
+      default_dtb_path = File.join(bin_dir, 'linux_virt.dtb')
 
       out = StringIO.new
       task_class = build_fake_task_class(software_root: software_root)
@@ -232,6 +232,38 @@ RSpec.describe RHDL::Examples::RISCV::CLI do
 
       expect(exit_code).to eq(1)
       expect(out.string).to include('Error: Linux initramfs not found: /tmp/does/not/exist/initramfs.cpio')
+    end
+  end
+
+  it 'defaults xv6 kernel and fs paths when omitted' do
+    Dir.mktmpdir('riscv_cli_xv6_defaults') do |software_root|
+      bin_dir = File.join(software_root, 'bin')
+      Dir.mkdir(bin_dir)
+      kernel_path = File.join(bin_dir, 'xv6_kernel.bin')
+      fs_path = File.join(bin_dir, 'xv6_fs.img')
+      File.binwrite(kernel_path, "XV6K")
+      File.binwrite(fs_path, "XV6F")
+
+      out = StringIO.new
+      task_class = build_fake_task_class(software_root: software_root)
+
+      exit_code = described_class.run(
+        ['--xv6'],
+        out: out,
+        task_class: task_class
+      )
+
+      instance = task_class.last_instance
+      expect(exit_code).to eq(0)
+      expect(out.string).to include('Info: forcing --io uart for xv6 mode.')
+      expect(instance.options[:xv6]).to eq(true)
+      expect(instance.options[:io]).to eq(:uart)
+      expect(instance.load_xv6_args).to eq(
+        kernel: kernel_path,
+        fs: fs_path,
+        pc: 0x8000_0000
+      )
+      expect(instance.ran).to eq(true)
     end
   end
 

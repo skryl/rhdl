@@ -178,25 +178,27 @@ if [[ "${CLEAN}" -eq 1 ]]; then
   make "${MAKE_ARGS[@]}" clean
 fi
 make -j"${JOBS}" "${MAKE_ARGS[@]}" kernel/kernel fs.img
-"${TOOLPREFIX}objcopy" -S -O binary kernel/kernel "${BIN_DIR}/kernel.bin"
-cp -f kernel/kernel "${BIN_DIR}/kernel.elf"
-cp -f kernel/kernel.sym "${BIN_DIR}/kernel.sym"
-cp -f kernel/kernel.asm "${BIN_DIR}/kernel.asm"
-"${TOOLPREFIX}nm" -n kernel/kernel > "${BIN_DIR}/kernel.nm"
-cp -f fs.img "${BIN_DIR}/fs.img"
+rm -f "${BIN_DIR}/kernel.bin" "${BIN_DIR}/kernel.elf" "${BIN_DIR}/kernel.sym" "${BIN_DIR}/kernel.asm" "${BIN_DIR}/kernel.nm" "${BIN_DIR}/kernel_srcmap.json" "${BIN_DIR}/fs.img"
+rm -f "${BIN_DIR}/xv6_kernel.bin" "${BIN_DIR}/xv6_kernel.elf" "${BIN_DIR}/xv6_kernel.sym" "${BIN_DIR}/xv6_kernel.asm" "${BIN_DIR}/xv6_kernel.nm" "${BIN_DIR}/xv6_kernel_srcmap.json" "${BIN_DIR}/xv6_fs.img"
+"${TOOLPREFIX}objcopy" -S -O binary kernel/kernel "${BIN_DIR}/xv6_kernel.bin"
+cp -f kernel/kernel "${BIN_DIR}/xv6_kernel.elf"
+cp -f kernel/kernel.sym "${BIN_DIR}/xv6_kernel.sym"
+cp -f kernel/kernel.asm "${BIN_DIR}/xv6_kernel.asm"
+"${TOOLPREFIX}nm" -n kernel/kernel > "${BIN_DIR}/xv6_kernel.nm"
+cp -f fs.img "${BIN_DIR}/xv6_fs.img"
 popd >/dev/null
 
 # Extract source map for web simulator (address → source file/line + function mapping).
 EXTRACT_SCRIPT="${SOFTWARE_DIR}/extract_srcmap.rb"
 if command -v ruby >/dev/null 2>&1 && [[ -f "${EXTRACT_SCRIPT}" ]]; then
   ruby "${EXTRACT_SCRIPT}" \
-    --asm "${BIN_DIR}/kernel.asm" \
-    --nm "${BIN_DIR}/kernel.nm" \
+    --asm "${BIN_DIR}/xv6_kernel.asm" \
+    --nm "${BIN_DIR}/xv6_kernel.nm" \
     --source-dir "${XV6_DIR}" \
-    -o "${BIN_DIR}/kernel_srcmap.json"
+    -o "${BIN_DIR}/xv6_kernel_srcmap.json"
 else
   echo "warning: ruby not found or extract_srcmap.rb missing; skipping source map generation"
 fi
 
 echo "xv6 artifacts generated in ${BIN_DIR}:"
-ls -lh "${BIN_DIR}/kernel.bin" "${BIN_DIR}/kernel.elf" "${BIN_DIR}/kernel.sym" "${BIN_DIR}/kernel.asm" "${BIN_DIR}/kernel.nm" "${BIN_DIR}/kernel_srcmap.json" "${BIN_DIR}/fs.img" 2>/dev/null || true
+ls -lh "${BIN_DIR}/xv6_kernel.bin" "${BIN_DIR}/xv6_kernel.elf" "${BIN_DIR}/xv6_kernel.sym" "${BIN_DIR}/xv6_kernel.asm" "${BIN_DIR}/xv6_kernel.nm" "${BIN_DIR}/xv6_kernel_srcmap.json" "${BIN_DIR}/xv6_fs.img" 2>/dev/null || true

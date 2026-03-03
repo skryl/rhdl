@@ -112,7 +112,10 @@ export function bindCoreBindings({
     }
     try {
       await yieldToUi();
-      await runner.loadPreset({ showLoadingUi: true });
+      await runner.loadPreset({
+        showLoadingUi: true,
+        applyPresetPreferredBackend: false
+      });
     } finally {
       runnerLoadInProgress = false;
       if (dom.loadRunnerBtn) {
@@ -275,24 +278,26 @@ export function bindCoreBindings({
     }
 
     store.setBackendState(next);
+    if (runnerLoadInProgress) {
+      sim.refreshStatus();
+      return;
+    }
+    runnerLoadInProgress = true;
+    if (dom.loadRunnerBtn) {
+      dom.loadRunnerBtn.disabled = true;
+    }
     try {
       await runner.ensureBackendInstance(state.backend);
       dom.simStatus.textContent = `WASM ready (${state.backend})`;
       if (String(dom.irJson?.value || '').trim()) {
         const preset = runner.currentPreset();
-        if (preset.usesManualIr) {
-          await sim.initializeSimulator({ preset });
-        } else {
-          const bundle = await runner.loadBundle(preset, { logLoad: false });
-          await sim.initializeSimulator({
-            preset,
-            simJson: bundle.simJson,
-            explorerSource: bundle.explorerJson,
-            explorerMeta: bundle.explorerMeta,
-            componentSourceBundle: bundle.sourceBundle || null,
-            componentSchematicBundle: bundle.schematicBundle || null
-          });
-        }
+        await runner.loadPreset({
+          presetOverride: preset,
+          logLoad: false,
+          setPreferredTab: false,
+          showLoadingUi: false,
+          applyPresetPreferredBackend: false
+        });
       } else {
         sim.refreshStatus();
       }
@@ -303,17 +308,17 @@ export function bindCoreBindings({
       if (dom.backendStatus) {
         dom.backendStatus.textContent = `Backend: ${state.backend} (unavailable)`;
       }
+    } finally {
+      runnerLoadInProgress = false;
+      if (dom.loadRunnerBtn) {
+        dom.loadRunnerBtn.disabled = false;
+      }
     }
   });
 
   listeners.on(dom.runnerSelect, 'change', () => {
     const preset = runner.getPreset(dom.runnerSelect.value);
     store.setRunnerPresetState(preset.id);
-    const preferredBackend = String(preset?.preferredBackend || '').trim();
-    if (preferredBackend && dom.backendSelect) {
-      dom.backendSelect.value = preferredBackend;
-      store.setBackendState(preferredBackend);
-    }
     runner.updateIrSourceVisibility();
     sim.refreshStatus();
   });

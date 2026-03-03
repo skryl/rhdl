@@ -20,7 +20,7 @@ await page.waitForFunction(() => (document.querySelector('#simStatus')?.textCont
 
 const res = await page.evaluate(async () => {
   const sim = window.runtime?.sim;
-  const resp = await fetch('./assets/fixtures/riscv/software/bin/kernel.bin');
+  const resp = await fetch('./assets/fixtures/riscv/software/bin/xv6_kernel.bin');
   const bytes = new Uint8Array(await resp.arrayBuffer());
   const hasRunner = typeof sim?.runner_load_memory === 'function';
   const hasRunnerMem = sim?.hasExport?.('runner_mem');

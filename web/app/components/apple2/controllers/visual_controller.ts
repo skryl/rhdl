@@ -33,6 +33,46 @@ function decodeTextChar(code: number, textConfig: Unsafe = {}) {
   return ' ';
 }
 
+function parseCssPixelValue(raw: unknown) {
+  const value = Number.parseFloat(String(raw ?? '').trim());
+  return Number.isFinite(value) ? value : NaN;
+}
+
+function resolveViewportTextRows(outputEl: unknown, fallbackRows: unknown) {
+  const fallback = Math.max(1, Number.parseInt(String(fallbackRows), 10) || 24);
+  if (!outputEl || typeof outputEl.clientHeight !== 'number') {
+    return fallback;
+  }
+  const hostHeight = Number(outputEl.clientHeight);
+  if (!Number.isFinite(hostHeight) || hostHeight <= 0) {
+    return fallback;
+  }
+
+  const view = outputEl.ownerDocument?.defaultView || globalThis;
+  const computed = typeof view?.getComputedStyle === 'function'
+    ? view.getComputedStyle(outputEl)
+    : null;
+  const padTop = parseCssPixelValue(computed?.paddingTop);
+  const padBottom = parseCssPixelValue(computed?.paddingBottom);
+  const availableHeight = Math.max(
+    0,
+    hostHeight
+      - (Number.isFinite(padTop) ? padTop : 0)
+      - (Number.isFinite(padBottom) ? padBottom : 0)
+  );
+  const lineHeightPx = parseCssPixelValue(computed?.lineHeight);
+  const fontSizePx = parseCssPixelValue(computed?.fontSize);
+  const lineHeight = Number.isFinite(lineHeightPx) && lineHeightPx > 0
+    ? lineHeightPx
+    : (Number.isFinite(fontSizePx) && fontSizePx > 0 ? fontSizePx * 1.35 : 16);
+  if (!Number.isFinite(lineHeight) || lineHeight <= 0) {
+    return fallback;
+  }
+
+  const rows = Math.floor(availableHeight / lineHeight);
+  return rows > 0 ? rows : fallback;
+}
+
 export function createApple2VisualController({
   dom,
   state,
@@ -69,16 +109,32 @@ export function createApple2VisualController({
     if (!sim) {
       return new Uint8Array(0);
     }
-    if (typeof sim.runner_riscv_uart_tx_len !== 'function'
-      || typeof sim.runner_riscv_uart_tx_bytes !== 'function') {
+    if (typeof sim.runner_riscv_uart_tx_bytes !== 'function') {
+      return new Uint8Array(0);
+    }
+    const maxBytes = Math.max(0, Number.isFinite(length) ? Math.trunc(length) : 0);
+    if (maxBytes <= 0) {
       return new Uint8Array(0);
     }
 
-    const txLen = Number(sim.runner_riscv_uart_tx_len());
-    const txLimit = Number.isFinite(txLen) ? Math.max(0, txLen) : 0;
-    const readLen = Math.max(0, Number.isFinite(length) ? Math.min(length, txLimit) : txLimit);
-    const offset = Math.max(0, txLimit - readLen);
-    return sim.runner_riscv_uart_tx_bytes(offset, readLen);
+    if (typeof sim.runner_riscv_uart_tx_len === 'function') {
+      const txLen = Number(sim.runner_riscv_uart_tx_len());
+      const txLimit = Number.isFinite(txLen) ? Math.max(0, txLen) : 0;
+      const readLen = Math.max(0, Math.min(maxBytes, txLimit));
+      if (readLen > 0) {
+        const offset = Math.max(0, txLimit - readLen);
+        const bytes = sim.runner_riscv_uart_tx_bytes(offset, readLen);
+        if (bytes && typeof bytes.length === 'number' && bytes.length > 0) {
+          return bytes;
+        }
+      }
+    }
+
+    const fallback = sim.runner_riscv_uart_tx_bytes(0, maxBytes);
+    if (fallback && typeof fallback.length === 'number' && fallback.length > 0) {
+      return fallback;
+    }
+    return new Uint8Array(0);
   }
 
   function refreshApple2Screen() {
@@ -188,7 +244,7 @@ export function createApple2VisualController({
     if (displayMode === 'uart') {
       const textConfig = ioConfig.display?.text || {};
       const width = Math.max(1, Number.parseInt(textConfig.width, 10) || 80);
-      const height = Math.max(1, Number.parseInt(textConfig.height, 10) || 24);
+      const height = resolveViewportTextRows(dom.apple2TextScreen, textConfig.height);
       const maxBytes = width * height;
       const uartBytes = readUartText(maxBytes);
       if (!uartBytes || uartBytes.length === 0) {

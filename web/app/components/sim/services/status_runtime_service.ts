@@ -34,6 +34,35 @@ function resolveTimingConfig(preset: Unsafe = {}) {
   };
 }
 
+function resolveSignalCount(runtime: Unsafe): number {
+  let reported = 0;
+  if (runtime?.sim && typeof runtime.sim.signal_count === 'function') {
+    try {
+      const value = Number(runtime.sim.signal_count());
+      if (Number.isFinite(value) && value > 0) {
+        return value;
+      }
+      if (Number.isFinite(value) && value >= 0) {
+        reported = value;
+      }
+    } catch {
+      reported = 0;
+    }
+  }
+
+  const metaNames = runtime?.irMeta?.names;
+  if (Array.isArray(metaNames) && metaNames.length > 0) {
+    return metaNames.length;
+  }
+
+  const widths = runtime?.irMeta?.widths;
+  if (widths instanceof Map && widths.size > 0) {
+    return widths.size;
+  }
+
+  return Math.max(0, reported | 0);
+}
+
 export function createSimStatusRuntimeService({
   state,
   runtime,
@@ -77,7 +106,7 @@ export function createSimStatusRuntimeService({
       };
     }
 
-    const sigs = runtime.sim.signal_count();
+    const sigs = resolveSignalCount(runtime);
     const regs = runtime.sim.reg_count();
     const clk = selectedClock(clockValue);
     const mode = clk ? runtime.sim.clock_mode(clk) : null;

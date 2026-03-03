@@ -62,6 +62,51 @@ export function createSimRuntimeController({
     return urls;
   }
 
+  function createWasmImportObject() {
+    const returnZero = () => 0;
+
+    const envBase = {
+      abort: returnZero,
+      emscripten_notify_memory_growth: returnZero
+    };
+    const wasiBase = {
+      args_get: returnZero,
+      args_sizes_get: returnZero,
+      clock_time_get: returnZero,
+      environ_get: returnZero,
+      environ_sizes_get: returnZero,
+      fd_close: returnZero,
+      fd_fdstat_get: returnZero,
+      fd_read: returnZero,
+      fd_seek: returnZero,
+      fd_write: returnZero,
+      proc_exit: returnZero,
+      random_get: returnZero
+    };
+
+    const env = new Proxy(envBase, {
+      get(target, prop: string) {
+        if (Object.prototype.hasOwnProperty.call(target, prop)) {
+          return (target as Record<string, unknown>)[prop];
+        }
+        return returnZero;
+      }
+    });
+    const wasi = new Proxy(wasiBase, {
+      get(target, prop: string) {
+        if (Object.prototype.hasOwnProperty.call(target, prop)) {
+          return (target as Record<string, unknown>)[prop];
+        }
+        return returnZero;
+      }
+    });
+
+    return {
+      env,
+      wasi_snapshot_preview1: wasi
+    };
+  }
+
   function resolveBackendDef(backend = state.backend) {
     const def = getBackendDef(backend);
     if (typeof currentRunnerPreset !== 'function') {
@@ -70,11 +115,18 @@ export function createSimRuntimeController({
 
     const preset = currentRunnerPreset();
     let overridePath = '';
+    const presetId = String(preset?.id || '').trim();
 
     if (backend === 'compiler') {
       overridePath = String(preset?.compilerWasmPath || '').trim();
-    } else if (backend === 'arcilator') {
-      overridePath = String(preset?.arcilatorWasmPath || '').trim();
+    } else if (backend === 'arcilator' || backend === 'verilator') {
+      const backendPathKey = backend === 'arcilator' ? 'arcilatorWasmPath' : 'verilatorWasmPath';
+      overridePath = String(preset?.[backendPathKey] || '').trim();
+      if (!overridePath && (presetId === 'riscv' || presetId === 'riscv_linux')) {
+        overridePath = `./assets/pkg/riscv_${backend}.wasm`;
+      } else if (!overridePath && presetId === 'apple2') {
+        overridePath = `./assets/pkg/apple2_${backend}.wasm`;
+      }
     }
 
     if (!overridePath) {
@@ -90,6 +142,7 @@ export function createSimRuntimeController({
   async function loadWasmInstance(backend = state.backend) {
     const def = resolveBackendDef(backend);
     const candidateUrls = resolveAssetCandidates(def.wasmPath);
+    const importObject = createWasmImportObject();
     let lastResponse: Response | null = null;
     const failures: string[] = [];
     const isUsableResponse = (response: Response) => response.ok || response.status === 0;
@@ -102,7 +155,7 @@ export function createSimRuntimeController({
             if (typeof webAssemblyApi.instantiateStreaming === 'function') {
               try {
                 const streamResponse = typeof response.clone === 'function' ? response.clone() : response;
-                const result = await webAssemblyApi.instantiateStreaming(streamResponse, {});
+                const result = await webAssemblyApi.instantiateStreaming(streamResponse, importObject);
                 return result.instance;
               } catch (_err) {
                 // Fall back to instantiate(bytes) for this successful fetch.
@@ -110,7 +163,7 @@ export function createSimRuntimeController({
             }
 
             const bytes = await response.arrayBuffer();
-            const result = await webAssemblyApi.instantiate(bytes, {});
+            const result = await webAssemblyApi.instantiate(bytes, importObject);
             return result.instance;
           } catch (err: unknown) {
             failures.push(`${url} -> ${err instanceof Error ? err.message : String(err)}`);

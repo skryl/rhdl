@@ -769,8 +769,8 @@ module RHDL
 
         # Benchmark RISC-V single-cycle CPU running xv6 boot across IR/Verilator/Arcilator
         def benchmark_riscv
-          kernel_path = File.expand_path('../../../../examples/riscv/software/bin/kernel.bin', __dir__)
-          fs_path = File.expand_path('../../../../examples/riscv/software/bin/fs.img', __dir__)
+          kernel_path = File.expand_path('../../../../examples/riscv/software/bin/xv6_kernel.bin', __dir__)
+          fs_path = File.expand_path('../../../../examples/riscv/software/bin/xv6_fs.img', __dir__)
 
           unless File.exist?(kernel_path)
             puts "Error: xv6 kernel not found at #{kernel_path}"
@@ -778,7 +778,7 @@ module RHDL
           end
 
           unless File.exist?(fs_path)
-            puts "Error: xv6 fs.img not found at #{fs_path}"
+            puts "Error: xv6_fs.img not found at #{fs_path}"
             return
           end
 
@@ -974,12 +974,12 @@ module RHDL
 
         # Benchmark RISC-V web WASM backends (Rust AOT compiler + Arcilator + Verilator) via Node.js
         def benchmark_web_riscv
-          kernel_path = File.expand_path('../../../../examples/riscv/software/bin/kernel.bin', __dir__)
-          fs_path = File.expand_path('../../../../examples/riscv/software/bin/fs.img', __dir__)
+          kernel_path = File.expand_path('../../../../examples/riscv/software/bin/xv6_kernel.bin', __dir__)
+          fs_path = File.expand_path('../../../../examples/riscv/software/bin/xv6_fs.img', __dir__)
           bench_script = File.expand_path('../../../../web/bench/riscv_wasm_bench.mjs', __dir__)
 
           unless File.exist?(kernel_path) && File.exist?(fs_path)
-            puts "Error: xv6 kernel or fs.img not found"
+            puts "Error: xv6 kernel or xv6_fs.img not found"
             puts "  Kernel: #{kernel_path}"
             puts "  Filesystem: #{fs_path}"
             return

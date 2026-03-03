@@ -16,18 +16,18 @@
     "enableApple2Ui": false,
     "usesManualIr": false,
     "defaultBin": {
-      "path": "./assets/fixtures/riscv/software/bin/kernel.bin",
+      "path": "./assets/fixtures/riscv/software/bin/xv6_kernel.bin",
       "offset": 2147483648,
       "space": "main",
       "startPc": "0x80000000",
-      "fastBoot": "moderate",
+      "fastBoot": "aggressive",
       "resetAfterLoad": true
     },
     "defaultSrcmap": {
-      "path": "./assets/fixtures/riscv/software/bin/kernel_srcmap.json"
+      "path": "./assets/fixtures/riscv/software/bin/xv6_kernel_srcmap.json"
     },
     "defaultDisk": {
-      "path": "./assets/fixtures/riscv/software/bin/fs.img",
+      "path": "./assets/fixtures/riscv/software/bin/xv6_fs.img",
       "offset": 0
     },
     "timing": {
@@ -39,6 +39,8 @@
     },
     "preferredBackend": "compiler",
     "compilerWasmPath": "./assets/pkg/ir_compiler_riscv.wasm",
+    "arcilatorWasmPath": "./assets/pkg/riscv_arcilator.wasm",
+    "verilatorWasmPath": "./assets/pkg/riscv_verilator.wasm",
     "io": {
       "enabled": true,
       "api": "generic",

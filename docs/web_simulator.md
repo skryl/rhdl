@@ -170,14 +170,14 @@ RISC-V web preset status:
   - `riscv` (xv6)
   - `riscv_linux` (Linux)
 - `riscv` maps to UART I/O (`mode: uart`) with:
-  - `./assets/fixtures/riscv/software/bin/kernel.bin`
-  - `./assets/fixtures/riscv/software/bin/fs.img`
+  - `./assets/fixtures/riscv/software/bin/xv6_kernel.bin`
+  - `./assets/fixtures/riscv/software/bin/xv6_fs.img`
   - `./assets/pkg/ir_compiler_riscv.wasm`
   - custom xv6 kernel/disk binaries can be swapped in through runner controls, but the defaults above are the shipped preloads
 - `riscv_linux` maps to UART I/O (`mode: uart`) and loads Linux assets when present:
   - `./assets/fixtures/riscv/software/bin/linux_kernel.bin`
   - `./assets/fixtures/riscv/software/bin/linux_initramfs.cpio`
-  - `./assets/fixtures/riscv/software/bin/rhdl_riscv_virt.dtb`
+  - `./assets/fixtures/riscv/software/bin/linux_virt.dtb`
   - `./assets/fixtures/riscv/software/bin/linux_bootstrap.bin`
 - Note: regenerate assets from `examples/riscv/config.json` / `examples/riscv/config_linux.json` whenever preset defaults change so generated presets stay aligned.
 - If RISC-V preset assets are not generated, preset selection still appears but default boot will skip/fail the required loads.

@@ -261,7 +261,7 @@ test('riscv disassembly and source map integration', { timeout: 300000, concurre
   await withScenarioPage(async (page, pageErrors) => {
     await routeCdnToLocal(page);
 
-    await page.route('**/kernel_srcmap.json', async (route: Route) => {
+    await page.route('**/xv6_kernel_srcmap.json', async (route: Route) => {
       await route.fulfill({
         body: JSON.stringify(MOCK_SRCMAP),
         contentType: 'application/json; charset=utf-8'
@@ -323,7 +323,7 @@ test('riscv disassembly and source map integration', { timeout: 300000, concurre
   await withScenarioPage(async (page, pageErrors) => {
     await routeCdnToLocal(page);
 
-    await page.route('**/kernel_srcmap.json', async (route: Route) => {
+    await page.route('**/xv6_kernel_srcmap.json', async (route: Route) => {
       await route.fulfill({
         status: 404,
         body: 'Not found',

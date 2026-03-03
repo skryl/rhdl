@@ -37,7 +37,7 @@ bundle exec rake native:build
 ### 2. Build software artifacts
 
 ```bash
-# xv6 artifacts (kernel.bin + fs.img)
+# xv6 artifacts (xv6_kernel.bin + xv6_fs.img)
 ./examples/riscv/software/build_xv6.sh
 
 # Linux kernel + DTB + BusyBox rootfs artifacts
@@ -93,8 +93,8 @@ rhdl examples riscv --mode circt --linux
 - Enable with `--xv6`
 - Forces `--io uart`
 - Default artifacts:
-  - `examples/riscv/software/bin/kernel.bin`
-  - `examples/riscv/software/bin/fs.img`
+  - `examples/riscv/software/bin/xv6_kernel.bin`
+  - `examples/riscv/software/bin/xv6_fs.img`
 - Optional overrides:
   - `--kernel <path>`
   - `--fs <path>`
@@ -106,7 +106,7 @@ rhdl examples riscv --mode circt --linux
 - Default artifacts (auto-filled if omitted):
   - `--kernel examples/riscv/software/bin/linux_kernel.bin`
   - `--initramfs examples/riscv/software/bin/linux_initramfs.cpio`
-  - `--dtb examples/riscv/software/bin/rhdl_riscv_virt.dtb`
+  - `--dtb examples/riscv/software/bin/linux_virt.dtb`
 - Optional address overrides:
   - `--kernel-addr` (default `0x80400000`)
   - `--initramfs-addr` (default `0x84000000`)
@@ -167,7 +167,7 @@ Default behavior:
 - configures kernel from `rv32_defconfig`
 - applies the RV32 minimum-size profile (unless `--no-min-profile`)
 - builds BusyBox initramfs via Buildroot (unless `--no-rootfs`)
-  - default Buildroot profile now uses a prebuilt external rv32g/ilp32d/uClibc toolchain
+  - default Buildroot profile now uses a prebuilt external rv32g/ilp32d/uClibc-ng toolchain
 - auto-detects kernel/Buildroot parallel jobs from available CPU count
 - emits kernel, DTB, and initramfs artifacts into `software/bin`
 
@@ -189,7 +189,7 @@ Notable outputs:
 - `linux_kernel.elf`
 - `linux_kernel.map`
 - `linux_kernel.config`
-- `rhdl_riscv_virt.dtb`
+- `linux_virt.dtb`
 - `linux_initramfs.cpio`
 - `linux_fs.img` (only when enabled by a custom Buildroot defconfig)
 - `linux_busybox`
@@ -213,12 +213,12 @@ Build xv6 artifacts:
 
 Outputs:
 
-- `examples/riscv/software/bin/kernel.bin`
-- `examples/riscv/software/bin/kernel.elf`
-- `examples/riscv/software/bin/kernel.sym`
-- `examples/riscv/software/bin/kernel.asm`
-- `examples/riscv/software/bin/kernel.nm`
-- `examples/riscv/software/bin/fs.img`
+- `examples/riscv/software/bin/xv6_kernel.bin`
+- `examples/riscv/software/bin/xv6_kernel.elf`
+- `examples/riscv/software/bin/xv6_kernel.sym`
+- `examples/riscv/software/bin/xv6_kernel.asm`
+- `examples/riscv/software/bin/xv6_kernel.nm`
+- `examples/riscv/software/bin/xv6_fs.img`
 
 Run:
 

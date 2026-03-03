@@ -199,7 +199,7 @@ export function createSimInitializerController({
         await waitForUiPaint();
       }
 
-      initializeTrace({ enabled: resolveTraceEnabledOnLoad(preset) });
+    initializeTrace({ enabled: true });
       populateClockSelect();
       seedDefaultWatchSignals({ runtime, simMeta, addWatchSignal, selectedClock });
       await initializeApple2Mode({

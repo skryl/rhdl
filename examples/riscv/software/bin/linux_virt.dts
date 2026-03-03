@@ -1,0 +1,80 @@
+/dts-v1/;
+
+/ {
+  #address-cells = <2>;
+  #size-cells = <2>;
+  compatible = "rhdl,riscv-virt", "riscv-virtio";
+  model = "rhdl-riscv-virt";
+
+  chosen {
+    stdout-path = "/soc/serial@10000000:115200n8";
+    bootargs = "console=ttyS0 earlycon=uart8250,mmio,0x10000000 rdinit=/sbin/init";
+    linux,initrd-start = <0x00000000 0x84000000>;
+    linux,initrd-end = <0x00000000 0x8405f400>;
+  };
+
+  memory@80000000 {
+    device_type = "memory";
+    reg = <0x0 0x80000000 0x0 0x08000000>;
+  };
+
+  cpus {
+    #address-cells = <1>;
+    #size-cells = <0>;
+    timebase-frequency = <10000000>;
+
+    cpu0: cpu@0 {
+      device_type = "cpu";
+      reg = <0>;
+      status = "okay";
+      compatible = "riscv";
+      riscv,isa = "rv32imafsu_zicsr_zifencei";
+
+      cpu0_intc: interrupt-controller {
+        #interrupt-cells = <1>;
+        interrupt-controller;
+        compatible = "riscv,cpu-intc";
+      };
+    };
+  };
+
+  soc {
+    #address-cells = <2>;
+    #size-cells = <2>;
+    compatible = "simple-bus";
+    ranges;
+
+    clint@2000000 {
+      compatible = "sifive,clint0";
+      reg = <0x0 0x02000000 0x0 0x00010000>;
+      interrupts-extended = <&cpu0_intc 3 &cpu0_intc 7>;
+    };
+
+    plic: interrupt-controller@c000000 {
+      compatible = "sifive,plic-1.0.0";
+      reg = <0x0 0x0c000000 0x0 0x04000000>;
+      #address-cells = <0>;
+      #interrupt-cells = <1>;
+      interrupt-controller;
+      interrupts-extended = <&cpu0_intc 11 &cpu0_intc 9>;
+      riscv,ndev = <31>;
+    };
+
+    serial@10000000 {
+      compatible = "ns16550a";
+      reg = <0x0 0x10000000 0x0 0x100>;
+      clock-frequency = <1843200>;
+      reg-shift = <0>;
+      reg-io-width = <1>;
+      interrupt-parent = <&plic>;
+      interrupts = <10>;
+    };
+
+    virtio_block@10001000 {
+      compatible = "virtio,mmio";
+      reg = <0x0 0x10001000 0x0 0x1000>;
+      interrupt-parent = <&plic>;
+      interrupts = <1>;
+    };
+  };
+};

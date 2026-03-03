@@ -193,7 +193,7 @@ export class WasmIrSimulator {
 
     out.sim_create = must(backendDef.createFn, 'sim_create');
     out.sim_destroy = must(backendDef.destroyFn, 'sim_destroy');
-    out.sim_free_error = must(backendDef.freeErrorFn, 'sim_free_error');
+    out.sim_free_error = pick(backendDef.freeErrorFn, 'sim_free_error') || (() => {});
     out.sim_wasm_alloc = must(`${alloc}_wasm_alloc`, 'sim_wasm_alloc');
     out.sim_wasm_dealloc = must(`${alloc}_wasm_dealloc`, 'sim_wasm_dealloc');
 
@@ -518,7 +518,8 @@ export class WasmIrSimulator {
     } else {
       clockIdx = this.get_signal_idx(clockSignal);
       if (clockIdx < 0) {
-        throw new Error(`Unknown clock signal: ${clockSignal}`);
+        this.run_ticks(cycles);
+        return;
       }
       clockListIdx = this.get_clock_list_idx(clockIdx);
       mode = clockListIdx >= 0 ? 'forced' : 'driven';
