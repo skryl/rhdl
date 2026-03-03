@@ -6,6 +6,14 @@ require_relative '../../../../lib/rhdl/cli/tasks/utilities/web_apple2_verilator_
 RSpec.describe RHDL::CLI::Tasks::WebApple2VerilatorBuild do
   let(:mod) { described_class }
 
+  around do |example|
+    original_root = ENV['VERILATOR_ROOT']
+    mod.instance_variable_set(:@resolved_verilator_root, nil)
+    example.run
+    ENV['VERILATOR_ROOT'] = original_root
+    mod.instance_variable_set(:@resolved_verilator_root, nil)
+  end
+
   describe '.missing_tools' do
     it 'returns an array of tool names' do
       result = mod.missing_tools
@@ -21,6 +29,25 @@ RSpec.describe RHDL::CLI::Tasks::WebApple2VerilatorBuild do
   describe '.tools_available?' do
     it 'matches missing_tools emptiness' do
       expect(mod.tools_available?).to eq(mod.missing_tools.empty?)
+    end
+  end
+
+  describe '.resolved_verilator_root' do
+    it 'prefers VERILATOR_ROOT from environment' do
+      ENV['VERILATOR_ROOT'] = '/tmp/verilator-root'
+      expect(mod.resolved_verilator_root).to eq('/tmp/verilator-root')
+    end
+  end
+
+  describe '.verilated_runtime_sources' do
+    it 'returns runtime source paths under resolved VERILATOR_ROOT' do
+      ENV['VERILATOR_ROOT'] = '/tmp/verilator-root'
+      expect(mod.verilated_runtime_sources).to eq(
+        [
+          '/tmp/verilator-root/include/verilated.cpp',
+          '/tmp/verilator-root/include/verilated_threads.cpp'
+        ]
+      )
     end
   end
 

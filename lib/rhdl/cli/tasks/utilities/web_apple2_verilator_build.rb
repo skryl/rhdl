@@ -23,9 +23,7 @@ module RHDL
         WASM_OUTPUT = File.join(BUILD_DIR, 'apple2_verilator.wasm')
         PKG_DIR = File.join(PROJECT_ROOT, 'web', 'assets', 'pkg')
         PKG_OUTPUT = File.join(PKG_DIR, 'apple2_verilator.wasm')
-        VERILATOR_ROOT = ENV['VERILATOR_ROOT'] || '/opt/homebrew/Cellar/verilator/5.044/share/verilator'
-        VERILATED_CPP = File.join(VERILATOR_ROOT, 'include', 'verilated.cpp')
-        VERILATED_THREADS_CPP = File.join(VERILATOR_ROOT, 'include', 'verilated_threads.cpp')
+        DEFAULT_VERILATOR_ROOT = '/opt/homebrew/Cellar/verilator/5.044/share/verilator'
 
         TOP_MODULE = 'apple2_apple2'
         VERILATOR_PREFIX = 'Vapple2'
@@ -79,8 +77,9 @@ module RHDL
             return false
           end
 
-          unless File.file?(VERILATED_CPP) && File.file?(VERILATED_THREADS_CPP)
-            warn "WARNING: verilator runtime sources not found under #{VERILATOR_ROOT}"
+          verilated_cpp, verilated_threads_cpp = verilated_runtime_sources
+          unless File.file?(verilated_cpp) && File.file?(verilated_threads_cpp)
+            warn "WARNING: verilator runtime sources not found under #{resolved_verilator_root}"
             return false
           end
 
@@ -735,7 +734,8 @@ module RHDL
           generated_sources = Dir.glob(File.join(OBJ_DIR, "#{VERILATOR_PREFIX}*.cpp")).sort
           raise "No generated Verilator C++ files found in #{OBJ_DIR}" if generated_sources.empty?
 
-          sources = [WRAPPER_SOURCE, COMPAT_SOURCE, VERILATED_CPP, VERILATED_THREADS_CPP] + generated_sources
+          verilated_cpp, verilated_threads_cpp = verilated_runtime_sources
+          sources = [WRAPPER_SOURCE, COMPAT_SOURCE, verilated_cpp, verilated_threads_cpp] + generated_sources
           sources.map do |source|
             object = source.sub(/\.cpp\z/, '.o')
             compile_cpp_to_obj(source, object)
@@ -746,8 +746,8 @@ module RHDL
         def compile_cpp_to_obj(source, object)
           include_flags = [
             "-I#{OBJ_DIR}",
-            "-I#{File.join(VERILATOR_ROOT, 'include')}",
-            "-I#{File.join(VERILATOR_ROOT, 'include', 'vltstd')}"
+            "-I#{File.join(resolved_verilator_root, 'include')}",
+            "-I#{File.join(resolved_verilator_root, 'include', 'vltstd')}"
           ]
           run_tool!(
             'em++',
@@ -788,6 +788,25 @@ module RHDL
           return if ok
 
           raise "Command failed: #{args.join(' ')}"
+        end
+
+        def resolved_verilator_root
+          @resolved_verilator_root ||= begin
+            env_root = ENV.fetch('VERILATOR_ROOT', '').strip
+            if env_root.empty?
+              output = `verilator -V 2>&1`
+              line = output.lines.find { |entry| entry.include?('VERILATOR_ROOT') && entry.include?('=') }
+              parsed = line&.split('=', 2)&.last&.strip
+              parsed.nil? || parsed.empty? ? DEFAULT_VERILATOR_ROOT : parsed
+            else
+              env_root
+            end
+          end
+        end
+
+        def verilated_runtime_sources
+          root = resolved_verilator_root
+          [File.join(root, 'include', 'verilated.cpp'), File.join(root, 'include', 'verilated_threads.cpp')]
         end
 
         def signal_enum_name(name)
