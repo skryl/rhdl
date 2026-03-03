@@ -834,7 +834,7 @@ module RHDL
           verilated_cpp, verilated_threads_cpp = verilated_runtime_sources
           sources = [WRAPPER_SOURCE, COMPAT_SOURCE, verilated_cpp, verilated_threads_cpp] + generated_sources
           sources.map do |source|
-            object = source.sub(/\.cpp\z/, '.o')
+            object = File.join(OBJ_DIR, "#{File.basename(source, '.cpp')}.o")
             compile_cpp_to_obj(source, object)
             object
           end
