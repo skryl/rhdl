@@ -203,7 +203,7 @@ RSpec.describe 'Rakefile interface' do
       expect(WEBrick::HTTPServer).to receive(:new) do |opts|
         expect(opts[:BindAddress]).to eq('127.0.0.1')
         expect(opts[:Port]).to eq(8080)
-        expect(opts[:DocumentRoot]).to end_with('/web')
+        expect(opts[:DocumentRoot]).to end_with('/web/dist')
         expect(opts[:RequestCallback]).to be_a(Proc)
 
         response = {}
@@ -216,7 +216,7 @@ RSpec.describe 'Rakefile interface' do
       expect(server).to receive(:mount).with(
         '/',
         WEBrick::HTTPServlet::FileHandler,
-        a_string_ending_with('/web')
+        a_string_ending_with('/web/dist')
       )
       expect(Kernel).to receive(:trap).with('INT')
       expect(Kernel).to receive(:trap).with('TERM')
