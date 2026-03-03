@@ -218,6 +218,7 @@ RSpec.describe 'Rakefile interface' do
         WEBrick::HTTPServlet::FileHandler,
         a_string_ending_with('/web/dist')
       )
+      expect(server).to receive(:mount_proc).with('/__rhdl_live_reload_version')
       expect(Kernel).to receive(:trap).with('INT')
       expect(Kernel).to receive(:trap).with('TERM')
       expect(server).to receive(:start)
