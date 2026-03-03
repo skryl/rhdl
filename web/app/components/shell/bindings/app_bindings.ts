@@ -272,11 +272,10 @@ export function bindCoreBindings({
 
   listeners.on(dom.backendSelect, 'change', async () => {
     const next = util.getBackendDef(dom.backendSelect.value).id;
-    if (state.backend === next) {
+    if (state.backend === next && runtime.instance) {
       sim.refreshStatus();
       return;
     }
-
     store.setBackendState(next);
     if (runnerLoadInProgress) {
       sim.refreshStatus();
@@ -287,8 +286,8 @@ export function bindCoreBindings({
       dom.loadRunnerBtn.disabled = true;
     }
     try {
-      await runner.ensureBackendInstance(state.backend);
-      dom.simStatus.textContent = `WASM ready (${state.backend})`;
+      await runner.ensureBackendInstance(next);
+      dom.simStatus.textContent = `WASM ready (${next})`;
       if (String(dom.irJson?.value || '').trim()) {
         const preset = runner.currentPreset();
         await runner.loadPreset({
@@ -301,12 +300,12 @@ export function bindCoreBindings({
       } else {
         sim.refreshStatus();
       }
-      log(`Switched backend to ${state.backend}`);
+      log(`Switched backend to ${next}`);
     } catch (err: unknown) {
-      dom.simStatus.textContent = `Backend ${state.backend} unavailable: ${err.message || err}`;
-      log(`Backend load failed (${state.backend}): ${err.message || err}`);
+      dom.simStatus.textContent = `Backend ${next} unavailable: ${err.message || err}`;
+      log(`Backend load failed (${next}): ${err.message || err}`);
       if (dom.backendStatus) {
-        dom.backendStatus.textContent = `Backend: ${state.backend} (unavailable)`;
+        dom.backendStatus.textContent = `Backend: ${next} (unavailable)`;
       }
     } finally {
       runnerLoadInProgress = false;

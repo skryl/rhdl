@@ -80,13 +80,16 @@ async function loadBytesIntoRom({
   yieldControl = null
 }: Unsafe = {}) {
   if (supportsRunnerApi && typeof runtime?.sim?.runner_load_rom === 'function') {
-    return transferBytesChunked({
+    const loadedViaRunnerRom = await transferBytesChunked({
       bytes,
       offset,
       chunkBytes: transferChunkBytes,
       yieldControl,
       writeChunk: (chunk: Unsafe, chunkOffset: Unsafe) => runtime.sim.runner_load_rom(chunk, chunkOffset)
     });
+    if (loadedViaRunnerRom) {
+      return true;
+    }
   }
   return loadBytesIntoMainMemory({
     runtime,
@@ -148,6 +151,31 @@ function parseOptionalPc(value: Unsafe) {
     return null;
   }
   return parsed >>> 0;
+}
+
+function supportsRunnerApiForRuntime(runtime: Unsafe = {}) {
+  const sim = runtime?.sim;
+  if (!sim) {
+    return false;
+  }
+  if (sim?.features?.hasRunnerApi === true) {
+    return true;
+  }
+  if (typeof sim.runnerCaps === 'function') {
+    try {
+      return !!sim.runnerCaps();
+    } catch {
+      // fall through
+    }
+  }
+  if (typeof sim.runner_mode === 'function') {
+    try {
+      return sim.runner_mode() === true;
+    } catch {
+      return false;
+    }
+  }
+  return false;
 }
 
 function normalizeDefaultBinSpace(value: Unsafe) {
@@ -445,11 +473,6 @@ async function loadDefaultBinAsset({
       return false;
     }
 
-    if (defaultBin.resetAfterLoad && typeof runtime.sim.reset === 'function') {
-      runtime.sim.reset();
-      await bootstrapMos6502Runner(runtime, log);
-    }
-
     if (startPc != null) {
       if (typeof runtime.sim.runner_set_reset_vector === 'function') {
         const pcApplied = didCallSucceed(runtime.sim.runner_set_reset_vector(startPc));
@@ -461,6 +484,11 @@ async function loadDefaultBinAsset({
         const width = startPc > 0xFFFF ? 8 : 4;
         log(`Default bin reset vector unsupported (PC=$${startPc.toString(16).padStart(width, '0')})`);
       }
+    }
+
+    if (defaultBin.resetAfterLoad && typeof runtime.sim.reset === 'function') {
+      runtime.sim.reset();
+      await bootstrapMos6502Runner(runtime, log);
     }
 
     log(`Loaded default bin (${defaultBin.space}) @ 0x${loadOffset.toString(16)}: ${defaultBin.path}`);
@@ -585,11 +613,6 @@ async function loadDefaultAssets({
         continue;
       }
 
-      if (asset.resetAfterLoad && typeof runtime.sim.reset === 'function') {
-        runtime.sim.reset();
-        await bootstrapMos6502Runner(runtime, log);
-      }
-
       if (asset.startPc != null) {
         if (typeof runtime.sim.runner_set_reset_vector === 'function') {
           const pcApplied = didCallSucceed(runtime.sim.runner_set_reset_vector(asset.startPc));
@@ -601,6 +624,11 @@ async function loadDefaultAssets({
           const width = asset.startPc > 0xFFFF ? 8 : 4;
           log(`Default asset reset vector unsupported (PC=$${asset.startPc.toString(16).padStart(width, '0')})`);
         }
+      }
+
+      if (asset.resetAfterLoad && typeof runtime.sim.reset === 'function') {
+        runtime.sim.reset();
+        await bootstrapMos6502Runner(runtime, log);
       }
 
       log(`Loaded default asset (${asset.kind}) @ 0x${asset.offset.toString(16)}: ${asset.path}`);
@@ -875,9 +903,7 @@ export async function initializeApple2Mode({
   const defaultBin = resolveDefaultBinConfig(preset);
   state.apple2.ioConfig = ioConfig;
 
-  const supportsRunnerApi = runtime.sim.runner_mode?.() === true
-    || (typeof runtime.sim?.runner_read_memory === 'function'
-      && typeof runtime.sim?.runner_write_memory === 'function');
+  const supportsRunnerApi = supportsRunnerApiForRuntime(runtime);
   const supportsGenericMemoryApi = typeof runtime.sim?.memory_mode === 'function'
     && runtime.sim.memory_mode() != null;
   const wantsMemoryApi = ioConfig.enabled || !!ioConfig.rom?.path || defaultAssets.length > 0 || !!defaultDisk || !!defaultBin;
