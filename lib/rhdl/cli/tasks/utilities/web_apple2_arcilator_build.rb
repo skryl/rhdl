@@ -175,6 +175,7 @@ module RHDL
             '--no-entry',
             '--export-dynamic',
             '--allow-undefined',
+            '--export=memory',
             '--initial-memory=16777216',   # 16 MB initial WASM memory
             '--max-memory=67108864',       # 64 MB max
             '-o', WASM_OUTPUT,

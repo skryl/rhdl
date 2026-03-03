@@ -161,7 +161,7 @@ module RHDL
             'wasm-ld',
             '--no-entry',
             '--export-dynamic',
-            '--export-memory',
+            '--export=memory',
             "--initial-memory=#{INITIAL_MEMORY}",
             "--max-memory=#{MAX_MEMORY}",
             '-o', WASM_OUTPUT,
