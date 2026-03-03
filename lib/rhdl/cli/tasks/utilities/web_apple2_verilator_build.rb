@@ -768,7 +768,7 @@ module RHDL
             'em++',
             '-O2',
             '-Wl,--no-entry',
-            '-Wl,--export=memory',
+            '-Wl,--export-memory',
             '-Wl,--initial-memory=67108864',
             '-sALLOW_MEMORY_GROWTH=1',
             '-sASSERTIONS=0',

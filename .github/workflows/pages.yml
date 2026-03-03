@@ -33,117 +33,14 @@ jobs:
           ruby-version: '3.3'
           bundler-cache: true
 
-      - name: Set up Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: wasm32-unknown-unknown
-
       - name: Set up Bun
         uses: oven-sh/setup-bun@v2
         with:
           bun-version: latest
 
-      - name: Install Verilator + Emscripten + LLVM Linker
-        run: |
-          set -euo pipefail
-          sudo apt-get update
-          sudo apt-get install -y verilator emscripten llvm lld clang
-
-          # Some Ubuntu images ship a verilator wrapper that expects
-          # /usr/share/verilator/verilator_bin, but only install verilator_bin in PATH.
-          if [ ! -x /usr/share/verilator/verilator_bin ] && command -v verilator_bin >/dev/null 2>&1; then
-            sudo mkdir -p /usr/share/verilator
-            sudo ln -sf "$(command -v verilator_bin)" /usr/share/verilator/verilator_bin
-          fi
-
-          # Ensure unversioned wasm-ld is available for arcilator wasm link step.
-          if ! command -v wasm-ld >/dev/null 2>&1; then
-            wasm_ld_candidate="$(ls /usr/bin/wasm-ld-* 2>/dev/null | head -n 1 || true)"
-            if [ -n "$wasm_ld_candidate" ]; then
-              sudo ln -sf "$wasm_ld_candidate" /usr/local/bin/wasm-ld
-            fi
-          fi
-
-          verilator --version
-          em++ --version
-          clang --version
-          wasm-ld --version
-
-      - name: Install CIRCT tools (firtool/arcilator/circt-opt)
-        run: |
-          set -euo pipefail
-          # Try distro packages first; fall back to CIRCT prebuilt release if unavailable.
-          sudo apt-get update
-          sudo apt-get install -y llvm || true
-          sudo apt-get install -y circt || true
-
-          if ! command -v firtool >/dev/null 2>&1 || ! command -v arcilator >/dev/null 2>&1 || ! command -v circt-opt >/dev/null 2>&1; then
-            release_api='https://api.github.com/repos/llvm/circt/releases/latest'
-            asset_name='circt-full-shared-linux-x64.tar.gz'
-            tmpdir="$(mktemp -d)"
-            trap 'rm -rf "$tmpdir"' EXIT
-
-            meta_json="$tmpdir/release.json"
-            curl -fsSL "$release_api" -o "$meta_json"
-
-            download_url="$(
-              ruby -rjson -e '
-                metadata = JSON.parse(File.read(ARGV[0]))
-                asset = metadata.fetch("assets", []).find { |entry| entry["name"] == ARGV[1] }
-                abort("CIRCT release asset not found: #{ARGV[1]}") unless asset
-                puts asset.fetch("browser_download_url")
-              ' "$meta_json" "$asset_name"
-            )"
-
-            archive_path="$tmpdir/$asset_name"
-            curl -fL "$download_url" -o "$archive_path"
-            tar -xzf "$archive_path" -C "$tmpdir"
-
-            extract_root="$(find "$tmpdir" -mindepth 1 -maxdepth 1 -type d | head -n 1)"
-            if [ -z "$extract_root" ]; then
-              echo "Failed to locate extracted CIRCT directory" >&2
-              exit 1
-            fi
-
-            mkdir -p "$HOME/.local/bin" "$HOME/.local/lib"
-            cp "$extract_root/bin/firtool" "$HOME/.local/bin/"
-            cp "$extract_root/bin/arcilator" "$HOME/.local/bin/"
-            cp "$extract_root/bin/circt-opt" "$HOME/.local/bin/"
-            chmod +x "$HOME/.local/bin/firtool" "$HOME/.local/bin/arcilator" "$HOME/.local/bin/circt-opt"
-
-            if [ -d "$extract_root/lib" ]; then
-              cp -R "$extract_root/lib/." "$HOME/.local/lib/"
-            fi
-
-            echo "$HOME/.local/bin" >> "$GITHUB_PATH"
-            echo "LD_LIBRARY_PATH=$HOME/.local/lib:${LD_LIBRARY_PATH:-}" >> "$GITHUB_ENV"
-          fi
-
-          firtool --version
-          arcilator --version
-          circt-opt --version
-
-      - name: Detect VERILATOR_ROOT
-        run: |
-          set -euo pipefail
-          VERILATOR_ROOT="$(verilator -V | awk -F= '/VERILATOR_ROOT/ {gsub(/^[ \t]+|[ \t]+$/, "", $2); print $2; exit}')"
-          if [ -z "${VERILATOR_ROOT}" ]; then
-            echo "Failed to detect VERILATOR_ROOT from 'verilator -V'" >&2
-            exit 1
-          fi
-          echo "VERILATOR_ROOT=${VERILATOR_ROOT}" >> "$GITHUB_ENV"
-
       - name: Install web JS dependencies
         working-directory: web
         run: bun install --frozen-lockfile
-
-      - name: Cache Rust build outputs
-        uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: |
-            lib/rhdl/codegen/ir/sim/ir_interpreter -> target
-            lib/rhdl/codegen/ir/sim/ir_jit -> target
-            lib/rhdl/codegen/ir/sim/ir_compiler -> target
 
       - name: Generate web assets
         run: bundle exec rake web:generate
