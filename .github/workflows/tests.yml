@@ -69,4 +69,5 @@ jobs:
       - name: Run test suite (parallel)
         env:
           RSPEC_QUIET_OUTPUT: "1"
+          RSPEC_TIMEOUT: "20"
         run: bundle exec rake pspec
