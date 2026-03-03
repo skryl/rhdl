@@ -15,6 +15,8 @@ module RHDL
         def run
           if options[:check]
             check_status
+          elsif options[:check_gpu]
+            check_gpu_status(strict: options[:strict_gpu] == true)
           else
             install
           end
@@ -104,6 +106,26 @@ module RHDL
             end
           end
 
+          # Check ArcToGPU / Metal path prerequisites (optional)
+          puts
+          arcilator_gpu_health_checks = arcilator_gpu_tool_health_checks(platform: platform)
+          missing_arcilator_gpu_tools = arcilator_gpu_health_checks.keys.reject do |tool|
+            tool_healthy?(tool, arcilator_gpu_health_checks.fetch(tool))
+          end
+
+          if missing_arcilator_gpu_tools.empty?
+            puts "[OK] ArcToGPU/Metal prerequisites are installed"
+          else
+            puts "[OPTIONAL] ArcToGPU/Metal prerequisites missing or broken: #{missing_arcilator_gpu_tools.join(', ')}"
+            if platform == :macos
+              puts "  Install/verify with:"
+              puts "    xcode-select --install"
+              puts "    brew install spirv-cross llvm"
+            else
+              puts "  Install LLVM tools (mlir-opt/llc) and spirv-cross for ArcToGPU pipelines."
+            end
+          end
+
           # Check for graphviz (dot)
           puts
           dot_available = command_available?('dot')
@@ -169,6 +191,8 @@ module RHDL
             'verilator' => { cmd: 'verilator --version', optional: true, desc: 'Verilator (for high-performance Verilog simulation)' },
             'firtool' => { cmd: 'firtool --version', optional: true, desc: 'CIRCT firtool (for Arcilator HDL simulation)' },
             'arcilator' => { cmd: 'arcilator --version', optional: true, desc: 'CIRCT Arcilator (cycle-based HDL simulator)' },
+            'mlir-opt' => { cmd: 'mlir-opt --version', optional: true, desc: 'MLIR optimizer (GPU/SPIR-V lowering passes)' },
+            'spirv-cross' => { cmd: 'spirv-cross --version', optional: true, desc: 'SPIR-V to Metal shader cross-compiler' },
             'dot' => { cmd: 'dot -V', optional: true, desc: 'Graphviz (for diagram rendering)' },
             'bun' => { cmd: 'bun --version', optional: true, desc: 'Bun (for web and desktop tooling)' },
             'ruby' => { cmd: 'ruby --version', optional: false, desc: 'Ruby interpreter' },
@@ -184,11 +208,68 @@ module RHDL
             puts "             #{version}" if available
           end
 
+          if detect_platform == :macos
+            metal_tools = {
+              'metal' => 'xcrun -f metal',
+              'metallib' => 'xcrun -f metallib'
+            }
+
+            metal_tools.each do |name, cmd|
+              available = tool_healthy?(name, cmd)
+              status = available ? "[OK]" : "[OPTIONAL]"
+              puts "#{status.ljust(12)} #{name.ljust(12)} - Xcode Metal toolchain utility"
+              puts "             #{command_output_first_line(cmd)}" if available
+            end
+          end
+
           puts
           puts "Run 'bundle exec rake deps' to install missing dependencies."
         end
 
+        # Check ArcToGPU toolchain prerequisites and fail fast when strict.
+        def check_gpu_status(strict: false)
+          puts_header("RHDL ArcToGPU Toolchain Status")
+
+          status = arcilator_gpu_runner_status
+          if status[:ready]
+            puts "[OK] ArcToGPU runner prerequisites are satisfied"
+            if status[:gpu_option_tokens] && !status[:gpu_option_tokens].empty?
+              puts "     ArcToGPU option: #{status[:gpu_option_tokens].join(' ')}"
+            end
+            return true
+          end
+
+          puts "[MISSING] ArcToGPU runner prerequisites are not satisfied"
+          unless status[:missing_tools].nil? || status[:missing_tools].empty?
+            puts "          missing tools: #{status[:missing_tools].join(', ')}"
+          end
+          unless status[:missing_capabilities].nil? || status[:missing_capabilities].empty?
+            puts "          missing capabilities: #{status[:missing_capabilities].join(', ')}"
+          end
+
+          if strict
+            details = []
+            details << "missing tools: #{status[:missing_tools].join(', ')}" unless status[:missing_tools].nil? || status[:missing_tools].empty?
+            details << "missing capabilities: #{status[:missing_capabilities].join(', ')}" unless status[:missing_capabilities].nil? || status[:missing_capabilities].empty?
+            raise "ArcToGPU toolchain check failed (#{details.join('; ')})"
+          end
+
+          false
+        end
+
         private
+
+        def arcilator_gpu_runner_status
+          require_relative '../../../../examples/8bit/utilities/runners/arcilator_gpu_runner'
+          RHDL::Examples::CPU8Bit::ArcilatorGpuRunner.status
+        rescue LoadError, StandardError => e
+          {
+            ready: false,
+            missing_tools: [],
+            missing_capabilities: ["status probe failed: #{e.message}"],
+            gpu_option_tokens: []
+          }
+        end
 
         def arcilator_tool_health_checks
           {
@@ -196,6 +277,31 @@ module RHDL
             'arcilator' => 'arcilator --version',
             'llc' => 'llc --version'
           }
+        end
+
+        def arcilator_gpu_tool_health_checks(platform:)
+          checks = {
+            'mlir-opt' => 'mlir-opt --version',
+            'spirv-cross' => 'spirv-cross --version',
+            'llc' => 'llc --version'
+          }
+
+          if platform == :macos
+            checks['xcrun'] = 'xcrun --version'
+            checks['metal'] = 'xcrun -f metal'
+            checks['metallib'] = 'xcrun -f metallib'
+          end
+
+          checks
+        end
+
+        def tool_healthy?(tool, check_command)
+          if %w[metal metallib].include?(tool)
+            _out, status = run_command_with_timeout(check_command)
+            return status&.success? || false
+          end
+
+          command_healthy?(tool, check_command)
         end
 
         def command_healthy?(tool, version_cmd)

@@ -70,6 +70,14 @@ RSpec.describe RHDL::CLI::Tasks::BenchmarkTask do
         task.run
       end
     end
+
+    context 'with type: :cpu8bit' do
+      it 'dispatches to benchmark_cpu8bit' do
+        task = described_class.new(type: :cpu8bit)
+        expect(task).to receive(:benchmark_cpu8bit)
+        task.run
+      end
+    end
   end
 
   describe '#benchmark_gates' do

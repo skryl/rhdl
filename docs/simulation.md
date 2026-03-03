@@ -639,16 +639,20 @@ end
 
 ```bash
 # Gate-level simulation benchmark
-rake bench
-RHDL_BENCH_LANES=128 RHDL_BENCH_CYCLES=1000000 rake bench
+rake bench:native[gates]
+RHDL_BENCH_LANES=128 RHDL_BENCH_CYCLES=1000000 rake bench:native[gates]
+
+# 8-bit CPU FastHarness benchmark
+rake bench:native[cpu8bit]
+rake bench:native[cpu8bit,5000000]  # 5M cycles
 
 # MOS6502 CPU benchmark
-rake bench[mos6502]
-rake bench[mos6502,5000000]  # 5M cycles
+rake bench:native[mos6502]
+rake bench:native[mos6502,5000000]  # 5M cycles
 
 # Apple II full system benchmark
-rake bench[apple2]
-rake bench[apple2,2000000]  # 2M cycles
+rake bench:native[apple2]
+rake bench:native[apple2,2000000]  # 2M cycles
 
 # Legacy alias removed (use bench scopes)
 

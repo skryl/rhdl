@@ -405,11 +405,17 @@ namespace :deps do
     load_cli_tasks
     RHDL::CLI::Tasks::DepsTask.new(check: true).run
   end
+
+  desc "Fail-fast ArcToGPU toolchain check (arcilator_gpu prerequisites)"
+  task :check_gpu do
+    load_cli_tasks
+    RHDL::CLI::Tasks::DepsTask.new(check_gpu: true, strict_gpu: true).run
+  end
 end
 
 # Benchmarking
 namespace :bench do
-  desc "Benchmark by scope (gates, mos6502, apple2, gameboy, ir, riscv)"
+  desc "Benchmark by scope (gates, cpu8bit, mos6502, apple2, gameboy, ir, riscv)"
   task :native, [:scope, :count] do |_, args|
     load_cli_tasks
 
@@ -419,6 +425,9 @@ namespace :bench do
     case scope
     when :gates
       RHDL::CLI::Tasks::BenchmarkTask.new(type: :gates).run
+    when :cpu8bit
+      cycles = count || 5_000_000
+      RHDL::CLI::Tasks::BenchmarkTask.new(type: :cpu8bit, cycles: cycles).run
     when :mos6502
       cycles = count || 5_000_000
       RHDL::CLI::Tasks::BenchmarkTask.new(type: :mos6502, cycles: cycles).run
@@ -436,7 +445,7 @@ namespace :bench do
       RHDL::CLI::Tasks::BenchmarkTask.new(type: :riscv, cycles: cycles).run
     else
       puts "Unknown benchmark scope '#{scope}'."
-      puts "Available scopes: gates, mos6502, apple2, gameboy, ir, riscv"
+      puts "Available scopes: gates, cpu8bit, mos6502, apple2, gameboy, ir, riscv"
       exit 1
     end
   end

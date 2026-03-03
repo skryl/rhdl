@@ -36,29 +36,85 @@ module RHDL
         end
       end
 
+      # 64K memory view backed by the native runner memory ABI.
+      class RunnerMemory64K
+        def initialize(sim)
+          @sim = sim
+        end
+
+        def read(addr)
+          @sim.runner_read_memory(addr & 0xFFFF, 1, mapped: false).first.to_i & 0xFF
+        end
+        alias read_mem read
+
+        def write(addr, value)
+          @sim.runner_write_memory(addr & 0xFFFF, [value & 0xFF], mapped: false)
+          value & 0xFF
+        end
+        alias write_mem write
+
+        def load(program, start_addr = 0)
+          bytes = program.is_a?(String) ? program.b.bytes : Array(program)
+          return if bytes.empty?
+
+          @sim.runner_load_memory(bytes, start_addr & 0xFFFF, false)
+        end
+      end
+
       # Fast Harness using IR Compiler for high-performance simulation
       # Uses native Rust backend instead of Ruby behavioral simulation
       class FastHarness
         attr_reader :memory, :halted, :cycle_count
+
+        def self.arcilator_gpu_status
+          require_relative '../../utilities/runners/arcilator_gpu_runner'
+          RHDL::Examples::CPU8Bit::ArcilatorGpuRunner.status
+        rescue LoadError, NameError => e
+          {
+            ready: false,
+            missing_tools: [],
+            missing_capabilities: ["arcilator_gpu runner unavailable: #{e.message}"]
+          }
+        end
+
+        def self.ensure_arcilator_gpu_available!
+          status = arcilator_gpu_status
+          return true if status[:ready]
+
+          details = []
+          details << "missing tools: #{status[:missing_tools].join(', ')}" unless status[:missing_tools].empty?
+          details << "missing capabilities: #{status[:missing_capabilities].join(', ')}" unless status[:missing_capabilities].empty?
+          raise ArgumentError,
+            "arcilator_gpu backend unavailable (#{details.join('; ')}). " \
+            "Install an ArcToGPU-enabled arcilator build plus Metal/SPIR-V toolchain support."
+        end
 
         def initialize(external_memory = nil, sim: :compile)
           require 'rhdl/codegen'
 
           @cycle_count = 0
           @halted = false
-          @memory = Memory64K.new
-          @sim_backend = sim
+          @sim_backend = normalize_sim_backend(sim)
 
-          # Generate IR from CPU component
-          ir = RHDL::HDL::CPU::CPU.to_flat_ir
-          ir_json = RHDL::Codegen::IR::IRToJson.convert(ir)
+          if arcilator_gpu_mode?
+            self.class.ensure_arcilator_gpu_available!
+            require_relative '../../utilities/runners/arcilator_gpu_runner'
+            @sim = RHDL::Examples::CPU8Bit::ArcilatorGpuRunner.new
+            @memory = RunnerMemory64K.new(@sim)
+            ensure_runner_cpu8bit_mode!
+          else
+            # Generate IR from CPU component
+            ir = RHDL::HDL::CPU::CPU.to_flat_ir
+            ir_json = RHDL::Codegen::IR::IRToJson.convert(ir)
 
-          require 'rhdl/codegen/ir/sim/ir_simulator'
-          @sim = RHDL::Codegen::IR::IrSimulator.new(
-            ir_json,
-            backend: sim,
-            allow_fallback: true
-          )
+            require 'rhdl/codegen/ir/sim/ir_simulator'
+            @sim = RHDL::Codegen::IR::IrSimulator.new(
+              ir_json,
+              backend: simulator_backend,
+              allow_fallback: true
+            )
+            @memory = Memory64K.new
+          end
 
           # Copy external memory if provided
           if external_memory && !external_memory.is_a?(String)
@@ -76,7 +132,7 @@ module RHDL
         end
 
         def backend
-          @sim.backend
+          arcilator_gpu_mode? ? :arcilator_gpu : @sim.backend
         end
 
         # Read CPU state
@@ -116,6 +172,15 @@ module RHDL
           @halted = false
           @cycle_count = 0
 
+          if arcilator_gpu_mode?
+            @sim.poke('rst', 1)
+            run_runner_cycles(1)
+            @sim.poke('rst', 0)
+            @sim.evaluate
+            @halted = true if @sim.peek('halted') == 1
+            return
+          end
+
           @sim.poke('rst', 1)
           @sim.poke('mem_data_in', 0)
           clock_cycle
@@ -124,6 +189,12 @@ module RHDL
         end
 
         def clock_cycle
+          if arcilator_gpu_mode?
+            run_runner_cycles(1)
+            @halted = true if @sim.peek('halted') == 1
+            return
+          end
+
           # Get memory address and control signals
           addr = @sim.peek('mem_addr')
           write_en = @sim.peek('mem_write_en')
@@ -147,6 +218,43 @@ module RHDL
 
           # Check for halt
           @halted = true if @sim.peek('halted') == 1
+        end
+
+        def run_cycles(count, batch_size: 1024)
+          n = count.to_i
+          return 0 if n <= 0
+
+          unless arcilator_gpu_mode?
+            ran = 0
+            n.times do
+              break if @halted
+
+              clock_cycle
+              ran += 1
+              @cycle_count += 1
+            end
+            return ran
+          end
+
+          remaining = n
+          ran = 0
+          batch = [batch_size.to_i, 1].max
+          while remaining.positive?
+            step = [remaining, batch].min
+            batch_ran = run_runner_cycles(step)
+            break if batch_ran <= 0
+
+            ran += batch_ran
+            remaining -= batch_ran
+            if @sim.peek('halted') == 1
+              @halted = true
+              break
+            end
+          end
+
+          @cycle_count += ran
+          @halted = true if @sim.peek('halted') == 1
+          ran
         end
 
         def run(max_cycles = 10000)
@@ -176,6 +284,41 @@ module RHDL
         def get_input(name)
           # Not directly supported in IR sim
           0
+        end
+
+        private
+
+        def normalize_sim_backend(sim)
+          sym = sim.to_sym
+          return :compile if sym == :compiler
+
+          sym
+        end
+
+        def simulator_backend
+          @sim_backend
+        end
+
+        def arcilator_gpu_mode?
+          @sim_backend == :arcilator_gpu
+        end
+
+        def ensure_runner_cpu8bit_mode!
+          return if @sim.runner_mode? && @sim.runner_kind == :cpu8bit
+
+          raise ArgumentError,
+            "arcilator_gpu backend requires native cpu8bit runner mode " \
+            "(runner_mode=#{@sim.runner_mode?}, runner_kind=#{@sim.runner_kind.inspect})"
+        end
+
+        def run_runner_cycles(n)
+          result = @sim.runner_run_cycles(n, 0, false)
+          cycles = if result.is_a?(Hash)
+            result.fetch(:cycles_run, n).to_i
+          else
+            n
+          end
+          [[cycles, 0].max, n].min
         end
       end
 
