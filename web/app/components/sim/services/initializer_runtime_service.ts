@@ -80,13 +80,16 @@ async function loadBytesIntoRom({
   yieldControl = null
 }: Unsafe = {}) {
   if (supportsRunnerApi && typeof runtime?.sim?.runner_load_rom === 'function') {
-    return transferBytesChunked({
+    const loadedViaRunnerRom = await transferBytesChunked({
       bytes,
       offset,
       chunkBytes: transferChunkBytes,
       yieldControl,
       writeChunk: (chunk: Unsafe, chunkOffset: Unsafe) => runtime.sim.runner_load_rom(chunk, chunkOffset)
     });
+    if (loadedViaRunnerRom) {
+      return true;
+    }
   }
   return loadBytesIntoMainMemory({
     runtime,
@@ -148,6 +151,31 @@ function parseOptionalPc(value: Unsafe) {
     return null;
   }
   return parsed >>> 0;
+}
+
+function supportsRunnerApiForRuntime(runtime: Unsafe = {}) {
+  const sim = runtime?.sim;
+  if (!sim) {
+    return false;
+  }
+  if (sim?.features?.hasRunnerApi === true) {
+    return true;
+  }
+  if (typeof sim.runnerCaps === 'function') {
+    try {
+      return !!sim.runnerCaps();
+    } catch {
+      // fall through
+    }
+  }
+  if (typeof sim.runner_mode === 'function') {
+    try {
+      return sim.runner_mode() === true;
+    } catch {
+      return false;
+    }
+  }
+  return false;
 }
 
 function normalizeDefaultBinSpace(value: Unsafe) {
@@ -445,26 +473,22 @@ async function loadDefaultBinAsset({
       return false;
     }
 
-    let pcApplied = startPc == null;
-    if (startPc != null && typeof runtime.sim.runner_set_reset_vector === 'function') {
-      pcApplied = didCallSucceed(runtime.sim.runner_set_reset_vector(startPc));
-      if (!pcApplied) {
+    if (startPc != null) {
+      if (typeof runtime.sim.runner_set_reset_vector === 'function') {
+        const pcApplied = didCallSucceed(runtime.sim.runner_set_reset_vector(startPc));
+        if (!pcApplied) {
+          const width = startPc > 0xFFFF ? 8 : 4;
+          log(`Default bin reset vector apply failed (PC=$${startPc.toString(16).padStart(width, '0')})`);
+        }
+      } else {
         const width = startPc > 0xFFFF ? 8 : 4;
-        log(`Default bin reset vector apply failed (PC=$${startPc.toString(16).padStart(width, '0')})`);
+        log(`Default bin reset vector unsupported (PC=$${startPc.toString(16).padStart(width, '0')})`);
       }
-    } else if (startPc != null) {
-      pcApplied = false;
     }
 
     if (defaultBin.resetAfterLoad && typeof runtime.sim.reset === 'function') {
       runtime.sim.reset();
       await bootstrapMos6502Runner(runtime, log);
-    }
-    if (startPc != null) {
-      const shouldApplyFallback = !pcApplied || riscvStartPcNeedsRepair(runtime, startPc);
-      if (shouldApplyFallback) {
-        applyRiscvStartPcFallback(runtime, startPc, log);
-      }
     }
 
     log(`Loaded default bin (${defaultBin.space}) @ 0x${loadOffset.toString(16)}: ${defaultBin.path}`);
@@ -589,27 +613,22 @@ async function loadDefaultAssets({
         continue;
       }
 
-      let pcApplied = asset.startPc == null;
-      if (asset.startPc != null && typeof runtime.sim.runner_set_reset_vector === 'function') {
-        pcApplied = didCallSucceed(runtime.sim.runner_set_reset_vector(asset.startPc));
-        if (!pcApplied) {
+      if (asset.startPc != null) {
+        if (typeof runtime.sim.runner_set_reset_vector === 'function') {
+          const pcApplied = didCallSucceed(runtime.sim.runner_set_reset_vector(asset.startPc));
+          if (!pcApplied) {
+            const width = asset.startPc > 0xFFFF ? 8 : 4;
+            log(`Default asset reset vector apply failed (PC=$${asset.startPc.toString(16).padStart(width, '0')})`);
+          }
+        } else {
           const width = asset.startPc > 0xFFFF ? 8 : 4;
-          log(`Default asset reset vector apply failed (PC=$${asset.startPc.toString(16).padStart(width, '0')})`);
+          log(`Default asset reset vector unsupported (PC=$${asset.startPc.toString(16).padStart(width, '0')})`);
         }
-      } else if (asset.startPc != null) {
-        pcApplied = false;
       }
 
       if (asset.resetAfterLoad && typeof runtime.sim.reset === 'function') {
         runtime.sim.reset();
         await bootstrapMos6502Runner(runtime, log);
-      }
-
-      if (asset.startPc != null) {
-        const shouldApplyFallback = !pcApplied || riscvStartPcNeedsRepair(runtime, asset.startPc);
-        if (shouldApplyFallback) {
-          applyRiscvStartPcFallback(runtime, asset.startPc, log);
-        }
       }
 
       log(`Loaded default asset (${asset.kind}) @ 0x${asset.offset.toString(16)}: ${asset.path}`);
@@ -651,77 +670,6 @@ function pokeSignalIfPresent(runtime: Unsafe, name: Unsafe, value: Unsafe) {
   if (runtime.sim.has_signal(name)) {
     runtime.sim.poke(name, value);
   }
-}
-
-function applyRiscvStartPcFallback(runtime: Unsafe, startPc: Unsafe, log: Unsafe = () => {}) {
-  if (!runtime?.sim) {
-    return false;
-  }
-  const kind = typeof runtime.sim.runner_kind === 'function'
-    ? runtime.sim.runner_kind()
-    : null;
-  if (kind !== 'riscv') {
-    return false;
-  }
-  if (typeof runtime.sim.has_signal !== 'function' || typeof runtime.sim.poke !== 'function') {
-    return false;
-  }
-
-  const vector = Number(startPc) >>> 0;
-  let wroteAny = false;
-  for (const signalName of ['pc_reg__pc', 'pc', 'debug_pc']) {
-    if (runtime.sim.has_signal(signalName)) {
-      runtime.sim.poke(signalName, vector);
-      wroteAny = true;
-    }
-  }
-  if (!wroteAny) {
-    return false;
-  }
-  if (typeof runtime.sim.evaluate === 'function') {
-    runtime.sim.evaluate();
-  }
-
-  log(`Applied RISC-V start PC fallback (PC=$${vector.toString(16).toUpperCase().padStart(8, '0')})`);
-  return true;
-}
-
-function readRiscvProgramCounter(runtime: Unsafe) {
-  if (!runtime?.sim || typeof runtime.sim.has_signal !== 'function' || typeof runtime.sim.peek !== 'function') {
-    return null;
-  }
-  for (const name of ['debug_pc', 'pc_reg__pc', 'pc']) {
-    if (!runtime.sim.has_signal(name)) {
-      continue;
-    }
-    const value = Number(runtime.sim.peek(name));
-    if (!Number.isFinite(value)) {
-      continue;
-    }
-    return value >>> 0;
-  }
-  return null;
-}
-
-function riscvStartPcNeedsRepair(runtime: Unsafe, startPc: Unsafe) {
-  if (!runtime?.sim || typeof runtime.sim.runner_kind !== 'function') {
-    return false;
-  }
-  if (runtime.sim.runner_kind() !== 'riscv') {
-    return false;
-  }
-  const expected = Number(startPc) >>> 0;
-  const observed = readRiscvProgramCounter(runtime);
-  if (observed == null) {
-    return true;
-  }
-  if (observed === expected) {
-    return false;
-  }
-  if (expected >= 0x80000000 && observed < 0x01000000) {
-    return true;
-  }
-  return (expected >>> 24) !== (observed >>> 24);
 }
 
 function runBootstrapCycles(runtime: Unsafe, count: Unsafe) {
@@ -955,9 +903,7 @@ export async function initializeApple2Mode({
   const defaultBin = resolveDefaultBinConfig(preset);
   state.apple2.ioConfig = ioConfig;
 
-  const supportsRunnerApi = runtime.sim.runner_mode?.() === true
-    || (typeof runtime.sim?.runner_read_memory === 'function'
-      && typeof runtime.sim?.runner_write_memory === 'function');
+  const supportsRunnerApi = supportsRunnerApiForRuntime(runtime);
   const supportsGenericMemoryApi = typeof runtime.sim?.memory_mode === 'function'
     && runtime.sim.memory_mode() != null;
   const wantsMemoryApi = ioConfig.enabled || !!ioConfig.rom?.path || defaultAssets.length > 0 || !!defaultDisk || !!defaultBin;

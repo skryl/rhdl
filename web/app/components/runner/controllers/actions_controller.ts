@@ -160,7 +160,8 @@ export function createRunnerActionsController({
       presetOverride = null,
       logLoad = true,
       setPreferredTab = true,
-      showLoadingUi = false
+      showLoadingUi = false,
+      applyPresetPreferredBackend = true
     } = options;
     const preset = presetOverride || getRunnerPreset(dom.runnerSelect?.value);
     const loadingText = 'Loading...';
@@ -195,7 +196,15 @@ export function createRunnerActionsController({
     setRunnerPresetState(preset.id);
     updateIrSourceVisibility();
     try {
-      await applyPreferredBackend(preset);
+      if (applyPresetPreferredBackend) {
+        await applyPreferredBackend(preset);
+      } else {
+        const selectedBackend = String(dom.backendSelect?.value || '').trim();
+        if (selectedBackend) {
+          setBackendState(selectedBackend);
+          await ensureBackendInstance(selectedBackend);
+        }
+      }
 
       let bundle = null;
       if (preset.usesManualIr) {

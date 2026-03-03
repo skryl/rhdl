@@ -492,21 +492,114 @@ namespace :web do
     end
   end
 
-  desc "Start local web server for the web UI (default host 127.0.0.1, port 8080)"
+  desc "Start local web server for the web UI (builds dist first unless SKIP_WEB_BUNDLE=1)"
   task :start, [:port] do |_t, args|
     require 'webrick'
 
     host = (ENV['HOST'] || '127.0.0.1').to_s
     port = Integer(args[:port] || ENV['PORT'] || '8080')
     web_root = File.expand_path('web/dist', __dir__)
-    unless File.directory?(web_root)
-      abort <<~MSG
-        [web] Missing built assets at #{web_root}.
-        Run:
-          bundle exec rake web:bundle
-      MSG
+    watch_enabled = ENV.fetch('WEB_WATCH', '1') != '0' && ENV['SKIP_WEB_BUNDLE'] != '1'
+    watch_interval = (Float(ENV.fetch('WEB_WATCH_INTERVAL', '0.75')) rescue 0.75)
+    watch_interval = 0.75 unless watch_interval.positive?
+    watch_targets = [
+      File.join(web_dir, 'app'),
+      File.join(web_dir, 'assets'),
+      File.join(web_dir, 'index.html'),
+      File.join(web_dir, 'coi-serviceworker.js'),
+      File.join(web_dir, 'build.ts'),
+      File.join(web_dir, 'package.json'),
+      File.join(web_dir, 'tsconfig.json'),
+      File.join(web_dir, 'bun.lock')
+    ]
+
+    inject_live_reload_client = lambda do
+      index_path = File.join(web_root, 'index.html')
+      next unless File.file?(index_path)
+
+      html = File.read(index_path)
+      marker = 'window.__RHDLLiveReloadPoll'
+      next if html.include?(marker)
+
+      snippet = <<~HTML
+        <script>
+          (() => {
+            if (window.__RHDLLiveReloadPoll) return;
+            window.__RHDLLiveReloadPoll = true;
+            let knownVersion = null;
+            const poll = async () => {
+              try {
+                const res = await fetch('./__rhdl_live_reload_version?ts=' + Date.now(), { cache: 'no-store' });
+                if (!res.ok) return;
+                const data = await res.json();
+                const nextVersion = Number(data && data.version);
+                if (!Number.isFinite(nextVersion)) return;
+                if (knownVersion === null) {
+                  knownVersion = nextVersion;
+                  return;
+                }
+                if (nextVersion !== knownVersion) {
+                  window.location.reload();
+                }
+              } catch (_err) {}
+            };
+            poll();
+            setInterval(poll, 800);
+          })();
+        </script>
+      HTML
+
+      if html.include?('</body>')
+        html.sub!('</body>', "#{snippet}\n  </body>")
+      else
+        html << "\n#{snippet}\n"
+      end
+      File.write(index_path, html)
+    end
+
+    snapshot_watch_inputs = lambda do
+      snapshot = {}
+      watch_targets.each do |target|
+        if File.directory?(target)
+          Dir.glob(File.join(target, '**', '*')).sort.each do |path|
+            next if File.directory?(path)
+
+            stat = File.stat(path) rescue nil
+            next unless stat
+
+            snapshot[path] = [stat.mtime.to_f, stat.size]
+          end
+          next
+        end
+
+        next unless File.file?(target)
+
+        stat = File.stat(target) rescue nil
+        next unless stat
+
+        snapshot[target] = [stat.mtime.to_f, stat.size]
+      end
+      snapshot
+    end
+
+    live_reload_version = 0
+    live_reload_mutex = Mutex.new
+    watcher_stop = false
+    watcher_thread = nil
+
+    if ENV['SKIP_WEB_BUNDLE'] != '1'
+      install_web_dependencies.call
+      Dir.chdir(web_dir) do
+        sh 'bun run build'
+      end
+      inject_live_reload_client.call if watch_enabled
+    end
+
+    unless File.directory?(web_root) && File.file?(File.join(web_root, 'index.html'))
+      abort "[web] Missing built assets at #{web_root}. Run `bundle exec rake web:bundle` first."
     end
     puts "Starting web server at http://#{host}:#{port} (root: #{web_root})"
+    puts '[web] Watching for changes with auto-reload enabled.' if watch_enabled
 
     headers_callback = proc do |_req, res|
       res['Cross-Origin-Opener-Policy'] = 'same-origin'
@@ -522,14 +615,70 @@ namespace :web do
       Logger: WEBrick::Log.new($stderr, WEBrick::Log::WARN),
       RequestCallback: headers_callback
     )
+    server.mount_proc('/__rhdl_live_reload_version') do |_req, res|
+      version = live_reload_mutex.synchronize { live_reload_version }
+      res.status = 200
+      res['Content-Type'] = 'application/json'
+      res['Cache-Control'] = 'no-store, max-age=0'
+      res['Pragma'] = 'no-cache'
+      res.body = "{\"version\":#{version}}"
+    end
     server.mount('/', WEBrick::HTTPServlet::FileHandler, web_root)
+
+    if watch_enabled
+      watch_snapshot = snapshot_watch_inputs.call
+      watcher_thread = Thread.new do
+        while !watcher_stop
+          sleep watch_interval
+          next if watcher_stop
+
+          latest_snapshot = snapshot_watch_inputs.call
+          next if latest_snapshot == watch_snapshot
+
+          changed_count = (watch_snapshot.keys | latest_snapshot.keys).count do |path|
+            watch_snapshot[path] != latest_snapshot[path]
+          end
+          changed_count = 1 if changed_count < 1
+          puts "[web] Detected #{changed_count} changed file(s); rebuilding..."
+          build_ok = false
+          Dir.chdir(web_dir) do
+            build_ok = system('bun', 'run', 'build')
+          end
+
+          if build_ok
+            inject_live_reload_client.call
+            live_reload_mutex.synchronize { live_reload_version += 1 }
+            version = live_reload_mutex.synchronize { live_reload_version }
+            puts "[web] Rebuild complete (reload version #{version})."
+          else
+            warn '[web] Rebuild failed. Waiting for next change.'
+          end
+          watch_snapshot = latest_snapshot
+        end
+      end
+    end
 
     trap_signals = %w[INT TERM]
     trap_signals.each do |signal|
-      Kernel.trap(signal) { server.shutdown }
+      Kernel.trap(signal) do
+        watcher_stop = true
+        watcher_thread&.join(2)
+        server.shutdown
+      end
     end
 
-    server.start
+    begin
+      server.start
+    ensure
+      watcher_stop = true
+      watcher_thread&.join(2)
+    end
+  end
+
+  desc "Generate web artifacts, bundle, then start local web server"
+  task :serve, [:port] do |_t, args|
+    Rake::Task['web:generate'].invoke
+    Rake::Task['web:start'].invoke(args[:port])
   end
 
   desc "Build web simulator WASM artifacts"

@@ -112,7 +112,10 @@ export function bindCoreBindings({
     }
     try {
       await yieldToUi();
-      await runner.loadPreset({ showLoadingUi: true });
+      await runner.loadPreset({
+        showLoadingUi: true,
+        applyPresetPreferredBackend: false
+      });
     } finally {
       runnerLoadInProgress = false;
       if (dom.loadRunnerBtn) {
@@ -269,39 +272,45 @@ export function bindCoreBindings({
 
   listeners.on(dom.backendSelect, 'change', async () => {
     const next = util.getBackendDef(dom.backendSelect.value).id;
-    if (state.backend === next) {
+    if (state.backend === next && runtime.instance) {
       sim.refreshStatus();
       return;
     }
-
     store.setBackendState(next);
+    if (runnerLoadInProgress) {
+      sim.refreshStatus();
+      return;
+    }
+    runnerLoadInProgress = true;
+    if (dom.loadRunnerBtn) {
+      dom.loadRunnerBtn.disabled = true;
+    }
     try {
-      await runner.ensureBackendInstance(state.backend);
-      dom.simStatus.textContent = `WASM ready (${state.backend})`;
+      await runner.ensureBackendInstance(next);
+      dom.simStatus.textContent = `WASM ready (${next})`;
       if (String(dom.irJson?.value || '').trim()) {
         const preset = runner.currentPreset();
-        if (preset.usesManualIr) {
-          await sim.initializeSimulator({ preset });
-        } else {
-          const bundle = await runner.loadBundle(preset, { logLoad: false });
-          await sim.initializeSimulator({
-            preset,
-            simJson: bundle.simJson,
-            explorerSource: bundle.explorerJson,
-            explorerMeta: bundle.explorerMeta,
-            componentSourceBundle: bundle.sourceBundle || null,
-            componentSchematicBundle: bundle.schematicBundle || null
-          });
-        }
+        await runner.loadPreset({
+          presetOverride: preset,
+          logLoad: false,
+          setPreferredTab: false,
+          showLoadingUi: false,
+          applyPresetPreferredBackend: false
+        });
       } else {
         sim.refreshStatus();
       }
-      log(`Switched backend to ${state.backend}`);
+      log(`Switched backend to ${next}`);
     } catch (err: unknown) {
-      dom.simStatus.textContent = `Backend ${state.backend} unavailable: ${err.message || err}`;
-      log(`Backend load failed (${state.backend}): ${err.message || err}`);
+      dom.simStatus.textContent = `Backend ${next} unavailable: ${err.message || err}`;
+      log(`Backend load failed (${next}): ${err.message || err}`);
       if (dom.backendStatus) {
-        dom.backendStatus.textContent = `Backend: ${state.backend} (unavailable)`;
+        dom.backendStatus.textContent = `Backend: ${next} (unavailable)`;
+      }
+    } finally {
+      runnerLoadInProgress = false;
+      if (dom.loadRunnerBtn) {
+        dom.loadRunnerBtn.disabled = false;
       }
     }
   });
@@ -309,11 +318,6 @@ export function bindCoreBindings({
   listeners.on(dom.runnerSelect, 'change', () => {
     const preset = runner.getPreset(dom.runnerSelect.value);
     store.setRunnerPresetState(preset.id);
-    const preferredBackend = String(preset?.preferredBackend || '').trim();
-    if (preferredBackend && dom.backendSelect) {
-      dom.backendSelect.value = preferredBackend;
-      store.setBackendState(preferredBackend);
-    }
     runner.updateIrSourceVisibility();
     sim.refreshStatus();
   });

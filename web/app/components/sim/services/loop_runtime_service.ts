@@ -114,8 +114,8 @@ export function shouldRefreshUiAfterRun({
   isComponentTabActive,
   traceFollowEnabled = true
 }: Unsafe = {}) {
-  if (!traceFollowEnabled && state.running && !hit) {
-    return false;
+  if (traceFollowEnabled) {
+    return true;
   }
   return !state.running
     || !!hit

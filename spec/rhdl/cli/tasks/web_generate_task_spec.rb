@@ -160,7 +160,6 @@ RSpec.describe RHDL::CLI::Tasks::WebGenerateTask do
       allow(task).to receive(:ensure_dir)
       allow(task).to receive(:copy_ghostty_web_assets)
       allow(task).to receive(:copy_vim_wasm_assets)
-      allow(task).to receive(:build_mruby_wasm)
       allow(task).to receive(:ensure_aot_ir_inputs)
       allow(task).to receive(:run_rustup_target_add!).and_return(true)
       allow(task).to receive(:build_wasm_backend)
@@ -170,7 +169,6 @@ RSpec.describe RHDL::CLI::Tasks::WebGenerateTask do
 
       expect(task).to receive(:copy_ghostty_web_assets)
       expect(task).to receive(:copy_vim_wasm_assets)
-      expect(task).to receive(:build_mruby_wasm)
       expect(task).to receive(:ensure_aot_ir_inputs)
       expect(task).to receive(:build_compiler_aot_wasm).with(
         ir_path: described_class::APPLE2_AOT_IR_PATH,

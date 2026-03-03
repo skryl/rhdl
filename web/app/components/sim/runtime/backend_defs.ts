@@ -38,6 +38,16 @@ export const BACKEND_DEFS = {
     createFn: 'sim_create',
     destroyFn: 'sim_destroy',
     freeErrorFn: 'sim_free_error'
+  },
+  verilator: {
+    id: 'verilator',
+    label: 'Verilator',
+    wasmPath: './assets/pkg/apple2_verilator.wasm',
+    corePrefix: 'sim',
+    allocPrefix: 'sim',
+    createFn: 'sim_create',
+    destroyFn: 'sim_destroy',
+    freeErrorFn: 'sim_free_error'
   }
 };
 

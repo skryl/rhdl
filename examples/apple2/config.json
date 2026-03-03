@@ -16,6 +16,8 @@
     "preferredTab": "ioTab",
     "traceEnabledOnLoad": false,
     "preferredBackend": "compiler",
+    "arcilatorWasmPath": "./assets/pkg/apple2_arcilator.wasm",
+    "verilatorWasmPath": "./assets/pkg/apple2_verilator.wasm",
     "enableApple2Ui": true,
     "usesManualIr": false,
     "autoLoadOnBoot": true,

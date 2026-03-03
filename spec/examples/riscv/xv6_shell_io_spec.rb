@@ -8,8 +8,8 @@ require_relative '../../../examples/riscv/utilities/runners/headless_runner'
 AOT_COMPILER_ENV_FLAG = 'RHDL_IR_COMPILER_AOT'.freeze
 
 RSpec.shared_examples 'xv6 shell UART I/O' do |pipeline:, backend_id:, boot_cycles:, prompt_cycles:, timeout_seconds:, boot_marker: 'init: starting sh', require_shell: true|
-  let(:kernel_path) { File.expand_path('../../../examples/riscv/software/bin/kernel.bin', __dir__) }
-  let(:fs_path) { File.expand_path('../../../examples/riscv/software/bin/fs.img', __dir__) }
+  let(:kernel_path) { File.expand_path('../../../examples/riscv/software/bin/xv6_kernel.bin', __dir__) }
+  let(:fs_path) { File.expand_path('../../../examples/riscv/software/bin/xv6_fs.img', __dir__) }
 
   def with_fast_boot_patch(kernel_bytes)
     patched = kernel_bytes.dup

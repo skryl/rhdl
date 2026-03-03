@@ -58,33 +58,82 @@ function buildMirbSessionReplaySource(lines: unknown[] = []) {
   ].join('\n');
 }
 
-function readUartSnapshotText({ state, runtime }: unknown) {
+function parseCssPixelValue(raw: unknown) {
+  const value = Number.parseFloat(String(raw ?? '').trim());
+  return Number.isFinite(value) ? value : NaN;
+}
+
+function resolveUartViewportRows(outputEl: unknown, fallbackRows: unknown) {
+  const fallback = Math.max(1, Number.parseInt(String(fallbackRows), 10) || 24);
+  if (!outputEl || typeof outputEl.clientHeight !== 'number') {
+    return fallback;
+  }
+  const hostHeight = Number(outputEl.clientHeight);
+  if (!Number.isFinite(hostHeight) || hostHeight <= 0) {
+    return fallback;
+  }
+
+  const view = outputEl.ownerDocument?.defaultView || globalThis;
+  const computed = typeof view?.getComputedStyle === 'function'
+    ? view.getComputedStyle(outputEl)
+    : null;
+  const padTop = parseCssPixelValue(computed?.paddingTop);
+  const padBottom = parseCssPixelValue(computed?.paddingBottom);
+  const availableHeight = Math.max(
+    0,
+    hostHeight
+      - (Number.isFinite(padTop) ? padTop : 0)
+      - (Number.isFinite(padBottom) ? padBottom : 0)
+  );
+
+  const lineHeightPx = parseCssPixelValue(computed?.lineHeight);
+  const fontSizePx = parseCssPixelValue(computed?.fontSize);
+  const lineHeight = Number.isFinite(lineHeightPx) && lineHeightPx > 0
+    ? lineHeightPx
+    : (Number.isFinite(fontSizePx) && fontSizePx > 0 ? fontSizePx * 1.35 : 16);
+  if (!Number.isFinite(lineHeight) || lineHeight <= 0) {
+    return fallback;
+  }
+
+  const estimatedRows = Math.floor(availableHeight / lineHeight);
+  if (!Number.isFinite(estimatedRows) || estimatedRows <= 0) {
+    return fallback;
+  }
+  return estimatedRows;
+}
+
+function readUartSnapshotText({ state, runtime, dom }: unknown) {
   const sim = runtime?.sim;
   if (!sim) {
     return 'No UART output yet.';
   }
-  if (typeof sim.runner_riscv_uart_tx_len !== 'function' || typeof sim.runner_riscv_uart_tx_bytes !== 'function') {
+  if (typeof sim.runner_riscv_uart_tx_bytes !== 'function') {
     return 'No UART output yet.';
   }
 
   const textConfig = state?.apple2?.ioConfig?.display?.text || {};
   const width = Math.max(1, Number.parseInt(textConfig.width, 10) || 80);
-  const height = Math.max(1, Number.parseInt(textConfig.height, 10) || 24);
+  const height = resolveUartViewportRows(dom?.terminalOutput, textConfig.height);
   const maxBytes = width * height;
+  let bytes = null;
 
-  const txLen = Number(sim.runner_riscv_uart_tx_len());
-  const txLimit = Number.isFinite(txLen) ? Math.max(0, txLen) : 0;
-  const readLen = Math.max(0, Math.min(maxBytes, txLimit));
-  if (readLen <= 0) {
-    return 'No UART output yet.';
+  if (typeof sim.runner_riscv_uart_tx_len === 'function') {
+    const txLen = Number(sim.runner_riscv_uart_tx_len());
+    const txLimit = Number.isFinite(txLen) ? Math.max(0, txLen) : 0;
+    const readLen = Math.max(0, Math.min(maxBytes, txLimit));
+    if (readLen > 0) {
+      const offset = Math.max(0, txLimit - readLen);
+      bytes = sim.runner_riscv_uart_tx_bytes(offset, readLen);
+    }
   }
 
-  const offset = Math.max(0, txLimit - readLen);
-  const bytes = sim.runner_riscv_uart_tx_bytes(offset, readLen);
+  if (!bytes || bytes.length === 0) {
+    bytes = sim.runner_riscv_uart_tx_bytes(0, maxBytes);
+  }
+
   if (!bytes || bytes.length === 0) {
     return 'No UART output yet.';
   }
-
   return renderUartTextGrid(bytes, { width, height, textConfig });
 }
 
@@ -308,7 +357,7 @@ export function createTerminalRuntimeService({
       terminalSession.setSnapshotOverride(null);
       return;
     }
-    terminalSession.setSnapshotOverride(readUartSnapshotText({ state, runtime }) as unknown);
+    terminalSession.setSnapshotOverride(readUartSnapshotText({ state, runtime, dom }) as unknown);
   }
 
   return {

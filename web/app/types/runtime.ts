@@ -1,6 +1,6 @@
 import type { IrMetaModel } from './models';
 
-export type BackendId = 'interpreter' | 'jit' | 'compiler';
+export type BackendId = 'interpreter' | 'jit' | 'compiler' | 'arcilator' | 'verilator';
 
 export interface BackendDef {
   id: BackendId | string;

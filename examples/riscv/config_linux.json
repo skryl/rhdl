@@ -31,7 +31,7 @@
       },
       {
         "kind": "main",
-        "path": "./assets/fixtures/riscv/software/bin/rhdl_riscv_virt.dtb",
+        "path": "./assets/fixtures/riscv/software/bin/linux_virt.dtb",
         "offset": "0x87f00000"
       },
       {
@@ -51,6 +51,8 @@
     },
     "preferredBackend": "compiler",
     "compilerWasmPath": "./assets/pkg/ir_compiler_riscv.wasm",
+    "arcilatorWasmPath": "./assets/pkg/riscv_arcilator.wasm",
+    "verilatorWasmPath": "./assets/pkg/riscv_verilator.wasm",
     "io": {
       "enabled": true,
       "api": "generic",

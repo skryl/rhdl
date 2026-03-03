@@ -13,7 +13,7 @@ module RHDL
       # The produced module exports the same sim_/runner_ ABI surface used by
       # the web benchmark harness.
       module WebApple2VerilatorBuild
-        PROJECT_ROOT = File.expand_path('../../../..', __dir__)
+        PROJECT_ROOT = File.expand_path('../../../../..', __dir__)
         BUILD_DIR = File.join(PROJECT_ROOT, 'web', 'build', 'verilator', 'build')
         VERILOG_DIR = File.join(BUILD_DIR, 'verilog')
         OBJ_DIR = File.join(BUILD_DIR, 'obj_dir')
@@ -312,6 +312,13 @@ module RHDL
               uint32_t frames_completed;
             };
 
+            static uint32_t normalize_rom_offset(uint32_t offset) {
+              if (offset >= 0xD000u && offset <= 0xFFFFu) {
+                return offset - 0xD000u;
+              }
+              return offset;
+            }
+
             __attribute__((export_name("sim_create")))
             void* sim_create(const char* json, uint32_t json_len, uint32_t sub_cycles, uint32_t* err_out) {
               (void)json;
@@ -521,6 +528,7 @@ module RHDL
 
               uint8_t* mem = nullptr;
               uint32_t mem_size = 0;
+              uint32_t mem_offset = offset;
               switch (space) {
               case RUNNER_MEM_SPACE_MAIN:
                 mem = ctx->ram;
@@ -529,6 +537,7 @@ module RHDL
               case RUNNER_MEM_SPACE_ROM:
                 mem = ctx->rom;
                 mem_size = kRomSize;
+                mem_offset = normalize_rom_offset(offset);
                 break;
               default:
                 return 0;
@@ -538,8 +547,8 @@ module RHDL
               case RUNNER_MEM_OP_LOAD:
               case RUNNER_MEM_OP_WRITE: {
                 uint32_t count = 0;
-                for (uint32_t i = 0; i < len && (offset + i) < mem_size; i++) {
-                  mem[offset + i] = data[i];
+                for (uint32_t i = 0; i < len && (mem_offset + i) < mem_size; i++) {
+                  mem[mem_offset + i] = data[i];
                   count++;
                 }
                 return count;
@@ -563,8 +572,8 @@ module RHDL
                 }
 
                 uint32_t count = 0;
-                for (uint32_t i = 0; i < len && (offset + i) < mem_size; i++) {
-                  data[i] = mem[offset + i];
+                for (uint32_t i = 0; i < len && (mem_offset + i) < mem_size; i++) {
+                  data[i] = mem[mem_offset + i];
                   count++;
                 }
                 return count;

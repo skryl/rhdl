@@ -79,6 +79,21 @@ export function createApple2MemoryController({
       return null;
     }
 
+    const runnerKind = currentRunnerKind();
+    const backendId = String(state?.backend || '').trim().toLowerCase();
+    // HDL backends expose debug_pc as virtual address once Linux enables paging.
+    // For memory panel follow mode, prefer current fetch physical address.
+    if (
+      runnerKind === 'riscv'
+      && (backendId === 'arcilator' || backendId === 'verilator')
+      && runtime.sim.has_signal('inst_addr')
+    ) {
+      const instAddr = Number(runtime.sim.peek('inst_addr'));
+      if (Number.isFinite(instAddr)) {
+        return instAddr >>> 0;
+      }
+    }
+
     const configCandidates = currentIoConfig().pcSignalCandidates;
     const candidates = Array.isArray(configCandidates) && configCandidates.length > 0
       ? configCandidates

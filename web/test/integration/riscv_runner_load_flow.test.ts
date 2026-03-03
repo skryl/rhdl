@@ -125,14 +125,14 @@ test('riscv runner loads default kernel, memory, uart and simulation', { timeout
   await page.waitForFunction(() => {
     const log = document.querySelector('#eventLog')?.textContent || '';
     return (
-      (log.includes('Loaded default bin (main)') && log.includes('./assets/fixtures/riscv/software/bin/kernel.bin'))
-      || log.includes('Default bin load skipped (404): ./assets/fixtures/riscv/software/bin/kernel.bin')
+      (log.includes('Loaded default bin (main)') && log.includes('./assets/fixtures/riscv/software/bin/xv6_kernel.bin'))
+      || log.includes('Default bin load skipped (404): ./assets/fixtures/riscv/software/bin/xv6_kernel.bin')
     );
   }, null, { timeout: 30000, polling: 100 });
 
   const eventLog = await getEventLog(page);
-  const kernelLoaded = /Loaded default bin \(main\).*kernel\.bin/.test(eventLog);
-  const kernelSkipped = /Default bin load skipped \(404\): .*kernel\.bin/.test(eventLog);
+  const kernelLoaded = /Loaded default bin \(main\).*xv6_kernel\.bin/.test(eventLog);
+  const kernelSkipped = /Default bin load skipped \(404\): .*xv6_kernel\.bin/.test(eventLog);
   assert.ok(kernelLoaded || kernelSkipped, 'expected kernel default bin to load or be explicitly skipped');
   assert.equal(
     eventLog.includes('Default bin load failed or unsupported for space "main"'),

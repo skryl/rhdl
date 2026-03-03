@@ -14,9 +14,9 @@ module RHDL
     module RISCV
       # Continuous verbose tracer for xv6 boot progress on native IR backends.
       class Xv6BootTracer
-        DEFAULT_KERNEL = File.expand_path('../software/bin/kernel.bin', __dir__)
-        DEFAULT_FS_IMG = File.expand_path('../software/bin/fs.img', __dir__)
-        DEFAULT_SYMBOLS = File.expand_path('../software/bin/kernel.nm', __dir__)
+        DEFAULT_KERNEL = File.expand_path('../software/bin/xv6_kernel.bin', __dir__)
+        DEFAULT_FS_IMG = File.expand_path('../software/bin/xv6_fs.img', __dir__)
+        DEFAULT_SYMBOLS = File.expand_path('../software/bin/xv6_kernel.nm', __dir__)
 
         STAGE_TABLE = [
           [0x8000_0000..0x8000_0640, 'early_boot'],
@@ -494,9 +494,9 @@ if __FILE__ == $PROGRAM_NAME
 
       opts[:backend] = value
     end
-    o.on('--kernel PATH', 'Path to xv6 kernel.bin') { |v| opts[:kernel] = File.expand_path(v) }
-    o.on('--fs PATH', 'Path to xv6 fs.img') { |v| opts[:fs] = File.expand_path(v) }
-    o.on('--symbols PATH', 'Path to kernel.nm symbol map (default: software/bin/kernel.nm)') do |v|
+    o.on('--kernel PATH', 'Path to xv6_kernel.bin') { |v| opts[:kernel] = File.expand_path(v) }
+    o.on('--fs PATH', 'Path to xv6_fs.img') { |v| opts[:fs] = File.expand_path(v) }
+    o.on('--symbols PATH', 'Path to xv6_kernel.nm symbol map (default: software/bin/xv6_kernel.nm)') do |v|
       opts[:symbols] = File.expand_path(v)
     end
     o.on('--no-symbols', 'Disable symbolized PC labels') { opts[:symbols] = nil }

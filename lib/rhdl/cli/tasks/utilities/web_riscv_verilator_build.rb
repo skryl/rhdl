@@ -13,7 +13,7 @@ module RHDL
       # The produced module exports the lightweight sim_* ABI used by
       # web/bench/riscv_wasm_bench.mjs.
       module WebRiscvVerilatorBuild
-        PROJECT_ROOT = File.expand_path('../../../..', __dir__)
+        PROJECT_ROOT = File.expand_path('../../../../..', __dir__)
         BUILD_DIR = File.join(PROJECT_ROOT, 'web', 'build', 'verilator', 'riscv_build')
         VERILOG_DIR = File.join(BUILD_DIR, 'verilog')
         OBJ_DIR = File.join(BUILD_DIR, 'obj_dir')
@@ -30,7 +30,9 @@ module RHDL
         TOP_MODULE = 'riscv_cpu'
         VERILATOR_PREFIX = 'Vriscv'
 
-        DEFAULT_MEM_SIZE = 16 * 1024 * 1024
+        # Match the canonical RISC-V headless runner RAM size so linux_kernel +
+        # initramfs + dtb/bootstrap load addresses fit without aliasing.
+        DEFAULT_MEM_SIZE = 128 * 1024 * 1024
 
         REQUIRED_TOOLS = %w[verilator em++].freeze
         LINK_EXPORTS = %w[
@@ -38,6 +40,8 @@ module RHDL
           sim_write_pc sim_load_mem sim_read_mem_word sim_run_cycles
           sim_uart_rx_push sim_uart_tx_len sim_uart_tx_copy sim_uart_tx_clear
           sim_disk_load sim_disk_read_byte sim_wasm_alloc sim_wasm_dealloc
+          sim_get_caps sim_signal sim_exec sim_trace sim_blob
+          runner_get_caps runner_mem runner_run runner_control runner_probe
         ].freeze
 
         module_function
@@ -118,6 +122,7 @@ module RHDL
             struct SimContext {
               Vriscv* dut;
               MemState mem;
+              uint8_t trace_enabled;
             };
 
             #define CTX(c) (static_cast<SimContext*>(c))
@@ -149,6 +154,161 @@ module RHDL
 
             #{run_cycles_impl}
 
+            #define SIM_CAP_SIGNAL_INDEX      (1u << 0)
+            #define SIM_CAP_TRACE             (1u << 2)
+            #define SIM_CAP_RUNNER_INTERP_JIT (1u << 4)
+
+            #define SIM_SIGNAL_HAS        0u
+            #define SIM_SIGNAL_GET_INDEX  1u
+            #define SIM_SIGNAL_PEEK       2u
+            #define SIM_SIGNAL_POKE       3u
+            #define SIM_SIGNAL_PEEK_INDEX 4u
+            #define SIM_SIGNAL_POKE_INDEX 5u
+
+            #define SIM_EXEC_EVALUATE       0u
+            #define SIM_EXEC_TICK           1u
+            #define SIM_EXEC_TICK_FORCED    2u
+            #define SIM_EXEC_SET_PREV_CLOCK 3u
+            #define SIM_EXEC_GET_CLOCK_LIST_IDX 4u
+            #define SIM_EXEC_RESET          5u
+            #define SIM_EXEC_RUN_TICKS      6u
+            #define SIM_EXEC_SIGNAL_COUNT   7u
+            #define SIM_EXEC_REG_COUNT      8u
+            #define SIM_EXEC_COMPILE        9u
+            #define SIM_EXEC_IS_COMPILED    10u
+
+            #define SIM_TRACE_START             0u
+            #define SIM_TRACE_START_STREAMING   1u
+            #define SIM_TRACE_STOP              2u
+            #define SIM_TRACE_ENABLED           3u
+            #define SIM_TRACE_CAPTURE           4u
+            #define SIM_TRACE_ADD_SIGNAL        5u
+            #define SIM_TRACE_ADD_SIGNALS_MATCHING 6u
+            #define SIM_TRACE_ALL_SIGNALS       7u
+            #define SIM_TRACE_CLEAR_SIGNALS     8u
+            #define SIM_TRACE_CLEAR             9u
+            #define SIM_TRACE_CHANGE_COUNT      10u
+            #define SIM_TRACE_SIGNAL_COUNT      11u
+            #define SIM_TRACE_SET_TIMESCALE     12u
+            #define SIM_TRACE_SET_MODULE_NAME   13u
+            #define SIM_TRACE_SAVE_VCD          14u
+
+            #define SIM_BLOB_INPUT_NAMES       0u
+            #define SIM_BLOB_OUTPUT_NAMES      1u
+            #define SIM_BLOB_TRACE_TO_VCD      2u
+            #define SIM_BLOB_TRACE_TAKE_LIVE_VCD 3u
+            #define SIM_BLOB_GENERATED_CODE    4u
+
+            #define RUNNER_KIND_RISCV          5
+
+            #define RUNNER_MEM_OP_LOAD         0u
+            #define RUNNER_MEM_OP_READ         1u
+            #define RUNNER_MEM_OP_WRITE        2u
+
+            #define RUNNER_MEM_SPACE_MAIN      0u
+            #define RUNNER_MEM_SPACE_ROM       1u
+            #define RUNNER_MEM_SPACE_DISK      7u
+            #define RUNNER_MEM_SPACE_UART_TX   8u
+            #define RUNNER_MEM_SPACE_UART_RX   9u
+            #define RUNNER_MEM_FLAG_MAPPED     1u
+
+            #define RUNNER_CONTROL_SET_RESET_VECTOR 0u
+            #define RUNNER_CONTROL_CLEAR_UART_TX    6u
+
+            #define RUNNER_PROBE_KIND              0u
+            #define RUNNER_PROBE_IS_MODE           1u
+            #define RUNNER_PROBE_SIGNAL            9u
+            #define RUNNER_PROBE_RISCV_UART_TX_LEN 17u
+
+            static const char* k_input_signal_names[] = {
+              "clk", "rst", "irq_software", "irq_timer", "irq_external",
+              "inst_data", "data_rdata", "debug_reg_addr",
+              "inst_ptw_pte0", "inst_ptw_pte1", "data_ptw_pte0", "data_ptw_pte1"
+            };
+            static const char* k_output_signal_names[] = {
+              "inst_addr", "inst_ptw_addr0", "inst_ptw_addr1",
+              "data_addr", "data_wdata", "data_we", "data_re", "data_funct3",
+              "data_ptw_addr0", "data_ptw_addr1",
+              "debug_pc", "debug_inst", "debug_x1", "debug_x2", "debug_x10", "debug_x11", "debug_reg_data"
+            };
+            static const char k_input_names_csv[] =
+              "clk,rst,irq_software,irq_timer,irq_external,inst_data,data_rdata,debug_reg_addr,"
+              "inst_ptw_pte0,inst_ptw_pte1,data_ptw_pte0,data_ptw_pte1";
+            static const char k_output_names_csv[] =
+              "inst_addr,inst_ptw_addr0,inst_ptw_addr1,data_addr,data_wdata,data_we,data_re,data_funct3,"
+              "data_ptw_addr0,data_ptw_addr1,debug_pc,debug_inst,debug_x1,debug_x2,debug_x10,debug_x11,debug_reg_data";
+            static const uint32_t k_input_signal_count = static_cast<uint32_t>(sizeof(k_input_signal_names) / sizeof(k_input_signal_names[0]));
+            static const uint32_t k_output_signal_count = static_cast<uint32_t>(sizeof(k_output_signal_names) / sizeof(k_output_signal_names[0]));
+
+            static uint32_t total_signal_count() {
+              return k_input_signal_count + k_output_signal_count;
+            }
+
+            static const char* signal_name_from_index(uint32_t idx) {
+              if (idx < k_input_signal_count) return k_input_signal_names[idx];
+              idx -= k_input_signal_count;
+              if (idx < k_output_signal_count) return k_output_signal_names[idx];
+              return nullptr;
+            }
+
+            static int32_t signal_index_from_name(const char* name) {
+              if (!name) return -1;
+              for (uint32_t i = 0; i < k_input_signal_count; i++) {
+                if (!std::strcmp(name, k_input_signal_names[i])) return static_cast<int32_t>(i);
+              }
+              for (uint32_t i = 0; i < k_output_signal_count; i++) {
+                if (!std::strcmp(name, k_output_signal_names[i])) return static_cast<int32_t>(k_input_signal_count + i);
+              }
+              return -1;
+            }
+
+            static void write_out_u32(uint32_t* out, uint32_t value) {
+              if (out) *out = value;
+            }
+
+            static uint32_t blob_write_text(const char* text, uint8_t* ptr, uint32_t max_bytes) {
+              const auto len = static_cast<uint32_t>(std::strlen(text));
+              if (!ptr || max_bytes == 0) return len;
+              const uint32_t n = len < max_bytes ? len : max_bytes;
+              if (n > 0) std::memcpy(ptr, text, n);
+              return n;
+            }
+
+            static uint32_t read_mem_bytes(SimContext* ctx, int32_t mem_type, uint32_t offset, uint8_t* out, uint32_t len) {
+              if (!ctx || !out || len == 0) return 0;
+              const uint8_t* mem = mem_type == MEM_TYPE_INST ? ctx->mem.inst_mem : ctx->mem.data_mem;
+              for (uint32_t i = 0; i < len; i++) {
+                const uint32_t byte_addr = offset + i;
+                const uint32_t aligned = byte_addr & ~3u;
+                const uint32_t shift = (byte_addr & 3u) * 8u;
+                const uint32_t word = read_word_le(mem, ctx->mem.mem_mask, aligned);
+                out[i] = static_cast<uint8_t>((word >> shift) & 0xFFu);
+              }
+              return len;
+            }
+
+            static uint32_t read_uart_tx_bytes(SimContext* ctx, uint32_t offset, uint8_t* out, uint32_t len) {
+              if (!ctx || !out || len == 0) return 0;
+              const uint32_t available = uart_tx_len(&ctx->mem);
+              if (offset >= available) return 0;
+              uint32_t n = available - offset;
+              if (n > len) n = len;
+              std::memcpy(out, ctx->mem.uart_tx_bytes + offset, n);
+              return n;
+            }
+
+            static inline uint32_t runner_main_resolve_offset(uint32_t offset, uint32_t flags) {
+              if ((flags & RUNNER_MEM_FLAG_MAPPED) == 0u) {
+                return offset;
+              }
+              // Linux kernel direct-map on RV32:
+              // virtual 0xC0000000.. maps to physical 0x80000000..
+              if (offset >= 0xC0000000u) {
+                return offset - 0x40000000u;
+              }
+              return offset;
+            }
+
             extern "C" {
             __attribute__((export_name("sim_wasm_alloc")))
             void* sim_wasm_alloc(uint32_t size) {
@@ -162,18 +322,18 @@ module RHDL
             }
 
             __attribute__((export_name("sim_create")))
-            void* sim_create(uint32_t mem_size) {
+            void* sim_create(const char* json, uint32_t json_len, uint32_t sub_cycles, uint32_t* err_out) {
+              (void)json;
+              (void)json_len;
+              (void)sub_cycles;
+              write_out_u32(err_out, 0);
               const char* empty_args[] = {""};
               Verilated::commandArgs(1, empty_args);
 
               auto* ctx = new SimContext();
               ctx->dut = new Vriscv();
 
-              uint32_t actual_mem = mem_size;
-              if (actual_mem == 0u || (actual_mem & (actual_mem - 1u)) != 0u) {
-                actual_mem = #{DEFAULT_MEM_SIZE};
-              }
-              mem_init(&ctx->mem, actual_mem);
+              mem_init(&ctx->mem, #{DEFAULT_MEM_SIZE});
 
               ctx->dut->clk = 0;
               ctx->dut->rst = 1;
@@ -187,6 +347,7 @@ module RHDL
               ctx->dut->inst_ptw_pte1 = 0;
               ctx->dut->data_ptw_pte0 = 0;
               ctx->dut->data_ptw_pte1 = 0;
+              ctx->trace_enabled = 0;
               ctx->dut->eval();
               return ctx;
             }
@@ -333,6 +494,286 @@ module RHDL
               auto* ctx = static_cast<SimContext*>(sim);
               if (!ctx) return 0;
               return static_cast<uint32_t>(disk_read_byte(&ctx->mem, offset));
+            }
+
+            __attribute__((export_name("sim_get_caps")))
+            uint32_t sim_get_caps(void* sim, uint32_t* out_caps) {
+              (void)sim;
+              write_out_u32(out_caps, SIM_CAP_SIGNAL_INDEX | SIM_CAP_TRACE | SIM_CAP_RUNNER_INTERP_JIT);
+              return 1;
+            }
+
+            __attribute__((export_name("sim_signal")))
+            uint32_t sim_signal(void* sim, uint32_t op, const char* name, uint32_t idx, uint32_t value, uint32_t* out_value) {
+              int32_t resolved_idx = -1;
+              const char* resolved_name = nullptr;
+              if (name && name[0]) {
+                resolved_idx = signal_index_from_name(name);
+                resolved_name = name;
+              } else {
+                resolved_name = signal_name_from_index(idx);
+                resolved_idx = resolved_name ? static_cast<int32_t>(idx) : -1;
+              }
+
+              switch (op) {
+                case SIM_SIGNAL_HAS:
+                  write_out_u32(out_value, resolved_idx >= 0 ? 1u : 0u);
+                  return resolved_idx >= 0 ? 1u : 0u;
+                case SIM_SIGNAL_GET_INDEX:
+                  if (resolved_idx < 0) {
+                    write_out_u32(out_value, 0xFFFFFFFFu);
+                    return 0;
+                  }
+                  write_out_u32(out_value, static_cast<uint32_t>(resolved_idx));
+                  return 1;
+                case SIM_SIGNAL_PEEK:
+                case SIM_SIGNAL_PEEK_INDEX:
+                  if (resolved_idx < 0 || !resolved_name) {
+                    write_out_u32(out_value, 0u);
+                    return 0;
+                  }
+                  write_out_u32(out_value, sim_peek(sim, resolved_name));
+                  return 1;
+                case SIM_SIGNAL_POKE:
+                case SIM_SIGNAL_POKE_INDEX:
+                  if (resolved_idx < 0 || !resolved_name) {
+                    write_out_u32(out_value, 0u);
+                    return 0;
+                  }
+                  sim_poke(sim, resolved_name, value);
+                  write_out_u32(out_value, 1u);
+                  return 1;
+                default:
+                  write_out_u32(out_value, 0u);
+                  return 0;
+              }
+            }
+
+            __attribute__((export_name("sim_exec")))
+            uint32_t sim_exec(void* sim, uint32_t op, uint32_t arg0, uint32_t arg1, uint32_t* out_value, uint32_t* err_out) {
+              (void)arg1;
+              write_out_u32(err_out, 0u);
+              switch (op) {
+                case SIM_EXEC_EVALUATE:
+                  sim_eval(sim);
+                  write_out_u32(out_value, 0u);
+                  return 1;
+                case SIM_EXEC_TICK:
+                case SIM_EXEC_TICK_FORCED:
+                  sim_run_cycles(sim, 1u);
+                  write_out_u32(out_value, 0u);
+                  return 1;
+                case SIM_EXEC_SET_PREV_CLOCK:
+                  write_out_u32(out_value, 0u);
+                  return 1;
+                case SIM_EXEC_GET_CLOCK_LIST_IDX:
+                  write_out_u32(out_value, 0xFFFFFFFFu);
+                  return 1;
+                case SIM_EXEC_RESET:
+                  sim_reset(sim);
+                  write_out_u32(out_value, 0u);
+                  return 1;
+                case SIM_EXEC_RUN_TICKS:
+                  sim_run_cycles(sim, arg0);
+                  write_out_u32(out_value, 0u);
+                  return 1;
+                case SIM_EXEC_SIGNAL_COUNT:
+                  write_out_u32(out_value, total_signal_count());
+                  return 1;
+                case SIM_EXEC_REG_COUNT:
+                  write_out_u32(out_value, 0u);
+                  return 1;
+                case SIM_EXEC_COMPILE:
+                case SIM_EXEC_IS_COMPILED:
+                  write_out_u32(out_value, 1u);
+                  return 1;
+                default:
+                  write_out_u32(out_value, 0u);
+                  return 0;
+              }
+            }
+
+            __attribute__((export_name("sim_trace")))
+            uint32_t sim_trace(void* sim, uint32_t op, const char* arg, uint32_t* out_value) {
+              (void)arg;
+              auto* ctx = static_cast<SimContext*>(sim);
+              if (!ctx) {
+                write_out_u32(out_value, 0u);
+                return 0;
+              }
+
+              switch (op) {
+                case SIM_TRACE_START:
+                case SIM_TRACE_START_STREAMING:
+                  ctx->trace_enabled = 1;
+                  write_out_u32(out_value, 1u);
+                  return 1;
+                case SIM_TRACE_STOP:
+                  ctx->trace_enabled = 0;
+                  write_out_u32(out_value, 0u);
+                  return 1;
+                case SIM_TRACE_ENABLED:
+                  write_out_u32(out_value, ctx->trace_enabled ? 1u : 0u);
+                  return 1;
+                case SIM_TRACE_CHANGE_COUNT:
+                  write_out_u32(out_value, 0u);
+                  return 1;
+                case SIM_TRACE_SIGNAL_COUNT:
+                  write_out_u32(out_value, total_signal_count());
+                  return 1;
+                case SIM_TRACE_CAPTURE:
+                case SIM_TRACE_ADD_SIGNAL:
+                case SIM_TRACE_ADD_SIGNALS_MATCHING:
+                case SIM_TRACE_ALL_SIGNALS:
+                case SIM_TRACE_CLEAR_SIGNALS:
+                case SIM_TRACE_CLEAR:
+                case SIM_TRACE_SET_TIMESCALE:
+                case SIM_TRACE_SET_MODULE_NAME:
+                case SIM_TRACE_SAVE_VCD:
+                  write_out_u32(out_value, 0u);
+                  return 1;
+                default:
+                  write_out_u32(out_value, 0u);
+                  return 0;
+              }
+            }
+
+            __attribute__((export_name("sim_blob")))
+            uint32_t sim_blob(void* sim, uint32_t op, uint8_t* ptr, uint32_t max_bytes) {
+              (void)sim;
+              if (op == SIM_BLOB_INPUT_NAMES) {
+                return blob_write_text(k_input_names_csv, ptr, max_bytes);
+              }
+              if (op == SIM_BLOB_OUTPUT_NAMES) {
+                return blob_write_text(k_output_names_csv, ptr, max_bytes);
+              }
+              return blob_write_text("", ptr, max_bytes);
+            }
+
+            __attribute__((export_name("runner_get_caps")))
+            uint32_t runner_get_caps(void* sim, uint32_t* caps_ptr) {
+              (void)sim;
+              if (!caps_ptr) return 0;
+              caps_ptr[0] = static_cast<uint32_t>(RUNNER_KIND_RISCV);
+              caps_ptr[1] =
+                (1u << RUNNER_MEM_SPACE_MAIN)
+                | (1u << RUNNER_MEM_SPACE_ROM)
+                | (1u << RUNNER_MEM_SPACE_DISK)
+                | (1u << RUNNER_MEM_SPACE_UART_TX)
+                | (1u << RUNNER_MEM_SPACE_UART_RX);
+              caps_ptr[2] =
+                (1u << RUNNER_CONTROL_SET_RESET_VECTOR)
+                | (1u << RUNNER_CONTROL_CLEAR_UART_TX);
+              caps_ptr[3] =
+                (1u << RUNNER_PROBE_KIND)
+                | (1u << RUNNER_PROBE_IS_MODE)
+                | (1u << RUNNER_PROBE_SIGNAL)
+                | (1u << RUNNER_PROBE_RISCV_UART_TX_LEN);
+              return 1;
+            }
+
+            __attribute__((export_name("runner_mem")))
+            uint32_t runner_mem(
+              void* sim,
+              uint32_t op,
+              uint32_t space,
+              uint32_t offset,
+              uint8_t* ptr,
+              uint32_t len,
+              uint32_t flags
+            ) {
+              if (!sim || !ptr || len == 0) return 0;
+
+              if (op == RUNNER_MEM_OP_LOAD) {
+                if (space == RUNNER_MEM_SPACE_MAIN || space == RUNNER_MEM_SPACE_ROM) {
+                  sim_load_mem(sim, MEM_TYPE_INST, ptr, len, offset);
+                  sim_load_mem(sim, MEM_TYPE_DATA, ptr, len, offset);
+                  return len;
+                }
+                if (space == RUNNER_MEM_SPACE_DISK) {
+                  return sim_disk_load(sim, ptr, len, offset);
+                }
+                return 0;
+              }
+
+              if (op == RUNNER_MEM_OP_READ) {
+                auto* ctx = static_cast<SimContext*>(sim);
+                if (space == RUNNER_MEM_SPACE_MAIN) {
+                  const uint32_t resolved = runner_main_resolve_offset(offset, flags);
+                  return read_mem_bytes(ctx, MEM_TYPE_DATA, resolved, ptr, len);
+                }
+                if (space == RUNNER_MEM_SPACE_ROM) {
+                  return read_mem_bytes(ctx, MEM_TYPE_INST, offset, ptr, len);
+                }
+                if (space == RUNNER_MEM_SPACE_UART_TX) {
+                  return read_uart_tx_bytes(ctx, offset, ptr, len);
+                }
+                return 0;
+              }
+
+              if (op == RUNNER_MEM_OP_WRITE) {
+                if (space == RUNNER_MEM_SPACE_UART_RX) {
+                  sim_uart_rx_push(sim, ptr, len);
+                  return len;
+                }
+                if (space == RUNNER_MEM_SPACE_MAIN) {
+                  const uint32_t resolved = runner_main_resolve_offset(offset, flags);
+                  sim_load_mem(sim, MEM_TYPE_DATA, ptr, len, resolved);
+                  return len;
+                }
+                return 0;
+              }
+
+              return 0;
+            }
+
+            __attribute__((export_name("runner_run")))
+            uint32_t runner_run(void* sim, uint32_t cycles, uint32_t key_data, uint32_t key_ready, uint32_t mode, uint32_t* result_ptr) {
+              (void)mode;
+              if (!sim) return 0;
+              if (key_ready) {
+                uint8_t key = static_cast<uint8_t>(key_data & 0xFFu);
+                sim_uart_rx_push(sim, &key, 1u);
+              }
+              sim_run_cycles(sim, cycles);
+              if (result_ptr) {
+                result_ptr[0] = 0u;                    /* text_dirty */
+                result_ptr[1] = key_ready ? 1u : 0u;  /* key_cleared */
+                result_ptr[2] = cycles;               /* cycles_run */
+                result_ptr[3] = 0u;                   /* speaker_toggles */
+                result_ptr[4] = 0u;                   /* frames_completed */
+              }
+              return 1;
+            }
+
+            __attribute__((export_name("runner_control")))
+            uint32_t runner_control(void* sim, uint32_t op, uint32_t arg0, uint32_t arg1) {
+              (void)arg1;
+              if (!sim) return 0;
+              if (op == RUNNER_CONTROL_SET_RESET_VECTOR) {
+                sim_write_pc(sim, arg0);
+                return 1;
+              }
+              if (op == RUNNER_CONTROL_CLEAR_UART_TX) {
+                sim_uart_tx_clear(sim);
+                return 1;
+              }
+              return 0;
+            }
+
+            __attribute__((export_name("runner_probe")))
+            uint32_t runner_probe(void* sim, uint32_t op, uint32_t arg0) {
+              if (!sim) return 0;
+              if (op == RUNNER_PROBE_KIND) return static_cast<uint32_t>(RUNNER_KIND_RISCV);
+              if (op == RUNNER_PROBE_IS_MODE) return 1u;
+              if (op == RUNNER_PROBE_RISCV_UART_TX_LEN) return sim_uart_tx_len(sim);
+              if (op == RUNNER_PROBE_SIGNAL) {
+                if (arg0 < k_output_signal_count) {
+                  return sim_peek(sim, k_output_signal_names[arg0]);
+                }
+                return 0u;
+              }
+              return 0u;
             }
             } // extern "C"
           CPP

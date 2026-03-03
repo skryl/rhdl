@@ -9,6 +9,7 @@ import {
 export const DASHBOARD_LAYOUT_KEY = 'rhdl.ir.web.dashboard.layout.v1';
 export const DASHBOARD_DROP_POSITIONS = new Set(['left', 'right', 'above', 'below']);
 export const DASHBOARD_MIN_ROW_HEIGHT = 140;
+export const DASHBOARD_RESIZE_HANDLE_WIDTH = 46;
 export const DASHBOARD_ROOT_CONFIGS = [
   {
     key: 'controls',
@@ -164,9 +165,22 @@ export function createDashboardLayoutManager(options: unknown) {
     return String(heading?.textContent || '').trim() || 'Panel';
   }
 
+  function isComponentGraphHalfWidthPanel(panel: unknown) {
+    if (!isHtmlElement(panel)) {
+      return false;
+    }
+    return panel.classList.contains('component-live-panel') || panel.classList.contains('component-connection-panel');
+  }
+
   function defaultDashboardSpan(rootKey: unknown, panel: unknown) {
-    void rootKey;
-    void panel;
+    if (rootKey === 'componentGraphTab' && isHtmlElement(panel)) {
+      if (panel.classList.contains('component-visual-panel')) {
+        return 'full';
+      }
+      if (isComponentGraphHalfWidthPanel(panel)) {
+        return 'half';
+      }
+    }
     return 'full';
   }
 
@@ -260,31 +274,71 @@ export function createDashboardLayoutManager(options: unknown) {
       if (!signature) {
         continue;
       }
-      let minLeft = Infinity;
-      let maxRight = -Infinity;
-      let maxBottom = -Infinity;
       for (const panel of rowPanels) {
         const rect = panel.getBoundingClientRect();
         if (!(rect.width > 0 && rect.height > 0)) {
           continue;
         }
-        minLeft = Math.min(minLeft, rect.left);
-        maxRight = Math.max(maxRight, rect.right);
-        maxBottom = Math.max(maxBottom, rect.bottom);
+        const centerX = rect.left - rootRect.left + root.scrollLeft + (rect.width * 0.5);
+        const left = Math.max(0, centerX - (DASHBOARD_RESIZE_HANDLE_WIDTH * 0.5));
+        const handle = documentRef.createElement('div');
+        handle.className = 'dashboard-row-resize-handle';
+        handle.dataset.rootKey = rootKey;
+        handle.dataset.rowSignature = signature;
+        handle.dataset.panelItemId = String(panel.dataset.layoutItemId || '').trim();
+        handle.style.left = `${left}px`;
+        handle.style.width = `${DASHBOARD_RESIZE_HANDLE_WIDTH}px`;
+        handle.style.top = `${Math.max(0, rect.bottom - rootRect.top + root.scrollTop - 7)}px`;
+        handle.title = 'Drag to resize row';
+        root.appendChild(handle);
       }
-      if (!Number.isFinite(minLeft) || !Number.isFinite(maxRight) || !Number.isFinite(maxBottom)) {
+    }
+  }
+
+  function updateRowHandlePositions(root: unknown, rowPanels: unknown[], signature: unknown) {
+    if (!isHtmlElement(root)) {
+      return;
+    }
+    const rowSignature = String(signature || '').trim();
+
+    const rootRect = root.getBoundingClientRect();
+    if (!(rootRect.width > 0 && rootRect.height > 0)) {
+      return;
+    }
+
+    const panelsByItemId = new Map();
+    for (const panel of rowPanels || []) {
+      if (!isHtmlElement(panel)) {
         continue;
       }
+      const itemId = String(panel.dataset.layoutItemId || '').trim();
+      if (!itemId) {
+        continue;
+      }
+      panelsByItemId.set(itemId, panel);
+    }
 
-      const handle = documentRef.createElement('div');
-      handle.className = 'dashboard-row-resize-handle';
-      handle.dataset.rootKey = rootKey;
-      handle.dataset.rowSignature = signature;
-      handle.style.left = `${Math.max(0, minLeft - rootRect.left + root.scrollLeft)}px`;
-      handle.style.width = `${Math.max(0, maxRight - minLeft)}px`;
-      handle.style.top = `${Math.max(0, maxBottom - rootRect.top + root.scrollTop - 4)}px`;
-      handle.title = 'Drag to resize row';
-      root.appendChild(handle);
+    const handles = Array.from(root.querySelectorAll(':scope > .dashboard-row-resize-handle'));
+    for (const handle of handles as unknown[]) {
+      if (!isHtmlElement(handle)) {
+        continue;
+      }
+      if (rowSignature && String(handle.dataset.rowSignature || '').trim() !== rowSignature) {
+        continue;
+      }
+      const panelItemId = String(handle.dataset.panelItemId || '').trim();
+      const panel = panelsByItemId.get(panelItemId);
+      if (!isHtmlElement(panel)) {
+        continue;
+      }
+      const rect = panel.getBoundingClientRect();
+      if (!(rect.width > 0 && rect.height > 0)) {
+        continue;
+      }
+      const centerX = rect.left - rootRect.left + root.scrollLeft + (rect.width * 0.5);
+      const left = Math.max(0, centerX - (DASHBOARD_RESIZE_HANDLE_WIDTH * 0.5));
+      handle.style.left = `${left}px`;
+      handle.style.top = `${Math.max(0, rect.bottom - rootRect.top + root.scrollTop - 7)}px`;
     }
   }
 
@@ -349,6 +403,7 @@ export function createDashboardLayoutManager(options: unknown) {
       panel.classList.add('dashboard-row-sized');
       panel.style.setProperty('--dashboard-row-height', `${Math.round(nextHeight)}px`);
     }
+    updateRowHandlePositions(root, dashboardRootPanels(root), '');
   }
 
   function handleDashboardResizeMouseUp() {
@@ -485,6 +540,28 @@ export function createDashboardLayoutManager(options: unknown) {
     }
   }
 
+  function hasLegacyComponentGraphFullWidthSpans(rootKey: unknown, panels: unknown[], savedSpans: unknown) {
+    if (rootKey !== 'componentGraphTab' || !savedSpans || typeof savedSpans !== 'object') {
+      return false;
+    }
+    let sawTrackedPanel = false;
+    for (const panel of panels) {
+      if (!isComponentGraphHalfWidthPanel(panel)) {
+        continue;
+      }
+      const itemId = String(panel.dataset.layoutItemId || '').trim();
+      if (!itemId || !Object.prototype.hasOwnProperty.call(savedSpans, itemId)) {
+        continue;
+      }
+      sawTrackedPanel = true;
+      const normalized = normalizeDashboardSpan(savedSpans[itemId], 'half');
+      if (normalized !== 'full') {
+        return false;
+      }
+    }
+    return sawTrackedPanel;
+  }
+
   function applySavedDashboardLayout(rootKey: unknown, root: unknown) {
     const layout = dashboard.layouts?.[rootKey];
     const panels = dashboardRootPanels(root) as unknown[];
@@ -512,10 +589,12 @@ export function createDashboardLayoutManager(options: unknown) {
     }
 
     const savedSpans = layout && layout.spans && typeof layout.spans === 'object' ? layout.spans : {};
+    const useComponentGraphDefaults = hasLegacyComponentGraphFullWidthSpans(rootKey, panels, savedSpans);
     for (const panel of dashboardRootPanels(root) as unknown[]) {
       const itemId = String(panel.dataset.layoutItemId || '').trim();
       const fallback = defaultDashboardSpan(rootKey, panel);
-      panel.dataset.layoutSpan = normalizeDashboardSpan(savedSpans[itemId], fallback);
+      const savedSpan = useComponentGraphDefaults ? undefined : savedSpans[itemId];
+      panel.dataset.layoutSpan = normalizeDashboardSpan(savedSpan, fallback);
     }
     normalizeDashboardSpansForRoot(root);
   }

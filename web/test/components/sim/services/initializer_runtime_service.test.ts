@@ -381,7 +381,7 @@ test('initializeApple2Mode supports runner-mapped memory API fallback for uart r
         memory: { addressSpace: 0xFFFFFFFF }
       },
       defaultBin: {
-        path: '/fixtures/kernel.bin',
+        path: '/fixtures/xv6_kernel.bin',
         offset: 0x80000000,
         space: 'main',
         startPc: '0x80000000',
@@ -433,11 +433,11 @@ test('initializeApple2Mode loads riscv default disk image before default kernel 
     state: { apple2: { enabled: false, baseRomBytes: null } },
     preset: {
       defaultDisk: {
-        path: '/fixtures/riscv/fs.img',
+        path: '/fixtures/riscv/xv6_fs.img',
         offset: 0
       },
       defaultBin: {
-        path: '/fixtures/riscv/kernel.bin',
+        path: '/fixtures/riscv/xv6_kernel.bin',
         offset: 0x80000000,
         space: 'main',
         startPc: '0x80000000',
@@ -446,7 +446,7 @@ test('initializeApple2Mode loads riscv default disk image before default kernel 
     },
     addWatchSignal: () => {},
     fetchImpl: async (path: string) => {
-      if (String(path).includes('fs.img')) {
+      if (String(path).includes('xv6_fs.img')) {
         return {
           ok: true,
           async arrayBuffer() {
@@ -490,7 +490,7 @@ test('initializeApple2Mode loads large default disk image in chunks', async () =
     state: { apple2: { enabled: false, baseRomBytes: null } },
     preset: {
       defaultDisk: {
-        path: '/fixtures/riscv/fs.img',
+        path: '/fixtures/riscv/xv6_fs.img',
         offset: 0x1000
       }
     },
@@ -540,7 +540,7 @@ test('initializeApple2Mode loads ordered defaultAssets for riscv linux preset', 
       defaultAssets: [
         { kind: 'main', path: '/fixtures/riscv/linux_kernel.bin', offset: '0x80400000' },
         { kind: 'main', path: '/fixtures/riscv/linux_initramfs.cpio', offset: '0x84000000' },
-        { kind: 'main', path: '/fixtures/riscv/rhdl_riscv_virt.dtb', offset: '0x87f00000' },
+        { kind: 'main', path: '/fixtures/riscv/linux_virt.dtb', offset: '0x87f00000' },
         { kind: 'main', path: '/fixtures/riscv/linux_bootstrap.bin', offset: '0x803ff000', startPc: '0x803ff000', resetAfterLoad: true }
       ]
     },
@@ -598,7 +598,7 @@ test('initializeApple2Mode repairs riscv start PC when reset-vector apply report
     state: { apple2: { enabled: false, baseRomBytes: null } },
     preset: {
       defaultBin: {
-        path: '/fixtures/kernel.bin',
+        path: '/fixtures/xv6_kernel.bin',
         offset: 0x80000000,
         space: 'main',
         startPc: '0x80000000',
@@ -651,7 +651,7 @@ test('initializeApple2Mode applies riscv moderate fast-boot PHYSTOP patch to def
     state: { apple2: { enabled: false, baseRomBytes: null } },
     preset: {
       defaultBin: {
-        path: '/fixtures/riscv/kernel.bin',
+        path: '/fixtures/riscv/xv6_kernel.bin',
         offset: 0x80000000,
         space: 'main',
         startPc: '0x80000000',
@@ -702,7 +702,7 @@ test('initializeApple2Mode applies riscv aggressive fast-boot PHYSTOP patch when
     state: { apple2: { enabled: false, baseRomBytes: null } },
     preset: {
       defaultBin: {
-        path: '/fixtures/riscv/kernel.bin',
+        path: '/fixtures/riscv/xv6_kernel.bin',
         offset: 0x80000000,
         space: 'main',
         startPc: '0x80000000',

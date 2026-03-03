@@ -1,5 +1,7 @@
 #!/bin/sh
 
 # Default shell environment for RHDL Linux initramfs.
-# Disable ANSI color escapes in UART terminals that do not render them.
-alias ls='ls --color=never'
+# Disable ANSI color escapes in UART terminals when ls supports --color.
+if /bin/busybox ls --color=never / >/dev/null 2>&1; then
+  alias ls='ls --color=never'
+fi

@@ -15,7 +15,7 @@ module RHDL
       # runner extensions, with the circuit evaluation function compiled directly
       # from MLIR rather than going through the IR simulator layer.
       module WebApple2ArcilatorBuild
-        PROJECT_ROOT = File.expand_path('../../../..', __dir__)
+        PROJECT_ROOT = File.expand_path('../../../../..', __dir__)
         BUILD_DIR = File.join(PROJECT_ROOT, 'web', 'build', 'arcilator', 'build')
         WRAPPER_SOURCE = File.join(BUILD_DIR, 'arc_wasm_wrapper.c')
         FIRRTL_FILE = File.join(BUILD_DIR, 'apple2.fir')
@@ -175,8 +175,8 @@ module RHDL
             '--no-entry',
             '--export-dynamic',
             '--allow-undefined',
-            '--initial-memory=4194304',   # 4 MB initial WASM memory
-            '--max-memory=16777216',       # 16 MB max
+            '--initial-memory=16777216',   # 16 MB initial WASM memory
+            '--max-memory=67108864',       # 64 MB max
             '-o', WASM_OUTPUT,
             OBJ_WRAPPER, OBJ_ARC
           )
@@ -267,8 +267,8 @@ module RHDL
 
             /* ---- Simple bump allocator for WASM ---- */
 
-            /* Heap region: 512 KB for temporary allocations */
-            #define HEAP_SIZE (512 * 1024)
+            /* Heap region for temporary allocations (IR JSON + staging buffers) */
+            #define HEAP_SIZE (8 * 1024 * 1024)
             static uint8_t g_heap[HEAP_SIZE];
             static uint32_t g_heap_offset = 0;
 
@@ -458,6 +458,13 @@ module RHDL
                 uint32_t speaker_toggles;
                 uint32_t frames_completed;
             } RunnerRunResult;
+
+            static uint32_t normalize_rom_offset(uint32_t offset) {
+                if (offset >= 0xD000u && offset <= 0xFFFFu) {
+                    return offset - 0xD000u;
+                }
+                return offset;
+            }
 
             __attribute__((export_name("sim_create")))
             void *sim_create(const char *json, uint32_t json_len, uint32_t sub_cycles, uint32_t *err_out) {
@@ -662,6 +669,7 @@ module RHDL
 
                 uint8_t *mem = NULL;
                 uint32_t mem_size = 0;
+                uint32_t mem_offset = offset;
 
                 switch (space) {
                 case RUNNER_MEM_SPACE_MAIN:
@@ -671,6 +679,7 @@ module RHDL
                 case RUNNER_MEM_SPACE_ROM:
                     mem = ctx->rom;
                     mem_size = ROM_SIZE;
+                    mem_offset = normalize_rom_offset(offset);
                     break;
                 default:
                     return 0;
@@ -680,8 +689,8 @@ module RHDL
                 case RUNNER_MEM_OP_LOAD:
                 case RUNNER_MEM_OP_WRITE: {
                     uint32_t count = 0;
-                    for (uint32_t i = 0; i < len && (offset + i) < mem_size; i++) {
-                        mem[offset + i] = data[i];
+                    for (uint32_t i = 0; i < len && (mem_offset + i) < mem_size; i++) {
+                        mem[mem_offset + i] = data[i];
                         count++;
                     }
                     return count;
@@ -705,8 +714,8 @@ module RHDL
                         return count;
                     }
                     uint32_t count = 0;
-                    for (uint32_t i = 0; i < len && (offset + i) < mem_size; i++) {
-                        data[i] = mem[offset + i];
+                    for (uint32_t i = 0; i < len && (mem_offset + i) < mem_size; i++) {
+                        data[i] = mem[mem_offset + i];
                         count++;
                     }
                     return count;

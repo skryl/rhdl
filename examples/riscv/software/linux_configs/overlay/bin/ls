@@ -1,2 +1,5 @@
 #!/bin/sh
-exec /bin/busybox ls --color=never "$@"
+if /bin/busybox ls --color=never / >/dev/null 2>&1; then
+  exec /bin/busybox ls --color=never "$@"
+fi
+exec /bin/busybox ls "$@"

@@ -33,20 +33,20 @@ module RHDL
         GAMEBOY_DEFAULT_BIN_SOURCE = File.join(PROJECT_ROOT, 'examples/gameboy/software/roms/dmg_boot.bin')
         SNAPSHOT_KIND = 'rhdl.apple2.ram_snapshot'
         SNAPSHOT_VERSION = 1
-        RISCV_DEFAULT_BIN_SOURCE = File.join(PROJECT_ROOT, 'examples/riscv/software/bin/kernel.bin')
-        RISCV_DEFAULT_BIN_ASSET = File.join(SCRIPT_DIR, 'riscv', 'software', 'bin', 'kernel.bin')
-        RISCV_DEFAULT_SRCMAP_SOURCE = File.join(PROJECT_ROOT, 'examples/riscv/software/bin/kernel_srcmap.json')
-        RISCV_DEFAULT_SRCMAP_ASSET = File.join(SCRIPT_DIR, 'riscv', 'software', 'bin', 'kernel_srcmap.json')
-        RISCV_DEFAULT_DISK_SOURCE = File.join(PROJECT_ROOT, 'examples/riscv/software/bin/fs.img')
-        RISCV_DEFAULT_DISK_ASSET = File.join(SCRIPT_DIR, 'riscv', 'software', 'bin', 'fs.img')
+        RISCV_DEFAULT_BIN_SOURCE = File.join(PROJECT_ROOT, 'examples/riscv/software/bin/xv6_kernel.bin')
+        RISCV_DEFAULT_BIN_ASSET = File.join(SCRIPT_DIR, 'riscv', 'software', 'bin', 'xv6_kernel.bin')
+        RISCV_DEFAULT_SRCMAP_SOURCE = File.join(PROJECT_ROOT, 'examples/riscv/software/bin/xv6_kernel_srcmap.json')
+        RISCV_DEFAULT_SRCMAP_ASSET = File.join(SCRIPT_DIR, 'riscv', 'software', 'bin', 'xv6_kernel_srcmap.json')
+        RISCV_DEFAULT_DISK_SOURCE = File.join(PROJECT_ROOT, 'examples/riscv/software/bin/xv6_fs.img')
+        RISCV_DEFAULT_DISK_ASSET = File.join(SCRIPT_DIR, 'riscv', 'software', 'bin', 'xv6_fs.img')
         RISCV_LINUX_SRCMAP_SOURCE = File.join(PROJECT_ROOT, 'examples/riscv/software/bin/linux_kernel_srcmap.json')
         RISCV_LINUX_SRCMAP_ASSET = File.join(SCRIPT_DIR, 'riscv', 'software', 'bin', 'linux_kernel_srcmap.json')
         RISCV_LINUX_KERNEL_SOURCE = File.join(PROJECT_ROOT, 'examples/riscv/software/bin/linux_kernel.bin')
         RISCV_LINUX_KERNEL_ASSET = File.join(SCRIPT_DIR, 'riscv', 'software', 'bin', 'linux_kernel.bin')
         RISCV_LINUX_INITRAMFS_SOURCE = File.join(PROJECT_ROOT, 'examples/riscv/software/bin/linux_initramfs.cpio')
         RISCV_LINUX_INITRAMFS_ASSET = File.join(SCRIPT_DIR, 'riscv', 'software', 'bin', 'linux_initramfs.cpio')
-        RISCV_LINUX_DTB_SOURCE = File.join(PROJECT_ROOT, 'examples/riscv/software/bin/rhdl_riscv_virt.dtb')
-        RISCV_LINUX_DTB_ASSET = File.join(SCRIPT_DIR, 'riscv', 'software', 'bin', 'rhdl_riscv_virt.dtb')
+        RISCV_LINUX_DTB_SOURCE = File.join(PROJECT_ROOT, 'examples/riscv/software/bin/linux_virt.dtb')
+        RISCV_LINUX_DTB_ASSET = File.join(SCRIPT_DIR, 'riscv', 'software', 'bin', 'linux_virt.dtb')
         RISCV_LINUX_BOOTSTRAP_ASSET = File.join(SCRIPT_DIR, 'riscv', 'software', 'bin', 'linux_bootstrap.bin')
         DEFAULT_KARATEKA_PC = 0xB82A
         DEFAULT_BIN_ASSETS = [
@@ -115,12 +115,36 @@ module RHDL
         def wasm_backends_built?
           return false unless File.file?(WASM_BUILD_STAMP_PATH)
 
+          stamp_mtime = File.mtime(WASM_BUILD_STAMP_PATH)
+          return false if wasm_build_inputs_newer_than?(stamp_mtime)
+
           outputs_present = REQUIRED_WASM_OUTPUTS.all? do |artifact|
             File.file?(File.join(PKG_DIR, artifact))
           end
-          return false unless outputs_present
+          outputs_present
+        end
 
-          mruby_artifacts_embed_rhdl?
+        def wasm_build_inputs_newer_than?(stamp_mtime)
+          inputs = []
+
+          inputs.concat(Dir.glob(File.join(SIM_DIR, 'ir_interpreter', 'src', '**', '*.rs')))
+          inputs.concat(Dir.glob(File.join(SIM_DIR, 'ir_jit', 'src', '**', '*.rs')))
+          inputs.concat(Dir.glob(File.join(SIM_DIR, 'ir_compiler', 'src', '**', '*.rs')))
+
+          inputs.concat([
+                          File.join(SIM_DIR, 'ir_interpreter', 'Cargo.toml'),
+                          File.join(SIM_DIR, 'ir_jit', 'Cargo.toml'),
+                          File.join(SIM_DIR, 'ir_compiler', 'Cargo.toml'),
+                          APPLE2_AOT_IR_PATH,
+                          CPU8BIT_AOT_IR_PATH,
+                          MOS6502_AOT_IR_PATH,
+                          GAMEBOY_AOT_IR_PATH,
+                          RISCV_AOT_IR_PATH
+                        ])
+
+          inputs.uniq.any? do |path|
+            File.file?(path) && File.mtime(path) > stamp_mtime
+          end
         end
 
         def mark_wasm_build_complete!
@@ -135,8 +159,6 @@ module RHDL
 
           copy_ghostty_web_assets
           copy_vim_wasm_assets
-          build_mruby_wasm
-          build_mirb_worker_asset
           ensure_aot_ir_inputs
 
           unless run_rustup_target_add!
@@ -167,10 +189,24 @@ module RHDL
         end
 
         def build_arcilator_wasm
+          build_apple2_arcilator_wasm
+          build_riscv_arcilator_wasm
+        rescue StandardError => e
+          warn "WARNING: arcilator WASM build failed: #{e.message}"
+        end
+
+        def build_apple2_arcilator_wasm
           require_relative 'utilities/web_apple2_arcilator_build'
           WebApple2ArcilatorBuild.build(dest_dir: PKG_DIR)
         rescue StandardError => e
-          warn "WARNING: arcilator WASM build failed: #{e.message}"
+          warn "WARNING: Apple II arcilator WASM build failed: #{e.message}"
+        end
+
+        def build_riscv_arcilator_wasm
+          require_relative 'utilities/web_riscv_arcilator_build'
+          WebRiscvArcilatorBuild.build(dest_dir: PKG_DIR)
+        rescue StandardError => e
+          warn "WARNING: RISC-V arcilator WASM build failed: #{e.message}"
         end
 
         def build_verilator_wasm
@@ -857,9 +893,11 @@ module RHDL
             export const GENERATED_DEFAULT_RUNNER_ID = #{JSON.generate(default_runner_id)};
           MJS
 
-          ensure_dir(File.dirname(RUNNER_PRESET_MODULE_PATH))
-          File.write(RUNNER_PRESET_MODULE_PATH, content)
-          puts "Wrote #{RUNNER_PRESET_MODULE_PATH}"
+          write_generated_module_pair(
+            mjs_path: RUNNER_PRESET_MODULE_MJS_PATH,
+            ts_path: RUNNER_PRESET_MODULE_TS_PATH,
+            content: content
+          )
         end
 
         def collect_memory_dump_asset_paths
@@ -881,9 +919,22 @@ module RHDL
             export const GENERATED_MEMORY_DUMP_ASSET_FILES = Object.freeze(#{JSON.pretty_generate(asset_paths)});
           MJS
 
-          ensure_dir(File.dirname(MEMORY_DUMP_ASSET_MODULE_PATH))
-          File.write(MEMORY_DUMP_ASSET_MODULE_PATH, content)
-          puts "Wrote #{MEMORY_DUMP_ASSET_MODULE_PATH}"
+          write_generated_module_pair(
+            mjs_path: MEMORY_DUMP_ASSET_MODULE_MJS_PATH,
+            ts_path: MEMORY_DUMP_ASSET_MODULE_TS_PATH,
+            content: content
+          )
+        end
+
+        def write_generated_module_pair(mjs_path:, ts_path:, content:)
+          [
+            mjs_path,
+            ts_path
+          ].each do |path|
+            ensure_dir(File.dirname(path))
+            File.write(path, content)
+            puts "Wrote #{path}"
+          end
         end
 
         RUNNER_CONFIG_PATHS = [
@@ -899,11 +950,6 @@ module RHDL
         MRUBY_REQUIRE_SHIM_GEM_PATH = File.join(PROJECT_ROOT, 'web', 'mruby', 'mruby-require-shim')
         MRUBY_EMSCRIPTEN_CONFIG_RELATIVE_PATH = File.join('build_config', 'emscripten_rhdl.rb')
         REQUIRED_WASM_OUTPUTS = %w[
-          mruby.js
-          mruby.wasm
-          mirb.js
-          mirb.wasm
-          mruby.version.json
           ghostty-web.js
           ghostty-vt.wasm
           vim.js
@@ -916,8 +962,10 @@ module RHDL
         ASSET_ROOT = File.join(WEB_ROOT, 'assets')
         WASM_BUILD_STAMP_PATH = File.join(PKG_DIR, '.web_build_stamp')
         DUMP_ASSET_EXTENSIONS = %w[.bin .mem .dat .rhdlsnap .snapshot].freeze
-        RUNNER_PRESET_MODULE_PATH = File.join(PROJECT_ROOT, 'web', 'app', 'components', 'runner', 'config', 'generated_presets.mjs')
-        MEMORY_DUMP_ASSET_MODULE_PATH = File.join(PROJECT_ROOT, 'web', 'app', 'components', 'memory', 'config', 'generated_dump_assets.mjs')
+        RUNNER_PRESET_MODULE_MJS_PATH = File.join(PROJECT_ROOT, 'web', 'app', 'components', 'runner', 'config', 'generated_presets.mjs')
+        RUNNER_PRESET_MODULE_TS_PATH = File.join(PROJECT_ROOT, 'web', 'app', 'components', 'runner', 'config', 'generated_presets.ts')
+        MEMORY_DUMP_ASSET_MODULE_MJS_PATH = File.join(PROJECT_ROOT, 'web', 'app', 'components', 'memory', 'config', 'generated_dump_assets.mjs')
+        MEMORY_DUMP_ASSET_MODULE_TS_PATH = File.join(PROJECT_ROOT, 'web', 'app', 'components', 'memory', 'config', 'generated_dump_assets.ts')
       end
     end
   end

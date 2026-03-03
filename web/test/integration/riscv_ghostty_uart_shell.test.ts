@@ -96,8 +96,8 @@ async function loadRiscvRunnerOnCompiler(page: Page): Promise<void> {
     const log = document.querySelector('#eventLog')?.textContent || '';
     const hasFastBootPatch = /Applied RISC-V (aggressive|moderate) fast-boot PHYSTOP patch/.test(log);
     return log.includes('Loaded default bin (main)')
-      && log.includes('./assets/fixtures/riscv/software/bin/kernel.bin')
-      && log.includes('./assets/fixtures/riscv/software/bin/fs.img')
+      && log.includes('./assets/fixtures/riscv/software/bin/xv6_kernel.bin')
+      && log.includes('./assets/fixtures/riscv/software/bin/xv6_fs.img')
       && hasFastBootPatch;
   }, null, { timeout: 120000 });
 }
@@ -143,8 +143,8 @@ function countOccurrences(haystack: string, needle: string): number {
 
 async function hasRiscvShellAssets(webRoot: string): Promise<boolean> {
   const required = [
-    path.join(webRoot, 'assets', 'fixtures', 'riscv', 'software', 'bin', 'kernel.bin'),
-    path.join(webRoot, 'assets', 'fixtures', 'riscv', 'software', 'bin', 'fs.img')
+    path.join(webRoot, 'assets', 'fixtures', 'riscv', 'software', 'bin', 'xv6_kernel.bin'),
+    path.join(webRoot, 'assets', 'fixtures', 'riscv', 'software', 'bin', 'xv6_fs.img')
   ];
   try {
     await Promise.all(required.map(async (filePath) => access(filePath)));

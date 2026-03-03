@@ -140,6 +140,25 @@ if (!mirbWorkerResult.success) {
   process.exit(1);
 }
 
+const schematicWorkerResult = await Bun.build({
+  entrypoints: [resolve(webRoot, "app/components/explorer/workers/schematic_render_worker.ts")],
+  outdir: resolve(distDir, "assets/pkg"),
+  target: "browser",
+  format: "esm",
+  splitting: false,
+  naming: "[name].js",
+  minify: isProduction,
+  sourcemap: "none"
+});
+
+if (!schematicWorkerResult.success) {
+  console.error("schematic render worker build failed:");
+  for (const log of schematicWorkerResult.logs) {
+    console.error(log);
+  }
+  process.exit(1);
+}
+
 try {
   copyRuntimeDependencyAssets(distDir, webRoot);
 } catch (err) {
