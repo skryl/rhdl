@@ -12,9 +12,31 @@ RSpec.describe RHDL::CLI::Tasks::DepsTask do
     it 'can be instantiated with check option' do
       expect { described_class.new(check: true) }.not_to raise_error
     end
+
+    it 'can be instantiated with check_gpu option' do
+      expect { described_class.new(check_gpu: true) }.not_to raise_error
+    end
   end
 
   describe '#run' do
+    context 'with check_gpu option' do
+      it 'dispatches to gpu toolchain check' do
+        task = described_class.new(check_gpu: true)
+        allow(task).to receive(:check_gpu_status).and_return(true)
+
+        task.run
+        expect(task).to have_received(:check_gpu_status).with(strict: false)
+      end
+
+      it 'passes strict flag through to gpu toolchain check' do
+        task = described_class.new(check_gpu: true, strict_gpu: true)
+        allow(task).to receive(:check_gpu_status).and_return(true)
+
+        task.run
+        expect(task).to have_received(:check_gpu_status).with(strict: true)
+      end
+    end
+
     context 'with check option' do
       it 'displays dependency status' do
         task = described_class.new(check: true)
@@ -56,6 +78,18 @@ RSpec.describe RHDL::CLI::Tasks::DepsTask do
         task = described_class.new(check: true)
 
         expect { task.run }.to output(/arcilator/).to_stdout
+      end
+
+      it 'shows mlir-opt in dependency check' do
+        task = described_class.new(check: true)
+
+        expect { task.run }.to output(/mlir-opt/).to_stdout
+      end
+
+      it 'shows spirv-cross in dependency check' do
+        task = described_class.new(check: true)
+
+        expect { task.run }.to output(/spirv-cross/).to_stdout
       end
     end
 
@@ -176,9 +210,48 @@ RSpec.describe RHDL::CLI::Tasks::DepsTask do
       expect(output).to match(/\[(OK|OPTIONAL)\]/)
     end
 
+    it 'shows mlir-opt status' do
+      output = capture_stdout { task.check_status }
+      expect(output).to match(/mlir-opt/)
+      expect(output).to match(/\[(OK|OPTIONAL)\]/)
+    end
+
+    it 'shows spirv-cross status' do
+      output = capture_stdout { task.check_status }
+      expect(output).to match(/spirv-cross/)
+      expect(output).to match(/\[(OK|OPTIONAL)\]/)
+    end
+
     it 'shows the correct install command hint' do
       output = capture_stdout { task.check_status }
       expect(output).to include("bundle exec rake deps")
+    end
+  end
+
+  describe '#check_gpu_status' do
+    let(:task) { described_class.new(check_gpu: true) }
+
+    it 'reports success when ArcToGPU prerequisites are ready' do
+      allow(task).to receive(:arcilator_gpu_runner_status).and_return(
+        ready: true,
+        missing_tools: [],
+        missing_capabilities: [],
+        gpu_option_tokens: ['--arc-to-gpu']
+      )
+
+      output = capture_stdout { expect(task.check_gpu_status).to be(true) }
+      expect(output).to include('ArcToGPU runner prerequisites are satisfied')
+    end
+
+    it 'raises in strict mode when ArcToGPU prerequisites are missing' do
+      allow(task).to receive(:arcilator_gpu_runner_status).and_return(
+        ready: false,
+        missing_tools: ['spirv-cross'],
+        missing_capabilities: ['ArcToGPU arcilator lowering flag'],
+        gpu_option_tokens: []
+      )
+
+      expect { task.check_gpu_status(strict: true) }.to raise_error(/ArcToGPU toolchain check failed/)
     end
   end
 

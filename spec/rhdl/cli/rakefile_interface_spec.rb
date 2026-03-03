@@ -50,6 +50,11 @@ RSpec.describe 'Rakefile interface' do
       expect_task_class(RHDL::CLI::Tasks::DepsTask, check: true)
       Rake::Task['deps:check'].invoke
     end
+
+    it 'deps:check_gpu invokes DepsTask with strict gpu check options' do
+      expect_task_class(RHDL::CLI::Tasks::DepsTask, check_gpu: true, strict_gpu: true)
+      Rake::Task['deps:check_gpu'].invoke
+    end
   end
 
   describe 'bench tasks' do
@@ -69,6 +74,19 @@ RSpec.describe 'Rakefile interface' do
       end
 
       Rake::Task['bench:native'].invoke('ir')
+    end
+
+    it 'bench:native :cpu8bit scope invokes BenchmarkTask with type: :cpu8bit and cycles' do
+      task_instance = instance_double(RHDL::CLI::Tasks::BenchmarkTask)
+      allow(task_instance).to receive(:run)
+
+      expect(RHDL::CLI::Tasks::BenchmarkTask).to receive(:new) do |opts|
+        expect(opts[:type]).to eq(:cpu8bit)
+        expect(opts[:cycles]).to be_a(Integer)
+        task_instance
+      end
+
+      Rake::Task['bench:native'].invoke('cpu8bit')
     end
 
     it 'bench:web scope riscv invokes BenchmarkTask with type: :web_riscv and cycles' do
@@ -327,7 +345,7 @@ RSpec.describe 'Rakefile interface' do
         spec pspec
         spec:bench spec:bench:timing spec:bench:quick
         pspec:n pspec:prepare pspec:balanced
-        deps deps:install deps:check
+        deps deps:install deps:check deps:check_gpu
         bench:native bench:web
         gem:build gem:build:checksum gem:install gem:install:local gem:release
         native:build native:clean native:check

@@ -78,7 +78,8 @@ The GameBoy runs at 4.19 MHz, so backends achieving >100% can run faster than re
 Benchmarks low-level gate simulation:
 
 ```bash
-rake bench                      # Gate-level toggle benchmark
+rake bench:native[gates]        # Gate-level toggle benchmark
+rake bench:native[cpu8bit]      # 8-bit CPU FastHarness benchmark
 ```
 
 ### Web WASM Backend Benchmarks

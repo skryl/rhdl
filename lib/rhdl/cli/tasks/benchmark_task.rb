@@ -22,6 +22,8 @@ module RHDL
             benchmark_apple2
           when :mos6502
             benchmark_mos6502
+          when :cpu8bit
+            benchmark_cpu8bit
           when :gameboy
             benchmark_gameboy
           when :riscv
@@ -200,6 +202,98 @@ module RHDL
             rate = r[:examples] > 0 ? format('%.1f', r[:examples] / r[:time]) : 'N/A'
             puts "#{r[:name].ljust(20)} #{format('%8.2f', r[:time])}s #{r[:examples].to_s.rjust(8)} #{r[:files].to_s.rjust(8)} #{rate.rjust(8)} t/s"
           end
+        end
+
+        # Benchmark 8-bit CPU FastHarness native backends.
+        def benchmark_cpu8bit
+          require 'rhdl/codegen'
+          require_relative '../../../../examples/8bit/hdl/cpu/harness'
+
+          cycles = options[:cycles] || 5_000_000
+          batch_size = options[:batch_size] || 4096
+          runner_filter = (ENV['RHDL_BENCH_BACKENDS'] || '')
+            .split(',')
+            .map { |name| name.strip.downcase.to_sym }
+            .map { |name| name == :gpu ? :arcilator_gpu : name }
+            .reject(&:empty?)
+
+          puts_header("8-bit CPU FastHarness Benchmark")
+          puts "Cycles per run: #{cycles}"
+          puts "Batch size: #{batch_size}"
+          puts
+
+          # JMP_LONG 0x0000 (infinite loop)
+          loop_program = [0xF9, 0x00, 0x00].freeze
+
+          runners = [
+            {
+              name: 'Compiler',
+              sim: :compile,
+              filter_key: :compiler,
+              available: RHDL::Codegen::IR::IR_COMPILER_AVAILABLE
+            },
+            {
+              name: 'ArcilatorGPU',
+              sim: :arcilator_gpu,
+              filter_key: :arcilator_gpu,
+              available: RHDL::HDL::CPU::FastHarness.arcilator_gpu_status[:ready]
+            }
+          ]
+          runners.select! { |runner| runner_filter.include?(runner[:filter_key]) } unless runner_filter.empty?
+
+          results = []
+
+          runners.each do |runner|
+            unless runner[:available]
+              puts "\n#{runner[:name]}: SKIPPED (not available)"
+              results << { name: runner[:name], status: :skipped }
+              next
+            end
+
+            print "\n#{runner[:name]}: "
+            $stdout.flush
+
+            begin
+              print 'initializing... '
+              $stdout.flush
+              init_start = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+              sim = RHDL::HDL::CPU::FastHarness.new(nil, sim: runner[:sim])
+              sim.memory.load(loop_program, 0)
+              sim.pc = 0
+              init_elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - init_start
+
+              print "running #{cycles} cycles... "
+              $stdout.flush
+              run_start = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+              cycles_run = sim.run_cycles(cycles, batch_size: batch_size)
+              run_elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - run_start
+
+              cycles_per_sec = cycles_run / run_elapsed
+              final_pc = sim.pc
+
+              puts 'done'
+              puts "  Init time:  #{format('%.3f', init_elapsed)}s"
+              puts "  Run time:   #{format('%.3f', run_elapsed)}s"
+              puts "  Cycles run: #{cycles_run}"
+              puts "  Final PC:   0x#{final_pc.to_s(16).upcase}"
+
+              results << {
+                name: runner[:name],
+                status: :success,
+                init_time: init_elapsed,
+                run_time: run_elapsed,
+                cycles_per_sec: cycles_per_sec,
+                final_pc: final_pc
+              }
+            rescue => e
+              puts 'FAILED'
+              puts "  Error: #{e.message}"
+              puts "  #{e.backtrace.first(3).join("\n  ")}" if options[:verbose]
+              results << { name: runner[:name], status: :failed, error: e.message }
+            end
+          end
+
+          print_benchmark_summary(results, cycles)
         end
 
         # Benchmark MOS6502 CPU IR with memory bridging (like karateka tests)

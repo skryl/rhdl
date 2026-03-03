@@ -612,10 +612,11 @@ See [Simulation](docs/simulation.md) and [Gate-Level Backend](docs/gate_level_ba
 RHDL includes benchmarking tasks to measure simulation performance across backends:
 
 ```bash
-rake bench                    # Benchmark gate-level simulation
-rake bench[mos6502,cycles]    # Benchmark MOS 6502 CPU
-rake bench[apple2,cycles]     # Benchmark Apple II full system
-rake bench[gameboy,frames]    # Benchmark GameBoy with Prince of Persia
+rake bench:native[gates]             # Benchmark gate-level simulation
+rake bench:native[cpu8bit,cycles]    # Benchmark 8-bit CPU FastHarness (compiler vs arcilator_gpu)
+rake bench:native[mos6502,cycles]    # Benchmark MOS 6502 CPU
+rake bench:native[apple2,cycles]     # Benchmark Apple II full system
+rake bench:native[gameboy,frames]    # Benchmark GameBoy with Prince of Persia
 rake bench:web[apple2,cycles] # Benchmark Apple II web WASM backends
 rake bench:web[riscv,cycles]  # Benchmark RISC-V web WASM backends
 ```
@@ -647,10 +648,16 @@ bundle exec rake pspec[riscv]          # Run RISC-V specs in parallel
 
 # Test and simulation benchmarks
 bundle exec rake spec:bench[riscv,20]  # Benchmark 20 RISC-V spec files
-bundle exec rake bench[ir,5000000]     # Benchmark IR runners
-bundle exec rake bench                  # Benchmark gate-level simulation
+bundle exec rake bench:native[ir,5000000]     # Benchmark IR runners
+bundle exec rake bench:native[gates]          # Benchmark gate-level simulation
+bundle exec rake bench:native[cpu8bit,5000000] # Benchmark 8-bit CPU compiler vs arcilator_gpu
 bundle exec rake bench:web[apple2]     # Benchmark Apple II web compiler vs arcilator vs verilator
 bundle exec rake bench:web[riscv]      # Benchmark RISC-V web compiler vs arcilator vs verilator
+
+# Dependency checks
+bundle exec rake deps:check             # General dependency status
+bundle exec rake deps:check_gpu         # Fail-fast ArcToGPU toolchain check
+RHDL_ENABLE_ARCILATOR_GPU=1 bundle exec rspec spec/examples/8bit/hdl/cpu/arcilator_gpu_parity_spec.rb # Enable ArcToGPU parity test
 
 # Native backends
 bundle exec rake native:build          # Build native extensions
