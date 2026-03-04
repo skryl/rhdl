@@ -401,7 +401,7 @@ Modern 32-bit RISC-V processor with single-cycle and 5-stage pipelined implement
 ```ruby
 require_relative 'examples/riscv/hdl/ir_harness'
 
-harness = RHDL::Examples::RISCV::IRHarness.new(backend: :jit, allow_fallback: false)
+harness = RHDL::Examples::RISCV::IRHarness.new(backend: :jit)
 harness.load_program([
   0x00500093,  # addi x1, x0, 5
   0x00A00113,  # addi x2, x0, 10
@@ -501,6 +501,11 @@ rhdl diagram RHDL::HDL::ALU --format svg # Single component diagram
 # Verilog export
 rhdl export --all                        # Export all components
 rhdl export --lang verilog --out ./out RHDL::HDL::Counter
+rhdl export --lang verilog --tool firtool --out ./out RHDL::HDL::Counter  # requires circt-translate or firtool
+
+# CIRCT import/raise
+rhdl import --mode verilog --input ./cpu.v --out ./generated   # requires circt-translate (or another Verilog importer)
+rhdl import --mode circt --input ./cpu.mlir --out ./generated
 
 # Gate-level synthesis
 rhdl gates --export                      # Export to JSON netlists
@@ -603,7 +608,7 @@ rake native:build    # Build all Rust extensions
 rake native:check    # Check availability
 ```
 
-All backends include automatic fallback to Ruby when native extensions aren't available.
+IR and netlist runtime backends now require native extensions (no runtime fallback path). Use explicit Ruby simulators when you need pure-Ruby execution.
 
 See [Simulation](docs/simulation.md) and [Gate-Level Backend](docs/gate_level_backend.md) for complete details.
 

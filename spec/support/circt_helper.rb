@@ -1,5 +1,5 @@
-# CIRCT testing helper for FIRRTL export validation
-# Converts RHDL FIRRTL to Verilog using firtool and validates against RHDL Verilog output
+# CIRCT testing helper for CIRCT export validation
+# Converts RHDL CIRCT text to Verilog using firtool and validates against RHDL Verilog output
 
 require "fileutils"
 require "open3"
@@ -7,29 +7,67 @@ require "open3"
 module CirctHelper
   module_function
 
-  # Convert FIRRTL to Verilog using firtool
-  # Returns the generated Verilog string or nil on failure
+  # Convert CIRCT text to Verilog using firtool.
+  # Tries MLIR input mode first and falls back to autodetect for compatibility.
+  # Returns a hash with success/error and generated Verilog text
   def firtool_to_verilog(firrtl_source, base_dir:)
     base_dir = File.expand_path(base_dir)
     FileUtils.mkdir_p(base_dir)
 
-    firrtl_path = File.join(base_dir, "design.fir")
+    firrtl_path = File.join(base_dir, "design.circt")
     verilog_path = File.join(base_dir, "design.v")
 
     File.write(firrtl_path, firrtl_source)
 
-    # Run firtool to convert FIRRTL to Verilog
+    # Run firtool to convert CIRCT text to Verilog.
     # Use lowering options for iverilog compatibility:
     # - disallowLocalVariables: iverilog doesn't support 'automatic' lifetime
     # - disallowPackedArrays: iverilog doesn't support packed arrays
+    common_args = [
+      "firtool",
+      firrtl_path,
+      "-o",
+      verilog_path,
+      "--lowering-options=disallowLocalVariables,disallowPackedArrays"
+    ]
+
     result = run_cmd(
-      ["firtool", firrtl_path, "-o", verilog_path, "--format=fir",
-       "--lowering-options=disallowLocalVariables,disallowPackedArrays"],
+      common_args + ["--format=mlir"],
       cwd: base_dir
     )
 
     unless result[:status].success?
-      return { success: false, error: "firtool failed: #{result[:stderr]}\n#{result[:stdout]}" }
+      fallback_result = run_cmd(
+        common_args + ["--format=autodetect"],
+        cwd: base_dir
+      )
+
+      legacy_fir_result = nil
+      unless fallback_result[:status].success?
+        legacy_fir_result = run_cmd(
+          common_args + ["--format=fir"],
+          cwd: base_dir
+        )
+      end
+
+      unless fallback_result[:status].success? || (legacy_fir_result && legacy_fir_result[:status].success?)
+        return {
+          success: false,
+          error: <<~ERROR.strip
+            firtool failed in MLIR mode:
+            #{result[:stderr]}
+            #{result[:stdout]}
+
+            firtool failed in autodetect mode:
+            #{fallback_result[:stderr]}
+            #{fallback_result[:stdout]}
+
+            firtool failed in FIR mode:
+            #{legacy_fir_result ? legacy_fir_result[:stderr] : "(not run)"}
+            #{legacy_fir_result ? legacy_fir_result[:stdout] : ""}
+          ERROR
+        }
+      end
     end
 
     unless File.exist?(verilog_path)
@@ -209,7 +247,7 @@ module CirctHelper
     end
   end
 
-  # Simple validation that just checks firtool can parse and compile the FIRRTL
+  # Simple validation that just checks firtool can parse and compile CIRCT text
   # without running full simulation comparison
   def validate_firrtl_syntax(component_class, base_dir:)
     rhdl_firrtl = component_class.to_circt
@@ -223,7 +261,7 @@ module CirctHelper
     }
   end
 
-  # Validate hierarchical FIRRTL export using to_circt_hierarchy
+  # Validate hierarchical CIRCT export using to_circt_hierarchy
   # This includes all submodule definitions in a single circuit
   def validate_hierarchical_firrtl(component_class, base_dir:)
     rhdl_firrtl = component_class.to_circt_hierarchy

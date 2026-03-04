@@ -70,12 +70,12 @@ RSpec.describe RHDL::Examples::MOS6502::InstructionDecoder do
       expect(verilog).to include('endmodule')
     end
 
-    it 'generates valid FIRRTL' do
-      firrtl = described_class.to_circt
-      expect(firrtl).to include('FIRRTL version')
-      expect(firrtl).to include('circuit mos6502_instruction_decoder')
-      expect(firrtl).to include('input opcode')
-      expect(firrtl).to include('output addr_mode')
+    it 'generates valid CIRCT MLIR' do
+      mlir = described_class.to_circt
+      expect(mlir).to include('hw.output')
+      expect(mlir).to include('hw.module @mos6502_instruction_decoder')
+      expect(mlir).to include('%opcode:')
+      expect(mlir).to include('addr_mode:')
     end
 
     context 'CIRCT firtool validation', if: HdlToolchain.firtool_available? do

@@ -51,12 +51,12 @@ RSpec.describe RHDL::Examples::MOS6502::IndirectAddressCalc do
       expect(verilog).to include('ptr_addr_lo')
     end
 
-    it 'generates valid FIRRTL' do
-      firrtl = described_class.to_circt
-      expect(firrtl).to include('FIRRTL version')
-      expect(firrtl).to include('circuit mos6502_indirect_address_calc')
-      expect(firrtl).to include('input mode')
-      expect(firrtl).to include('output ptr_addr_lo')
+    it 'generates valid CIRCT MLIR' do
+      mlir = described_class.to_circt
+      expect(mlir).to include('hw.output')
+      expect(mlir).to include('hw.module @mos6502_indirect_address_calc')
+      expect(mlir).to include('%mode:')
+      expect(mlir).to include('ptr_addr_lo:')
     end
 
     context 'CIRCT firtool validation', if: HdlToolchain.firtool_available? do

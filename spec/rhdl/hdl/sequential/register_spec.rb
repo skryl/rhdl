@@ -39,8 +39,8 @@ RSpec.describe RHDL::HDL::Register do
     end
 
     it 'generates valid IR' do
-      ir = RHDL::HDL::Register.to_ir
-      expect(ir).to be_a(RHDL::Export::IR::ModuleDef)
+      ir = RHDL::HDL::Register.to_flat_circt_nodes
+      expect(ir).to be_a(RHDL::Codegen::CIRCT::IR::ModuleOp)
       expect(ir.ports.length).to eq(5)  # d, clk, rst, en, q
     end
 
@@ -51,13 +51,13 @@ RSpec.describe RHDL::HDL::Register do
       expect(verilog).to match(/output.*\[7:0\].*q/)
     end
 
-    it 'generates valid FIRRTL' do
-      firrtl = RHDL::HDL::Register.to_circt
-      expect(firrtl).to include('FIRRTL version')
-      expect(firrtl).to include('circuit register')
-      expect(firrtl).to include('input d')
-      expect(firrtl).to include('input clk')
-      expect(firrtl).to include('output q')
+    it 'generates valid CIRCT MLIR' do
+      mlir = RHDL::HDL::Register.to_circt
+      expect(mlir).to include('hw.output')
+      expect(mlir).to include('hw.module @register')
+      expect(mlir).to include('%d:')
+      expect(mlir).to include('%clk:')
+      expect(mlir).to include('q:')
     end
 
     context 'CIRCT firtool validation', if: HdlToolchain.firtool_available? && HdlToolchain.iverilog_available? do

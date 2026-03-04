@@ -10,9 +10,9 @@ RSpec.shared_examples 'sv32 tlb behavior' do |pipeline:|
   let(:is_pipeline) { pipeline }
   let(:cpu) do
     if is_pipeline
-      RHDL::Examples::RISCV::Pipeline::IRHarness.new('sv32_tlb_pipeline', backend: :jit, allow_fallback: false)
+      RHDL::Examples::RISCV::Pipeline::IRHarness.new('sv32_tlb_pipeline', backend: :jit)
     else
-      RHDL::Examples::RISCV::IRHarness.new(mem_size: 65_536, backend: :jit, allow_fallback: false)
+      RHDL::Examples::RISCV::IRHarness.new(mem_size: 65_536, backend: :jit)
     end
   end
 

@@ -5,6 +5,7 @@
 //! are in separate modules.
 
 use serde::Deserialize;
+use serde_json::{Map, Value};
 use std::collections::{HashMap, HashSet};
 use std::mem;
 
@@ -50,7 +51,7 @@ pub struct RegDef {
 
 /// Expression types (JSON deserialization)
 #[derive(Debug, Clone, Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
+#[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ExprDef {
     Signal { name: String, width: usize },
     Literal { value: i64, width: usize },
@@ -136,6 +137,616 @@ pub struct ModuleIR {
     pub write_ports: Vec<WritePortDef>,
     #[serde(default)]
     pub sync_read_ports: Vec<SyncReadPortDef>,
+}
+
+fn deserialize_unbounded<T>(json: &str) -> Result<T, serde_json::Error>
+where
+    T: for<'de> serde::Deserialize<'de>,
+{
+    let mut deserializer = serde_json::Deserializer::from_str(json);
+    deserializer.disable_recursion_limit();
+    T::deserialize(&mut deserializer)
+}
+
+fn parse_module_ir(json: &str) -> Result<ModuleIR, String> {
+    let value = deserialize_unbounded::<Value>(json)
+        .map_err(|e| format!("Failed to parse IR JSON: {}", e))?;
+
+    if !is_circt_runtime_payload(&value) {
+        return Err("Failed to parse IR JSON: expected CIRCT runtime JSON payload".to_string());
+    }
+
+    let normalized = normalize_circt_runtime_payload(value)
+        .map_err(|e| format!("Failed to parse IR JSON: CIRCT normalization failed: {}", e))?;
+
+    serde_json::from_value::<ModuleIR>(normalized)
+        .map_err(|e| format!("Failed to parse IR JSON: normalized CIRCT parse failed: {}", e))
+}
+
+fn is_circt_runtime_payload(value: &Value) -> bool {
+    let Some(obj) = value.as_object() else {
+        return false;
+    };
+
+    obj.contains_key("circt_json_version") && obj.contains_key("modules")
+}
+
+fn normalize_circt_runtime_payload(payload: Value) -> Result<Value, String> {
+    let module_obj = extract_runtime_module(payload)?;
+    module_to_normalized_value(module_obj)
+}
+
+fn extract_runtime_module(payload: Value) -> Result<Map<String, Value>, String> {
+    let obj = payload
+        .as_object()
+        .ok_or_else(|| "Expected top-level JSON object".to_string())?;
+
+    if !(obj.contains_key("circt_json_version") && obj.contains_key("modules")) {
+        return Err("CIRCT payload missing wrapper metadata".to_string());
+    }
+
+    let modules = obj
+        .get("modules")
+        .and_then(Value::as_array)
+        .ok_or_else(|| "CIRCT payload is missing modules array".to_string())?;
+    let first = modules
+        .first()
+        .ok_or_else(|| "CIRCT payload has no modules".to_string())?;
+    first
+        .as_object()
+        .cloned()
+        .ok_or_else(|| "First CIRCT module is not an object".to_string())
+}
+
+fn module_to_normalized_value(module_obj: Map<String, Value>) -> Result<Value, String> {
+    let mut out = Map::new();
+    out.insert("name".to_string(), Value::String(value_to_string(module_obj.get("name"))));
+    out.insert(
+        "ports".to_string(),
+        Value::Array(
+            array_field(&module_obj, "ports")
+                .into_iter()
+                .map(|v| port_to_normalized_value(&v))
+                .collect::<Result<Vec<_>, _>>()?,
+        ),
+    );
+    out.insert(
+        "nets".to_string(),
+        Value::Array(
+            array_field(&module_obj, "nets")
+                .into_iter()
+                .map(|v| net_to_normalized_value(&v))
+                .collect::<Result<Vec<_>, _>>()?,
+        ),
+    );
+    out.insert(
+        "regs".to_string(),
+        Value::Array(
+            array_field(&module_obj, "regs")
+                .into_iter()
+                .map(|v| reg_to_normalized_value(&v))
+                .collect::<Result<Vec<_>, _>>()?,
+        ),
+    );
+    out.insert(
+        "assigns".to_string(),
+        Value::Array(
+            array_field(&module_obj, "assigns")
+                .into_iter()
+                .map(|v| assign_to_normalized_value(&v))
+                .collect::<Result<Vec<_>, _>>()?,
+        ),
+    );
+    out.insert(
+        "processes".to_string(),
+        Value::Array(
+            array_field(&module_obj, "processes")
+                .into_iter()
+                .map(|v| process_to_normalized_value(&v))
+                .collect::<Result<Vec<_>, _>>()?,
+        ),
+    );
+    out.insert(
+        "memories".to_string(),
+        Value::Array(
+            array_field(&module_obj, "memories")
+                .into_iter()
+                .map(|v| memory_to_normalized_value(&v))
+                .collect::<Result<Vec<_>, _>>()?,
+        ),
+    );
+    out.insert(
+        "write_ports".to_string(),
+        Value::Array(
+            array_field(&module_obj, "write_ports")
+                .into_iter()
+                .map(|v| write_port_to_normalized_value(&v))
+                .collect::<Result<Vec<_>, _>>()?,
+        ),
+    );
+    out.insert(
+        "sync_read_ports".to_string(),
+        Value::Array(
+            array_field(&module_obj, "sync_read_ports")
+                .into_iter()
+                .map(|v| sync_read_port_to_normalized_value(&v))
+                .collect::<Result<Vec<_>, _>>()?,
+        ),
+    );
+    Ok(Value::Object(out))
+}
+
+fn port_to_normalized_value(value: &Value) -> Result<Value, String> {
+    let obj = as_object(value, "port")?;
+    let mut out = Map::new();
+    out.insert("name".to_string(), Value::String(value_to_string(obj.get("name"))));
+    out.insert(
+        "direction".to_string(),
+        Value::String(value_to_string(obj.get("direction"))),
+    );
+    out.insert("width".to_string(), Value::from(value_to_u64(obj.get("width"))));
+    Ok(Value::Object(out))
+}
+
+fn net_to_normalized_value(value: &Value) -> Result<Value, String> {
+    let obj = as_object(value, "net")?;
+    let mut out = Map::new();
+    out.insert("name".to_string(), Value::String(value_to_string(obj.get("name"))));
+    out.insert("width".to_string(), Value::from(value_to_u64(obj.get("width"))));
+    Ok(Value::Object(out))
+}
+
+fn reg_to_normalized_value(value: &Value) -> Result<Value, String> {
+    let obj = as_object(value, "reg")?;
+    let mut out = Map::new();
+    out.insert("name".to_string(), Value::String(value_to_string(obj.get("name"))));
+    out.insert("width".to_string(), Value::from(value_to_u64(obj.get("width"))));
+    if let Some(reset_value) = obj.get("reset_value") {
+        if !reset_value.is_null() {
+            out.insert("reset_value".to_string(), Value::from(value_to_i64(Some(reset_value))));
+        }
+    }
+    Ok(Value::Object(out))
+}
+
+fn assign_to_normalized_value(value: &Value) -> Result<Value, String> {
+    let obj = as_object(value, "assign")?;
+    let mut out = Map::new();
+    out.insert("target".to_string(), Value::String(value_to_string(obj.get("target"))));
+    out.insert("expr".to_string(), expr_to_normalized_value(obj.get("expr"))?);
+    Ok(Value::Object(out))
+}
+
+fn process_to_normalized_value(value: &Value) -> Result<Value, String> {
+    let obj = as_object(value, "process")?;
+    let mut out = Map::new();
+    out.insert("name".to_string(), Value::String(value_to_string(obj.get("name"))));
+    out.insert(
+        "clock".to_string(),
+        obj.get("clock")
+            .map(|v| {
+                if v.is_null() {
+                    Value::Null
+                } else {
+                    Value::String(value_to_string(Some(v)))
+                }
+            })
+            .unwrap_or(Value::Null),
+    );
+    out.insert("clocked".to_string(), Value::Bool(value_to_bool(obj.get("clocked"))));
+    out.insert(
+        "statements".to_string(),
+        Value::Array(flatten_statements(array_field(obj, "statements"))?),
+    );
+    Ok(Value::Object(out))
+}
+
+fn flatten_statements(statements: Vec<Value>) -> Result<Vec<Value>, String> {
+    let mut out = Vec::new();
+    for stmt in statements {
+        let stmt_obj = as_object(&stmt, "statement")?;
+        match stmt_obj.get("kind").and_then(Value::as_str).unwrap_or("") {
+            "seq_assign" => {
+                let mut seq = Map::new();
+                seq.insert(
+                    "target".to_string(),
+                    Value::String(value_to_string(stmt_obj.get("target"))),
+                );
+                seq.insert("expr".to_string(), expr_to_normalized_value(stmt_obj.get("expr"))?);
+                out.push(Value::Object(seq));
+            }
+            "if" => flatten_if(stmt_obj, &mut out)?,
+            _ => {}
+        }
+    }
+    Ok(out)
+}
+
+fn flatten_if(if_obj: &Map<String, Value>, out: &mut Vec<Value>) -> Result<(), String> {
+    let cond = expr_to_normalized_value(if_obj.get("condition"))?;
+
+    let mut then_assigns: HashMap<String, Value> = HashMap::new();
+    for stmt in array_field(if_obj, "then_statements") {
+        let obj = as_object(&stmt, "if.then statement")?;
+        match obj.get("kind").and_then(Value::as_str).unwrap_or("") {
+            "seq_assign" => {
+                then_assigns.insert(
+                    value_to_string(obj.get("target")),
+                    expr_to_normalized_value(obj.get("expr"))?,
+                );
+            }
+            "if" => flatten_if(obj, out)?,
+            _ => {}
+        }
+    }
+
+    let mut else_assigns: HashMap<String, Value> = HashMap::new();
+    for stmt in array_field(if_obj, "else_statements") {
+        let obj = as_object(&stmt, "if.else statement")?;
+        match obj.get("kind").and_then(Value::as_str).unwrap_or("") {
+            "seq_assign" => {
+                else_assigns.insert(
+                    value_to_string(obj.get("target")),
+                    expr_to_normalized_value(obj.get("expr"))?,
+                );
+            }
+            "if" => flatten_if(obj, out)?,
+            _ => {}
+        }
+    }
+
+    let mut all_targets: Vec<String> = then_assigns
+        .keys()
+        .chain(else_assigns.keys())
+        .cloned()
+        .collect();
+    all_targets.sort();
+    all_targets.dedup();
+
+    for target in all_targets {
+        let then_expr = then_assigns.get(&target).cloned();
+        let else_expr = else_assigns.get(&target).cloned();
+        let width = expr_width(then_expr.as_ref().or(else_expr.as_ref())).unwrap_or(8);
+
+        let mux_expr = match (then_expr, else_expr) {
+            (Some(t), Some(f)) => mux_expr(cond.clone(), t, f, width),
+            (Some(t), None) => mux_expr(
+                cond.clone(),
+                t,
+                signal_expr(target.clone(), width),
+                width,
+            ),
+            (None, Some(f)) => mux_expr(
+                unary_expr("~", cond.clone(), 1),
+                f,
+                signal_expr(target.clone(), width),
+                width,
+            ),
+            (None, None) => continue,
+        };
+
+        let mut seq = Map::new();
+        seq.insert("target".to_string(), Value::String(target));
+        seq.insert("expr".to_string(), mux_expr);
+        out.push(Value::Object(seq));
+    }
+
+    Ok(())
+}
+
+fn memory_to_normalized_value(value: &Value) -> Result<Value, String> {
+    let obj = as_object(value, "memory")?;
+    let mut out = Map::new();
+    out.insert("name".to_string(), Value::String(value_to_string(obj.get("name"))));
+    out.insert("depth".to_string(), Value::from(value_to_u64(obj.get("depth"))));
+    out.insert("width".to_string(), Value::from(value_to_u64(obj.get("width"))));
+    if let Some(initial_data) = obj.get("initial_data") {
+        if !initial_data.is_null() {
+            out.insert("initial_data".to_string(), initial_data.clone());
+        }
+    }
+    Ok(Value::Object(out))
+}
+
+fn write_port_to_normalized_value(value: &Value) -> Result<Value, String> {
+    let obj = as_object(value, "write_port")?;
+    let mut out = Map::new();
+    out.insert(
+        "memory".to_string(),
+        Value::String(value_to_string(obj.get("memory"))),
+    );
+    out.insert(
+        "clock".to_string(),
+        Value::String(value_to_string(obj.get("clock"))),
+    );
+    out.insert("addr".to_string(), expr_to_normalized_value(obj.get("addr"))?);
+    out.insert("data".to_string(), expr_to_normalized_value(obj.get("data"))?);
+    out.insert("enable".to_string(), expr_to_normalized_value(obj.get("enable"))?);
+    Ok(Value::Object(out))
+}
+
+fn sync_read_port_to_normalized_value(value: &Value) -> Result<Value, String> {
+    let obj = as_object(value, "sync_read_port")?;
+    let mut out = Map::new();
+    out.insert(
+        "memory".to_string(),
+        Value::String(value_to_string(obj.get("memory"))),
+    );
+    out.insert(
+        "clock".to_string(),
+        Value::String(value_to_string(obj.get("clock"))),
+    );
+    out.insert("addr".to_string(), expr_to_normalized_value(obj.get("addr"))?);
+    out.insert(
+        "data".to_string(),
+        Value::String(value_to_string(obj.get("data"))),
+    );
+    if let Some(enable) = obj.get("enable") {
+        if !enable.is_null() {
+            out.insert("enable".to_string(), expr_to_normalized_value(Some(enable))?);
+        }
+    }
+    Ok(Value::Object(out))
+}
+
+fn expr_to_normalized_value(expr: Option<&Value>) -> Result<Value, String> {
+    let Some(value) = expr else {
+        return Ok(literal_expr(0, 1));
+    };
+    let obj = as_object(value, "expression")?;
+
+    let expr_kind = obj
+        .get("kind")
+        .and_then(Value::as_str)
+        .unwrap_or("");
+
+    match expr_kind {
+        "signal" => Ok(signal_expr(
+            value_to_string(obj.get("name")),
+            value_to_usize(obj.get("width")),
+        )),
+        "literal" => Ok(literal_expr(
+            value_to_i64(obj.get("value")),
+            value_to_usize(obj.get("width")),
+        )),
+        "unary" => Ok(unary_expr(
+            &value_to_string(obj.get("op")),
+            expr_to_normalized_value(obj.get("operand"))?,
+            value_to_usize(obj.get("width")),
+        )),
+        "binary" => Ok(binary_expr(
+            &value_to_string(obj.get("op")),
+            expr_to_normalized_value(obj.get("left"))?,
+            expr_to_normalized_value(obj.get("right"))?,
+            value_to_usize(obj.get("width")),
+        )),
+        "mux" => Ok(mux_expr(
+            expr_to_normalized_value(obj.get("condition"))?,
+            expr_to_normalized_value(obj.get("when_true"))?,
+            expr_to_normalized_value(obj.get("when_false"))?,
+            value_to_usize(obj.get("width")),
+        )),
+        "slice" => {
+            let begin = value_to_i64(obj.get("range_begin"));
+            let end = value_to_i64(obj.get("range_end"));
+            let low = begin.min(end);
+            let high = begin.max(end);
+            let mut out = Map::new();
+            out.insert("kind".to_string(), Value::String("slice".to_string()));
+            out.insert("base".to_string(), expr_to_normalized_value(obj.get("base"))?);
+            out.insert("range_begin".to_string(), Value::from(low));
+            out.insert("range_end".to_string(), Value::from(high));
+            out.insert("width".to_string(), Value::from(value_to_u64(obj.get("width"))));
+            Ok(Value::Object(out))
+        }
+        "concat" => {
+            let mut out = Map::new();
+            out.insert("kind".to_string(), Value::String("concat".to_string()));
+            out.insert(
+                "parts".to_string(),
+                Value::Array(
+                    array_field(obj, "parts")
+                        .into_iter()
+                        .map(|part| expr_to_normalized_value(Some(&part)))
+                        .collect::<Result<Vec<_>, _>>()?,
+                ),
+            );
+            out.insert("width".to_string(), Value::from(value_to_u64(obj.get("width"))));
+            Ok(Value::Object(out))
+        }
+        "resize" => {
+            let mut out = Map::new();
+            out.insert("kind".to_string(), Value::String("resize".to_string()));
+            out.insert("expr".to_string(), expr_to_normalized_value(obj.get("expr"))?);
+            out.insert("width".to_string(), Value::from(value_to_u64(obj.get("width"))));
+            Ok(Value::Object(out))
+        }
+        "memory_read" => {
+            let mut out = Map::new();
+            out.insert("kind".to_string(), Value::String("memory_read".to_string()));
+            out.insert(
+                "memory".to_string(),
+                Value::String(value_to_string(obj.get("memory"))),
+            );
+            out.insert("addr".to_string(), expr_to_normalized_value(obj.get("addr"))?);
+            out.insert("width".to_string(), Value::from(value_to_u64(obj.get("width"))));
+            Ok(Value::Object(out))
+        }
+        "case" => lower_case_expr(obj),
+        _ => Ok(literal_expr(0, 1)),
+    }
+}
+
+fn lower_case_expr(case_obj: &Map<String, Value>) -> Result<Value, String> {
+    let selector = expr_to_normalized_value(case_obj.get("selector"))?;
+    let width = value_to_usize(case_obj.get("width"));
+    let default_expr = if let Some(default_value) = case_obj.get("default") {
+        if !default_value.is_null() {
+            expr_to_normalized_value(Some(default_value))?
+        } else {
+            literal_expr(0, width.max(1))
+        }
+    } else {
+        literal_expr(0, width.max(1))
+    };
+
+    let mut result = default_expr;
+
+    if let Some(cases_obj) = case_obj.get("cases").and_then(Value::as_object) {
+        for (raw_values, raw_expr) in cases_obj {
+            let values = parse_case_values(raw_values);
+            if values.is_empty() {
+                continue;
+            }
+            for value in values {
+                let cond = binary_expr(
+                    "==",
+                    selector.clone(),
+                    literal_expr(value, expr_width(Some(&selector)).unwrap_or(1)),
+                    1,
+                );
+                result = mux_expr(
+                    cond,
+                    expr_to_normalized_value(Some(raw_expr))?,
+                    result,
+                    width.max(1),
+                );
+            }
+        }
+    }
+
+    Ok(result)
+}
+
+fn parse_case_values(raw: &str) -> Vec<i64> {
+    let text = raw.trim();
+    if text.is_empty() {
+        return Vec::new();
+    }
+
+    if text.starts_with('[') && text.ends_with(']') {
+        let inner = &text[1..text.len() - 1];
+        return inner
+            .split(',')
+            .filter_map(|v| v.trim().parse::<i64>().ok())
+            .collect();
+    }
+
+    text.parse::<i64>().ok().into_iter().collect()
+}
+
+fn as_object<'a>(value: &'a Value, what: &str) -> Result<&'a Map<String, Value>, String> {
+    value
+        .as_object()
+        .ok_or_else(|| format!("Expected {} object", what))
+}
+
+fn array_field(obj: &Map<String, Value>, key: &str) -> Vec<Value> {
+    obj.get(key)
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default()
+}
+
+fn value_to_string(value: Option<&Value>) -> String {
+    match value {
+        Some(Value::String(s)) => s.clone(),
+        Some(v) => match v {
+            Value::Null => String::new(),
+            Value::Number(n) => n.to_string(),
+            Value::Bool(b) => {
+                if *b {
+                    "true".to_string()
+                } else {
+                    "false".to_string()
+                }
+            }
+            _ => String::new(),
+        },
+        None => String::new(),
+    }
+}
+
+fn value_to_bool(value: Option<&Value>) -> bool {
+    match value {
+        Some(Value::Bool(b)) => *b,
+        Some(Value::Number(n)) => n.as_u64().unwrap_or(0) != 0,
+        Some(Value::String(s)) => s == "true" || s == "1",
+        _ => false,
+    }
+}
+
+fn value_to_u64(value: Option<&Value>) -> u64 {
+    value_to_i64(value).max(0) as u64
+}
+
+fn value_to_usize(value: Option<&Value>) -> usize {
+    value_to_u64(value) as usize
+}
+
+fn value_to_i64(value: Option<&Value>) -> i64 {
+    match value {
+        Some(Value::Number(n)) => n.as_i64().unwrap_or_else(|| n.as_u64().unwrap_or(0) as i64),
+        Some(Value::String(s)) => s.parse::<i64>().unwrap_or(0),
+        Some(Value::Bool(b)) => {
+            if *b {
+                1
+            } else {
+                0
+            }
+        }
+        _ => 0,
+    }
+}
+
+fn literal_expr(value: i64, width: usize) -> Value {
+    let mut out = Map::new();
+    out.insert("kind".to_string(), Value::String("literal".to_string()));
+    out.insert("value".to_string(), Value::from(value));
+    out.insert("width".to_string(), Value::from(width as u64));
+    Value::Object(out)
+}
+
+fn signal_expr(name: String, width: usize) -> Value {
+    let mut out = Map::new();
+    out.insert("kind".to_string(), Value::String("signal".to_string()));
+    out.insert("name".to_string(), Value::String(name));
+    out.insert("width".to_string(), Value::from(width as u64));
+    Value::Object(out)
+}
+
+fn unary_expr(op: &str, operand: Value, width: usize) -> Value {
+    let mut out = Map::new();
+    out.insert("kind".to_string(), Value::String("unary".to_string()));
+    out.insert("op".to_string(), Value::String(op.to_string()));
+    out.insert("operand".to_string(), operand);
+    out.insert("width".to_string(), Value::from(width as u64));
+    Value::Object(out)
+}
+
+fn binary_expr(op: &str, left: Value, right: Value, width: usize) -> Value {
+    let mut out = Map::new();
+    out.insert("kind".to_string(), Value::String("binary".to_string()));
+    out.insert("op".to_string(), Value::String(op.to_string()));
+    out.insert("left".to_string(), left);
+    out.insert("right".to_string(), right);
+    out.insert("width".to_string(), Value::from(width as u64));
+    Value::Object(out)
+}
+
+fn mux_expr(condition: Value, when_true: Value, when_false: Value, width: usize) -> Value {
+    let mut out = Map::new();
+    out.insert("kind".to_string(), Value::String("mux".to_string()));
+    out.insert("condition".to_string(), condition);
+    out.insert("when_true".to_string(), when_true);
+    out.insert("when_false".to_string(), when_false);
+    out.insert("width".to_string(), Value::from(width as u64));
+    Value::Object(out)
+}
+
+fn expr_width(expr: Option<&Value>) -> Option<usize> {
+    let obj = expr?.as_object()?;
+    obj.get("width").map(|w| value_to_usize(Some(w)))
 }
 
 #[derive(Debug, Clone)]
@@ -732,10 +1343,7 @@ pub struct CoreSimulator {
 
 impl CoreSimulator {
     pub fn new(json: &str) -> Result<Self, String> {
-        let mut deserializer = serde_json::Deserializer::from_str(json);
-        deserializer.disable_recursion_limit();
-        let ir: ModuleIR = serde::Deserialize::deserialize(&mut deserializer)
-            .map_err(|e| format!("Failed to parse IR JSON: {}", e))?;
+        let ir = parse_module_ir(json)?;
 
         let mut signals = Vec::new();
         let mut widths = Vec::new();

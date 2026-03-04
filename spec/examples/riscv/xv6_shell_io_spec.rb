@@ -177,7 +177,7 @@ RSpec.describe RHDL::Examples::RISCV::IRHarness do
   XV6_SINGLE_BACKEND_CASES.each do |test_case|
     context "backend #{test_case[:id]}" do
       let(:backend) { test_case[:harness_backend] }
-      let(:cpu) { described_class.new(mem_size: 4096, backend: backend, allow_fallback: false) }
+      let(:cpu) { described_class.new(mem_size: 4096, backend: backend) }
 
       include_examples 'xv6 shell UART I/O',
                        pipeline: false,
@@ -195,7 +195,7 @@ RSpec.describe RHDL::Examples::RISCV::Pipeline::IRHarness do
   XV6_PIPELINE_BACKEND_CASES.each do |test_case|
     context "backend #{test_case[:id]}" do
       let(:backend) { test_case[:harness_backend] }
-      let(:cpu) { described_class.new("xv6_shell_pipeline_#{backend}", backend: backend, allow_fallback: false) }
+      let(:cpu) { described_class.new("xv6_shell_pipeline_#{backend}", backend: backend) }
 
       include_examples 'xv6 shell UART I/O',
                        pipeline: true,

@@ -74,21 +74,20 @@ module RHDL
         start_time = Time.now
 
         # Generate IR JSON from Apple2 component
-        ir = Apple2.to_flat_ir
-        @ir_json = RHDL::Codegen::IR::IRToJson.convert(ir)
+        ir = Apple2.to_flat_circt_nodes
+        @ir_json = RHDL::Codegen::IR.sim_json(ir, backend: backend)
         @backend = backend
         @sub_cycles = sub_cycles.clamp(1, 14)
 
         @sim = RHDL::Codegen::IR::IrSimulator.new(
           @ir_json,
           backend: backend,
-          allow_fallback: false,
           sub_cycles: @sub_cycles
         )
 
         elapsed = Time.now - start_time
         log "  IR loaded in #{elapsed.round(2)}s"
-        log "  Native backend: #{@sim.native? ? 'Rust (optimized)' : 'Ruby (fallback)'}"
+        log "  Native backend: Rust (optimized)"
         log "  Signals: #{@sim.signal_count}, Registers: #{@sim.reg_count}"
         log "  Sub-cycles: #{@sub_cycles} (#{@sub_cycles == 14 ? 'full accuracy' : 'fast mode'})"
 

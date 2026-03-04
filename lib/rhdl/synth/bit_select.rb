@@ -17,7 +17,7 @@ module RHDL
       def to_ir
         if @index.is_a?(Integer)
           # Constant index - static bit slice
-          RHDL::Codegen::IR::Slice.new(base: @base.to_ir, range: @index..@index, width: 1)
+          RHDL::Codegen::CIRCT::IR::Slice.new(base: @base.to_ir, range: @index..@index, width: 1)
         else
           # Dynamic index - generate (base >> index) & 1
           # This implements runtime bit selection
@@ -25,7 +25,7 @@ module RHDL
           index_ir = @index.to_ir
 
           # (base >> index) & 1
-          shifted = RHDL::Codegen::IR::BinaryOp.new(
+          shifted = RHDL::Codegen::CIRCT::IR::BinaryOp.new(
             op: :>>,
             left: base_ir,
             right: index_ir,
@@ -33,10 +33,10 @@ module RHDL
           )
 
           # Mask to get just the lowest bit
-          RHDL::Codegen::IR::BinaryOp.new(
+          RHDL::Codegen::CIRCT::IR::BinaryOp.new(
             op: :&,
             left: shifted,
-            right: RHDL::Codegen::IR::Literal.new(value: 1, width: 1),
+            right: RHDL::Codegen::CIRCT::IR::Literal.new(value: 1, width: 1),
             width: 1
           )
         end

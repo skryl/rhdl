@@ -14,14 +14,14 @@ module RHDL
       class IrRunner
         attr_reader :clock_count
 
-        def initialize(core: :single, mem_size: Memory::DEFAULT_SIZE, backend: :jit, allow_fallback: true)
+        def initialize(core: :single, mem_size: Memory::DEFAULT_SIZE, backend: :jit)
           @core = core
 
           @harness = case core
                      when :single
-                       IRHarness.new(mem_size: mem_size, backend: backend, allow_fallback: allow_fallback)
+                       IRHarness.new(mem_size: mem_size, backend: backend)
                      when :pipeline
-                       Pipeline::IRHarness.new('riscv_pipeline_ir', mem_size: mem_size, backend: backend, allow_fallback: allow_fallback)
+                       Pipeline::IRHarness.new('riscv_pipeline_ir', mem_size: mem_size, backend: backend)
                      else
                        raise ArgumentError, "Unsupported core: #{core.inspect}"
                      end

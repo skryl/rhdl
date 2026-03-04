@@ -52,7 +52,7 @@ RSpec.describe 'GameBoy HDMA' do
 
   describe 'HDMA Component Structure' do
     let(:hdma) { RHDL::Examples::GameBoy::HDMA.new('hdma') }
-    let(:ir) { hdma.class.to_ir }
+    let(:ir) { hdma.class.to_flat_circt_nodes }
     let(:port_names) { ir.ports.map { |p| p.name.to_sym } }
 
     describe 'Input Ports (via IR)' do
@@ -122,7 +122,7 @@ RSpec.describe 'GameBoy HDMA' do
       end
 
       it 'can generate flattened IR' do
-        flat_ir = hdma.class.to_flat_ir
+        flat_ir = hdma.class.to_flat_circt_nodes
         expect(flat_ir).not_to be_nil
       end
 

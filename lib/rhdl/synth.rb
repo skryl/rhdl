@@ -1,8 +1,8 @@
 # Synthesis expression tree building
 # Provides expression AST classes for converting behavior blocks to IR
 
-# Load codegen IR first (synth expressions depend on IR types)
-require_relative 'codegen/ir/ir'
+# Load CIRCT IR first (synth expressions emit CIRCT nodes)
+require_relative 'codegen/circt/ir'
 
 # Load expression hierarchy in dependency order
 require_relative 'synth/expr'

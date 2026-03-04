@@ -193,7 +193,7 @@ module RHDL
         end
 
         def to_ir
-          RHDL::Export::IR::Literal.new(value: @value, width: @width)
+          RHDL::Codegen::CIRCT::IR::Literal.new(value: @value, width: @width)
         end
 
         def to_dsl_expr
@@ -218,7 +218,7 @@ module RHDL
         end
 
         def to_ir
-          RHDL::Export::IR::Signal.new(name: @name, width: @width)
+          RHDL::Codegen::CIRCT::IR::Signal.new(name: @name, width: @width)
         end
 
         def to_dsl_expr
@@ -238,7 +238,7 @@ module RHDL
         end
 
         def to_ir
-          RHDL::Export::IR::BinaryOp.new(
+          RHDL::Codegen::CIRCT::IR::BinaryOp.new(
             op: @op,
             left: @left.to_ir,
             right: resize_ir(@right.to_ir, @left.width),
@@ -254,7 +254,7 @@ module RHDL
 
         def resize_ir(expr, target_width)
           return expr if expr.width == target_width
-          RHDL::Export::IR::Resize.new(expr: expr, width: target_width)
+          RHDL::Codegen::CIRCT::IR::Resize.new(expr: expr, width: target_width)
         end
       end
 
@@ -269,7 +269,7 @@ module RHDL
         end
 
         def to_ir
-          RHDL::Export::IR::UnaryOp.new(op: @op, operand: @operand.to_ir, width: @width)
+          RHDL::Codegen::CIRCT::IR::UnaryOp.new(op: @op, operand: @operand.to_ir, width: @width)
         end
 
         def to_dsl_expr
@@ -288,7 +288,7 @@ module RHDL
         end
 
         def to_ir
-          RHDL::Export::IR::Slice.new(base: @base.to_ir, range: @index..@index, width: 1)
+          RHDL::Codegen::CIRCT::IR::Slice.new(base: @base.to_ir, range: @index..@index, width: 1)
         end
 
         def to_dsl_expr
@@ -310,7 +310,7 @@ module RHDL
         end
 
         def to_ir
-          RHDL::Export::IR::Slice.new(base: @base.to_ir, range: @range, width: @width)
+          RHDL::Codegen::CIRCT::IR::Slice.new(base: @base.to_ir, range: @range, width: @width)
         end
 
         def to_dsl_expr
@@ -328,7 +328,7 @@ module RHDL
         end
 
         def to_ir
-          RHDL::Export::IR::Concat.new(parts: @parts.map(&:to_ir), width: @width)
+          RHDL::Codegen::CIRCT::IR::Concat.new(parts: @parts.map(&:to_ir), width: @width)
         end
 
         def to_dsl_expr
@@ -348,7 +348,7 @@ module RHDL
 
         def to_ir
           parts = Array.new(@times) { @expr.to_ir }
-          RHDL::Export::IR::Concat.new(parts: parts, width: @width)
+          RHDL::Codegen::CIRCT::IR::Concat.new(parts: parts, width: @width)
         end
 
         def to_dsl_expr
@@ -374,10 +374,10 @@ module RHDL
         end
 
         def to_ir
-          RHDL::Export::IR::Mux.new(
+          RHDL::Codegen::CIRCT::IR::Mux.new(
             condition: @condition.to_ir,
             when_true: @when_true_expr.to_ir,
-            when_false: @when_false_expr&.to_ir || RHDL::Export::IR::Literal.new(value: 0, width: @width),
+            when_false: @when_false_expr&.to_ir || RHDL::Codegen::CIRCT::IR::Literal.new(value: 0, width: @width),
             width: @width
           )
         end
@@ -403,7 +403,7 @@ module RHDL
 
         def to_ir
           # Convert to nested muxes or case IR
-          RHDL::Export::IR::Case.new(
+          RHDL::Codegen::CIRCT::IR::Case.new(
             selector: @selector.to_ir,
             cases: @cases.transform_keys { |k| k.is_a?(Array) ? k : [k] }
                         .transform_values(&:to_ir),
@@ -425,12 +425,12 @@ module RHDL
 
         def to_ir
           # In synthesis, reference the wire
-          RHDL::Export::IR::Signal.new(name: @name, width: @width)
+          RHDL::Codegen::CIRCT::IR::Signal.new(name: @name, width: @width)
         end
 
         # Return the assignment that creates this wire
         def wire_assign_ir
-          RHDL::Export::IR::Assign.new(
+          RHDL::Codegen::CIRCT::IR::Assign.new(
             target: @name,
             expr: @expr.to_ir
           )
@@ -462,7 +462,7 @@ module RHDL
         end
 
         def to_ir
-          RHDL::Export::IR::MemoryRead.new(
+          RHDL::Codegen::CIRCT::IR::MemoryRead.new(
             memory: @memory_name,
             addr: @addr.to_ir,
             width: @width
@@ -527,7 +527,7 @@ module RHDL
           ir_cases = cases.transform_keys { |k| [k] }
                          .transform_values { |v| to_ir_expr(v, width) }
 
-          RHDL::Export::IR::Case.new(
+          RHDL::Codegen::CIRCT::IR::Case.new(
             selector: to_ir_expr(@selector, @selector.width),
             cases: ir_cases,
             default: default ? to_ir_expr(default, width) : nil,
@@ -537,7 +537,7 @@ module RHDL
 
         def to_ir_expr(expr, width)
           return expr.to_ir if expr.respond_to?(:to_ir)
-          RHDL::Export::IR::Literal.new(value: expr.to_i, width: width)
+          RHDL::Codegen::CIRCT::IR::Literal.new(value: expr.to_i, width: width)
         end
       end
 
@@ -770,10 +770,10 @@ module RHDL
 
           # Convert to IR with locals as wires
           {
-            wires: @locals.map { |l| RHDL::Export::IR::Net.new(name: l.name, width: l.width) },
+            wires: @locals.map { |l| RHDL::Codegen::CIRCT::IR::Net.new(name: l.name, width: l.width) },
             wire_assigns: @locals.map(&:wire_assign_ir),
             output_assigns: @assignments.map do |assignment|
-              RHDL::Export::IR::Assign.new(
+              RHDL::Codegen::CIRCT::IR::Assign.new(
                 target: assignment.target.name,
                 expr: resize_to_target(assignment.expr.to_ir, assignment.target.width)
               )
@@ -791,7 +791,7 @@ module RHDL
 
         def resize_to_target(ir_expr, target_width)
           return ir_expr if ir_expr.width == target_width
-          RHDL::Export::IR::Resize.new(expr: ir_expr, width: target_width)
+          RHDL::Codegen::CIRCT::IR::Resize.new(expr: ir_expr, width: target_width)
         end
 
         # Compute the actual value of an expression during simulation
@@ -883,31 +883,31 @@ module RHDL
         # Compute IR expression value during simulation
         def compute_value_from_ir(ir)
           case ir
-          when RHDL::Export::IR::Literal
+          when RHDL::Codegen::CIRCT::IR::Literal
             ir.value
-          when RHDL::Export::IR::Signal
+          when RHDL::Codegen::CIRCT::IR::Signal
             @input_values[ir.name.to_sym] || @output_values[ir.name.to_sym] || 0
-          when RHDL::Export::IR::BinaryOp
+          when RHDL::Codegen::CIRCT::IR::BinaryOp
             left = compute_value_from_ir(ir.left)
             right = compute_value_from_ir(ir.right)
             compute_binary(ir.op, left, right, ir.width)
-          when RHDL::Export::IR::UnaryOp
+          when RHDL::Codegen::CIRCT::IR::UnaryOp
             operand = compute_value_from_ir(ir.operand)
             compute_unary(ir.op, operand, ir.width)
-          when RHDL::Export::IR::Slice
+          when RHDL::Codegen::CIRCT::IR::Slice
             base = compute_value_from_ir(ir.base)
             low = [ir.range.begin, ir.range.end].min
             (base >> low) & ((1 << ir.width) - 1)
-          when RHDL::Export::IR::Mux
+          when RHDL::Codegen::CIRCT::IR::Mux
             cond = compute_value_from_ir(ir.condition)
             if cond != 0
               compute_value_from_ir(ir.when_true)
             else
               compute_value_from_ir(ir.when_false)
             end
-          when RHDL::Export::IR::Case
+          when RHDL::Codegen::CIRCT::IR::Case
             compute_case_value(ir)
-          when RHDL::Export::IR::Resize
+          when RHDL::Codegen::CIRCT::IR::Resize
             compute_value_from_ir(ir.expr)
           else
             0

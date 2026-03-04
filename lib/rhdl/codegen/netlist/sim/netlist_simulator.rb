@@ -351,7 +351,7 @@ module RHDL
         end
       end
 
-      # Pure Ruby fallback implementation.
+      # Pure Ruby netlist simulator implementation.
       class RubyNetlistSimulator
         attr_reader :ir, :lanes
 
@@ -522,7 +522,7 @@ module RHDL
         end
       end
 
-      # Unified wrapper for interpreter, JIT, compiler, and Ruby fallback.
+      # Unified wrapper for native netlist backends (interpreter, JIT, compiler).
       class NetlistSimulator
         attr_reader :ir, :lanes
 
@@ -547,16 +547,15 @@ module RHDL
           }
         }.freeze
 
-        def initialize(ir, backend: :interpreter, lanes: 64, simd: :auto, allow_fallback: true)
+        def initialize(ir, backend: :interpreter, lanes: 64, simd: :auto)
           @ir = ir
           @lanes = lanes
           @simd = simd
           @requested_backend = normalize_backend(backend)
-          @fallback = false
           @native_error = nil
 
           native_loaded = false
-          backend_candidates(@requested_backend, allow_fallback: allow_fallback).each do |candidate|
+          backend_candidates(@requested_backend).each do |candidate|
             next unless BACKEND_CONFIGS[candidate][:available]
 
             begin
@@ -570,13 +569,7 @@ module RHDL
 
           return if native_loaded
 
-          if allow_fallback
-            @sim = RubyNetlistSimulator.new(ir, lanes: lanes)
-            @backend = :ruby
-            @fallback = true
-          else
-            raise LoadError, unavailable_backend_error_message(@requested_backend, allow_fallback: false)
-          end
+          raise LoadError, unavailable_backend_error_message(@requested_backend)
         end
 
         def simulator_type
@@ -588,7 +581,7 @@ module RHDL
         end
 
         def native?
-          !@fallback && @sim.respond_to?(:native?) && @sim.native?
+          @sim.respond_to?(:native?) && @sim.native?
         end
 
         def poke(name, value)
@@ -690,11 +683,11 @@ module RHDL
           end
         end
 
-        def backend_candidates(backend, allow_fallback:)
+        def backend_candidates(backend)
           case backend
           when :auto then [:compiler, :jit, :interpreter]
-          when :compiler then allow_fallback ? [:compiler, :jit, :interpreter] : [:compiler]
-          when :jit then allow_fallback ? [:jit, :interpreter] : [:jit]
+          when :compiler then [:compiler]
+          when :jit then [:jit]
           when :interpreter then [:interpreter]
           else
             [backend]
@@ -718,8 +711,8 @@ module RHDL
           @backend = config[:type]
         end
 
-        def unavailable_backend_error_message(backend, allow_fallback:)
-          candidates = backend_candidates(backend, allow_fallback: allow_fallback)
+        def unavailable_backend_error_message(backend)
+          candidates = backend_candidates(backend)
           missing = candidates.reject { |candidate| BACKEND_CONFIGS[candidate][:available] }
           hint_paths = missing.map { |candidate| BACKEND_CONFIGS[candidate][:lib_path] }
 

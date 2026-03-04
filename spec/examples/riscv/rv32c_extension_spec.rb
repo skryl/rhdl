@@ -9,7 +9,7 @@ RSpec.describe 'RISC-V RV32C extension', timeout: 30 do
   let(:asm) { RHDL::Examples::RISCV::Assembler }
 
   describe RHDL::Examples::RISCV::IRHarness do
-    let(:cpu) { described_class.new(mem_size: 4096, backend: :jit, allow_fallback: false) }
+    let(:cpu) { described_class.new(mem_size: 4096, backend: :jit) }
 
     before do
       skip 'IR JIT not available' unless RHDL::Codegen::IR::IR_JIT_AVAILABLE
@@ -76,7 +76,7 @@ RSpec.describe 'RISC-V RV32C extension', timeout: 30 do
   end
 
   describe RHDL::Examples::RISCV::Pipeline::IRHarness do
-    let(:cpu) { described_class.new('test_cpu', backend: :jit, allow_fallback: false) }
+    let(:cpu) { described_class.new('test_cpu', backend: :jit) }
 
     before do
       skip 'IR JIT not available' unless RHDL::Codegen::IR::IR_JIT_AVAILABLE

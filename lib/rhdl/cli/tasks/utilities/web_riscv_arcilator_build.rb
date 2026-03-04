@@ -9,7 +9,7 @@ module RHDL
       # Builds an arcilator-compiled RISC-V WASM module for web benchmarking.
       #
       # Pipeline:
-      #   RHDL -> FIRRTL -> firtool/circt-opt -> arcilator -> LLVM IR
+      #   RHDL -> CIRCT MLIR -> arcilator -> LLVM IR
       #   -> clang --target=wasm32 -> wasm-ld -> riscv_arcilator.wasm
       module WebRiscvArcilatorBuild
         PROJECT_ROOT = File.expand_path('../../../../..', __dir__)
@@ -30,7 +30,7 @@ module RHDL
         PKG_DIR = File.join(PROJECT_ROOT, 'web', 'assets', 'pkg')
         PKG_OUTPUT = File.join(PKG_DIR, 'riscv_arcilator.wasm')
 
-        REQUIRED_TOOLS = %w[firtool circt-opt arcilator clang wasm-ld].freeze
+        REQUIRED_TOOLS = %w[arcilator clang wasm-ld].freeze
         DEFAULT_MEM_SIZE = 128 * 1024 * 1024
         # Arcilator wrapper uses a fixed bump heap for malloc/calloc.
         # Keep enough room for inst+data memories, disk image buffer, and runtime state.
@@ -87,21 +87,17 @@ module RHDL
         end
 
         def export_firrtl
-          puts '  Exporting RISC-V CPU to FIRRTL...'
+          puts '  Exporting RISC-V CPU to CIRCT MLIR...'
           require File.join(PROJECT_ROOT, 'examples/riscv/hdl/cpu')
           require 'rhdl/codegen'
 
-          flat_ir = RHDL::Examples::RISCV::CPU.to_flat_ir(top_name: 'riscv_cpu')
-          firrtl = RHDL::Codegen::CIRCT::FIRRTL.generate(flat_ir)
-          File.write(FIRRTL_FILE, firrtl)
+          flat_nodes = RHDL::Examples::RISCV::CPU.to_flat_circt_nodes(top_name: 'riscv_cpu')
+          mlir = RHDL::Codegen::CIRCT::MLIR.generate(flat_nodes)
+          File.write(MLIR_FILE, mlir)
         end
 
         def compile_firrtl_to_mlir
-          puts '  Compiling FIRRTL -> HW MLIR...'
-          run_tool!('firtool', FIRRTL_FILE, '--parse-only', '-o', PARSED_MLIR_FILE)
-          run_tool!('circt-opt', PARSED_MLIR_FILE, "--pass-pipeline=#{firrtl_pipeline_without_comb_check}", '-o',
-                    LOWERED_MLIR_FILE)
-          run_tool!('firtool', '--format=mlir', LOWERED_MLIR_FILE, '--ir-hw', '-o', MLIR_FILE)
+          puts '  CIRCT MLIR already emitted; skipping FIRRTL lowering step.'
         end
 
         def compile_mlir_to_llvm_ir

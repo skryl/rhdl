@@ -127,8 +127,8 @@ RSpec.describe RHDL::HDL::CPU::InstructionDecoder do
     end
 
     it 'generates valid IR' do
-      ir = RHDL::HDL::CPU::InstructionDecoder.to_ir
-      expect(ir).to be_a(RHDL::Export::IR::ModuleDef)
+      ir = RHDL::HDL::CPU::InstructionDecoder.to_flat_circt_nodes
+      expect(ir).to be_a(RHDL::Codegen::CIRCT::IR::ModuleOp)
       # 2 inputs (instruction, zero_flag) + 15 outputs
       expect(ir.ports.length).to eq(17)
     end

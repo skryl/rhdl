@@ -29,7 +29,7 @@ RSpec.describe 'GameBoy SpeedControl' do
 
   describe 'SpeedControl Component Structure' do
     let(:speed_ctrl) { RHDL::Examples::GameBoy::SpeedControl.new('speedcontrol') }
-    let(:ir) { speed_ctrl.class.to_ir }
+    let(:ir) { speed_ctrl.class.to_flat_circt_nodes }
     let(:port_names) { ir.ports.map { |p| p.name.to_sym } }
 
     describe 'Input Ports (via IR)' do
@@ -79,7 +79,7 @@ RSpec.describe 'GameBoy SpeedControl' do
       end
 
       it 'can generate flattened IR' do
-        flat_ir = speed_ctrl.class.to_flat_ir
+        flat_ir = speed_ctrl.class.to_flat_circt_nodes
         expect(flat_ir).not_to be_nil
       end
 

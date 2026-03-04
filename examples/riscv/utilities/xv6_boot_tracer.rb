@@ -109,14 +109,12 @@ module RHDL
           case @options[:core]
           when :single
             RHDL::Examples::RISCV::IRHarness.new(
-              backend: @options[:backend],
-              allow_fallback: false
+              backend: @options[:backend]
             )
           when :pipeline
             RHDL::Examples::RISCV::Pipeline::IRHarness.new(
               'xv6_pipeline_trace',
-              backend: @options[:backend],
-              allow_fallback: false
+              backend: @options[:backend]
             )
           else
             raise ArgumentError, "Unsupported core #{@options[:core]}"

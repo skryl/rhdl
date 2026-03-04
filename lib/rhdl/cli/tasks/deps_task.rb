@@ -102,7 +102,7 @@ module RHDL
                 diagnostic = command_output_first_line(arcilator_health_checks.fetch(tool))
                 puts "  #{tool}: #{diagnostic}" if diagnostic && !diagnostic.empty?
               end
-              puts "  Install CIRCT tools (firtool, arcilator, llc) from https://github.com/llvm/circt"
+              puts "  Install CIRCT tools (firtool, arcilator, circt-translate, llc) from https://github.com/llvm/circt"
             end
           end
 
@@ -193,6 +193,7 @@ module RHDL
             'arcilator' => { cmd: 'arcilator --version', optional: true, desc: 'CIRCT Arcilator (cycle-based HDL simulator)' },
             'mlir-opt' => { cmd: 'mlir-opt --version', optional: true, desc: 'MLIR optimizer (GPU/SPIR-V lowering passes)' },
             'spirv-cross' => { cmd: 'spirv-cross --version', optional: true, desc: 'SPIR-V to Metal shader cross-compiler' },
+            'circt-translate' => { cmd: 'circt-translate --version', optional: true, desc: 'CIRCT translate utility (MLIR/Verilog translation)' },
             'dot' => { cmd: 'dot -V', optional: true, desc: 'Graphviz (for diagram rendering)' },
             'bun' => { cmd: 'bun --version', optional: true, desc: 'Bun (for web and desktop tooling)' },
             'ruby' => { cmd: 'ruby --version', optional: false, desc: 'Ruby interpreter' },
@@ -275,6 +276,7 @@ module RHDL
           {
             'firtool' => 'firtool --version',
             'arcilator' => 'arcilator --version',
+            'circt-translate' => 'circt-translate --version',
             'llc' => 'llc --version'
           }
         end
@@ -316,7 +318,7 @@ module RHDL
           output.lines.first&.strip
         end
 
-        def run_command_with_timeout(command, timeout_seconds: 2)
+        def run_command_with_timeout(command, timeout_seconds: 10)
           output = +""
           status = nil
 

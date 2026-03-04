@@ -75,7 +75,7 @@ module RHDL
         end
 
         def to_ir
-          RHDL::Export::IR::Case.new(
+          RHDL::Codegen::CIRCT::IR::Case.new(
             selector: @selector.to_ir,
             cases: @cases.transform_keys { |k| k.is_a?(Array) ? k : [k] }
                         .transform_values(&:to_ir),
@@ -111,9 +111,9 @@ module RHDL
 
         def to_ir
           # Convert to nested muxes for IR
-          result = @else_branch&.to_ir || RHDL::Export::IR::Literal.new(value: 0, width: @width)
+          result = @else_branch&.to_ir || RHDL::Codegen::CIRCT::IR::Literal.new(value: 0, width: @width)
           @conditions.reverse.zip(@branches.reverse).each do |cond, branch|
-            result = RHDL::Export::IR::Mux.new(
+            result = RHDL::Codegen::CIRCT::IR::Mux.new(
               condition: cond.to_ir,
               when_true: branch.to_ir,
               when_false: result,
@@ -135,6 +135,9 @@ module RHDL
           @block = block
         end
       end
+
+      SequentialAssign = Struct.new(:target, :expr, keyword_init: true)
+      SequentialIR = Struct.new(:clock, :reset, :reset_values, :assignments, keyword_init: true)
 
       # Context for sequential evaluation
       class SequentialContext < Behavior::BehaviorContext
@@ -184,12 +187,12 @@ module RHDL
           evaluator = SequentialEvaluator.new(self, proxies)
           evaluator.evaluate(&block)
 
-          RHDL::Export::IR::Sequential.new(
+          SequentialIR.new(
             clock: @clock,
             reset: @reset,
             reset_values: @reset_values,
             assignments: @assignments.map do |a|
-              RHDL::Export::IR::Assign.new(
+              SequentialAssign.new(
                 target: a.target.name,
                 expr: a.expr.to_ir
               )

@@ -48,7 +48,7 @@ RSpec.shared_examples 'zbb core behavior' do |pipeline:|
 end
 
 RSpec.describe RHDL::Examples::RISCV::IRHarness do
-  let(:cpu) { described_class.new(mem_size: 4096, backend: :compile, allow_fallback: false) }
+  let(:cpu) { described_class.new(mem_size: 4096, backend: :compile) }
 
   before(:each) do
     skip 'IR compiler backend unavailable' unless RHDL::Codegen::IR::IR_COMPILER_AVAILABLE
@@ -58,7 +58,7 @@ RSpec.describe RHDL::Examples::RISCV::IRHarness do
 end
 
 RSpec.describe RHDL::Examples::RISCV::Pipeline::IRHarness do
-  let(:cpu) { described_class.new('zbb_pipeline', backend: :compile, allow_fallback: false) }
+  let(:cpu) { described_class.new('zbb_pipeline', backend: :compile) }
 
   before(:each) do
     skip 'IR compiler backend unavailable' unless RHDL::Codegen::IR::IR_COMPILER_AVAILABLE

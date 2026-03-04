@@ -58,12 +58,12 @@ RSpec.describe RHDL::Examples::MOS6502::ControlUnit do
       expect(verilog).to include('state')
     end
 
-    it 'generates valid FIRRTL' do
-      firrtl = described_class.to_circt
-      expect(firrtl).to include('FIRRTL version')
-      expect(firrtl).to include('circuit mos6502_control_unit')
-      expect(firrtl).to include('input clk')
-      expect(firrtl).to include('output state')
+    it 'generates valid CIRCT MLIR' do
+      mlir = described_class.to_circt
+      expect(mlir).to include('hw.output')
+      expect(mlir).to include('hw.module @mos6502_control_unit')
+      expect(mlir).to include('%clk:')
+      expect(mlir).to include('state:')
     end
 
     context 'CIRCT firtool validation', if: HdlToolchain.firtool_available? do

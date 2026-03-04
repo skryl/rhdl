@@ -58,15 +58,15 @@ RSpec.describe 'Karateka MOS6502 4-Way Divergence Analysis' do
       return false unless RHDL::Codegen::IR::IR_JIT_AVAILABLE
       # Check if MOS6502 mode is available
       require_relative '../../../examples/mos6502/hdl/cpu'
-      ir = RHDL::Examples::MOS6502::CPU.to_flat_ir
-      ir_json = RHDL::Codegen::IR::IRToJson.convert(ir)
+      ir = RHDL::Examples::MOS6502::CPU.to_flat_circt_nodes
+      ir_json = RHDL::Codegen::IR.sim_json(ir, backend: :jit)
       sim = RHDL::Codegen::IR::IrSimulator.new(ir_json, backend: :jit)
       sim.respond_to?(:runner_kind) && sim.runner_kind == :mos6502
     when :compile
       return false unless RHDL::Codegen::IR::IR_COMPILER_AVAILABLE
       require_relative '../../../examples/mos6502/hdl/cpu'
-      ir = RHDL::Examples::MOS6502::CPU.to_flat_ir
-      ir_json = RHDL::Codegen::IR::IRToJson.convert(ir)
+      ir = RHDL::Examples::MOS6502::CPU.to_flat_circt_nodes
+      ir_json = RHDL::Codegen::IR.sim_json(ir, backend: :compiler)
       sim = RHDL::Codegen::IR::IrSimulator.new(ir_json, backend: :compiler)
       sim.respond_to?(:runner_kind) && sim.runner_kind == :mos6502
     else

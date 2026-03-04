@@ -57,8 +57,8 @@ RSpec.describe RHDL::HDL::RegisterFile do
     end
 
     it 'generates valid IR' do
-      ir = RHDL::HDL::RegisterFile.to_ir
-      expect(ir).to be_a(RHDL::Export::IR::ModuleDef)
+      ir = RHDL::HDL::RegisterFile.to_flat_circt_nodes
+      expect(ir).to be_a(RHDL::Codegen::CIRCT::IR::ModuleOp)
       expect(ir.ports.length).to eq(8)  # clk, we, waddr, wdata, raddr1, raddr2, rdata1, rdata2
       expect(ir.memories.length).to eq(1)
     end
@@ -70,13 +70,13 @@ RSpec.describe RHDL::HDL::RegisterFile do
       expect(verilog).to match(/output.*\[7:0\].*rdata1/)
     end
 
-    it 'generates valid FIRRTL' do
-      firrtl = RHDL::HDL::RegisterFile.to_circt
-      expect(firrtl).to include('FIRRTL version')
-      expect(firrtl).to include('circuit register_file')
-      expect(firrtl).to include('input clk')
-      expect(firrtl).to include('input wdata')
-      expect(firrtl).to include('output rdata1')
+    it 'generates valid CIRCT MLIR' do
+      mlir = RHDL::HDL::RegisterFile.to_circt
+      expect(mlir).to include('hw.output')
+      expect(mlir).to include('hw.module @register_file')
+      expect(mlir).to include('%clk:')
+      expect(mlir).to include('%wdata:')
+      expect(mlir).to include('rdata1:')
     end
 
     context 'CIRCT firtool validation', if: HdlToolchain.firtool_available? do

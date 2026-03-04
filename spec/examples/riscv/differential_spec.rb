@@ -15,11 +15,11 @@ RSpec.describe 'RISC-V single-cycle vs pipelined equivalence', timeout: 30 do
   end
 
   def build_single
-    RHDL::Examples::RISCV::IRHarness.new(mem_size: 65_536, backend: :jit, allow_fallback: false)
+    RHDL::Examples::RISCV::IRHarness.new(mem_size: 65_536, backend: :jit)
   end
 
   def build_pipeline
-    RHDL::Examples::RISCV::Pipeline::IRHarness.new('pipeline_equiv', backend: :jit, allow_fallback: false)
+    RHDL::Examples::RISCV::Pipeline::IRHarness.new('pipeline_equiv', backend: :jit)
   end
 
   def run_single(program, extra_cycles: 0)

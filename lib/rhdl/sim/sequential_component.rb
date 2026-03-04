@@ -11,9 +11,6 @@
 module RHDL
   module Sim
     class SequentialComponent < Component
-      # Include sequential codegen for to_ir override
-      include RHDL::DSL::SequentialCodegen
-
       def initialize(name = nil, **kwargs)
         @prev_clk = 0
         @clk_sampled = false  # Track if we've sampled clock this cycle

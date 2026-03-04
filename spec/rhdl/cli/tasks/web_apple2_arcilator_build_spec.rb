@@ -13,8 +13,9 @@ RSpec.describe RHDL::CLI::Tasks::WebApple2ArcilatorBuild do
       result.each { |t| expect(t).to be_a(String) }
     end
 
-    it 'checks all required CIRCT and compiler tools' do
-      expect(described_class::REQUIRED_TOOLS).to include('firtool', 'arcilator', 'clang', 'wasm-ld')
+    it 'checks all required compiler and arcilator tools' do
+      expect(described_class::REQUIRED_TOOLS).to include('arcilator', 'clang', 'wasm-ld')
+      expect(described_class::REQUIRED_TOOLS).not_to include('firtool')
     end
   end
 

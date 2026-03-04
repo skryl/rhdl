@@ -31,7 +31,7 @@ RSpec.describe 'GameBoy GB Top-Level Module' do
 
   describe 'GB Component Structure' do
     let(:gb) { RHDL::Examples::GameBoy::GB.new('gb') }
-    let(:ir) { gb.class.to_ir }
+    let(:ir) { gb.class.to_flat_circt_nodes }
     let(:port_names) { ir.ports.map { |p| p.name.to_sym } }
 
     describe 'Clock and Reset Inputs (via IR)' do
@@ -158,7 +158,7 @@ RSpec.describe 'GameBoy GB Top-Level Module' do
         # This may fail if there are issues in subcomponents (e.g., SM83)
         # Skip gracefully in that case
         begin
-          flat_ir = gb.class.to_flat_ir
+          flat_ir = gb.class.to_flat_circt_nodes
           expect(flat_ir).not_to be_nil
         rescue NameError => e
           skip "Flattened IR generation failed: #{e.message}"

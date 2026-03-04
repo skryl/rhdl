@@ -20,20 +20,20 @@ module RHDL
       # Utility module for exporting Gameboy component to IR
       module GameBoyIr
       class << self
-        # Get the Behavior IR for the Gameboy component (shallow, for Verilog export)
+        # Get the CIRCT node graph for the Gameboy component (shallow module view)
         def behavior_ir
-          ::RHDL::Examples::GameBoy::Gameboy.to_ir
+          ::RHDL::Examples::GameBoy::Gameboy.to_circt_nodes
         end
 
         # Get the flattened Behavior IR (includes all subcomponent logic)
         def flat_ir
-          ::RHDL::Examples::GameBoy::Gameboy.to_flat_ir
+          ::RHDL::Examples::GameBoy::Gameboy.to_flat_circt_nodes
         end
 
         # Convert to JSON format for the simulator
-        def ir_json
+        def ir_json(backend: :interpreter)
           ir = flat_ir
-          RHDL::Codegen::IR::IRToJson.convert(ir)
+          RHDL::Codegen::IR.sim_json(ir, backend: backend)
         end
 
         # Get stats about the IR
@@ -94,18 +94,17 @@ module RHDL
         start_time = Time.now
 
         # Generate IR JSON
-        @ir_json = GameBoyIr.ir_json
+        @ir_json = GameBoyIr.ir_json(backend: backend)
         @backend = backend
 
         @sim = RHDL::Codegen::IR::IrSimulator.new(
           @ir_json,
-          backend: backend,
-          allow_fallback: false
+          backend: backend
         )
 
         elapsed = Time.now - start_time
         log "  IR loaded in #{elapsed.round(2)}s"
-        log "  Native backend: #{@sim.native? ? 'Rust (optimized)' : 'Ruby (fallback)'}"
+        log "  Native backend: Rust (optimized)"
         log "  Signals: #{@sim.signal_count}, Registers: #{@sim.reg_count}"
 
         @cycles = 0

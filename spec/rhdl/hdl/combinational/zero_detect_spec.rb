@@ -34,8 +34,8 @@ RSpec.describe RHDL::HDL::ZeroDetect do
     end
 
     it 'generates valid IR' do
-      ir = RHDL::HDL::ZeroDetect.to_ir
-      expect(ir).to be_a(RHDL::Export::IR::ModuleDef)
+      ir = RHDL::HDL::ZeroDetect.to_flat_circt_nodes
+      expect(ir).to be_a(RHDL::Codegen::CIRCT::IR::ModuleOp)
       expect(ir.ports.length).to eq(2)  # a, zero
     end
 
@@ -46,12 +46,12 @@ RSpec.describe RHDL::HDL::ZeroDetect do
       expect(verilog).to include('output zero')
     end
 
-    it 'generates valid FIRRTL' do
-      firrtl = RHDL::HDL::ZeroDetect.to_circt
-      expect(firrtl).to include('FIRRTL version')
-      expect(firrtl).to include('circuit zero_detect')
-      expect(firrtl).to include('input a')
-      expect(firrtl).to include('output zero')
+    it 'generates valid CIRCT MLIR' do
+      mlir = RHDL::HDL::ZeroDetect.to_circt
+      expect(mlir).to include('hw.output')
+      expect(mlir).to include('hw.module @zero_detect')
+      expect(mlir).to include('%a:')
+      expect(mlir).to include('zero:')
     end
 
     context 'CIRCT firtool validation', if: HdlToolchain.firtool_available? do

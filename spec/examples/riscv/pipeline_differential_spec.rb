@@ -18,11 +18,11 @@ RSpec.describe 'RISC-V pipeline differential: OS-boot critical scenarios', timeo
   # -- Harness construction helpers ------------------------------------------
 
   def build_single
-    RHDL::Examples::RISCV::IRHarness.new(mem_size: 65_536, backend: :jit, allow_fallback: false)
+    RHDL::Examples::RISCV::IRHarness.new(mem_size: 65_536, backend: :jit)
   end
 
   def build_pipeline
-    RHDL::Examples::RISCV::Pipeline::IRHarness.new('diff_test', mem_size: 65_536, backend: :jit, allow_fallback: false)
+    RHDL::Examples::RISCV::Pipeline::IRHarness.new('diff_test', mem_size: 65_536, backend: :jit)
   end
 
   # Polymorphic data-memory helpers (the two harnesses expose different names).

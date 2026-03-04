@@ -334,8 +334,12 @@ module RHDL
           require_relative '../../../../examples/mos6502/utilities/apple2/bus'
 
           ir_start = Process.clock_gettime(Process::CLOCK_MONOTONIC)
-          ir = RHDL::Examples::MOS6502::CPU.to_flat_ir
-          ir_json = RHDL::Codegen::IR::IRToJson.convert(ir)
+          ir = RHDL::Examples::MOS6502::CPU.to_flat_circt_nodes
+          ir_json_by_backend = {
+            interpreter: RHDL::Codegen::IR.sim_json(ir, backend: :interpreter),
+            jit: RHDL::Codegen::IR.sim_json(ir, backend: :jit),
+            compiler: RHDL::Codegen::IR.sim_json(ir, backend: :compiler)
+          }
           ir_elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - ir_start
           puts "done (#{format('%.3f', ir_elapsed)}s)"
 
@@ -402,11 +406,11 @@ module RHDL
 
                 sim = case runner[:backend]
                 when :interpreter
-                  RHDL::Codegen::IR::IrSimulator.new(ir_json, backend: :interpreter)
+                  RHDL::Codegen::IR::IrSimulator.new(ir_json_by_backend[:interpreter], backend: :interpreter)
                 when :jit
-                  RHDL::Codegen::IR::IrSimulator.new(ir_json, backend: :jit)
+                  RHDL::Codegen::IR::IrSimulator.new(ir_json_by_backend[:jit], backend: :jit)
                 when :compiler
-                  RHDL::Codegen::IR::IrSimulator.new(ir_json, backend: :compiler)
+                  RHDL::Codegen::IR::IrSimulator.new(ir_json_by_backend[:compiler], backend: :compiler)
                 end
               end
 
@@ -569,8 +573,12 @@ module RHDL
 
           require_relative '../../../../examples/apple2/hdl'
           ir_start = Process.clock_gettime(Process::CLOCK_MONOTONIC)
-          ir = RHDL::Examples::Apple2::Apple2.to_flat_ir
-          ir_json = RHDL::Codegen::IR::IRToJson.convert(ir)
+          ir = RHDL::Examples::Apple2::Apple2.to_flat_circt_nodes
+          ir_json_by_backend = {
+            interpreter: RHDL::Codegen::IR.sim_json(ir, backend: :interpreter),
+            jit: RHDL::Codegen::IR.sim_json(ir, backend: :jit),
+            compiler: RHDL::Codegen::IR.sim_json(ir, backend: :compiler)
+          }
           ir_elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - ir_start
           puts "done (#{format('%.3f', ir_elapsed)}s)"
 
@@ -624,11 +632,11 @@ module RHDL
 
               sim = case runner[:backend]
               when :interpreter
-                RHDL::Codegen::IR::IrSimulator.new(ir_json, backend: :interpreter)
+                RHDL::Codegen::IR::IrSimulator.new(ir_json_by_backend[:interpreter], backend: :interpreter)
               when :jit
-                RHDL::Codegen::IR::IrSimulator.new(ir_json, backend: :jit)
+                RHDL::Codegen::IR::IrSimulator.new(ir_json_by_backend[:jit], backend: :jit)
               when :compiler
-                RHDL::Codegen::IR::IrSimulator.new(ir_json, backend: :compiler, sub_cycles: compiler_sub_cycles)
+                RHDL::Codegen::IR::IrSimulator.new(ir_json_by_backend[:compiler], backend: :compiler, sub_cycles: compiler_sub_cycles)
               when :verilator
                 require_relative '../../../../examples/apple2/utilities/runners/verilator_runner'
                 RHDL::Examples::Apple2::VerilogRunner.new(sub_cycles: 14)
@@ -1381,8 +1389,8 @@ module RHDL
             require 'rhdl/codegen'
 
             require File.join(project_root, 'examples/apple2/hdl')
-            ir = RHDL::Examples::Apple2::Apple2.to_flat_ir
-            ir_data = RHDL::Codegen::IR::IRToJson.convert(ir)
+            ir = RHDL::Examples::Apple2::Apple2.to_flat_circt_nodes
+            ir_data = RHDL::Codegen::IR.sim_json(ir, backend: :compiler)
 
             FileUtils.mkdir_p(File.dirname(ir_json_path))
             File.write(ir_json_path, ir_data)
@@ -1417,8 +1425,8 @@ module RHDL
             require 'rhdl/codegen'
             require File.join(project_root, 'examples/riscv/hdl/cpu')
 
-            ir = RHDL::Examples::RISCV::CPU.to_flat_ir(top_name: 'riscv_cpu')
-            ir_data = RHDL::Codegen::IR::IRToJson.convert(ir)
+            ir = RHDL::Examples::RISCV::CPU.to_flat_circt_nodes(top_name: 'riscv_cpu')
+            ir_data = RHDL::Codegen::IR.sim_json(ir, backend: :compiler)
 
             FileUtils.mkdir_p(File.dirname(ir_json_path))
             File.write(ir_json_path, ir_data)

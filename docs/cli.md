@@ -1,6 +1,6 @@
 # RHDL Command Line Interface
 
-The `rhdl` command provides a unified interface for working with RHDL components, including interactive debugging, diagram generation, HDL export, gate-level synthesis, and Apple II emulation.
+The `rhdl` command provides a unified interface for working with RHDL components, including interactive debugging, diagram generation, import/export workflows, gate-level synthesis, and example emulators.
 
 ## Installation
 
@@ -24,8 +24,9 @@ bundle exec rhdl --help
 | `tui` | Launch interactive TUI debugger |
 | `diagram` | Generate circuit diagrams |
 | `export` | Export components to Verilog |
+| `import` | Import Verilog/CIRCT MLIR and raise to RHDL DSL |
 | `gates` | Gate-level synthesis |
-| `apple2` | Apple II emulator and ROM tools |
+| `examples` | Run MOS6502, Apple2, GameBoy, and RISC-V emulators |
 
 ---
 
@@ -206,6 +207,8 @@ rhdl export [options] [ComponentRef]
 | `--scope SCOPE` | Batch scope: `all`, `lib`, or `examples` |
 | `--clean` | Clean all generated HDL files |
 | `--lang LANG` | Target language: `verilog` |
+| `--tool CMD` | External tool command (default: `circt-translate`; `firtool` also supported for MLIR->Verilog export) |
+| `--tool-arg ARG` | Extra tool arg (repeatable) |
 | `--out DIR` | Output directory |
 | `--top NAME` | Override top module/entity name |
 | `-h, --help` | Show help |
@@ -224,6 +227,12 @@ rhdl export --all --scope examples
 
 # Export a single component
 rhdl export --lang verilog --out ./output RHDL::HDL::Counter
+
+# Export via CIRCT MLIR + external tooling
+rhdl export --lang verilog --out ./output RHDL::HDL::Counter
+
+# Export via firtool explicitly
+rhdl export --lang verilog --tool firtool --out ./output RHDL::HDL::Counter
 
 # Export with custom top module name
 rhdl export --lang verilog --out ./output --top my_counter RHDL::HDL::Counter
@@ -250,6 +259,48 @@ export/verilog/
 └── mos6502/
     ├── mos6502_alu.v
     └── ...
+```
+
+---
+
+## Import Command
+
+Import Verilog or CIRCT MLIR and raise to RHDL DSL source files.
+
+### Usage
+
+```bash
+rhdl import [options]
+```
+
+### Options
+
+| Option | Description |
+|--------|-------------|
+| `--mode MODE` | Import mode: `verilog` or `circt` |
+| `--input FILE` | Input file (`.v` for verilog mode, `.mlir` for circt mode) |
+| `--out DIR` | Output directory |
+| `--mlir-out FILE` | Verilog mode: write intermediate CIRCT MLIR path |
+| `--tool CMD` | Verilog mode: external import tool (default: `circt-translate`) |
+| `--tool-arg ARG` | Verilog mode: extra tool arg (repeatable) |
+| `--[no-]raise` | Run CIRCT->RHDL raising step (default: enabled) |
+| `--top NAME` | Optional top module for CIRCT->DSL raise |
+| `-h, --help` | Show help |
+
+### Examples
+
+```bash
+# Verilog -> external LLVM/CIRCT tooling -> CIRCT MLIR -> RHDL DSL
+rhdl import --mode verilog --input ./cpu.v --out ./generated
+
+# Verilog -> CIRCT MLIR only (skip raising)
+rhdl import --mode verilog --input ./cpu.v --out ./generated --no-raise
+
+# CIRCT MLIR -> RHDL DSL
+rhdl import --mode circt --input ./cpu.mlir --out ./generated
+
+# Note: firtool does not support direct Verilog import in this flow.
+# Use circt-translate (or another Verilog importer) for --mode verilog.
 ```
 
 ---

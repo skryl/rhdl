@@ -683,7 +683,7 @@ module RHDL
           ensure_dir(File.dirname(runner[:sim_ir]))
           top_class = load_runner_top_class(runner)
 
-          flat_ir = top_class.to_flat_ir
+          flat_ir = top_class.to_flat_circt_nodes
           write_ir_json(flat_ir, runner[:sim_ir])
 
           hier_ir_hash = RHDL::Codegen::Schematic.hierarchical_ir_hash(
@@ -767,7 +767,7 @@ module RHDL
         end
 
         def write_ir_json(ir_obj, output_path)
-          json = RHDL::Codegen::IR::IRToJson.convert(ir_obj)
+          json = RHDL::Codegen::IR.sim_json(ir_obj, backend: :compiler)
           parsed = JSON.parse(json, max_nesting: false)
           File.write(output_path, JSON.generate(parsed, max_nesting: false))
           puts "Wrote #{output_path}"

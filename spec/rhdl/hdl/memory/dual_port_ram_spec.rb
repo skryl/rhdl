@@ -82,8 +82,8 @@ RSpec.describe RHDL::HDL::DualPortRAM do
     end
 
     it 'generates valid IR' do
-      ir = RHDL::HDL::DualPortRAM.to_ir
-      expect(ir).to be_a(RHDL::Export::IR::ModuleDef)
+      ir = RHDL::HDL::DualPortRAM.to_flat_circt_nodes
+      expect(ir).to be_a(RHDL::Codegen::CIRCT::IR::ModuleOp)
       expect(ir.ports.length).to eq(9)  # clk, we_a, we_b, addr_a, addr_b, din_a, din_b, dout_a, dout_b
       expect(ir.memories.length).to eq(1)
     end
@@ -95,13 +95,13 @@ RSpec.describe RHDL::HDL::DualPortRAM do
       expect(verilog).to match(/output.*\[7:0\].*dout_a/)
     end
 
-    it 'generates valid FIRRTL' do
-      firrtl = RHDL::HDL::DualPortRAM.to_circt
-      expect(firrtl).to include('FIRRTL version')
-      expect(firrtl).to include('circuit dual_port_ram')
-      expect(firrtl).to include('input clk')
-      expect(firrtl).to include('input addr_a')
-      expect(firrtl).to include('output dout_a')
+    it 'generates valid CIRCT MLIR' do
+      mlir = RHDL::HDL::DualPortRAM.to_circt
+      expect(mlir).to include('hw.output')
+      expect(mlir).to include('hw.module @dual_port_ram')
+      expect(mlir).to include('%clk:')
+      expect(mlir).to include('%addr_a:')
+      expect(mlir).to include('dout_a:')
     end
 
     context 'CIRCT firtool validation', if: HdlToolchain.firtool_available? do

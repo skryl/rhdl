@@ -90,8 +90,8 @@ RSpec.describe RHDL::HDL::StackPointer do
     end
 
     it 'generates valid IR' do
-      ir = RHDL::HDL::StackPointer.to_ir
-      expect(ir).to be_a(RHDL::Export::IR::ModuleDef)
+      ir = RHDL::HDL::StackPointer.to_flat_circt_nodes
+      expect(ir).to be_a(RHDL::Codegen::CIRCT::IR::ModuleOp)
       expect(ir.ports.length).to eq(7)  # clk, rst, push, pop, q, empty, full
     end
 
@@ -101,12 +101,12 @@ RSpec.describe RHDL::HDL::StackPointer do
       expect(verilog).to match(/output.*\[7:0\].*q/)
     end
 
-    it 'generates valid FIRRTL' do
-      firrtl = RHDL::HDL::StackPointer.to_circt
-      expect(firrtl).to include('FIRRTL version')
-      expect(firrtl).to include('circuit stack_pointer')
-      expect(firrtl).to include('input clk')
-      expect(firrtl).to include('output q')
+    it 'generates valid CIRCT MLIR' do
+      mlir = RHDL::HDL::StackPointer.to_circt
+      expect(mlir).to include('hw.output')
+      expect(mlir).to include('hw.module @stack_pointer')
+      expect(mlir).to include('%clk:')
+      expect(mlir).to include('q:')
     end
 
     context 'CIRCT firtool validation', if: HdlToolchain.firtool_available? do

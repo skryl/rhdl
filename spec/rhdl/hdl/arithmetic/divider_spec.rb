@@ -39,8 +39,8 @@ RSpec.describe RHDL::HDL::Divider do
     end
 
     it 'generates valid IR' do
-      ir = RHDL::HDL::Divider.to_ir
-      expect(ir).to be_a(RHDL::Export::IR::ModuleDef)
+      ir = RHDL::HDL::Divider.to_flat_circt_nodes
+      expect(ir).to be_a(RHDL::Codegen::CIRCT::IR::ModuleOp)
       expect(ir.ports.length).to eq(5)  # dividend, divisor, quotient, remainder, div_by_zero
     end
 
@@ -51,12 +51,12 @@ RSpec.describe RHDL::HDL::Divider do
       expect(verilog).to include('output [7:0] quotient')
     end
 
-    it 'generates valid FIRRTL' do
-      firrtl = RHDL::HDL::Divider.to_circt
-      expect(firrtl).to include('FIRRTL version')
-      expect(firrtl).to include('circuit divider')
-      expect(firrtl).to include('input dividend')
-      expect(firrtl).to include('output quotient')
+    it 'generates valid CIRCT MLIR' do
+      mlir = RHDL::HDL::Divider.to_circt
+      expect(mlir).to include('hw.output')
+      expect(mlir).to include('hw.module @divider')
+      expect(mlir).to include('%dividend:')
+      expect(mlir).to include('quotient:')
     end
 
     context 'CIRCT firtool validation', if: HdlToolchain.firtool_available? do

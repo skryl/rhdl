@@ -120,13 +120,13 @@ RSpec.describe RHDL::Examples::MOS6502::ALU do
       expect(verilog).to include('result')
     end
 
-    it 'generates valid FIRRTL' do
-      firrtl = RHDL::Examples::MOS6502::ALU.to_circt
-      expect(firrtl).to include('FIRRTL version')
-      expect(firrtl).to include('circuit mos6502_alu')
-      expect(firrtl).to include('input a')
-      expect(firrtl).to include('input b')
-      expect(firrtl).to include('output result')
+    it 'generates valid CIRCT MLIR' do
+      mlir = RHDL::Examples::MOS6502::ALU.to_circt
+      expect(mlir).to include('hw.output')
+      expect(mlir).to include('hw.module @mos6502_alu')
+      expect(mlir).to include('%a:')
+      expect(mlir).to include('%b:')
+      expect(mlir).to include('result:')
     end
 
     context 'CIRCT firtool validation', if: HdlToolchain.firtool_available? do

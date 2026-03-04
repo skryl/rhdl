@@ -65,12 +65,12 @@ RSpec.describe RHDL::Examples::MOS6502::StatusRegister do
       expect(verilog).to include('p')
     end
 
-    it 'generates valid FIRRTL' do
-      firrtl = described_class.to_circt
-      expect(firrtl).to include('FIRRTL version')
-      expect(firrtl).to include('circuit mos6502_status_register')
-      expect(firrtl).to include('input clk')
-      expect(firrtl).to include('output p')
+    it 'generates valid CIRCT MLIR' do
+      mlir = described_class.to_circt
+      expect(mlir).to include('hw.output')
+      expect(mlir).to include('hw.module @mos6502_status_register')
+      expect(mlir).to include('%clk:')
+      expect(mlir).to include('p:')
     end
 
     context 'CIRCT firtool validation', if: HdlToolchain.firtool_available? do

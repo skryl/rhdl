@@ -35,7 +35,7 @@ module RHDL
       end
 
       def hierarchical_ir_hash(top_class:, instance_name:, parameters:, stack:)
-        node = ir_to_hash(top_class.to_ir(parameters: parameters || {}))
+        node = ir_to_hash(top_class.to_circt_nodes(parameters: parameters || {}))
         node['instance_name'] = instance_name.to_s
         node['component_class'] = top_class.name.to_s
 
@@ -46,7 +46,7 @@ module RHDL
         instance_defs = top_class.respond_to?(:_instance_defs) ? Array(top_class._instance_defs) : []
         instance_defs.each do |inst|
           child_class = inst[:component_class]
-          next unless child_class.respond_to?(:to_ir)
+          next unless child_class.respond_to?(:to_circt_nodes)
 
           child_name = inst[:name].to_s
           child_params = inst[:parameters] || {}
@@ -702,7 +702,7 @@ module RHDL
       def collect_expr_signal_names(expr, out = Set.new)
         case expr
         when Hash
-          if expr['type'] == 'signal' && expr['name'].is_a?(String) && !expr['name'].strip.empty?
+          if expr['kind'].to_s == 'signal' && expr['name'].is_a?(String) && !expr['name'].strip.empty?
             out.add(expr['name'].strip)
           end
           expr.each_value { |value| collect_expr_signal_names(value, out) }
@@ -801,10 +801,59 @@ module RHDL
       end
 
       def ir_to_hash(ir_obj)
-        return ir_obj if ir_obj.is_a?(Hash)
-        return JSON.parse(ir_obj, max_nesting: false) if ir_obj.is_a?(String)
+        payload = if ir_obj.is_a?(Hash)
+                    deep_stringify_keys(ir_obj)
+                  elsif ir_obj.is_a?(String)
+                    deep_stringify_keys(JSON.parse(ir_obj, max_nesting: false))
+                  else
+                    json = RHDL::Codegen::IR.sim_json(ir_obj, format: :circt)
+                    deep_stringify_keys(JSON.parse(json, max_nesting: false))
+                  end
 
-        JSON.parse(RHDL::Codegen::IR::IRToJson.convert(ir_obj), max_nesting: false)
+        normalize_ir_payload(payload)
+      end
+
+      def circt_ir_object?(ir_obj)
+        class_name = ir_obj.class.name.to_s
+        return true if class_name.include?('::CIRCT::IR::')
+
+        ir_obj.respond_to?(:modules) &&
+          Array(ir_obj.modules).all? { |mod| mod.class.name.to_s.include?('::CIRCT::IR::') }
+      end
+
+      def normalize_ir_payload(payload)
+        return payload unless payload.is_a?(Hash)
+
+        if payload.key?('circt_json_version') || payload.key?('modules')
+          unless valid_circt_runtime_payload?(payload)
+            raise ArgumentError, 'CIRCT runtime JSON for schematic must include circt_json_version and non-empty modules'
+          end
+
+          return deep_stringify_keys(payload['modules'].first)
+        end
+
+        payload
+      end
+
+      def valid_circt_runtime_payload?(payload)
+        return false unless payload.is_a?(Hash)
+        return false unless payload.key?('circt_json_version')
+
+        modules = payload['modules']
+        modules.is_a?(Array) && !modules.empty? && modules.first.is_a?(Hash)
+      end
+
+      def deep_stringify_keys(obj)
+        case obj
+        when Hash
+          obj.each_with_object({}) do |(key, value), out|
+            out[key.to_s] = deep_stringify_keys(value)
+          end
+        when Array
+          obj.map { |entry| deep_stringify_keys(entry) }
+        else
+          obj
+        end
       end
     end
   end

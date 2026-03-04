@@ -1,0 +1,288 @@
+# frozen_string_literal: true
+
+require 'spec_helper'
+require 'tmpdir'
+require 'fileutils'
+
+RSpec.describe RHDL::Codegen::CIRCT::Raise do
+  let(:ir) { RHDL::Codegen::CIRCT::IR }
+  let(:tmp_dir) { Dir.mktmpdir('rhdl_circt_raise_spec') }
+  let(:simple_mlir) do
+    <<~MLIR
+      hw.module @simple(%a: i8, %b: i8) -> (y: i8) {
+        %sum = comb.add %a, %b : i8
+        hw.output %sum : i8
+      }
+    MLIR
+  end
+
+  after do
+    FileUtils.rm_rf(tmp_dir)
+  end
+
+  describe '.to_sources' do
+    it 'returns in-memory DSL source map for MLIR input' do
+      result = described_class.to_sources(simple_mlir, top: 'simple')
+      expect(result.success?).to be(true)
+      expect(result.sources.keys).to eq(['simple'])
+      expect(result.sources['simple']).to include('class Simple')
+      expect(result.sources['simple']).to include('y <= (a + b)')
+    end
+
+    it 'emits structure + wire declarations for instance-based modules' do
+      child = ir::ModuleOp.new(
+        name: 'child',
+        ports: [
+          ir::Port.new(name: :a, direction: :in, width: 8),
+          ir::Port.new(name: :y, direction: :out, width: 8)
+        ],
+        nets: [],
+        regs: [],
+        assigns: [ir::Assign.new(target: :y, expr: ir::Signal.new(name: :a, width: 8))],
+        processes: [],
+        instances: [],
+        memories: [],
+        write_ports: [],
+        sync_read_ports: [],
+        parameters: {}
+      )
+      top = ir::ModuleOp.new(
+        name: 'top',
+        ports: [
+          ir::Port.new(name: :a, direction: :in, width: 8),
+          ir::Port.new(name: :y, direction: :out, width: 8)
+        ],
+        nets: [ir::Net.new(name: 'u__y', width: 8)],
+        regs: [],
+        assigns: [ir::Assign.new(target: :y, expr: ir::Signal.new(name: 'u__y', width: 8))],
+        processes: [],
+        instances: [
+          ir::Instance.new(
+            name: 'u',
+            module_name: 'child',
+            connections: [
+              ir::PortConnection.new(port_name: :a, signal: 'a', direction: :in),
+              ir::PortConnection.new(port_name: :y, signal: 'u__y', direction: :out)
+            ],
+            parameters: {}
+          )
+        ],
+        memories: [],
+        write_ports: [],
+        sync_read_ports: [],
+        parameters: {}
+      )
+
+      result = described_class.to_sources([child, top], top: 'top')
+      expect(result.success?).to be(true)
+      source = result.sources['top']
+      expect(source).to include('wire :u__y, width: 8')
+      expect(source).to include('instance :u, Child')
+      expect(source).to include('port :a => [:u, :a]')
+      expect(source).to include('port [:u, :y] => :u__y')
+      expect(source).to include('y <= u__y')
+    end
+
+    it 'sanitizes invalid ruby identifiers and class names from CIRCT symbols' do
+      mlir = <<~MLIR
+        hw.module @0.top$mod(%0a: i8, %class: i8) -> (%0y: i8) {
+          %sum = comb.add %0a, %class : i8
+          hw.output %sum : i8
+        }
+      MLIR
+
+      result = described_class.to_sources(mlir, top: '0.top$mod')
+      expect(result.success?).to be(true)
+      source = result.sources['0.top$mod']
+      expect(source).to include('class M0TopMod < RHDL::Sim::Component')
+      expect(source).to include('input :_0a, width: 8')
+      expect(source).to include('input :_class, width: 8')
+      expect(source).to include('output :_0y, width: 8')
+      expect(source).to include('_0y <= (_0a + _class)')
+    end
+
+    it 'raises integer module parameters into DSL parameter declarations' do
+      mlir = <<~MLIR
+        hw.module @param_mod<WIDTH: i32 = 8>(%a: i8) -> (y: i8) {
+          hw.output %a : i8
+        }
+      MLIR
+
+      result = described_class.to_sources(mlir, top: 'param_mod')
+      expect(result.success?).to be(true)
+      source = result.sources['param_mod']
+      expect(source).to include('class ParamMod < RHDL::Sim::Component')
+      expect(source).to include('parameter :WIDTH, default: 8')
+      expect(result.diagnostics.any? { |d| d.op == 'raise.module_params' }).to be(false)
+    end
+  end
+
+  describe '.to_components' do
+    it 'loads raised classes into provided namespace' do
+      namespace = Module.new
+      result = described_class.to_components(simple_mlir, namespace: namespace, top: 'simple')
+      expect(result.success?).to be(true)
+      expect(result.components.keys).to eq(['simple'])
+      expect(result.components['simple']).to be < RHDL::Sim::Component
+      expect(namespace.const_defined?(:Simple, false)).to be(true)
+    end
+
+    it 'replaces an existing class constant in namespace on reload' do
+      namespace = Module.new
+      namespace.const_set(:Simple, Class.new)
+
+      result = described_class.to_components(simple_mlir, namespace: namespace, top: 'simple')
+      expect(result.success?).to be(true)
+      expect(result.components['simple']).to be < RHDL::Sim::Component
+      expect(namespace.const_get(:Simple, false)).to eq(result.components['simple'])
+    end
+
+    it 'loads hierarchical components even when parent appears before child in source order' do
+      hierarchy_mlir = <<~MLIR
+        hw.module @top(%a: i8) -> (y: i8) {
+          %u_y = hw.instance "u" @child(a: %a: i8) -> (y: i8)
+          hw.output %u_y : i8
+        }
+
+        hw.module @child(%a: i8) -> (y: i8) {
+          hw.output %a : i8
+        }
+      MLIR
+
+      namespace = Module.new
+      result = described_class.to_components(hierarchy_mlir, namespace: namespace, top: 'top')
+      expect(result.success?).to be(true)
+      expect(result.components.keys).to include('top', 'child')
+      expect(namespace.const_defined?(:Top, false)).to be(true)
+      expect(namespace.const_defined?(:Child, false)).to be(true)
+    end
+  end
+
+  describe '.to_dsl' do
+    it 'raises CIRCT nodes into Ruby DSL files' do
+      mod = ir::ModuleOp.new(
+        name: 'simple',
+        ports: [
+          ir::Port.new(name: :a, direction: :in, width: 8),
+          ir::Port.new(name: :b, direction: :in, width: 8),
+          ir::Port.new(name: :y, direction: :out, width: 8)
+        ],
+        nets: [],
+        regs: [],
+        assigns: [
+          ir::Assign.new(
+            target: :y,
+            expr: ir::BinaryOp.new(
+              op: :+,
+              left: ir::Signal.new(name: :a, width: 8),
+              right: ir::Signal.new(name: :b, width: 8),
+              width: 8
+            )
+          )
+        ],
+        processes: [],
+        instances: [],
+        memories: [],
+        write_ports: [],
+        sync_read_ports: [],
+        parameters: {}
+      )
+
+      result = described_class.to_dsl(mod, out_dir: tmp_dir, top: 'simple')
+      expect(result.success?).to be(true)
+      expect(result.files_written).to eq([File.join(tmp_dir, 'simple.rb')])
+
+      generated = File.read(result.files_written.first)
+      expect(generated).to include('class Simple')
+      expect(generated).to include('behavior do')
+      expect(generated).to include('y <= (a + b)')
+    end
+
+    it 'emits placeholder output assignments when output recovery is partial' do
+      mod = ir::ModuleOp.new(
+        name: 'placeholder',
+        ports: [ir::Port.new(name: :y, direction: :out, width: 1)],
+        nets: [],
+        regs: [],
+        assigns: [],
+        processes: [],
+        instances: [],
+        memories: [],
+        write_ports: [],
+        sync_read_ports: [],
+        parameters: {}
+      )
+
+      result = described_class.to_dsl(mod, out_dir: tmp_dir, top: 'placeholder')
+      expect(result.success?).to be(true)
+      expect(result.diagnostics.any? { |d| d.op == 'raise.behavior' }).to be(true)
+
+      generated = File.read(File.join(tmp_dir, 'placeholder.rb'))
+      expect(generated).to include('y <= 0')
+    end
+
+    it 'returns an error diagnostic when requested top module is missing' do
+      mod = ir::ModuleOp.new(
+        name: 'exists',
+        ports: [ir::Port.new(name: :y, direction: :out, width: 1)],
+        nets: [],
+        regs: [],
+        assigns: [ir::Assign.new(target: :y, expr: ir::Literal.new(value: 1, width: 1))],
+        processes: [],
+        instances: [],
+        memories: [],
+        write_ports: [],
+        sync_read_ports: [],
+        parameters: {}
+      )
+
+      result = described_class.to_dsl(mod, out_dir: tmp_dir, top: 'missing')
+      expect(result.success?).to be(false)
+      expect(result.diagnostics.any? { |d| d.severity.to_s == 'error' && d.message.include?("Top module 'missing' not found") }).to be(true)
+      expect(result.files_written).to include(File.join(tmp_dir, 'exists.rb'))
+    end
+
+    it 'lowers sequential if-chains into mux-based assignments' do
+      mod = ir::ModuleOp.new(
+        name: 'seq_if',
+        ports: [
+          ir::Port.new(name: :clk, direction: :in, width: 1),
+          ir::Port.new(name: :d, direction: :in, width: 1),
+          ir::Port.new(name: :q, direction: :out, width: 1)
+        ],
+        nets: [],
+        regs: [ir::Reg.new(name: :q, width: 1)],
+        assigns: [ir::Assign.new(target: :q, expr: ir::Signal.new(name: :q, width: 1))],
+        processes: [
+          ir::Process.new(
+            name: :seq_logic,
+            clocked: true,
+            clock: :clk,
+            statements: [
+              ir::If.new(
+                condition: ir::Signal.new(name: :d, width: 1),
+                then_statements: [
+                  ir::SeqAssign.new(target: :q, expr: ir::Literal.new(value: 1, width: 1))
+                ],
+                else_statements: []
+              )
+            ]
+          )
+        ],
+        instances: [],
+        memories: [],
+        write_ports: [],
+        sync_read_ports: [],
+        parameters: {}
+      )
+
+      result = described_class.to_dsl(mod, out_dir: tmp_dir, top: 'seq_if')
+      expect(result.success?).to be(true)
+      expect(result.diagnostics.any? { |d| d.op == 'raise.sequential_if' }).to be(false)
+
+      generated = File.read(File.join(tmp_dir, 'seq_if.rb'))
+      expect(generated).to include('sequential clock: :clk do')
+      expect(generated).to include('q <= (d ? 1 : q)')
+    end
+  end
+end

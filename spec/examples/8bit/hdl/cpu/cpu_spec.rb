@@ -28,8 +28,8 @@ RSpec.describe RHDL::HDL::CPU::CPU do
 
   describe 'synthesis' do
     it 'generates valid IR' do
-      ir = RHDL::HDL::CPU::CPU.to_ir
-      expect(ir).to be_a(RHDL::Export::IR::ModuleDef)
+      ir = RHDL::HDL::CPU::CPU.to_flat_circt_nodes
+      expect(ir).to be_a(RHDL::Codegen::CIRCT::IR::ModuleOp)
 
       # Check ports exist (port names are symbols)
       port_names = ir.ports.map(&:name)

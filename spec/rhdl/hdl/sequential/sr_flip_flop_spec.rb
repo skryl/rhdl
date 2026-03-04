@@ -79,8 +79,8 @@ RSpec.describe RHDL::HDL::SRFlipFlop do
     end
 
     it 'generates valid IR' do
-      ir = RHDL::HDL::SRFlipFlop.to_ir
-      expect(ir).to be_a(RHDL::Export::IR::ModuleDef)
+      ir = RHDL::HDL::SRFlipFlop.to_flat_circt_nodes
+      expect(ir).to be_a(RHDL::Codegen::CIRCT::IR::ModuleOp)
       expect(ir.ports.length).to eq(7)  # s, r, clk, rst, en, q, qn
     end
 
@@ -92,14 +92,14 @@ RSpec.describe RHDL::HDL::SRFlipFlop do
       expect(verilog).to match(/output.*q/)
     end
 
-    it 'generates valid FIRRTL' do
-      firrtl = RHDL::HDL::SRFlipFlop.to_circt
-      expect(firrtl).to include('FIRRTL version')
-      expect(firrtl).to include('circuit sr_flip_flop')
-      expect(firrtl).to include('input s')
-      expect(firrtl).to include('input r')
-      expect(firrtl).to include('input clk')
-      expect(firrtl).to include('output q')
+    it 'generates valid CIRCT MLIR' do
+      mlir = RHDL::HDL::SRFlipFlop.to_circt
+      expect(mlir).to include('hw.output')
+      expect(mlir).to include('hw.module @sr_flip_flop')
+      expect(mlir).to include('%s:')
+      expect(mlir).to include('%r:')
+      expect(mlir).to include('%clk:')
+      expect(mlir).to include('q:')
     end
 
     context 'CIRCT firtool validation', if: HdlToolchain.firtool_available? do

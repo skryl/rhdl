@@ -29,8 +29,8 @@ end
 
 RSpec.describe 'IR JIT memory ports' do
   def create_jit(ir)
-    ir_json = RHDL::Codegen::IR::IRToJson.convert(ir)
-    RHDL::Codegen::IR::IrSimulator.new(ir_json, backend: :jit, allow_fallback: false)
+    ir_json = RHDL::Codegen::IR.sim_json(ir, backend: :jit)
+    RHDL::Codegen::IR::IrSimulator.new(ir_json, backend: :jit)
   end
 
   def step(sim, inputs)
@@ -52,7 +52,7 @@ RSpec.describe 'IR JIT memory ports' do
   end
 
   it 'commits memory sync_write ports for the RISC-V register file' do
-    sim = create_jit(RHDL::Examples::RISCV::RegisterFile.to_flat_ir)
+    sim = create_jit(RHDL::Examples::RISCV::RegisterFile.to_flat_circt_nodes)
     sim.reset
 
     # Write x1 = 0x1234_5678
@@ -74,7 +74,7 @@ RSpec.describe 'IR JIT memory ports' do
   end
 
   it 'updates signals driven by sync_read_ports on clock edges' do
-    sim = create_jit(RHDL::Spec::IRJitMemoryPorts::SyncReadProbe.to_flat_ir)
+    sim = create_jit(RHDL::Spec::IRJitMemoryPorts::SyncReadProbe.to_flat_circt_nodes)
     sim.reset
 
     step(sim, { rst: 0, we: 1, addr: 2, din: 0xAB })

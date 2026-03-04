@@ -464,19 +464,18 @@ end
 
 ### Unified Netlist Simulator
 
-All native netlist backends are accessed through one class with automatic fallback:
+All native netlist backends are accessed through one class with strict native selection:
 
 ```ruby
 # Automatically uses best available backend
 sim = RHDL::Codegen::Netlist::NetlistSimulator.new(
   ir,
   backend: :interpreter,
-  lanes: 64,
-  allow_fallback: true  # Falls back to Ruby if native unavailable
+  lanes: 64
 )
 
 # Check which backend is in use
-puts sim.backend  # :interpret, :ruby, :jit, or :compile
+puts sim.backend  # :interpret, :jit, or :compile
 puts sim.native?  # true if using native extension
 ```
 
@@ -510,7 +509,6 @@ if RHDL::Codegen::IR::IR_INTERPRETER_AVAILABLE
   sim = RHDL::Codegen::IR::IrSimulator.new(
     ir_json,
     backend: :interpreter,
-    allow_fallback: true,
     sub_cycles: 14  # MOS6502 cycles per instruction
   )
 

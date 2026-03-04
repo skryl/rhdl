@@ -17,6 +17,7 @@ def show_help
       tui           Launch interactive TUI debugger
       diagram       Generate circuit diagrams
       export        Export components to Verilog
+      import        Import Verilog/CIRCT into RHDL DSL
       gates         Gate-level synthesis
       examples      Run example emulators (mos6502, apple2)
       disk          Disk image utilities for Apple II
@@ -147,7 +148,9 @@ def handle_export(args)
     top: nil,
     all: false,
     scope: 'all',
-    clean: false
+    clean: false,
+    tool: 'circt-translate',
+    tool_args: []
   }
 
   parser = OptionParser.new do |opts|
@@ -164,6 +167,9 @@ def handle_export(args)
         rhdl export --all --scope lib
         rhdl export --all --scope examples
 
+      CIRCT tooling export:
+        rhdl export --lang verilog --tool circt-translate --out ./output RHDL::HDL::Counter
+
       Options:
     BANNER
 
@@ -171,6 +177,10 @@ def handle_export(args)
     opts.on('--scope SCOPE', 'Batch scope: all, lib, or examples') { |v| options[:scope] = v }
     opts.on('--clean', 'Clean all generated HDL files') { options[:clean] = true }
     opts.on('--lang LANG', 'Target language: verilog') { |v| options[:lang] = v }
+    opts.on('--tool CMD', 'External tool command for CIRCT MLIR->Verilog export (default: circt-translate)') { |v| options[:tool] = v }
+    opts.on('--tool-arg ARG', 'Extra argument for external tool (repeatable)') do |v|
+      options[:tool_args] << v
+    end
     opts.on('--out DIR', 'Output directory') { |v| options[:out] = v }
     opts.on('--top NAME', 'Override top module/entity name') { |v| options[:top] = v }
     opts.on('-h', '--help', 'Show this help') do
@@ -183,6 +193,54 @@ def handle_export(args)
   options[:component] = args.shift unless options[:all] || options[:clean]
 
   RHDL::CLI::Tasks::ExportTask.new(options).run
+end
+
+def handle_import(args)
+  options = {
+    mode: nil,
+    input: nil,
+    out: nil,
+    mlir_out: nil,
+    tool: 'circt-translate',
+    tool_args: [],
+    raise_to_dsl: true,
+    top: nil
+  }
+
+  parser = OptionParser.new do |opts|
+    opts.banner = <<~BANNER
+      Usage: rhdl import [options]
+
+      Import paths:
+        1) Verilog -> (external LLVM/CIRCT tools) -> CIRCT MLIR -> RHDL DSL
+        2) CIRCT MLIR -> RHDL DSL
+
+      Examples:
+        rhdl import --mode verilog --input ./cpu.v --out ./generated
+        rhdl import --mode verilog --input ./cpu.v --out ./generated --no-raise
+        rhdl import --mode circt --input ./cpu.mlir --out ./generated
+
+      Options:
+    BANNER
+
+    opts.on('--mode MODE', [:verilog, :circt], 'Import mode: verilog or circt') { |v| options[:mode] = v }
+    opts.on('--input FILE', 'Input file (.v for verilog mode, .mlir for circt mode)') { |v| options[:input] = v }
+    opts.on('--out DIR', 'Output directory for generated files') { |v| options[:out] = v }
+    opts.on('--mlir-out FILE', 'Verilog mode: write intermediate CIRCT MLIR to this path') { |v| options[:mlir_out] = v }
+    opts.on('--tool CMD', 'Verilog mode: external tool command (default: circt-translate)') { |v| options[:tool] = v }
+    opts.on('--tool-arg ARG', 'Verilog mode: extra argument for external tool (repeatable)') do |v|
+      options[:tool_args] << v
+    end
+    opts.on('--[no-]raise', 'Raise CIRCT MLIR into RHDL DSL (default: true)') { |v| options[:raise_to_dsl] = v }
+    opts.on('--top NAME', 'Optional top module name for CIRCT->DSL raise') { |v| options[:top] = v }
+    opts.on('-h', '--help', 'Show this help') do
+      puts opts
+      exit 0
+    end
+  end
+
+  parser.parse!(args)
+  RHDL::CLI::Tasks::ImportTask.new(options).run
 end
 
 def handle_gates(args)
@@ -632,6 +690,8 @@ when 'diagram', 'diagrams'
   handle_diagram(ARGV)
 when 'export', 'exports'
   handle_export(ARGV)
+when 'import'
+  handle_import(ARGV)
 when 'gates', 'gate'
   handle_gates(ARGV)
 when 'examples'

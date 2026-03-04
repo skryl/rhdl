@@ -46,15 +46,40 @@ RSpec.describe RHDL::Export do
   end
 
   describe '.to_verilog' do
+    it 'routes normal export through the CIRCT tooling path' do
+      allow(RHDL::Export).to receive(:verilog_via_circt).and_return("module not_gate;\nendmodule\n")
+
+      verilog = RHDL::Export.to_verilog(RHDL::HDL::NotGate)
+
+      expect(RHDL::Export).to have_received(:verilog_via_circt).with(RHDL::HDL::NotGate, top_name: nil)
+      expect(verilog).to include('module not_gate')
+    end
+
     it 'exports a single component to Verilog' do
-      verilog = RHDL::Export.to_verilog(ExportTestAdder)
-      expect(verilog).to include('module export_test_adder')
+      verilog = RHDL::Export.to_verilog(RHDL::HDL::NotGate)
+      expect(verilog).to include('module not_gate')
       expect(verilog).to include('endmodule')
+    end
+  end
+
+  describe '.mlir_for_verilog' do
+    it 'rejects _ports-only components without CIRCT generation support' do
+      legacy_like_component = Class.new do
+        def self._ports
+          []
+        end
+      end
+
+      expect do
+        RHDL::Export.mlir_for_verilog(legacy_like_component, top_name: nil)
+      end.to raise_error(ArgumentError, /does not support CIRCT MLIR generation/)
     end
   end
 
   describe '.all_to_verilog' do
     it 'exports all discovered components to Verilog' do
+      allow(RHDL::Export).to receive(:discover_components).and_return([ExportTestAdder, ExportTestCounter])
+
       results = RHDL::Export.all_to_verilog
       expect(results).to be_a(Hash)
       expect(results[ExportTestAdder]).to include('module export_test_adder')
@@ -86,6 +111,8 @@ RSpec.describe RHDL::Export do
 
   describe '.export_all_to_files' do
     it 'exports all discovered components to files' do
+      allow(RHDL::Export).to receive(:discover_components).and_return([ExportTestAdder, ExportTestCounter])
+
       Dir.mktmpdir do |dir|
         results = RHDL::Export.export_all_to_files(dir)
 
@@ -98,6 +125,8 @@ RSpec.describe RHDL::Export do
     end
 
     it 'creates the output directory if it does not exist' do
+      allow(RHDL::Export).to receive(:discover_components).and_return([ExportTestAdder])
+
       Dir.mktmpdir do |base_dir|
         new_dir = File.join(base_dir, 'nested', 'output')
         expect(File.exist?(new_dir)).to be false
@@ -130,17 +159,16 @@ RSpec.describe RHDL::Export do
 
   describe 'Verilog output' do
     it 'generates correct port names' do
-      verilog = RHDL::Export.to_verilog(ExportTestAdder)
+      verilog = RHDL::Export.to_verilog(RHDL::HDL::NotGate)
 
       expect(verilog).to include('a')
-      expect(verilog).to include('b')
-      expect(verilog).to include('sum')
+      expect(verilog).to include('y')
     end
 
-    it 'generates correct signal names' do
-      verilog = RHDL::Export.to_verilog(ExportTestAdder)
+    it 'generates expected output assignments' do
+      verilog = RHDL::Export.to_verilog(RHDL::HDL::NotGate)
 
-      expect(verilog).to include('internal_sum')
+      expect(verilog).to include('assign y')
     end
   end
 end

@@ -41,8 +41,8 @@ RSpec.describe RHDL::HDL::BitReverse do
     end
 
     it 'generates valid IR' do
-      ir = RHDL::HDL::BitReverse.to_ir
-      expect(ir).to be_a(RHDL::Export::IR::ModuleDef)
+      ir = RHDL::HDL::BitReverse.to_flat_circt_nodes
+      expect(ir).to be_a(RHDL::Codegen::CIRCT::IR::ModuleOp)
       expect(ir.ports.length).to eq(2)  # a, y
     end
 
@@ -52,12 +52,12 @@ RSpec.describe RHDL::HDL::BitReverse do
       expect(verilog).to include('input [7:0] a')
     end
 
-    it 'generates valid FIRRTL' do
-      firrtl = RHDL::HDL::BitReverse.to_circt
-      expect(firrtl).to include('FIRRTL version')
-      expect(firrtl).to include('circuit bit_reverse')
-      expect(firrtl).to include('input a')
-      expect(firrtl).to include('output y')
+    it 'generates valid CIRCT MLIR' do
+      mlir = RHDL::HDL::BitReverse.to_circt
+      expect(mlir).to include('hw.output')
+      expect(mlir).to include('hw.module @bit_reverse')
+      expect(mlir).to include('%a:')
+      expect(mlir).to include('y:')
     end
 
     context 'CIRCT firtool validation', if: HdlToolchain.firtool_available? do

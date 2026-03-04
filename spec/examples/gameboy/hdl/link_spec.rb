@@ -29,7 +29,7 @@ RSpec.describe 'GameBoy Link Port' do
 
   describe 'Link Component Structure' do
     let(:link) { RHDL::Examples::GameBoy::Link.new('link') }
-    let(:ir) { link.class.to_ir }
+    let(:ir) { link.class.to_flat_circt_nodes }
     let(:port_names) { ir.ports.map { |p| p.name.to_sym } }
 
     describe 'Input Ports (via IR)' do
@@ -117,7 +117,7 @@ RSpec.describe 'GameBoy Link Port' do
       end
 
       it 'can generate flattened IR' do
-        flat_ir = link.class.to_flat_ir
+        flat_ir = link.class.to_flat_circt_nodes
         expect(flat_ir).not_to be_nil
       end
 

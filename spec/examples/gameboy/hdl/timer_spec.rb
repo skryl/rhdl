@@ -29,7 +29,7 @@ RSpec.describe 'GameBoy Timer' do
 
   describe 'Timer Component Structure' do
     let(:timer) { RHDL::Examples::GameBoy::Timer.new('timer') }
-    let(:ir) { timer.class.to_ir }
+    let(:ir) { timer.class.to_flat_circt_nodes }
     let(:port_names) { ir.ports.map { |p| p.name.to_sym } }
 
     describe 'Input Ports (via IR)' do
@@ -79,7 +79,7 @@ RSpec.describe 'GameBoy Timer' do
       end
 
       it 'can generate flattened IR' do
-        flat_ir = timer.class.to_flat_ir
+        flat_ir = timer.class.to_flat_circt_nodes
         expect(flat_ir).not_to be_nil
       end
 

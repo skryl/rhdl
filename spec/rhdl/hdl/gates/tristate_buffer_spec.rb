@@ -36,13 +36,13 @@ RSpec.describe RHDL::HDL::TristateBuffer do
       expect(verilog).to include('assign y')
     end
 
-    it 'generates valid FIRRTL' do
-      firrtl = RHDL::HDL::TristateBuffer.to_circt
-      expect(firrtl).to include('FIRRTL version')
-      expect(firrtl).to include('circuit tristate_buffer')
-      expect(firrtl).to include('input a')
-      expect(firrtl).to include('input en')
-      expect(firrtl).to include('output y')
+    it 'generates valid CIRCT MLIR' do
+      mlir = RHDL::HDL::TristateBuffer.to_circt
+      expect(mlir).to include('hw.output')
+      expect(mlir).to include('hw.module @tristate_buffer')
+      expect(mlir).to include('%a:')
+      expect(mlir).to include('%en:')
+      expect(mlir).to include('y:')
     end
 
     context 'CIRCT firtool validation', if: HdlToolchain.firtool_available? && HdlToolchain.iverilog_available? do

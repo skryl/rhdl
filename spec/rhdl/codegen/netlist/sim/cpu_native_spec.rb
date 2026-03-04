@@ -419,7 +419,7 @@ RSpec.describe RHDL::Codegen::Netlist::NetlistSimulator do
   end
 
   describe 'when native is available', if: RHDL::Codegen::Netlist::NATIVE_SIM_AVAILABLE do
-    let(:sim) { described_class.new(ir, backend: :interpreter, lanes: 64, allow_fallback: false) }
+    let(:sim) { described_class.new(ir, backend: :interpreter, lanes: 64) }
 
     it 'uses native implementation' do
       expect(sim.native?).to be true
@@ -433,9 +433,21 @@ RSpec.describe RHDL::Codegen::Netlist::NetlistSimulator do
     end
   end
 
-  describe 'fallback behavior' do
-    # This tests the unified simulator interface.
-    let(:sim) { described_class.new(ir, backend: :interpreter, lanes: 64) }
+  describe 'unified simulator behavior',
+           if: (RHDL::Codegen::Netlist::NETLIST_INTERPRETER_AVAILABLE ||
+                RHDL::Codegen::Netlist::NETLIST_JIT_AVAILABLE ||
+                RHDL::Codegen::Netlist::NETLIST_COMPILER_AVAILABLE) do
+    let(:backend) do
+      if RHDL::Codegen::Netlist::NETLIST_INTERPRETER_AVAILABLE
+        :interpreter
+      elsif RHDL::Codegen::Netlist::NETLIST_JIT_AVAILABLE
+        :jit
+      else
+        :compiler
+      end
+    end
+
+    let(:sim) { described_class.new(ir, backend: backend, lanes: 64) }
 
     it 'provides stats' do
       stats = sim.stats
@@ -449,6 +461,18 @@ RSpec.describe RHDL::Codegen::Netlist::NetlistSimulator do
 
     it 'has correct lanes' do
       expect(sim.lanes).to eq(64)
+    end
+
+    it 'reports native backend' do
+      expect(sim.native?).to be true
+    end
+  end
+
+  describe 'hard-cut behavior' do
+    it 'rejects removed allow_fallback keyword' do
+      expect do
+        described_class.new(ir, backend: :interpreter, lanes: 64, allow_fallback: true)
+      end.to raise_error(ArgumentError, /allow_fallback/)
     end
   end
 end

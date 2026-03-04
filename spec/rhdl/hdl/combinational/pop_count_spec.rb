@@ -27,8 +27,8 @@ RSpec.describe RHDL::HDL::PopCount do
     end
 
     it 'generates valid IR' do
-      ir = RHDL::HDL::PopCount.to_ir
-      expect(ir).to be_a(RHDL::Export::IR::ModuleDef)
+      ir = RHDL::HDL::PopCount.to_flat_circt_nodes
+      expect(ir).to be_a(RHDL::Codegen::CIRCT::IR::ModuleOp)
       expect(ir.ports.length).to eq(2)  # a, count
     end
 
@@ -38,12 +38,12 @@ RSpec.describe RHDL::HDL::PopCount do
       expect(verilog).to include('input [7:0] a')
     end
 
-    it 'generates valid FIRRTL' do
-      firrtl = RHDL::HDL::PopCount.to_circt
-      expect(firrtl).to include('FIRRTL version')
-      expect(firrtl).to include('circuit pop_count')
-      expect(firrtl).to include('input a')
-      expect(firrtl).to include('output count')
+    it 'generates valid CIRCT MLIR' do
+      mlir = RHDL::HDL::PopCount.to_circt
+      expect(mlir).to include('hw.output')
+      expect(mlir).to include('hw.module @pop_count')
+      expect(mlir).to include('%a:')
+      expect(mlir).to include('count:')
     end
 
     context 'CIRCT firtool validation', if: HdlToolchain.firtool_available? do

@@ -4,6 +4,19 @@ require 'spec_helper'
 require 'rhdl/cli'
 require 'tmpdir'
 
+module RHDL
+  module SpecFixtures
+    class ExportTaskDummy < RHDL::Sim::Component
+      input :a
+      output :y
+
+      behavior do
+        y <= a
+      end
+    end
+  end
+end
+
 RSpec.describe RHDL::CLI::Tasks::ExportTask do
   let(:temp_dir) { Dir.mktmpdir('rhdl_export_test') }
 
@@ -51,6 +64,18 @@ RSpec.describe RHDL::CLI::Tasks::ExportTask do
     it 'can be instantiated with top option' do
       expect { described_class.new(component: 'RHDL::HDL::NotGate', lang: 'verilog', out: '/tmp', top: 'my_module') }.not_to raise_error
     end
+
+    it 'can be instantiated with tool options' do
+      expect do
+        described_class.new(
+          component: 'RHDL::HDL::NotGate',
+          lang: 'verilog',
+          out: '/tmp',
+          tool: 'circt-translate',
+          tool_args: ['--lowering-options=disallowPackedArrays']
+        )
+      end.not_to raise_error
+    end
   end
 
   describe '#run' do
@@ -93,6 +118,58 @@ RSpec.describe RHDL::CLI::Tasks::ExportTask do
 
       task = described_class.new(all: true, scope: 'lib')
       expect { task.export_all }.to output(/Exported \d+ components/).to_stdout
+    end
+
+    it 'exports via circt tooling for batch export' do
+      allow(RHDL::CLI::Config).to receive(:verilog_dir).and_return(temp_dir)
+      allow(RHDL::Export).to receive(:list_components).and_return(
+        [{ class: RHDL::SpecFixtures::ExportTaskDummy, relative_path: 'fixtures/export_task_dummy' }]
+      )
+      allow(RHDL::Export).to receive(:verilog_via_circt).and_return("module not_gate;\nendmodule\n")
+
+      task = described_class.new(all: true, scope: 'lib', tool: 'circt-translate', tool_args: ['--foo'])
+      expect { task.export_all }.to output(/Exported 1 components/).to_stdout
+
+      expect(RHDL::Export).to have_received(:verilog_via_circt).with(
+        RHDL::SpecFixtures::ExportTaskDummy,
+        top_name: nil,
+        tool: 'circt-translate',
+        extra_args: ['--foo']
+      )
+      expect(File.exist?(File.join(temp_dir, 'fixtures/export_task_dummy.v'))).to be(true)
+    end
+  end
+
+  describe '#export_single' do
+    it 'exports via circt tooling for single exports' do
+      allow(RHDL::Export).to receive(:verilog_via_circt).and_return("module not_gate;\nendmodule\n")
+
+      task = described_class.new(
+        component: 'RHDL::SpecFixtures::ExportTaskDummy',
+        lang: 'verilog',
+        out: temp_dir,
+        tool: 'circt-translate',
+        tool_args: ['--bar']
+      )
+
+      expect { task.export_single }.to output(/Wrote verilog/).to_stdout
+      expect(RHDL::Export).to have_received(:verilog_via_circt).with(
+        RHDL::SpecFixtures::ExportTaskDummy,
+        top_name: nil,
+        tool: 'circt-translate',
+        extra_args: ['--bar']
+      )
+    end
+
+    it 'raises for legacy backend' do
+      task = described_class.new(
+        component: 'RHDL::SpecFixtures::ExportTaskDummy',
+        lang: 'verilog',
+        out: temp_dir,
+        backend: 'legacy'
+      )
+
+      expect { task.export_single }.to raise_error(ArgumentError, /Unknown export backend/)
     end
   end
 

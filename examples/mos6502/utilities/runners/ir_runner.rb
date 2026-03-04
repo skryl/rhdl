@@ -2,7 +2,7 @@
 
 # Wrapper for IR-based simulators (HDL mode with interpret/jit/compile backends)
 # Provides a unified interface for different simulation backends
-# Uses RHDL::Examples::MOS6502::CPU IR with internalized memory in Rust (or Ruby fallback)
+# Uses RHDL::Examples::MOS6502::CPU IR with internalized memory in Rust.
 
 module RHDL
   module Examples
@@ -24,15 +24,14 @@ module RHDL
           @last_speaker_sync_time = nil
 
           # Generate IR JSON from RHDL::Examples::MOS6502::CPU component
-          ir = RHDL::Examples::MOS6502::CPU.to_flat_ir
-          @ir_json = RHDL::Codegen::IR::IRToJson.convert(ir)
+          ir = RHDL::Examples::MOS6502::CPU.to_flat_circt_nodes
+          @ir_json = RHDL::Codegen::IR.sim_json(ir, backend: @sim_backend)
         end
 
         def create_simulator
           sim = RHDL::Codegen::IR::IrSimulator.new(
             @ir_json,
-            backend: @sim_backend,
-            allow_fallback: false
+            backend: @sim_backend
           )
 
           # Check if Rust MOS6502 mode is available

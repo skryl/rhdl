@@ -49,8 +49,9 @@ RSpec.describe RHDL::Examples::MOS6502::Registers do
       verilog = described_class.to_verilog
       expect(verilog).to include('module mos6502_registers')
       expect(verilog).to include('input [7:0] data_in')
-      expect(verilog).to include('output reg [7:0] a')
-      expect(verilog).to include('always @(posedge clk')
+      expect(verilog).to include('output [7:0] a')
+      expect(verilog).to include('always_ff @(posedge clk)')
+      expect(verilog).to include('assign a =')
     end
 
     context 'when iverilog is available', if: HdlToolchain.iverilog_available? do

@@ -14,7 +14,7 @@ RSpec.describe 'RISC-V IR runner backend parity', timeout: 30 do
 
   backends.each do |backend, available|
     context "single-cycle on #{backend}" do
-      let(:cpu) { RHDL::Examples::RISCV::IRHarness.new(mem_size: 4096, backend: backend, allow_fallback: false) }
+      let(:cpu) { RHDL::Examples::RISCV::IRHarness.new(mem_size: 4096, backend: backend) }
 
       before do
         skip "#{backend} backend not available" unless available
@@ -84,7 +84,7 @@ RSpec.describe 'RISC-V IR runner backend parity', timeout: 30 do
     end
 
     context "pipeline on #{backend}" do
-      let(:cpu) { RHDL::Examples::RISCV::Pipeline::IRHarness.new('backend_parity_pipeline', backend: backend, allow_fallback: false) }
+      let(:cpu) { RHDL::Examples::RISCV::Pipeline::IRHarness.new('backend_parity_pipeline', backend: backend) }
 
       before do
         skip "#{backend} backend not available" unless available

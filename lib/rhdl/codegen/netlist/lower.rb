@@ -1,10 +1,12 @@
 # Lower HDL simulation components into gate-level IR
 
 require 'fileutils'
+require 'json'
 
 require_relative 'ir'
 require_relative 'primitives'
 require_relative 'toposort'
+require_relative '../circt/ir'
 
 module RHDL
   module Codegen
@@ -3922,16 +3924,7 @@ module RHDL
 
       # Lower a behavior block to gates using the component's IR
       def lower_behavior_block(component)
-        return unless component.class.respond_to?(:to_ir)
-
-        # Get the behavior IR from the component
-        begin
-          behavior_ir = component.class.to_ir
-        rescue StandardError => e
-          # If IR generation fails, skip this component
-          warn "Warning: Failed to generate IR for #{component.class}: #{e.message}" if ENV['RHDL_DEBUG']
-          return
-        end
+        behavior_ir = behavior_module_for_netlist(component)
 
         return unless behavior_ir
 
@@ -3992,7 +3985,7 @@ module RHDL
           next unless clock_net
 
           process.statements&.each do |stmt|
-            next unless stmt.is_a?(RHDL::Codegen::IR::SeqAssign)
+            next unless stmt.is_a?(RHDL::Codegen::CIRCT::IR::SeqAssign)
 
             target_nets = signal_nets[stmt.target.to_s] || signal_nets[stmt.target.to_sym]
             next unless target_nets
@@ -4018,6 +4011,312 @@ module RHDL
         end
       end
 
+      def behavior_module_for_netlist(component)
+        return unless component.class.respond_to?(:to_circt_runtime_json)
+
+        circt_runtime_json = component.class.to_circt_runtime_json
+        payload = JSON.parse(circt_runtime_json, symbolize_names: true, max_nesting: false)
+        runtime_hash_to_circt_module(circt_runtime_module_hash(payload))
+      rescue StandardError => e
+        warn "Warning: Failed to generate IR for #{component.class}: #{e.message}" if ENV['RHDL_DEBUG']
+        nil
+      end
+
+      def circt_runtime_module_hash(payload)
+        data = symbolize_keys(payload)
+        raise ArgumentError, 'CIRCT runtime JSON must be a hash payload' unless data.is_a?(Hash)
+        raise ArgumentError, 'CIRCT runtime JSON missing circt_json_version' unless data.key?(:circt_json_version)
+
+        modules = Array(data[:modules])
+        raise ArgumentError, 'CIRCT runtime JSON has no modules' if modules.empty?
+
+        symbolize_keys(modules.first)
+      end
+
+      def symbolize_keys(obj)
+        case obj
+        when Hash
+          obj.each_with_object({}) do |(key, value), out|
+            normalized_key = key.is_a?(String) || key.is_a?(Symbol) ? key.to_sym : key
+            out[normalized_key] = symbolize_keys(value)
+          end
+        when Array
+          obj.map { |item| symbolize_keys(item) }
+        else
+          obj
+        end
+      end
+
+      def runtime_hash_to_circt_module(hash)
+        h = symbolize_keys(hash)
+        RHDL::Codegen::CIRCT::IR::ModuleOp.new(
+          name: h[:name]&.to_s || 'module',
+          ports: Array(h[:ports]).map { |port| runtime_hash_to_circt_port(port) },
+          nets: Array(h[:nets]).map { |net| runtime_hash_to_circt_net(net) },
+          regs: Array(h[:regs]).map { |reg| runtime_hash_to_circt_reg(reg) },
+          assigns: Array(h[:assigns]).map { |assign| runtime_hash_to_circt_assign(assign) },
+          processes: Array(h[:processes]).map { |process| runtime_hash_to_circt_process(process) },
+          instances: [],
+          memories: Array(h[:memories]).map { |memory| runtime_hash_to_circt_memory(memory) },
+          write_ports: Array(h[:write_ports]).map { |wp| runtime_hash_to_circt_write_port(wp) },
+          sync_read_ports: Array(h[:sync_read_ports]).map { |rp| runtime_hash_to_circt_sync_read_port(rp) },
+          parameters: {}
+        )
+      end
+
+      def runtime_hash_to_circt_port(hash)
+        h = symbolize_keys(hash)
+        RHDL::Codegen::CIRCT::IR::Port.new(
+          name: h[:name].to_sym,
+          direction: h[:direction].to_sym,
+          width: h[:width].to_i
+        )
+      end
+
+      def runtime_hash_to_circt_net(hash)
+        h = symbolize_keys(hash)
+        RHDL::Codegen::CIRCT::IR::Net.new(
+          name: h[:name].to_sym,
+          width: h[:width].to_i
+        )
+      end
+
+      def runtime_hash_to_circt_reg(hash)
+        h = symbolize_keys(hash)
+        kwargs = {
+          name: h[:name].to_sym,
+          width: h[:width].to_i
+        }
+        kwargs[:reset_value] = h[:reset_value] if h.key?(:reset_value)
+        RHDL::Codegen::CIRCT::IR::Reg.new(**kwargs)
+      end
+
+      def runtime_hash_to_circt_assign(hash)
+        h = symbolize_keys(hash)
+        RHDL::Codegen::CIRCT::IR::Assign.new(
+          target: h[:target].to_sym,
+          expr: runtime_hash_to_circt_expr(h[:expr])
+        )
+      end
+
+      def runtime_hash_to_circt_process(hash)
+        h = symbolize_keys(hash)
+        RHDL::Codegen::CIRCT::IR::Process.new(
+          name: h[:name].to_sym,
+          clock: h[:clock]&.to_sym,
+          clocked: !!h[:clocked],
+          statements: flatten_runtime_process_statements(Array(h[:statements])).map do |stmt|
+            RHDL::Codegen::CIRCT::IR::SeqAssign.new(
+              target: stmt[:target].to_sym,
+              expr: stmt[:expr]
+            )
+          end
+        )
+      end
+
+      def flatten_runtime_process_statements(stmts)
+        result = []
+        stmts.each do |stmt|
+          h = symbolize_keys(stmt)
+          kind = h[:kind]&.to_s
+          if kind == 'seq_assign'
+            result << { target: h[:target], expr: runtime_hash_to_circt_expr(h[:expr]) }
+          elsif kind == 'if'
+            flatten_runtime_if_statement(h, result)
+          end
+        end
+        result
+      end
+
+      def flatten_runtime_if_statement(if_stmt, out)
+        cond = runtime_hash_to_circt_expr(if_stmt[:condition])
+
+        then_assigns = collect_branch_assigns(Array(if_stmt[:then_statements]), out)
+        else_assigns = collect_branch_assigns(Array(if_stmt[:else_statements]), out)
+
+        (then_assigns.keys + else_assigns.keys).uniq.each do |target|
+          then_expr = then_assigns[target]
+          else_expr = else_assigns[target]
+          width = expr_width_node(then_expr || else_expr) || 8
+          hold_expr = RHDL::Codegen::CIRCT::IR::Signal.new(name: target.to_sym, width: width)
+
+          merged_expr = if then_expr && else_expr
+                          RHDL::Codegen::CIRCT::IR::Mux.new(
+                            condition: cond,
+                            when_true: then_expr,
+                            when_false: else_expr,
+                            width: width
+                          )
+                        elsif then_expr
+                          RHDL::Codegen::CIRCT::IR::Mux.new(
+                            condition: cond,
+                            when_true: then_expr,
+                            when_false: hold_expr,
+                            width: width
+                          )
+                        elsif else_expr
+                          RHDL::Codegen::CIRCT::IR::Mux.new(
+                            condition: RHDL::Codegen::CIRCT::IR::UnaryOp.new(op: :~, operand: cond, width: 1),
+                            when_true: else_expr,
+                            when_false: hold_expr,
+                            width: width
+                          )
+                        end
+
+          out << { target: target, expr: merged_expr } if merged_expr
+        end
+      end
+
+      def collect_branch_assigns(statements, out)
+        assigns = {}
+        statements.each do |stmt|
+          h = symbolize_keys(stmt)
+          kind = h[:kind]&.to_s
+          if kind == 'seq_assign'
+            assigns[h[:target].to_s] = runtime_hash_to_circt_expr(h[:expr])
+          elsif kind == 'if'
+            flatten_runtime_if_statement(h, out)
+          end
+        end
+        assigns
+      end
+
+      def expr_width_node(expr)
+        return nil unless expr
+        return expr.width.to_i if expr.respond_to?(:width) && !expr.width.nil?
+
+        nil
+      end
+
+      def runtime_hash_to_circt_memory(hash)
+        h = symbolize_keys(hash)
+        RHDL::Codegen::CIRCT::IR::Memory.new(
+          name: h[:name].to_sym,
+          depth: h[:depth].to_i,
+          width: h[:width].to_i,
+          initial_data: h[:initial_data]
+        )
+      end
+
+      def runtime_hash_to_circt_write_port(hash)
+        h = symbolize_keys(hash)
+        RHDL::Codegen::CIRCT::IR::MemoryWritePort.new(
+          memory: h[:memory].to_sym,
+          clock: h[:clock].to_sym,
+          addr: runtime_hash_to_circt_expr(h[:addr]),
+          data: runtime_hash_to_circt_expr(h[:data]),
+          enable: runtime_hash_to_circt_expr(h[:enable])
+        )
+      end
+
+      def runtime_hash_to_circt_sync_read_port(hash)
+        h = symbolize_keys(hash)
+        RHDL::Codegen::CIRCT::IR::MemorySyncReadPort.new(
+          memory: h[:memory].to_sym,
+          clock: h[:clock].to_sym,
+          addr: runtime_hash_to_circt_expr(h[:addr]),
+          data: h[:data].to_sym,
+          enable: h[:enable] ? runtime_hash_to_circt_expr(h[:enable]) : nil
+        )
+      end
+
+      def runtime_hash_to_circt_expr(hash)
+        return nil if hash.nil?
+
+        h = symbolize_keys(hash)
+        kind = h[:kind].to_s
+
+        case kind
+        when 'signal'
+          RHDL::Codegen::CIRCT::IR::Signal.new(
+            name: h[:name].to_sym,
+            width: h[:width].to_i
+          )
+        when 'literal'
+          RHDL::Codegen::CIRCT::IR::Literal.new(
+            value: h[:value].to_i,
+            width: h[:width].to_i
+          )
+        when 'unary'
+          RHDL::Codegen::CIRCT::IR::UnaryOp.new(
+            op: h[:op].to_sym,
+            operand: runtime_hash_to_circt_expr(h[:operand]),
+            width: h[:width].to_i
+          )
+        when 'binary'
+          RHDL::Codegen::CIRCT::IR::BinaryOp.new(
+            op: h[:op].to_sym,
+            left: runtime_hash_to_circt_expr(h[:left]),
+            right: runtime_hash_to_circt_expr(h[:right]),
+            width: h[:width].to_i
+          )
+        when 'mux'
+          RHDL::Codegen::CIRCT::IR::Mux.new(
+            condition: runtime_hash_to_circt_expr(h[:condition]),
+            when_true: runtime_hash_to_circt_expr(h[:when_true]),
+            when_false: runtime_hash_to_circt_expr(h[:when_false]),
+            width: h[:width].to_i
+          )
+        when 'slice'
+          range_begin = h[:range_begin]
+          range_end = h[:range_end]
+          raise ArgumentError, 'slice expression missing range_begin/range_end' if range_begin.nil? || range_end.nil?
+
+          RHDL::Codegen::CIRCT::IR::Slice.new(
+            base: runtime_hash_to_circt_expr(h[:base]),
+            range: range_begin.to_i..range_end.to_i,
+            width: h[:width].to_i
+          )
+        when 'concat'
+          RHDL::Codegen::CIRCT::IR::Concat.new(
+            parts: Array(h[:parts]).map { |part| runtime_hash_to_circt_expr(part) },
+            width: h[:width].to_i
+          )
+        when 'resize'
+          RHDL::Codegen::CIRCT::IR::Resize.new(
+            expr: runtime_hash_to_circt_expr(h[:expr]),
+            width: h[:width].to_i
+          )
+        when 'case'
+          cases = {}
+          symbolize_keys(h[:cases] || {}).each do |key, value|
+            cases[parse_case_values_key(key)] = runtime_hash_to_circt_expr(value)
+          end
+          RHDL::Codegen::CIRCT::IR::Case.new(
+            selector: runtime_hash_to_circt_expr(h[:selector]),
+            cases: cases,
+            default: h[:default] ? runtime_hash_to_circt_expr(h[:default]) : nil,
+            width: h[:width].to_i
+          )
+        when 'memory_read'
+          RHDL::Codegen::CIRCT::IR::MemoryRead.new(
+            memory: h[:memory].to_sym,
+            addr: runtime_hash_to_circt_expr(h[:addr]),
+            width: h[:width].to_i
+          )
+        else
+          raise ArgumentError, "Unsupported CIRCT runtime expr kind: #{kind.inspect}"
+        end
+      end
+
+      def parse_case_values_key(key)
+        case key
+        when Array
+          key.map { |item| item.to_i }
+        when Integer
+          [key]
+        when String
+          stripped = key.strip
+          return [stripped.to_i] unless stripped.start_with?('[')
+
+          JSON.parse(stripped).map { |item| item.to_i }
+        else
+          [key.to_i]
+        end
+      rescue StandardError
+        [key.to_i]
+      end
+
       # Lower an IR expression to gate-level nets
       # Returns an array of net IDs (one per bit)
       def lower_ir_expr(expr, signal_nets)
@@ -4027,13 +4326,13 @@ module RHDL
         end
 
         case expr
-        when RHDL::Codegen::IR::Signal
+        when RHDL::Codegen::CIRCT::IR::Signal
           nets = signal_nets[expr.name.to_s] || signal_nets[expr.name.to_sym]
           return nets if nets
           # Create new nets for unknown signal
           expr.width.times.map { new_temp }
 
-        when RHDL::Codegen::IR::Literal
+        when RHDL::Codegen::CIRCT::IR::Literal
           # Create constant gates
           expr.width.times.map do |i|
             bit = (expr.value >> i) & 1
@@ -4042,7 +4341,7 @@ module RHDL
             out
           end
 
-        when RHDL::Codegen::IR::UnaryOp
+        when RHDL::Codegen::CIRCT::IR::UnaryOp
           operand_nets = lower_ir_expr(expr.operand, signal_nets)
           operand_nets = [operand_nets] unless operand_nets.is_a?(Array)
           # Replace any nil values with zero
@@ -4080,7 +4379,7 @@ module RHDL
             operand_nets
           end
 
-        when RHDL::Codegen::IR::BinaryOp
+        when RHDL::Codegen::CIRCT::IR::BinaryOp
           left_nets = lower_ir_expr(expr.left, signal_nets)
           right_nets = lower_ir_expr(expr.right, signal_nets)
           left_nets = [left_nets] unless left_nets.is_a?(Array)
@@ -4149,14 +4448,14 @@ module RHDL
           when :<=
             # Less than or equal
             lt = lower_comparator_lt(left_nets, right_nets)
-            eq = lower_ir_expr(RHDL::Codegen::IR::BinaryOp.new(op: :==, left: expr.left, right: expr.right, width: 1), signal_nets)
+            eq = lower_ir_expr(RHDL::Codegen::CIRCT::IR::BinaryOp.new(op: :==, left: expr.left, right: expr.right, width: 1), signal_nets)
             out = new_temp
             @ir.add_gate(type: Primitives::OR, inputs: [lt.first, eq.first], output: out)
             [out]
           when :>=
             # Greater than or equal - swap operands for LT
             lt = lower_comparator_lt(right_nets, left_nets)
-            eq = lower_ir_expr(RHDL::Codegen::IR::BinaryOp.new(op: :==, left: expr.left, right: expr.right, width: 1), signal_nets)
+            eq = lower_ir_expr(RHDL::Codegen::CIRCT::IR::BinaryOp.new(op: :==, left: expr.left, right: expr.right, width: 1), signal_nets)
             out = new_temp
             @ir.add_gate(type: Primitives::OR, inputs: [lt.first, eq.first], output: out)
             [out]
@@ -4171,7 +4470,7 @@ module RHDL
             left_nets
           end
 
-        when RHDL::Codegen::IR::Mux
+        when RHDL::Codegen::CIRCT::IR::Mux
           cond_nets = lower_ir_expr(expr.condition, signal_nets)
           true_nets = lower_ir_expr(expr.when_true, signal_nets)
           false_nets = lower_ir_expr(expr.when_false, signal_nets)
@@ -4198,7 +4497,7 @@ module RHDL
             out
           end
 
-        when RHDL::Codegen::IR::Slice
+        when RHDL::Codegen::CIRCT::IR::Slice
           base_nets = lower_ir_expr(expr.base, signal_nets)
           base_nets = [base_nets] unless base_nets.is_a?(Array)
 
@@ -4212,13 +4511,13 @@ module RHDL
               # Dynamic slice - convert bounds to constant values if possible
               if range_begin.respond_to?(:to_ir)
                 range_begin_ir = range_begin.to_ir
-                if range_begin_ir.is_a?(RHDL::Codegen::IR::Literal)
+                if range_begin_ir.is_a?(RHDL::Codegen::CIRCT::IR::Literal)
                   range_begin = range_begin_ir.value
                 end
               end
               if range_end.respond_to?(:to_ir)
                 range_end_ir = range_end.to_ir
-                if range_end_ir.is_a?(RHDL::Codegen::IR::Literal)
+                if range_end_ir.is_a?(RHDL::Codegen::CIRCT::IR::Literal)
                   range_end = range_end_ir.value
                 end
               end
@@ -4245,7 +4544,7 @@ module RHDL
             (0...expr.width).map { |i| base_nets[i] || new_temp }
           end
 
-        when RHDL::Codegen::IR::Concat
+        when RHDL::Codegen::CIRCT::IR::Concat
           result = []
           expr.parts.each do |part|
             part_nets = lower_ir_expr(part, signal_nets)
@@ -4254,12 +4553,12 @@ module RHDL
           end
           result
 
-        when RHDL::Codegen::IR::Resize
+        when RHDL::Codegen::CIRCT::IR::Resize
           inner_nets = lower_ir_expr(expr.expr, signal_nets)
           inner_nets = [inner_nets] unless inner_nets.is_a?(Array)
           extend_nets(inner_nets, expr.width)
 
-        when RHDL::Codegen::IR::Case
+        when RHDL::Codegen::CIRCT::IR::Case
           # Case expression - build MUX tree
           selector_nets = lower_ir_expr(expr.selector, signal_nets)
           selector_nets = [selector_nets] unless selector_nets.is_a?(Array)
@@ -4314,7 +4613,7 @@ module RHDL
 
           result
 
-        when RHDL::Codegen::IR::MemoryRead
+        when RHDL::Codegen::CIRCT::IR::MemoryRead
           # Memory reads become all zeros for now (would need ROM content)
           expr.width.times.map { z = new_temp; @ir.add_gate(type: Primitives::CONST, inputs: [], output: z, value: 0); z }
 

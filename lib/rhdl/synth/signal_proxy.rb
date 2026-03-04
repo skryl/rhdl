@@ -19,7 +19,7 @@ module RHDL
       end
 
       def to_ir
-        RHDL::Codegen::IR::Signal.new(name: @name, width: @width)
+        RHDL::Codegen::CIRCT::IR::Signal.new(name: @name, width: @width)
       end
     end
   end

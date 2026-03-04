@@ -3,9 +3,9 @@
 # Apple II Arcilator Simulator Runner
 # High-performance RTL simulation using CIRCT's arcilator
 #
-# Pipeline: RHDL -> FIRRTL -> firtool -> MLIR -> arcilator -> LLVM IR -> .so
+# Pipeline: RHDL -> CIRCT MLIR -> arcilator -> LLVM IR -> .so
 #
-# This runner exports the Apple2 HDL to FIRRTL, compiles through the CIRCT
+# This runner exports the Apple2 HDL to CIRCT MLIR, compiles through the CIRCT
 # toolchain, and provides a native simulation interface identical to VerilogRunner.
 
 require_relative '../../hdl/apple2'
@@ -23,7 +23,7 @@ module RHDL
   module Examples
     module Apple2
       # Arcilator-based runner for Apple II simulation
-      # Compiles RHDL FIRRTL export to native code via CIRCT arcilator
+      # Compiles RHDL CIRCT MLIR export to native code via CIRCT arcilator
       class ArcilatorRunner
         # Text page constants
         TEXT_PAGE1_START = 0x0400
@@ -339,7 +339,7 @@ module RHDL
         private
 
         def check_arcilator_available!
-          %w[firtool arcilator].each do |tool|
+          %w[arcilator].each do |tool|
             unless system("which #{tool} > /dev/null 2>&1")
               raise "#{tool} not found in PATH. Install CIRCT: https://github.com/llvm/circt/releases"
             end
@@ -353,16 +353,16 @@ module RHDL
           FileUtils.mkdir_p(BUILD_DIR)
 
           lib_file = shared_lib_path
-          firrtl_gen = File.expand_path('../../../../lib/rhdl/codegen/circt/firrtl.rb', __dir__)
-          export_deps = [__FILE__, firrtl_gen].select { |p| File.exist?(p) }
+          mlir_gen = File.expand_path('../../../../lib/rhdl/codegen/circt/mlir.rb', __dir__)
+          export_deps = [__FILE__, mlir_gen].select { |p| File.exist?(p) }
           needs_rebuild = !File.exist?(lib_file) ||
                           export_deps.any? { |p| File.mtime(p) > File.mtime(lib_file) }
 
           if needs_rebuild
-            puts "  Exporting Apple2 to FIRRTL..."
-            export_firrtl
+            puts "  Exporting Apple2 to CIRCT MLIR..."
+            export_mlir
 
-            puts "  Compiling with firtool + arcilator..."
+            puts "  Compiling with arcilator..."
             compile_arcilator
 
             puts "  Building shared library..."
@@ -373,23 +373,17 @@ module RHDL
           load_shared_library(lib_file)
         end
 
-        def export_firrtl
-          components = [TimingGenerator, VideoGenerator, CharacterROM, SpeakerToggle,
-                        CPU6502, DiskII, DiskIIROM, Keyboard, PS2Controller, Apple2]
-          module_defs = components.map { |c| c.to_ir }
-          firrtl = RHDL::Codegen::CIRCT::FIRRTL.generate_hierarchy(module_defs, top_name: 'apple2_apple2')
-          File.write(File.join(BUILD_DIR, 'apple2.fir'), firrtl)
+        def export_mlir
+          mlir = Apple2.to_mlir_hierarchy(top_name: 'apple2_apple2')
+          File.write(File.join(BUILD_DIR, 'apple2_hw.mlir'), mlir)
         end
 
         def compile_arcilator
-          fir_file = File.join(BUILD_DIR, 'apple2.fir')
           mlir_file = File.join(BUILD_DIR, 'apple2_hw.mlir')
           ll_file = File.join(BUILD_DIR, 'apple2_arc.ll')
           state_file = File.join(BUILD_DIR, 'apple2_state.json')
           obj_file = File.join(BUILD_DIR, 'apple2_arc.o')
 
-          # FIRRTL -> MLIR core
-          system("firtool #{fir_file} --ir-hw -o #{mlir_file}") or raise "firtool failed"
           # MLIR -> LLVM IR
           system("arcilator #{mlir_file} --state-file=#{state_file} -o #{ll_file}") or raise "arcilator failed"
           # LLVM IR -> object file

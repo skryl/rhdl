@@ -31,7 +31,7 @@ RSpec.describe 'Behavior DSL' do
 
     it 'generates correct Verilog' do
       verilog = BehaviorAndGate.to_verilog
-      expect(verilog).to include('assign y = (a & b)')
+      expect(verilog).to include('assign y = a & b')
     end
   end
 
@@ -145,8 +145,8 @@ RSpec.describe 'Behavior DSL' do
 
     it 'generates correct Verilog' do
       verilog = BehaviorFullAdder.to_verilog
-      expect(verilog).to include('assign sum = ((a ^ b) ^ cin)')
-      expect(verilog).to include('assign cout = (((a & b) | (a & cin)) | (b & cin))')
+      expect(verilog).to include('assign sum = a ^ b ^ cin')
+      expect(verilog).to include('assign cout = a & b | a & cin | b & cin')
     end
   end
 
@@ -410,17 +410,17 @@ RSpec.describe 'Behavior DSL' do
 
   describe 'IR generation' do
     it 'generates IR assigns from behavior block' do
-      result = BehaviorAndGate.send(:behavior_to_ir_assigns)
+      result = BehaviorAndGate.send(:behavior_to_circt_assigns)
       ir_assigns = result[:assigns]
       expect(ir_assigns.length).to eq(1)
       expect(ir_assigns[0].target).to eq(:y)
-      expect(ir_assigns[0].expr).to be_a(RHDL::Export::IR::BinaryOp)
+      expect(ir_assigns[0].expr).to be_a(RHDL::Codegen::CIRCT::IR::BinaryOp)
       expect(ir_assigns[0].expr.op).to eq(:&)
     end
 
     it 'generates complete IR module definition' do
-      ir = BehaviorFullAdder.to_ir
-      expect(ir).to be_a(RHDL::Export::IR::ModuleDef)
+      ir = BehaviorFullAdder.to_flat_circt_nodes
+      expect(ir).to be_a(RHDL::Codegen::CIRCT::IR::ModuleOp)
       expect(ir.ports.length).to eq(5)
       expect(ir.assigns.length).to eq(2)
     end

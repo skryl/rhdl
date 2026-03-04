@@ -41,8 +41,8 @@ RSpec.describe RHDL::HDL::ROM do
     end
 
     it 'generates valid IR' do
-      ir = RHDL::HDL::ROM.to_ir
-      expect(ir).to be_a(RHDL::Export::IR::ModuleDef)
+      ir = RHDL::HDL::ROM.to_flat_circt_nodes
+      expect(ir).to be_a(RHDL::Codegen::CIRCT::IR::ModuleOp)
       expect(ir.ports.length).to eq(3)  # en, addr, dout
       expect(ir.memories.length).to eq(1)
     end
@@ -54,12 +54,12 @@ RSpec.describe RHDL::HDL::ROM do
       expect(verilog).to match(/output.*\[7:0\].*dout/)
     end
 
-    it 'generates valid FIRRTL' do
-      firrtl = RHDL::HDL::ROM.to_circt
-      expect(firrtl).to include('FIRRTL version')
-      expect(firrtl).to include('circuit rom')
-      expect(firrtl).to include('input addr')
-      expect(firrtl).to include('output dout')
+    it 'generates valid CIRCT MLIR' do
+      mlir = RHDL::HDL::ROM.to_circt
+      expect(mlir).to include('hw.output')
+      expect(mlir).to include('hw.module @rom')
+      expect(mlir).to include('%addr:')
+      expect(mlir).to include('dout:')
     end
 
     context 'CIRCT firtool validation', if: HdlToolchain.firtool_available? do

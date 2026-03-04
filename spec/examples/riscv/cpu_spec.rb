@@ -7,7 +7,7 @@ require_relative '../../../examples/riscv/hdl/ir_harness'
 require_relative '../../../examples/riscv/utilities/assembler'
 
 RSpec.describe RHDL::Examples::RISCV::IRHarness do
-  let(:cpu) { described_class.new(mem_size: 4096, backend: :jit, allow_fallback: false) }
+  let(:cpu) { described_class.new(mem_size: 4096, backend: :jit) }
 
   before(:each) do
     skip 'IR JIT not available' unless RHDL::Codegen::IR::IR_JIT_AVAILABLE

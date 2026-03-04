@@ -74,6 +74,12 @@ RSpec.describe RHDL::CLI::Tasks::DepsTask do
         expect { task.run }.to output(/firtool/).to_stdout
       end
 
+      it 'shows circt-translate in dependency check' do
+        task = described_class.new(check: true)
+
+        expect { task.run }.to output(/circt-translate/).to_stdout
+      end
+
       it 'shows arcilator in dependency check' do
         task = described_class.new(check: true)
 
@@ -105,10 +111,12 @@ RSpec.describe RHDL::CLI::Tasks::DepsTask do
         allow(task).to receive(:command_available?).with('dot').and_return(true)
         allow(task).to receive(:command_available?).with('firtool').and_return(true)
         allow(task).to receive(:command_available?).with('arcilator').and_return(true)
+        allow(task).to receive(:command_available?).with('circt-translate').and_return(true)
         allow(task).to receive(:command_available?).with('llc').and_return(true)
         allow(task).to receive(:command_healthy?).and_call_original
         allow(task).to receive(:command_healthy?).with('firtool', 'firtool --version').and_return(true)
         allow(task).to receive(:command_healthy?).with('arcilator', 'arcilator --version').and_return(true)
+        allow(task).to receive(:command_healthy?).with('circt-translate', 'circt-translate --version').and_return(true)
         allow(task).to receive(:command_healthy?).with('llc', 'llc --version').and_return(true)
         allow(task).to receive(:command_output_first_line).and_call_original
         allow(task).to receive(:command_output_first_line).with('firtool --version').and_return('firtool-1.62.0')
@@ -141,10 +149,12 @@ RSpec.describe RHDL::CLI::Tasks::DepsTask do
           allow(task).to receive(:command_available?).with('dot').and_return(true)
           allow(task).to receive(:command_available?).with('firtool').and_return(false, true)
           allow(task).to receive(:command_available?).with('arcilator').and_return(false, true)
+          allow(task).to receive(:command_available?).with('circt-translate').and_return(false, true)
           allow(task).to receive(:command_available?).with('llc').and_return(false, true)
           allow(task).to receive(:command_healthy?).and_call_original
           allow(task).to receive(:command_healthy?).with('firtool', 'firtool --version').and_return(false, true)
           allow(task).to receive(:command_healthy?).with('arcilator', 'arcilator --version').and_return(false, true)
+          allow(task).to receive(:command_healthy?).with('circt-translate', 'circt-translate --version').and_return(false, true)
           allow(task).to receive(:command_healthy?).with('llc', 'llc --version').and_return(false, true)
           allow(task).to receive(:command_output_first_line).and_call_original
           allow(task).to receive(:command_output_first_line).with('firtool --version').and_return('firtool-1.62.0')
@@ -222,6 +232,12 @@ RSpec.describe RHDL::CLI::Tasks::DepsTask do
       expect(output).to match(/\[(OK|OPTIONAL)\]/)
     end
 
+    it 'shows circt-translate status' do
+      output = capture_stdout { task.check_status }
+      expect(output).to match(/circt-translate/)
+      expect(output).to match(/\[(OK|OPTIONAL)\]/)
+    end
+
     it 'shows the correct install command hint' do
       output = capture_stdout { task.check_status }
       expect(output).to include("bundle exec rake deps")
@@ -267,10 +283,12 @@ RSpec.describe RHDL::CLI::Tasks::DepsTask do
       allow(task).to receive(:command_available?).with('dot').and_return(true)
       allow(task).to receive(:command_available?).with('firtool').and_return(true)
       allow(task).to receive(:command_available?).with('arcilator').and_return(true)
+      allow(task).to receive(:command_available?).with('circt-translate').and_return(true)
       allow(task).to receive(:command_available?).with('llc').and_return(true)
       allow(task).to receive(:command_healthy?).and_call_original
       allow(task).to receive(:command_healthy?).with('firtool', 'firtool --version').and_return(true)
       allow(task).to receive(:command_healthy?).with('arcilator', 'arcilator --version').and_return(true)
+      allow(task).to receive(:command_healthy?).with('circt-translate', 'circt-translate --version').and_return(true)
       allow(task).to receive(:command_healthy?).with('llc', 'llc --version').and_return(true)
       allow(task).to receive(:command_output_first_line).and_call_original
       allow(task).to receive(:command_output_first_line).with('firtool --version').and_return('firtool-1.62.0')

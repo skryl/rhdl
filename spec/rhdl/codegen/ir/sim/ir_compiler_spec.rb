@@ -18,21 +18,21 @@ RSpec.describe 'IrCompiler vs IrInterpreter PC Progression' do
     end
   end
 
-  def create_ir_json
+  def create_ir_json(backend = :interpreter)
     require_relative '../../../../../examples/apple2/hdl/apple2'
-    ir = RHDL::Examples::Apple2::Apple2.to_flat_ir
-    RHDL::Codegen::IR::IRToJson.convert(ir)
+    ir = RHDL::Examples::Apple2::Apple2.to_flat_circt_nodes
+    RHDL::Codegen::IR.sim_json(ir, backend: backend)
   end
 
   def create_interpreter
     skip 'IR Interpreter not available' unless RHDL::Codegen::IR::IR_INTERPRETER_AVAILABLE
-    ir_json = create_ir_json
+    ir_json = create_ir_json(:interpreter)
     RHDL::Codegen::IR::IrSimulator.new(ir_json, backend: :interpreter)
   end
 
   def create_compiler
     skip 'IR Compiler not available' unless RHDL::Codegen::IR::IR_COMPILER_AVAILABLE
-    ir_json = create_ir_json
+    ir_json = create_ir_json(:compiler)
     RHDL::Codegen::IR::IrSimulator.new(ir_json, backend: :compiler)
   end
 

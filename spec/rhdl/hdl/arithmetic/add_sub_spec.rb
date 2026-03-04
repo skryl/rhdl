@@ -29,8 +29,8 @@ RSpec.describe RHDL::HDL::AddSub do
     end
 
     it 'generates valid IR' do
-      ir = RHDL::HDL::AddSub.to_ir
-      expect(ir).to be_a(RHDL::Export::IR::ModuleDef)
+      ir = RHDL::HDL::AddSub.to_flat_circt_nodes
+      expect(ir).to be_a(RHDL::Codegen::CIRCT::IR::ModuleOp)
       expect(ir.ports.length).to eq(8)  # a, b, sub, result, cout, overflow, zero, negative
     end
 
@@ -41,12 +41,12 @@ RSpec.describe RHDL::HDL::AddSub do
       expect(verilog).to include('output [7:0] result')
     end
 
-    it 'generates valid FIRRTL' do
-      firrtl = RHDL::HDL::AddSub.to_circt
-      expect(firrtl).to include('FIRRTL version')
-      expect(firrtl).to include('circuit add_sub')
-      expect(firrtl).to include('input a')
-      expect(firrtl).to include('output result')
+    it 'generates valid CIRCT MLIR' do
+      mlir = RHDL::HDL::AddSub.to_circt
+      expect(mlir).to include('hw.output')
+      expect(mlir).to include('hw.module @add_sub')
+      expect(mlir).to include('%a:')
+      expect(mlir).to include('result:')
     end
 
     context 'CIRCT firtool validation', if: HdlToolchain.firtool_available? && HdlToolchain.iverilog_available? do

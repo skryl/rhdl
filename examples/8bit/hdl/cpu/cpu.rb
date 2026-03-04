@@ -116,7 +116,7 @@ module RHDL
         instance :alu, ALU, width: 8
         instance :pc_reg, ProgramCounter, width: 16
         instance :acc, Register, width: 8
-        instance :sp, StackPointer, width: 8, initial: 0xFF
+        instance :sp, StackPointer, width: 8, initial_rhdl: 0xFF
         instance :zero_flag_reg, DFlipFlop
         instance :acc_mux, Mux2, width: 8
 

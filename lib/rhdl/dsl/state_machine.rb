@@ -121,7 +121,7 @@ module RHDL
           next_state_cases = @states.transform_values do |state_def|
             if state_def.transitions.empty?
               # Stay in current state
-              RHDL::Export::IR::Literal.new(value: state_def.value, width: width)
+              RHDL::Codegen::CIRCT::IR::Literal.new(value: state_def.value, width: width)
             else
               # Build transition logic
               build_transition_ir(state_def.transitions, width)
@@ -136,7 +136,7 @@ module RHDL
           first_state.outputs.keys.each do |output_name|
             output_cases[output_name] = @states.transform_values do |state_def|
               value = state_def.outputs[output_name] || 0
-              RHDL::Export::IR::Literal.new(value: value, width: 1)
+              RHDL::Codegen::CIRCT::IR::Literal.new(value: value, width: 1)
             end
           end
 
@@ -156,7 +156,7 @@ module RHDL
 
           transitions.reverse.each do |trans|
             target_value = @states[trans.target]&.value || 0
-            target_ir = RHDL::Export::IR::Literal.new(value: target_value, width: width)
+            target_ir = RHDL::Codegen::CIRCT::IR::Literal.new(value: target_value, width: width)
 
             if trans.condition
               # Conditional transition
@@ -164,12 +164,12 @@ module RHDL
                 result = target_ir
               else
                 cond_ir = if trans.condition.is_a?(Symbol)
-                           RHDL::Export::IR::Signal.new(name: trans.condition, width: 1)
+                           RHDL::Codegen::CIRCT::IR::Signal.new(name: trans.condition, width: 1)
                          else
                            # For procs, we'll handle in simulation
-                           RHDL::Export::IR::Literal.new(value: 1, width: 1)
+                           RHDL::Codegen::CIRCT::IR::Literal.new(value: 1, width: 1)
                          end
-                result = RHDL::Export::IR::Mux.new(
+                result = RHDL::Codegen::CIRCT::IR::Mux.new(
                   condition: cond_ir,
                   when_true: target_ir,
                   when_false: result,

@@ -21,8 +21,8 @@ RSpec.describe RHDL::HDL::FullAdder do
     end
 
     it 'generates valid IR' do
-      ir = RHDL::HDL::FullAdder.to_ir
-      expect(ir).to be_a(RHDL::Export::IR::ModuleDef)
+      ir = RHDL::HDL::FullAdder.to_flat_circt_nodes
+      expect(ir).to be_a(RHDL::Codegen::CIRCT::IR::ModuleOp)
       expect(ir.ports.length).to eq(5)  # a, b, cin, sum, cout
       expect(ir.assigns.length).to be >= 2
     end
@@ -39,13 +39,13 @@ RSpec.describe RHDL::HDL::FullAdder do
       expect(verilog).to include('assign cout')
     end
 
-    it 'generates valid FIRRTL' do
-      firrtl = RHDL::HDL::FullAdder.to_circt
-      expect(firrtl).to include('FIRRTL version')
-      expect(firrtl).to include('circuit full_adder')
-      expect(firrtl).to include('input a')
-      expect(firrtl).to include('input b')
-      expect(firrtl).to include('output sum')
+    it 'generates valid CIRCT MLIR' do
+      mlir = RHDL::HDL::FullAdder.to_circt
+      expect(mlir).to include('hw.output')
+      expect(mlir).to include('hw.module @full_adder')
+      expect(mlir).to include('%a:')
+      expect(mlir).to include('%b:')
+      expect(mlir).to include('sum:')
     end
 
     context 'CIRCT firtool validation', if: HdlToolchain.firtool_available? && HdlToolchain.iverilog_available? do

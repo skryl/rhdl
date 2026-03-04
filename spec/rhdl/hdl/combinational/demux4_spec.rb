@@ -27,8 +27,8 @@ RSpec.describe RHDL::HDL::Demux4 do
     end
 
     it 'generates valid IR' do
-      ir = RHDL::HDL::Demux4.to_ir
-      expect(ir).to be_a(RHDL::Export::IR::ModuleDef)
+      ir = RHDL::HDL::Demux4.to_flat_circt_nodes
+      expect(ir).to be_a(RHDL::Codegen::CIRCT::IR::ModuleOp)
       expect(ir.ports.length).to eq(6)  # a, sel, y0, y1, y2, y3
     end
 
@@ -39,12 +39,12 @@ RSpec.describe RHDL::HDL::Demux4 do
       expect(verilog).to include('output y0')
     end
 
-    it 'generates valid FIRRTL' do
-      firrtl = RHDL::HDL::Demux4.to_circt
-      expect(firrtl).to include('FIRRTL version')
-      expect(firrtl).to include('circuit demux4')
-      expect(firrtl).to include('input a')
-      expect(firrtl).to include('output y0')
+    it 'generates valid CIRCT MLIR' do
+      mlir = RHDL::HDL::Demux4.to_circt
+      expect(mlir).to include('hw.output')
+      expect(mlir).to include('hw.module @demux4')
+      expect(mlir).to include('%a:')
+      expect(mlir).to include('y0:')
     end
 
     context 'CIRCT firtool validation', if: HdlToolchain.firtool_available? do

@@ -1629,7 +1629,7 @@ module RHDL
         private
 
         def check_tools_available!
-          %w[firtool circt-opt arcilator].each do |tool|
+          %w[arcilator].each do |tool|
             raise LoadError, "#{tool} not found in PATH" unless command_available?(tool)
           end
 
@@ -1644,7 +1644,6 @@ module RHDL
         def build_simulation
           FileUtils.mkdir_p(build_dir)
 
-          fir_file = File.join(build_dir, 'riscv_cpu.fir')
           mlir_file = File.join(build_dir, 'riscv_cpu_hw.mlir')
           ll_file = File.join(build_dir, 'riscv_cpu_arc.ll')
           state_file = File.join(build_dir, 'riscv_cpu_state.json')
@@ -1653,18 +1652,18 @@ module RHDL
           lib_file = shared_lib_path
 
           cpu_source = File.expand_path('../../hdl/cpu.rb', __dir__)
-          firrtl_gen = File.expand_path('../../../../lib/rhdl/codegen/circt/firrtl.rb', __dir__)
-          export_deps = [__FILE__, cpu_source, firrtl_gen].select { |p| File.exist?(p) }
+          mlir_gen = File.expand_path('../../../../lib/rhdl/codegen/circt/mlir.rb', __dir__)
+          export_deps = [__FILE__, cpu_source, mlir_gen].select { |p| File.exist?(p) }
 
           needs_rebuild = !File.exist?(lib_file) ||
                           export_deps.any? { |p| File.mtime(p) > File.mtime(lib_file) }
 
           if needs_rebuild
-            puts '  Exporting RISC-V CPU to FIRRTL...'
-            export_firrtl(fir_file)
+            puts '  Exporting RISC-V CPU to CIRCT MLIR...'
+            export_mlir(mlir_file)
 
-            puts '  Compiling with firtool + arcilator...'
-            compile_arcilator(fir_file, mlir_file, ll_file, state_file, obj_file)
+            puts '  Compiling with arcilator...'
+            compile_arcilator(mlir_file, ll_file, state_file, obj_file)
 
             puts '  Building shared library...'
             write_arcilator_wrapper(wrapper_file, state_file)
@@ -1678,28 +1677,14 @@ module RHDL
           File.join(build_dir, 'libriscv_arc_sim.so')
         end
 
-        def export_firrtl(fir_file)
-          flat_ir = CPU.to_flat_ir(top_name: 'riscv_cpu')
-          firrtl = RHDL::Codegen::CIRCT::FIRRTL.generate(flat_ir)
-          File.write(fir_file, firrtl)
+        def export_mlir(mlir_file)
+          flat_nodes = CPU.to_flat_circt_nodes(top_name: 'riscv_cpu')
+          mlir = RHDL::Codegen::CIRCT::MLIR.generate(flat_nodes)
+          File.write(mlir_file, mlir)
         end
 
-        def compile_arcilator(fir_file, mlir_file, ll_file, state_file, obj_file)
-          parsed_mlir = File.join(build_dir, 'riscv_cpu_parsed.mlir')
-          lowered_mlir = File.join(build_dir, 'riscv_cpu_lowered.mlir')
-          log = File.join(build_dir, 'firtool.log')
-
-          run_or_raise("firtool #{fir_file} --parse-only -o #{parsed_mlir} 2>#{log}",
-                       'firtool parse', log)
-
-          run_or_raise(
-            "circt-opt #{parsed_mlir} --pass-pipeline='#{firrtl_pipeline_without_comb_check}' " \
-            "-o #{lowered_mlir} 2>>#{log}",
-            'circt-opt FIRRTL pipeline', log
-          )
-
-          run_or_raise("firtool --format=mlir #{lowered_mlir} --ir-hw -o #{mlir_file} 2>>#{log}",
-                       'firtool HW lowering', log)
+        def compile_arcilator(mlir_file, ll_file, state_file, obj_file)
+          log = File.join(build_dir, 'arcilator.log')
 
           run_or_raise("arcilator #{mlir_file} --observe-registers --state-file=#{state_file} -o #{ll_file} 2>>#{log}",
                        'arcilator', log)

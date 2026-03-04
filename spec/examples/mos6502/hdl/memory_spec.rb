@@ -30,12 +30,12 @@ RSpec.describe RHDL::Examples::MOS6502::Memory do
       expect(verilog).to include('module mos6502_memory')
     end
 
-    it 'generates valid FIRRTL' do
-      firrtl = RHDL::Examples::MOS6502::Memory.to_circt
-      expect(firrtl).to include('FIRRTL version')
-      expect(firrtl).to include('circuit mos6502_memory')
-      expect(firrtl).to include('input clk')
-      expect(firrtl).to include('input addr')
+    it 'generates valid CIRCT MLIR' do
+      mlir = RHDL::Examples::MOS6502::Memory.to_circt
+      expect(mlir).to include('hw.output')
+      expect(mlir).to include('hw.module @mos6502_memory')
+      expect(mlir).to include('%clk:')
+      expect(mlir).to include('%addr:')
     end
 
     context 'CIRCT firtool validation', if: HdlToolchain.firtool_available? do

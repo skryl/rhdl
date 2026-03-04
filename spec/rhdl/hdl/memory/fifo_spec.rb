@@ -78,8 +78,8 @@ RSpec.describe RHDL::HDL::FIFO do
     end
 
     it 'generates valid IR' do
-      ir = RHDL::HDL::FIFO.to_ir
-      expect(ir).to be_a(RHDL::Export::IR::ModuleDef)
+      ir = RHDL::HDL::FIFO.to_flat_circt_nodes
+      expect(ir).to be_a(RHDL::Codegen::CIRCT::IR::ModuleOp)
       expect(ir.ports.length).to eq(11)  # clk, rst, wr_en, rd_en, din, dout, empty, full, count, wr_ptr, rd_ptr
       expect(ir.memories.length).to eq(1)
     end
@@ -91,13 +91,13 @@ RSpec.describe RHDL::HDL::FIFO do
       expect(verilog).to match(/output.*\[7:0\].*dout/)
     end
 
-    it 'generates valid FIRRTL' do
-      firrtl = RHDL::HDL::FIFO.to_circt
-      expect(firrtl).to include('FIRRTL version')
-      expect(firrtl).to include('circuit fifo')
-      expect(firrtl).to include('input clk')
-      expect(firrtl).to include('input din')
-      expect(firrtl).to include('output dout')
+    it 'generates valid CIRCT MLIR' do
+      mlir = RHDL::HDL::FIFO.to_circt
+      expect(mlir).to include('hw.output')
+      expect(mlir).to include('hw.module @fifo')
+      expect(mlir).to include('%clk:')
+      expect(mlir).to include('%din:')
+      expect(mlir).to include('dout:')
     end
 
     context 'CIRCT firtool validation', if: HdlToolchain.firtool_available? do

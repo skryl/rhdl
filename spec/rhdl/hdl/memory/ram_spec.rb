@@ -81,8 +81,8 @@ RSpec.describe RHDL::HDL::RAM do
     end
 
     it 'generates valid IR' do
-      ir = RHDL::HDL::RAM.to_ir
-      expect(ir).to be_a(RHDL::Export::IR::ModuleDef)
+      ir = RHDL::HDL::RAM.to_flat_circt_nodes
+      expect(ir).to be_a(RHDL::Codegen::CIRCT::IR::ModuleOp)
       expect(ir.ports.length).to eq(5)  # clk, we, addr, din, dout
       expect(ir.memories.length).to eq(1)
     end
@@ -92,16 +92,16 @@ RSpec.describe RHDL::HDL::RAM do
       expect(verilog).to include('module ram')
       expect(verilog).to include('input [7:0] addr')
       expect(verilog).to match(/output.*\[7:0\].*dout/)
-      expect(verilog).to include('reg [7:0] mem')  # Memory array
+      expect(verilog).to include('assign dout')
     end
 
-    it 'generates valid FIRRTL' do
-      firrtl = RHDL::HDL::RAM.to_circt
-      expect(firrtl).to include('FIRRTL version')
-      expect(firrtl).to include('circuit ram')
-      expect(firrtl).to include('input clk')
-      expect(firrtl).to include('input addr')
-      expect(firrtl).to include('output dout')
+    it 'generates valid CIRCT MLIR' do
+      mlir = RHDL::HDL::RAM.to_circt
+      expect(mlir).to include('hw.output')
+      expect(mlir).to include('hw.module @ram')
+      expect(mlir).to include('%clk:')
+      expect(mlir).to include('%addr:')
+      expect(mlir).to include('dout:')
     end
 
     context 'CIRCT firtool validation', if: HdlToolchain.firtool_available? do

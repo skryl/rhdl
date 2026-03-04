@@ -60,7 +60,7 @@ module RHDL
 
       # Unified IR simulator wrapper for interpreter, JIT and compiler backends.
       class IrSimulator
-        attr_reader :ir_json, :sub_cycles
+        attr_reader :ir_json, :sub_cycles, :input_format, :effective_input_format
 
         RUNNER_KIND_NONE = 0
         RUNNER_KIND_APPLE2 = 1
@@ -179,26 +179,71 @@ module RHDL
           }
         }.freeze
 
+        DEFAULT_INPUT_FORMAT = :circt
+        INPUT_FORMATS = %i[circt].freeze
+        BACKEND_INPUT_FORMAT_DEFAULTS = {
+          interpreter: :circt,
+          jit: :circt,
+          compiler: :circt
+        }.freeze
+
+        class << self
+          def normalize_input_format(format)
+            value = (format || DEFAULT_INPUT_FORMAT).to_sym
+            return value if INPUT_FORMATS.include?(value)
+
+            raise ArgumentError, "Unknown IR input format: #{format.inspect}. Valid: :circt"
+          end
+
+          def normalize_backend_name(backend)
+            value = backend.to_sym
+            value = :interpreter if value == :interpret
+            value = :compiler if value == :compile
+            return value if BACKEND_CONFIGS.key?(value) || value == :auto
+
+            raise ArgumentError, "Unknown IR backend: #{backend.inspect}"
+          end
+
+          def input_format_for_backend(backend, env: ENV)
+            normalized_backend = normalize_backend_name(backend)
+            normalized_backend = :interpreter if normalized_backend == :auto
+
+            specific_key = "RHDL_IR_INPUT_FORMAT_#{normalized_backend.to_s.upcase}"
+            specific = env[specific_key]
+            return normalize_input_format(specific.strip.downcase.to_sym) if specific && !specific.strip.empty?
+
+            global = env['RHDL_IR_INPUT_FORMAT']
+            return normalize_input_format(global.strip.downcase.to_sym) if global && !global.strip.empty?
+
+            BACKEND_INPUT_FORMAT_DEFAULTS.fetch(normalized_backend, DEFAULT_INPUT_FORMAT)
+          end
+
+          def resolve_input_format(backend, explicit_input_format = nil, env: ENV)
+            return normalize_input_format(explicit_input_format) if explicit_input_format
+
+            input_format_for_backend(backend, env: env)
+          end
+        end
+
         # @param ir_json [String] JSON representation of the IR
         # @param backend [Symbol] :interpreter, :jit, :compiler, or :auto
-        # @param allow_fallback [Boolean] Allow fallback to another backend or Ruby implementation
+        # @param input_format [Symbol, nil] :circt (nil => backend default/env)
         # @param sub_cycles [Integer] Number of sub-cycles per CPU cycle (default: 14)
-        def initialize(ir_json, backend: :interpreter, allow_fallback: true, sub_cycles: 14)
-          @ir_json = ir_json
-          @sub_cycles = sub_cycles.clamp(1, 14)
-          @requested_backend = normalize_backend(backend)
+        def initialize(ir_json, backend: :interpreter, input_format: nil, sub_cycles: 14)
 
+          @sub_cycles = sub_cycles.clamp(1, 14)
+          @requested_backend = self.class.normalize_backend_name(backend)
           selected = select_backend(@requested_backend)
+          @input_format = self.class.resolve_input_format(@requested_backend, input_format)
+          prepared = prepare_ir_json(ir_json, @input_format)
+          @ir_json = prepared[:json]
+          @effective_input_format = prepared[:effective_format]
 
           if selected
             configure_backend(selected)
             load_library
             create_simulator
             compile if @backend == :compile
-          elsif allow_fallback
-            @sim = RubyIrSim.new(ir_json)
-            @backend = :ruby
-            @fallback = true
           else
             raise LoadError, unavailable_backend_error_message(@requested_backend)
           end
@@ -209,7 +254,7 @@ module RHDL
         end
 
         def native?
-          !@fallback && @backend != :ruby
+          @backend != :ruby
         end
 
         def backend
@@ -217,69 +262,56 @@ module RHDL
         end
 
         def poke(name, value)
-          return @sim.poke(name, value) if @fallback
           core_signal(SIM_SIGNAL_POKE, name: name, value: value)[:ok]
         end
 
         def peek(name)
-          return @sim.peek(name) if @fallback
           core_signal(SIM_SIGNAL_PEEK, name: name)[:value]
         end
 
         def has_signal?(name)
-          return @sim.respond_to?(:has_signal?) && @sim.has_signal?(name) if @fallback
           core_signal(SIM_SIGNAL_HAS, name: name)[:value] != 0
         end
 
         def evaluate
-          return @sim.evaluate if @fallback
           core_exec(SIM_EXEC_EVALUATE)
         end
 
         def tick
-          return @sim.tick if @fallback
           core_exec(SIM_EXEC_TICK)
         end
 
         def tick_forced
-          return @sim.tick if @fallback  # Ruby fallback doesn't need edge detection
           core_exec(SIM_EXEC_TICK_FORCED)
         end
 
         def set_prev_clock(clock_list_idx, value)
-          return if @fallback  # Ruby fallback doesn't track prev clocks
           core_exec(SIM_EXEC_SET_PREV_CLOCK, clock_list_idx, value)
         end
 
         def get_clock_list_idx(signal_idx)
-          return -1 if @fallback
           result = core_exec(SIM_EXEC_GET_CLOCK_LIST_IDX, signal_idx)
           result[:ok] ? result[:value] : -1
         end
 
         def reset
-          return @sim.reset if @fallback
           @sim_runner_speaker_toggles = 0
           core_exec(SIM_EXEC_RESET)
         end
 
         def signal_count
-          return @sim.signal_count if @fallback
           core_exec(SIM_EXEC_SIGNAL_COUNT)[:value]
         end
 
         def reg_count
-          return @sim.reg_count if @fallback
           core_exec(SIM_EXEC_REG_COUNT)[:value]
         end
 
         def compiled?
-          return false if @fallback
           core_exec(SIM_EXEC_IS_COMPILED)[:value] != 0
         end
 
         def compile
-          return true if @fallback
 
           error_ptr = Fiddle::Pointer.malloc(Fiddle::SIZEOF_VOIDP)
           error_ptr[0, Fiddle::SIZEOF_VOIDP] = [0].pack('Q')
@@ -296,127 +328,89 @@ module RHDL
         end
 
         def generated_code
-          return '' if @fallback
           core_blob(SIM_BLOB_GENERATED_CODE)
         end
 
         def input_names
-          return @sim.input_names if @fallback
           csv = core_blob(SIM_BLOB_INPUT_NAMES)
           csv.empty? ? [] : csv.split(',')
         end
 
         def output_names
-          return @sim.output_names if @fallback
           csv = core_blob(SIM_BLOB_OUTPUT_NAMES)
           csv.empty? ? [] : csv.split(',')
         end
 
         # VCD tracing methods
         def trace_start
-          return @sim.trace_start if @fallback && @sim.respond_to?(:trace_start)
-          return false if @fallback
           core_trace(SIM_TRACE_START)[:ok]
         end
 
         def trace_start_streaming(path)
-          return @sim.trace_start_streaming(path) if @fallback && @sim.respond_to?(:trace_start_streaming)
-          return false if @fallback
           core_trace(SIM_TRACE_START_STREAMING, path)[:ok]
         end
 
         def trace_stop
-          return @sim.trace_stop if @fallback && @sim.respond_to?(:trace_stop)
-          return nil if @fallback
           core_trace(SIM_TRACE_STOP)
         end
 
         def trace_enabled?
-          return @sim.trace_enabled? if @fallback && @sim.respond_to?(:trace_enabled?)
-          return false if @fallback
           core_trace(SIM_TRACE_ENABLED)[:value] != 0
         end
 
         def trace_capture
-          return @sim.trace_capture if @fallback && @sim.respond_to?(:trace_capture)
-          return nil if @fallback
           core_trace(SIM_TRACE_CAPTURE)
         end
 
         def trace_add_signal(name)
-          return @sim.trace_add_signal(name) if @fallback && @sim.respond_to?(:trace_add_signal)
-          return false if @fallback
           core_trace(SIM_TRACE_ADD_SIGNAL, name)[:ok]
         end
 
         def trace_add_signals_matching(pattern)
-          return @sim.trace_add_signals_matching(pattern) if @fallback && @sim.respond_to?(:trace_add_signals_matching)
-          return 0 if @fallback
           core_trace(SIM_TRACE_ADD_SIGNALS_MATCHING, pattern)[:value]
         end
 
         def trace_all_signals
-          return @sim.trace_all_signals if @fallback && @sim.respond_to?(:trace_all_signals)
-          return nil if @fallback
           core_trace(SIM_TRACE_ALL_SIGNALS)
         end
 
         def trace_clear_signals
-          return @sim.trace_clear_signals if @fallback && @sim.respond_to?(:trace_clear_signals)
-          return nil if @fallback
           core_trace(SIM_TRACE_CLEAR_SIGNALS)
         end
 
         def trace_to_vcd
-          return @sim.trace_to_vcd if @fallback && @sim.respond_to?(:trace_to_vcd)
-          return '' if @fallback
           core_blob(SIM_BLOB_TRACE_TO_VCD)
         end
 
         def trace_take_live_vcd
-          return @sim.trace_take_live_vcd if @fallback && @sim.respond_to?(:trace_take_live_vcd)
-          return '' if @fallback
           core_blob(SIM_BLOB_TRACE_TAKE_LIVE_VCD)
         end
 
         def trace_save_vcd(path)
-          return @sim.trace_save_vcd(path) if @fallback && @sim.respond_to?(:trace_save_vcd)
-          return false if @fallback
           core_trace(SIM_TRACE_SAVE_VCD, path)[:ok]
         end
 
         def trace_clear
-          return @sim.trace_clear if @fallback && @sim.respond_to?(:trace_clear)
-          return nil if @fallback
           core_trace(SIM_TRACE_CLEAR)
         end
 
         def trace_change_count
-          return @sim.trace_change_count if @fallback && @sim.respond_to?(:trace_change_count)
-          return 0 if @fallback
           core_trace(SIM_TRACE_CHANGE_COUNT)[:value]
         end
 
         def trace_signal_count
-          return @sim.trace_signal_count if @fallback && @sim.respond_to?(:trace_signal_count)
-          return 0 if @fallback
           core_trace(SIM_TRACE_SIGNAL_COUNT)[:value]
         end
 
         def trace_set_timescale(timescale)
-          return @sim.trace_set_timescale(timescale) if @fallback && @sim.respond_to?(:trace_set_timescale)
-          return false if @fallback
           core_trace(SIM_TRACE_SET_TIMESCALE, timescale)[:ok]
         end
 
         def trace_set_module_name(name)
-          return @sim.trace_set_module_name(name) if @fallback && @sim.respond_to?(:trace_set_module_name)
-          return false if @fallback
           core_trace(SIM_TRACE_SET_MODULE_NAME, name)[:ok]
         end
 
         def stats
-          return @sim.stats if @fallback
           runner_kind = runner_kind
           {
             signals: signal_count,
@@ -433,26 +427,22 @@ module RHDL
 
         # Batched tick execution
         def run_ticks(n)
-          return @sim.respond_to?(:run_ticks) ? @sim.run_ticks(n) : n.times { @sim.tick } if @fallback
           core_exec(SIM_EXEC_RUN_TICKS, n)
         end
 
         # Get signal index by name (for caching)
         def get_signal_idx(name)
-          return @sim.respond_to?(:get_signal_idx) ? @sim.get_signal_idx(name) : nil if @fallback
           result = core_signal(SIM_SIGNAL_GET_INDEX, name: name)
           result[:ok] ? result[:value] : nil
         end
 
         # Poke by index - faster than by name when index is cached
         def poke_by_idx(idx, value)
-          return @sim.poke_by_idx(idx, value) if @fallback && @sim.respond_to?(:poke_by_idx)
           core_signal(SIM_SIGNAL_POKE_INDEX, idx: idx, value: value)
         end
 
         # Peek by index - faster than by name when index is cached
         def peek_by_idx(idx)
-          return @sim.peek_by_idx(idx) if @fallback && @sim.respond_to?(:peek_by_idx)
           core_signal(SIM_SIGNAL_PEEK_INDEX, idx: idx)[:value]
         end
 
@@ -461,10 +451,6 @@ module RHDL
         # ====================================================================
 
         def runner_kind
-          if @fallback
-            return @sim.runner_kind if @sim.respond_to?(:runner_kind)
-            return nil
-          end
 
           case runner_probe(RUNNER_PROBE_KIND)
           when RUNNER_KIND_APPLE2 then :apple2
@@ -477,18 +463,10 @@ module RHDL
         end
 
         def runner_mode?
-          if @fallback
-            return @sim.runner_mode? if @sim.respond_to?(:runner_mode?)
-            return !runner_kind.nil?
-          end
           runner_probe(RUNNER_PROBE_IS_MODE) != 0
         end
 
         def runner_load_memory(data, offset = 0, is_rom = false)
-          if @fallback
-            return @sim.runner_load_memory(data, offset, is_rom) if @sim.respond_to?(:runner_load_memory)
-            return false
-          end
           data = data.pack('C*') if data.is_a?(Array)
           return false if data.nil? || data.bytesize.zero?
 
@@ -498,10 +476,6 @@ module RHDL
 
         def runner_read_memory(offset, length, mapped: true)
           length = [length.to_i, 0].max
-          if @fallback
-            return @sim.runner_read_memory(offset, length, mapped: mapped) if @sim.respond_to?(:runner_read_memory)
-            return Array.new(length, 0)
-          end
           return [] if length.zero?
 
           flags = mapped ? RUNNER_MEM_FLAG_MAPPED : 0
@@ -509,10 +483,6 @@ module RHDL
         end
 
         def runner_write_memory(offset, data, mapped: true)
-          if @fallback
-            return @sim.runner_write_memory(offset, data, mapped: mapped) if @sim.respond_to?(:runner_write_memory)
-            return 0
-          end
           data = data.pack('C*') if data.is_a?(Array)
           return 0 if data.nil? || data.bytesize.zero?
 
@@ -521,10 +491,6 @@ module RHDL
         end
 
         def runner_run_cycles(n, key_data = 0, key_ready = false)
-          if @fallback
-            return @sim.runner_run_cycles(n, key_data, key_ready) if @sim.respond_to?(:runner_run_cycles)
-            return { text_dirty: false, key_cleared: false, cycles_run: 0, speaker_toggles: 0 }
-          end
 
           result_buf = Fiddle::Pointer.malloc(20)
           ok = @fn_runner_run.call(
@@ -549,9 +515,6 @@ module RHDL
         end
 
         def runner_load_rom(data, offset = 0)
-          if @fallback
-            return @sim.runner_load_rom(data, offset) if @sim.respond_to?(:runner_load_rom)
-          end
 
           data = data.pack('C*') if data.is_a?(Array)
           return false if data.nil? || data.bytesize.zero?
@@ -560,10 +523,6 @@ module RHDL
 
         def runner_read_rom(offset, length)
           length = [length.to_i, 0].max
-          if @fallback
-            return @sim.runner_read_rom(offset, length) if @sim.respond_to?(:runner_read_rom)
-            return Array.new(length, 0)
-          end
           return [] if length.zero?
 
           runner_mem_read(RUNNER_MEM_SPACE_ROM, offset, length, 0)
@@ -571,28 +530,17 @@ module RHDL
 
         def runner_set_reset_vector(addr)
           vector = addr.to_i & 0xFFFF_FFFF
-          if @fallback
-            return @sim.runner_set_reset_vector(vector) if @sim.respond_to?(:runner_set_reset_vector)
-          end
           return false unless @fn_runner_control
 
           @fn_runner_control.call(@ctx, RUNNER_CONTROL_SET_RESET_VECTOR, vector, 0) != 0
         end
 
         def runner_speaker_toggles
-          if @fallback
-            return @sim.runner_speaker_toggles if @sim.respond_to?(:runner_speaker_toggles)
-            return 0
-          end
           return runner_probe(RUNNER_PROBE_SPEAKER_TOGGLES) if runner_kind == :mos6502
           @sim_runner_speaker_toggles || 0
         end
 
         def runner_reset_speaker_toggles
-          if @fallback
-            return @sim.runner_reset_speaker_toggles if @sim.respond_to?(:runner_reset_speaker_toggles)
-            return nil
-          end
           @fn_runner_control.call(@ctx, RUNNER_CONTROL_RESET_SPEAKER_TOGGLES, 0, 0)
           @sim_runner_speaker_toggles = 0
           nil
@@ -603,8 +551,6 @@ module RHDL
         # ====================================================================
 
         def riscv_mode?
-          return @sim.riscv_mode? if @fallback && @sim.respond_to?(:riscv_mode?)
-          return false if @fallback
           runner_kind == :riscv
         end
 
@@ -680,27 +626,19 @@ module RHDL
         # ====================================================================
 
         def gameboy_mode?
-          return @sim.gameboy_mode? if @fallback && @sim.respond_to?(:gameboy_mode?)
-          return false if @fallback
           runner_kind == :gameboy
         end
 
         def load_rom(data)
-          return @sim.load_rom(data) if @fallback && @sim.respond_to?(:load_rom)
-          return if @fallback
           runner_load_rom(data, 0)
         end
 
         def load_boot_rom(data)
-          return @sim.load_boot_rom(data) if @fallback && @sim.respond_to?(:load_boot_rom)
-          return if @fallback
           data = data.pack('C*') if data.is_a?(Array)
           runner_mem(RUNNER_MEM_OP_LOAD, RUNNER_MEM_SPACE_BOOT_ROM, 0, data, 0)
         end
 
         def run_gb_cycles(n)
-          return @sim.run_gb_cycles(n) if @fallback && @sim.respond_to?(:run_gb_cycles)
-          return { cycles_run: 0, frames_completed: 0 } if @fallback
 
           result_buf = Fiddle::Pointer.malloc(20)
           ok = @fn_runner_run.call(@ctx, n, 0, 0, RUNNER_RUN_MODE_FULL, result_buf)
@@ -713,47 +651,33 @@ module RHDL
         end
 
         def read_vram(addr)
-          return @sim.read_vram(addr) if @fallback && @sim.respond_to?(:read_vram)
-          return 0 if @fallback
           bytes = runner_mem_read(RUNNER_MEM_SPACE_VRAM, addr, 1, 0)
           bytes.empty? ? 0 : (bytes[0] & 0xFF)
         end
 
         def write_vram(addr, data)
-          return @sim.write_vram(addr, data) if @fallback && @sim.respond_to?(:write_vram)
-          return if @fallback
           runner_mem(RUNNER_MEM_OP_WRITE, RUNNER_MEM_SPACE_VRAM, addr, [data].pack('C'), 0)
         end
 
         def read_zpram(addr)
-          return @sim.read_zpram(addr) if @fallback && @sim.respond_to?(:read_zpram)
-          return 0 if @fallback
           bytes = runner_mem_read(RUNNER_MEM_SPACE_ZPRAM, addr, 1, 0)
           bytes.empty? ? 0 : (bytes[0] & 0xFF)
         end
 
         def write_zpram(addr, data)
-          return @sim.write_zpram(addr, data) if @fallback && @sim.respond_to?(:write_zpram)
-          return if @fallback
           runner_mem(RUNNER_MEM_OP_WRITE, RUNNER_MEM_SPACE_ZPRAM, addr, [data].pack('C'), 0)
         end
 
         def read_wram(addr)
-          return @sim.read_wram(addr) if @fallback && @sim.respond_to?(:read_wram)
-          return 0 if @fallback
           bytes = runner_mem_read(RUNNER_MEM_SPACE_WRAM, addr, 1, 0)
           bytes.empty? ? 0 : (bytes[0] & 0xFF)
         end
 
         def write_wram(addr, data)
-          return @sim.write_wram(addr, data) if @fallback && @sim.respond_to?(:write_wram)
-          return if @fallback
           runner_mem(RUNNER_MEM_OP_WRITE, RUNNER_MEM_SPACE_WRAM, addr, [data].pack('C'), 0)
         end
 
         def read_framebuffer
-          return @sim.read_framebuffer if @fallback && @sim.respond_to?(:read_framebuffer)
-          return [] if @fallback
 
           len = runner_probe(RUNNER_PROBE_FRAMEBUFFER_LEN)
           return [] if len <= 0
@@ -761,56 +685,38 @@ module RHDL
         end
 
         def frame_count
-          return @sim.frame_count if @fallback && @sim.respond_to?(:frame_count)
-          return 0 if @fallback
           runner_probe(RUNNER_PROBE_FRAME_COUNT)
         end
 
         def reset_lcd_state
-          return @sim.reset_lcd_state if @fallback && @sim.respond_to?(:reset_lcd_state)
-          return if @fallback
           @fn_runner_control.call(@ctx, RUNNER_CONTROL_RESET_LCD, 0, 0)
         end
 
         def get_v_cnt
-          return @sim.get_v_cnt if @fallback && @sim.respond_to?(:get_v_cnt)
-          return 0 if @fallback
           runner_probe(RUNNER_PROBE_V_CNT)
         end
 
         def get_h_cnt
-          return @sim.get_h_cnt if @fallback && @sim.respond_to?(:get_h_cnt)
-          return 0 if @fallback
           runner_probe(RUNNER_PROBE_H_CNT)
         end
 
         def get_vblank_irq
-          return @sim.get_vblank_irq if @fallback && @sim.respond_to?(:get_vblank_irq)
-          return 0 if @fallback
           runner_probe(RUNNER_PROBE_VBLANK_IRQ)
         end
 
         def get_if_r
-          return @sim.get_if_r if @fallback && @sim.respond_to?(:get_if_r)
-          return 0 if @fallback
           runner_probe(RUNNER_PROBE_IF_R)
         end
 
         def get_signal(idx)
-          return @sim.get_signal(idx) if @fallback && @sim.respond_to?(:get_signal)
-          return 0 if @fallback
           runner_probe(RUNNER_PROBE_SIGNAL, idx)
         end
 
         def get_lcdc_on
-          return @sim.get_lcdc_on if @fallback && @sim.respond_to?(:get_lcdc_on)
-          return 0 if @fallback
           runner_probe(RUNNER_PROBE_LCDC_ON)
         end
 
         def get_h_div_cnt
-          return @sim.get_h_div_cnt if @fallback && @sim.respond_to?(:get_h_div_cnt)
-          return 0 if @fallback
           runner_probe(RUNNER_PROBE_H_DIV_CNT)
         end
 
@@ -870,33 +776,11 @@ module RHDL
           @fn_runner_probe.call(@ctx, op, arg0)
         end
 
-        def respond_to_missing?(method_name, include_private = false)
-          (@fallback && @sim.respond_to?(method_name)) || super
-        end
-
-        def method_missing(method_name, *args, &block)
-          if @fallback && @sim.respond_to?(method_name)
-            @sim.send(method_name, *args, &block)
-          else
-            super
-          end
-        end
-
-        private
-
-        def normalize_backend(backend)
-          value = backend.to_sym
-          value = :interpreter if value == :interpret
-          value = :compiler if value == :compile
-          return value if BACKEND_CONFIGS.key?(value) || value == :auto
-          raise ArgumentError, "Unknown IR backend: #{backend.inspect}"
-        end
-
         def backend_candidates(requested)
           case requested
           when :interpreter then %i[interpreter]
-          when :jit then %i[jit interpreter]
-          when :compiler then %i[compiler interpreter]
+          when :jit then %i[jit]
+          when :compiler then %i[compiler]
           when :auto then %i[compiler jit interpreter]
           else []
           end
@@ -1031,482 +915,90 @@ module RHDL
           @sim_runner_speaker_toggles = 0
           @destructor = @fn_destroy
         end
-      end
 
-      # Ruby fallback simulator for when native extension is not available
-      class RubyIrSim
-        def initialize(json)
-          @ir = JSON.parse(json, symbolize_names: true, max_nesting: false)
-          @signals = {}
-          @widths = {}
-          @inputs = []
-          @outputs = []
-          @memories = {}
-          @memory_meta = {}
-
-          # Initialize ports
-          @ir[:ports]&.each do |port|
-            @signals[port[:name]] = 0
-            @widths[port[:name]] = port[:width]
-            if port[:direction] == 'in'
-              @inputs << port[:name]
-            else
-              @outputs << port[:name]
-            end
-          end
-
-          # Initialize wires
-          @ir[:nets]&.each do |net|
-            @signals[net[:name]] = 0
-            @widths[net[:name]] = net[:width]
-          end
-
-          # Initialize registers (with reset values if present)
-          @reset_values = {}
-          @ir[:regs]&.each do |reg|
-            reset_val = reg[:reset_value] || 0
-            @signals[reg[:name]] = reset_val
-            @widths[reg[:name]] = reg[:width]
-            @reset_values[reg[:name]] = reset_val
-          end
-
-          # Initialize memories
-          @ir[:memories]&.each do |mem|
-            depth = mem[:depth].to_i
-            width = mem[:width].to_i
-            initial = Array.new(depth, 0)
-            (mem[:initial_data] || []).each_with_index do |value, idx|
-              break if idx >= depth
-              initial[idx] = value.to_i & mask(width)
-            end
-            @memories[mem[:name]] = initial
-            @memory_meta[mem[:name]] = { depth: depth, width: width, initial: initial.dup }
-          end
-
-          @assigns = @ir[:assigns] || []
-          @processes = @ir[:processes] || []
-          @write_ports = @ir[:write_ports] || []
-          @sync_read_ports = @ir[:sync_read_ports] || []
-        end
-
-        def native?
-          false
-        end
-
-        def mask(width)
-          width >= 64 ? 0xFFFFFFFFFFFFFFFF : (1 << width) - 1
-        end
-
-        def eval_expr(expr)
-          case expr[:type]
-          when 'signal'
-            (@signals[expr[:name]] || 0) & mask(expr[:width])
-          when 'literal'
-            expr[:value] & mask(expr[:width])
-          when 'unary_op'
-            val = eval_expr(expr[:operand])
-            m = mask(expr[:width])
-            case expr[:op]
-            when '~', 'not'
-              (~val) & m
-            when '&', 'reduce_and'
-              op_width = expr[:operand][:width]
-              (val & mask(op_width)) == mask(op_width) ? 1 : 0
-            when '|', 'reduce_or'
-              val != 0 ? 1 : 0
-            when '^', 'reduce_xor'
-              val.to_s(2).count('1') & 1
-            else
-              val
-            end
-          when 'binary_op'
-            l = eval_expr(expr[:left])
-            r = eval_expr(expr[:right])
-            m = mask(expr[:width])
-            case expr[:op]
-            when '&' then l & r
-            when '|' then l | r
-            when '^' then l ^ r
-            when '+' then (l + r) & m
-            when '-' then (l - r) & m
-            when '*' then (l * r) & m
-            when '/' then r != 0 ? l / r : 0
-            when '%' then r != 0 ? l % r : 0
-            when '<<' then (l << [r, 63].min) & m
-            when '>>' then l >> [r, 63].min
-            when '==' then l == r ? 1 : 0
-            when '!=' then l != r ? 1 : 0
-            when '<' then l < r ? 1 : 0
-            when '>' then l > r ? 1 : 0
-            when '<=', 'le' then l <= r ? 1 : 0
-            when '>=' then l >= r ? 1 : 0
-            else 0
-            end
-          when 'mux'
-            cond = eval_expr(expr[:condition])
-            m = mask(expr[:width])
-            if cond != 0
-              eval_expr(expr[:when_true]) & m
-            else
-              eval_expr(expr[:when_false]) & m
-            end
-          when 'slice'
-            val = eval_expr(expr[:base])
-            (val >> expr[:low]) & mask(expr[:width])
-          when 'concat'
-            result = 0
-            expr[:parts].each do |part|
-              part_width = part[:width]
-              part_val = eval_expr(part) & mask(part_width)
-              result = ((result << part_width) | part_val) & mask(expr[:width])
-            end
-            result & mask(expr[:width])
-          when 'resize'
-            eval_expr(expr[:expr]) & mask(expr[:width])
-          when 'mem_read'
-            memory = @memories[expr[:memory]]
-            meta = @memory_meta[expr[:memory]]
-            return 0 unless memory && meta
-
-            addr = eval_expr(expr[:addr]) % meta[:depth]
-            width = expr[:width] || meta[:width]
-            memory[addr] & mask(width)
+        def prepare_ir_json(ir_json, input_format)
+          case input_format
+          when :circt
+            json = ir_json.is_a?(String) ? ir_json : JSON.generate(ir_json, max_nesting: false)
+            { json: json, effective_format: :circt }
           else
-            0
+            raise ArgumentError, "Unsupported IR input format: #{input_format.inspect}. Valid: :circt"
           end
-        end
-
-        def has_signal?(name)
-          @signals.key?(name.to_s) || @signals.key?(name.to_sym)
-        end
-
-        def poke(name, value)
-          raise "Unknown input: #{name}" unless @inputs.include?(name)
-          width = @widths[name] || 64
-          @signals[name] = value & mask(width)
-        end
-
-        def peek(name)
-          @signals[name] || 0
-        end
-
-        def evaluate
-          10.times do
-            changed = false
-            @assigns.each do |assign|
-              new_val = eval_expr(assign[:expr])
-              width = @widths[assign[:target]] || 64
-              masked = new_val & mask(width)
-              if @signals[assign[:target]] != masked
-                @signals[assign[:target]] = masked
-                changed = true
-              end
-            end
-            break unless changed
-          end
-        end
-
-        def tick
-          evaluate
-
-          # Apply memory writes at the active clock edge.
-          @write_ports.each do |wp|
-            next unless (@signals[wp[:clock]] || 0) != 0
-            next unless (eval_expr(wp[:enable]) & 1) == 1
-
-            memory = @memories[wp[:memory]]
-            meta = @memory_meta[wp[:memory]]
-            next unless memory && meta
-
-            addr = eval_expr(wp[:addr]) % meta[:depth]
-            data = eval_expr(wp[:data]) & mask(meta[:width])
-            memory[addr] = data
-          end
-
-          # Sample register inputs
-          next_regs = {}
-          @processes.each do |process|
-            next unless process[:clocked]
-            process[:statements]&.each do |stmt|
-              new_val = eval_expr(stmt[:expr])
-              width = @widths[stmt[:target]] || 64
-              next_regs[stmt[:target]] = new_val & mask(width)
-            end
-          end
-
-          # Update registers
-          next_regs.each do |name, val|
-            @signals[name] = val
-          end
-
-          # Synchronous memory reads update their destination signals on edge.
-          @sync_read_ports.each do |rp|
-            next unless (@signals[rp[:clock]] || 0) != 0
-            if rp[:enable]
-              next unless (eval_expr(rp[:enable]) & 1) == 1
-            end
-
-            memory = @memories[rp[:memory]]
-            meta = @memory_meta[rp[:memory]]
-            next unless memory && meta
-
-            addr = eval_expr(rp[:addr]) % meta[:depth]
-            data = memory[addr] & mask(meta[:width])
-            width = @widths[rp[:data]] || meta[:width]
-            @signals[rp[:data]] = data & mask(width)
-          end
-
-          evaluate
-        end
-
-        def reset
-          @signals.transform_values! { 0 }
-          # Apply register reset values
-          @reset_values.each do |name, val|
-            @signals[name] = val
-          end
-          @memory_meta.each do |name, meta|
-            @memories[name] = meta[:initial].dup
-          end
-        end
-
-        def signal_count
-          @signals.length
-        end
-
-        def reg_count
-          @processes.sum { |p| p[:statements]&.length || 0 }
-        end
-
-        def input_names
-          @inputs
-        end
-
-        def output_names
-          @outputs
-        end
-
-        def stats
-          {
-            signal_count: signal_count,
-            reg_count: reg_count,
-            input_count: @inputs.length,
-            output_count: @outputs.length,
-            assign_count: @assigns.length,
-            process_count: @processes.length
-          }
         end
       end
 
-      # Convert Behavior IR to JSON format for the simulator
-      module IRToJson
-        module_function
-
-        def convert(ir)
-          {
-            name: ir.name,
-            ports: ir.ports.map { |p| port_to_hash(p) },
-            nets: ir.nets.map { |n| net_to_hash(n) },
-            regs: ir.regs.map { |r| reg_to_hash(r) },
-            assigns: ir.assigns.map { |a| assign_to_hash(a) },
-            processes: ir.processes.map { |p| process_to_hash(p) },
-            memories: (ir.memories || []).map { |m| memory_to_hash(m) },
-            write_ports: (ir.write_ports || []).map { |wp| write_port_to_hash(wp) },
-            sync_read_ports: (ir.sync_read_ports || []).map { |rp| sync_read_port_to_hash(rp) }
-          }.to_json(max_nesting: false)
+      class << self
+        def input_format_for_backend(backend, env: ENV)
+          IrSimulator.input_format_for_backend(backend, env: env)
         end
 
-        def port_to_hash(port)
-          {
-            name: port.name.to_s,
-            direction: port.direction.to_s,
-            width: port.width
-          }
+        def resolve_input_format(backend, explicit_input_format = nil, env: ENV)
+          IrSimulator.resolve_input_format(backend, explicit_input_format, env: env)
         end
 
-        def net_to_hash(net)
-          {
-            name: net.name.to_s,
-            width: net.width
-          }
-        end
-
-        def reg_to_hash(reg)
-          hash = {
-            name: reg.name.to_s,
-            width: reg.width
-          }
-          hash[:reset_value] = reg.reset_value if reg.reset_value
-          hash
-        end
-
-        def assign_to_hash(assign)
-          {
-            target: assign.target.to_s,
-            expr: expr_to_hash(assign.expr)
-          }
-        end
-
-        def process_to_hash(process)
-          {
-            name: process.name.to_s,
-            clock: process.clock&.to_s,
-            clocked: process.clocked,
-            statements: flatten_statements(process.statements)
-          }
-        end
-
-        def flatten_statements(stmts)
-          return [] unless stmts
-          result = []
-          stmts.each do |stmt|
-            case stmt
-            when IR::SeqAssign
-              result << seq_assign_to_hash(stmt)
-            when IR::If
-              flatten_if(stmt, result)
-            end
-          end
-          result
-        end
-
-        def flatten_if(if_stmt, result)
-          cond = expr_to_hash(if_stmt.condition)
-
-          then_assigns = {}
-          if_stmt.then_statements&.each do |s|
-            case s
-            when IR::SeqAssign
-              then_assigns[s.target.to_s] = expr_to_hash(s.expr)
-            when IR::If
-              flatten_if(s, result)
-            end
-          end
-
-          else_assigns = {}
-          if_stmt.else_statements&.each do |s|
-            case s
-            when IR::SeqAssign
-              else_assigns[s.target.to_s] = expr_to_hash(s.expr)
-            when IR::If
-              flatten_if(s, result)
-            end
-          end
-
-          all_targets = (then_assigns.keys + else_assigns.keys).uniq
-          all_targets.each do |target|
-            then_expr = then_assigns[target]
-            else_expr = else_assigns[target]
-            width = (then_expr || else_expr)&.dig(:width) || 8
-
-            if then_expr && else_expr
-              result << {
-                target: target,
-                expr: { type: 'mux', condition: cond, when_true: then_expr, when_false: else_expr, width: width }
-              }
-            elsif then_expr
-              result << {
-                target: target,
-                expr: { type: 'mux', condition: cond, when_true: then_expr, when_false: { type: 'signal', name: target, width: width }, width: width }
-              }
-            elsif else_expr
-              inv_cond = { type: 'unary_op', op: '~', operand: cond, width: 1 }
-              result << {
-                target: target,
-                expr: { type: 'mux', condition: inv_cond, when_true: else_expr, when_false: { type: 'signal', name: target, width: width }, width: width }
-              }
-            end
-          end
-        end
-
-        def seq_assign_to_hash(stmt)
-          {
-            target: stmt.target.to_s,
-            expr: expr_to_hash(stmt.expr)
-          }
-        end
-
-        def memory_to_hash(mem)
-          hash = {
-            name: mem.name.to_s,
-            depth: mem.depth,
-            width: mem.width
-          }
-          hash[:initial_data] = mem.initial_data if mem.initial_data
-          hash
-        end
-
-        def write_port_to_hash(wp)
-          {
-            memory: wp.memory.to_s,
-            clock: wp.clock.to_s,
-            addr: expr_to_hash(wp.addr),
-            data: expr_to_hash(wp.data),
-            enable: expr_to_hash(wp.enable)
-          }
-        end
-
-        def sync_read_port_to_hash(rp)
-          hash = {
-            memory: rp.memory.to_s,
-            clock: rp.clock.to_s,
-            addr: expr_to_hash(rp.addr),
-            data: rp.data.to_s
-          }
-          hash[:enable] = expr_to_hash(rp.enable) if rp.enable
-          hash
-        end
-
-        def expr_to_hash(expr)
-          case expr
-          when IR::Signal
-            { type: 'signal', name: expr.name.to_s, width: expr.width }
-          when IR::Literal
-            { type: 'literal', value: expr.value, width: expr.width }
-          when IR::UnaryOp
-            { type: 'unary_op', op: expr.op.to_s, operand: expr_to_hash(expr.operand), width: expr.width }
-          when IR::BinaryOp
-            { type: 'binary_op', op: expr.op.to_s, left: expr_to_hash(expr.left), right: expr_to_hash(expr.right), width: expr.width }
-          when IR::Mux
-            { type: 'mux', condition: expr_to_hash(expr.condition), when_true: expr_to_hash(expr.when_true), when_false: expr_to_hash(expr.when_false), width: expr.width }
-          when IR::Slice
-            low = 0
-            high = expr.width - 1
-
-            if expr.range.is_a?(Range)
-              range_begin = expr.range.begin
-              range_end = expr.range.end
-              if range_begin.is_a?(Integer) && range_end.is_a?(Integer)
-                low = [range_begin, range_end].min
-                high = [range_begin, range_end].max
-              end
-            elsif expr.range.is_a?(Integer)
-              low = expr.range
-              high = expr.range
-            end
-            { type: 'slice', base: expr_to_hash(expr.base), low: low, high: high, width: expr.width }
-          when IR::Concat
-            { type: 'concat', parts: expr.parts.map { |p| expr_to_hash(p) }, width: expr.width }
-          when IR::Resize
-            { type: 'resize', expr: expr_to_hash(expr.expr), width: expr.width }
-          when IR::Case
-            if expr.cases.empty?
-              expr_to_hash(expr.default)
-            else
-              result = expr.default ? expr_to_hash(expr.default) : { type: 'literal', value: 0, width: expr.width }
-              expr.cases.each do |values, case_expr|
-                values.each do |v|
-                  cond = { type: 'binary_op', op: '==', left: expr_to_hash(expr.selector), right: { type: 'literal', value: v, width: expr.selector.width }, width: 1 }
-                  result = { type: 'mux', condition: cond, when_true: expr_to_hash(case_expr), when_false: result, width: expr.width }
-                end
-              end
-              result
-            end
-          when IR::MemoryRead
-            { type: 'mem_read', memory: expr.memory.to_s, addr: expr_to_hash(expr.addr), width: expr.width }
+        def sim_json(ir_obj, backend: :interpreter, format: nil, env: ENV)
+          input_format = format ? IrSimulator.normalize_input_format(format) : input_format_for_backend(backend, env: env)
+          case input_format
+          when :circt
+            circt_runtime_json(ir_obj)
           else
-            { type: 'literal', value: 0, width: 1 }
+            raise ArgumentError, "Unsupported IR input format: #{input_format.inspect}. Valid: :circt"
           end
+        end
+
+        private
+
+        def circt_runtime_json(ir_obj)
+          if ir_obj.is_a?(String)
+            parsed = parse_json_string(ir_obj)
+            return ir_obj if valid_circt_runtime_payload?(parsed)
+            raise ArgumentError, 'CIRCT runtime JSON must include circt_json_version and non-empty modules' if malformed_circt_runtime_payload?(parsed)
+          end
+
+          if ir_obj.is_a?(Hash)
+            payload = stringify_hash_keys(ir_obj)
+            return JSON.generate(payload, max_nesting: false) if valid_circt_runtime_payload?(payload)
+            raise ArgumentError, 'CIRCT runtime JSON must include circt_json_version and non-empty modules' if malformed_circt_runtime_payload?(payload)
+          end
+
+          require_relative '../../circt/runtime_json' unless defined?(RHDL::Codegen::CIRCT::RuntimeJSON)
+          RHDL::Codegen::CIRCT::RuntimeJSON.dump(circt_nodes_for_runtime(ir_obj))
+        end
+
+        def circt_nodes_for_runtime(ir_obj)
+          return ir_obj if circt_ir_object?(ir_obj)
+
+          raise ArgumentError, "Unsupported IR object for CIRCT runtime JSON: #{ir_obj.class}"
+        end
+
+        def parse_json_string(text)
+          JSON.parse(text, max_nesting: false)
+        rescue JSON::ParserError
+          nil
+        end
+
+        def stringify_hash_keys(hash)
+          hash.each_with_object({}) { |(k, v), out| out[k.to_s] = v }
+        end
+
+        def valid_circt_runtime_payload?(payload)
+          return false unless payload.is_a?(Hash)
+          return false unless payload.key?('circt_json_version')
+
+          modules = payload['modules']
+          modules.is_a?(Array) && !modules.empty?
+        end
+
+        def malformed_circt_runtime_payload?(payload)
+          payload.is_a?(Hash) && (payload.key?('circt_json_version') || payload.key?('modules'))
+        end
+
+        def circt_ir_object?(ir_obj)
+          class_name = ir_obj.class.name.to_s
+          return true if class_name.include?('::CIRCT::IR::')
+
+          ir_obj.respond_to?(:modules) &&
+            Array(ir_obj.modules).all? { |mod| mod.class.name.to_s.include?('::CIRCT::IR::') }
         end
       end
     end
