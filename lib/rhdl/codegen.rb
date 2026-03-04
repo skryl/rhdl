@@ -133,6 +133,11 @@ module RHDL
         CIRCT::Raise.to_dsl(nodes_or_mlir, out_dir: out_dir, top: top, strict: strict, format: format)
       end
 
+      # Format a directory of raised RHDL DSL files.
+      def format_raised_dsl(out_dir)
+        CIRCT::Raise.format_output_dir(out_dir)
+      end
+
       # Raise CIRCT nodes/MLIR into loaded Ruby DSL component classes.
       def raise_circt_components(nodes_or_mlir, namespace: Module.new, top: nil, strict: false)
         CIRCT::Raise.to_components(nodes_or_mlir, namespace: namespace, top: top, strict: strict)

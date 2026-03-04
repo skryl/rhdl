@@ -34,7 +34,7 @@ module RHDL
     HIRES_PAGE2_END = 0x5FFF
 
     # Build directory for Verilator output
-    BUILD_DIR = File.expand_path('../../../.verilator_build_6502', __dir__)
+    BUILD_DIR = File.expand_path('../../.verilator_build', __dir__)
     VERILOG_DIR = File.join(BUILD_DIR, 'verilog')
     OBJ_DIR = File.join(BUILD_DIR, 'obj_dir')
 

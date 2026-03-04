@@ -128,9 +128,7 @@ rhdl examples riscv --mode circt --linux
 - `examples/riscv/software/linux_patches`:
   local patch series applied by the Linux build script
 - `examples/riscv/software/xv6`:
-  preferred xv6 source tree (if present)
-- `examples/riscv/software/xv6-rv32`:
-  fallback xv6 source tree
+  xv6 source submodule (upstream tree)
 - `examples/riscv/software/bin`:
   generated local artifacts
 
@@ -146,6 +144,16 @@ Initialize/update:
 
 ```bash
 git submodule update --init --recursive examples/riscv/software/linux
+```
+
+xv6 source is tracked as a submodule at:
+
+- `examples/riscv/software/xv6`
+
+Initialize/update:
+
+```bash
+git submodule update --init --recursive examples/riscv/software/xv6
 ```
 
 Local Linux changes should be stored as patch files in:
@@ -208,6 +216,7 @@ Linux loading uses a bootstrap handoff that:
 Build xv6 artifacts:
 
 ```bash
+git submodule update --init --recursive examples/riscv/software/xv6
 ./examples/riscv/software/build_xv6.sh
 ```
 

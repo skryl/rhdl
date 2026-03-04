@@ -429,6 +429,7 @@ rhdl examples riscv --core single path/to/program.bin
 rhdl examples riscv -d --io uart path/to/program.bin
 
 # Launch xv6 (forces UART mode automatically)
+git submodule update --init --recursive examples/riscv/software/xv6
 ./examples/riscv/software/build_xv6.sh
 rhdl examples riscv --xv6 -d
 rhdl examples riscv --xv6 --mode verilog
@@ -438,6 +439,9 @@ rhdl examples riscv --xv6 --mode circt
 git submodule update --init --recursive examples/riscv/software/linux
 ./examples/riscv/software/build_linux.sh
 # Buildroot for prebuilt toolchain defaults to linux/amd64 Buildroot host images.
+
+# AO486 import sources
+git submodule update --init --recursive examples/ao486/reference
 
 # Run Linux via the top-level CLI (forces UART mode automatically)
 rhdl examples riscv --linux

@@ -91,7 +91,8 @@ Exit criteria:
    - assignment emitter now wraps long expressions in multi-line form for behavior and sequential logic.
    - preserved valid Ruby parsing by emitting binary/mux continuation operators on preceding lines.
 3. Added import-time auto-format:
-   - CIRCT raise `to_dsl(..., format: true)` now runs RuboCop auto-correct in layout-only mode.
+   - CIRCT raise `to_dsl(..., format: true)` now runs RuboCop auto-correct in layout-only mode on the import `out_dir` only.
+   - import-time formatter excludes `Layout/LineLength` to avoid long stalls on large generated trees.
    - output is suppressed during formatting and failures surface as `raise.format` diagnostics.
 4. Wired import entry points to format generated files:
    - `rhdl import` task now passes `format: true`.

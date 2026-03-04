@@ -41,7 +41,7 @@ RSpec.describe RHDL::CLI::Tasks::GenerateTask do
   describe '#run' do
     context 'with action: :generate (default)' do
       it 'starts generation without error' do
-        task = described_class.new(action: :generate)
+        task = described_class.new(action: :generate, root: temp_dir)
 
         expect { task.run }.to output(/Generating all output files/).to_stdout
       end
@@ -52,8 +52,18 @@ RSpec.describe RHDL::CLI::Tasks::GenerateTask do
         FileUtils.mkdir_p(File.join(diagrams_dir, 'component'))
         FileUtils.mkdir_p(verilog_dir)
         FileUtils.mkdir_p(gates_dir)
+        FileUtils.mkdir_p(File.join(temp_dir, 'tmp'))
+        FileUtils.mkdir_p(File.join(temp_dir, '.tmp'))
+        FileUtils.mkdir_p(File.join(temp_dir, 'web', 'dist'))
+        FileUtils.mkdir_p(File.join(temp_dir, 'web', 'test-results'))
+        FileUtils.mkdir_p(File.join(temp_dir, 'web', 'build', 'arcilator'))
+        FileUtils.mkdir_p(File.join(temp_dir, 'web', 'build', 'verilator'))
+        File.write(File.join(temp_dir, 'web', 'build', 'arcilator', '.gitignore'), "")
+        File.write(File.join(temp_dir, 'web', 'build', 'verilator', '.gitignore'), "")
 
-        task = described_class.new(action: :clean)
+        allow_any_instance_of(RHDL::CLI::Tasks::NativeTask).to receive(:run)
+
+        task = described_class.new(action: :clean, root: temp_dir)
 
         expect { task.run }.to output(/Cleaning all generated files/).to_stdout
       end
@@ -61,7 +71,8 @@ RSpec.describe RHDL::CLI::Tasks::GenerateTask do
 
     context 'with action: :regenerate' do
       it 'cleans and then generates' do
-        task = described_class.new(action: :regenerate)
+        allow_any_instance_of(RHDL::CLI::Tasks::NativeTask).to receive(:run)
+        task = described_class.new(action: :regenerate, root: temp_dir)
 
         output = capture_stdout { task.run }
 
@@ -72,7 +83,7 @@ RSpec.describe RHDL::CLI::Tasks::GenerateTask do
   end
 
   describe '#generate_all' do
-    let(:task) { described_class.new(action: :generate) }
+    let(:task) { described_class.new(action: :generate, root: temp_dir) }
 
     it 'displays completion message' do
       expect { task.generate_all }.to output(/All output files generated/).to_stdout
@@ -80,9 +91,10 @@ RSpec.describe RHDL::CLI::Tasks::GenerateTask do
   end
 
   describe '#clean_all' do
-    let(:task) { described_class.new(action: :clean) }
+    let(:task) { described_class.new(action: :clean, root: temp_dir) }
 
     it 'displays completion message' do
+      allow_any_instance_of(RHDL::CLI::Tasks::NativeTask).to receive(:run)
       expect { task.clean_all }.to output(/All generated files cleaned/).to_stdout
     end
   end

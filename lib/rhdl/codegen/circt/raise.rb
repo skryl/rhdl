@@ -46,6 +46,18 @@ module RHDL
         end
       end
 
+      class FormatResult
+        attr_reader :diagnostics
+
+        def initialize(diagnostics: [])
+          @diagnostics = diagnostics
+        end
+
+        def success?
+          @diagnostics.none? { |d| d.severity.to_s == 'error' }
+        end
+      end
+
       module Raise
         module_function
 
@@ -78,9 +90,18 @@ module RHDL
             files_written << out_path
           end
 
-          format_generated_output_dir(out_dir, source_result.diagnostics) if format
+          if format
+            format_result = format_output_dir(out_dir)
+            source_result.diagnostics.concat(format_result.diagnostics)
+          end
 
           RaiseResult.new(files_written: files_written, diagnostics: source_result.diagnostics.dup)
+        end
+
+        def format_output_dir(out_dir)
+          diagnostics = []
+          format_generated_output_dir(out_dir, diagnostics)
+          FormatResult.new(diagnostics: diagnostics)
         end
 
         # Raise CIRCT nodes/MLIR into loaded Ruby DSL component classes.
@@ -219,7 +240,8 @@ module RHDL
           end
           lines << ''
 
-          emit_internal_wires(lines, mod, extra_wires: structure_plan[:bridge_wires])
+          inferred_wires = infer_referenced_internal_wires(mod, extra_wires: structure_plan[:bridge_wires])
+          emit_internal_wires(lines, mod, extra_wires: structure_plan[:bridge_wires] + inferred_wires)
           emit_structure(lines, structure_plan)
 
           if sequential
@@ -282,6 +304,86 @@ module RHDL
             seen << name
           end
           lines << '' unless seen.empty?
+        end
+
+        def infer_referenced_internal_wires(mod, extra_wires: [])
+          declared = Set.new
+          mod.ports.each { |port| declared << sanitize_name(port.name) }
+          mod.nets.each { |net| declared << sanitize_name(net.name) }
+          mod.regs.each { |reg| declared << sanitize_name(reg.name) }
+          Array(extra_wires).each { |wire| declared << sanitize_name(wire[:name]) }
+
+          referenced = {}
+
+          mod.assigns.each { |assign| collect_signals_from_expr(assign.expr, referenced) }
+          mod.processes.each { |process| collect_signals_from_statements(Array(process.statements), referenced) }
+
+          Array(mod.instances).each do |inst|
+            Array(inst.connections).each do |conn|
+              collect_signals_from_connection(conn.signal, referenced)
+            end
+          end
+
+          referenced.each_with_object([]) do |(name, width), wires|
+            next if declared.include?(name)
+
+            wires << { name: name, width: width.to_i.positive? ? width.to_i : 1 }
+          end
+        end
+
+        def collect_signals_from_statements(statements, referenced)
+          Array(statements).each do |stmt|
+            case stmt
+            when IR::SeqAssign
+              collect_signals_from_expr(stmt.expr, referenced)
+            when IR::If
+              collect_signals_from_expr(stmt.condition, referenced)
+              collect_signals_from_statements(stmt.then_statements, referenced)
+              collect_signals_from_statements(stmt.else_statements, referenced)
+            end
+          end
+        end
+
+        def collect_signals_from_connection(signal, referenced)
+          case signal
+          when String, Symbol
+            name = sanitize_name(signal)
+            referenced[name] = [referenced[name].to_i, 1].max
+          when IR::Signal
+            name = sanitize_name(signal.name)
+            referenced[name] = [referenced[name].to_i, signal.width.to_i].max
+          when IR::Expr
+            collect_signals_from_expr(signal, referenced)
+          end
+        end
+
+        def collect_signals_from_expr(expr, referenced)
+          case expr
+          when IR::Signal
+            name = sanitize_name(expr.name)
+            referenced[name] = [referenced[name].to_i, expr.width.to_i].max
+          when IR::UnaryOp
+            collect_signals_from_expr(expr.operand, referenced)
+          when IR::BinaryOp
+            collect_signals_from_expr(expr.left, referenced)
+            collect_signals_from_expr(expr.right, referenced)
+          when IR::Mux
+            collect_signals_from_expr(expr.condition, referenced)
+            collect_signals_from_expr(expr.when_true, referenced)
+            collect_signals_from_expr(expr.when_false, referenced)
+          when IR::Concat
+            Array(expr.parts).each { |part| collect_signals_from_expr(part, referenced) }
+          when IR::Slice
+            collect_signals_from_expr(expr.base, referenced)
+          when IR::Resize
+            collect_signals_from_expr(expr.expr, referenced)
+          when IR::Case
+            collect_signals_from_expr(expr.selector, referenced)
+            expr.cases.each_value { |value| collect_signals_from_expr(value, referenced) }
+            collect_signals_from_expr(expr.default, referenced)
+          when IR::MemoryRead
+            collect_signals_from_expr(expr.addr, referenced)
+          end
         end
 
         def emit_structure(lines, structure_plan)
@@ -634,7 +736,7 @@ module RHDL
             lines << "#{' ' * indent})"
             lines
           when IR::Concat
-            lines = ["#{' ' * indent}concat("]
+            lines = ["#{' ' * indent}cat("]
             parts = expr.parts || []
             parts.each_with_index do |part, idx|
               part_lines = render_expr_lines(part, diagnostics, strict: strict, indent: indent + 2, cache: cache)
@@ -675,7 +777,7 @@ module RHDL
         def expr_to_ruby(expr, diagnostics, strict: false)
           case expr
           when IR::Literal
-            expr.value.to_s
+            "lit(#{expr.value.inspect}, width: #{expr.width.to_i})"
           when IR::Signal
             signal_ref(expr.name)
           when IR::BinaryOp
@@ -713,7 +815,7 @@ module RHDL
             parts = expr.parts.map { |p| expr_to_ruby(p, diagnostics, strict: strict) }
             return nil if parts.any?(&:nil?)
 
-            "concat(#{parts.join(', ')})"
+            "cat(#{parts.join(', ')})"
           when IR::Resize
             expr_to_ruby(expr.expr, diagnostics, strict: strict)
           when IR::Case

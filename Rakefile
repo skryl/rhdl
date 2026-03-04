@@ -137,6 +137,14 @@ namespace :native do
   end
 end
 
+namespace :hygiene do
+  desc "Run repository hygiene checks"
+  task :check do
+    load_cli_tasks
+    RHDL::CLI::Tasks::HygieneTask.new.run
+  end
+end
+
 # =============================================================================
 # Test Tasks (spec namespace)
 # =============================================================================

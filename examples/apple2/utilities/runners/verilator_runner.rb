@@ -40,7 +40,7 @@ module RHDL
       HIRES_BYTES_PER_LINE = 40
 
       # Build directory for Verilator output
-      BUILD_DIR = File.expand_path('../../../.verilator_build', __dir__)
+      BUILD_DIR = File.expand_path('../../.verilator_build', __dir__)
       VERILOG_DIR = File.join(BUILD_DIR, 'verilog')
       OBJ_DIR = File.join(BUILD_DIR, 'obj_dir')
 

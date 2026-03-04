@@ -533,7 +533,7 @@ RSpec.describe RHDL::Codegen::CIRCT::Raise do
 
       generated = File.read(File.join(tmp_dir, 'seq_if.rb'))
       expect(generated).to include('sequential clock: :clk do')
-      expect(generated).to include('q <= (d ? 1 : q)')
+      expect(generated).to include('q <= (d ? lit(1, width: 1) : q)')
     end
   end
 end

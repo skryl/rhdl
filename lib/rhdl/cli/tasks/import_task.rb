@@ -35,6 +35,7 @@ module RHDL
           mlir_out = options[:mlir_out] || File.join(out_dir, "#{base}.mlir")
           tool = options[:tool] || RHDL::Codegen::CIRCT::Tooling::DEFAULT_VERILOG_IMPORT_TOOL
 
+          puts "Import step: Verilog -> CIRCT MLIR (#{tool})"
           result = RHDL::Codegen::CIRCT::Tooling.verilog_to_circt_mlir(
             verilog_path: input,
             out_path: mlir_out,
@@ -69,6 +70,7 @@ module RHDL
         end
 
         def run_raise_flow(mlir_out:, out_dir:)
+          puts 'Import step: Parse/import CIRCT MLIR'
           mlir = File.read(mlir_out)
           strict = options.fetch(:strict, true)
           extern_modules = Array(options[:extern_modules]).map(&:to_s)
@@ -81,28 +83,38 @@ module RHDL
           )
           emit_diagnostics(import_result.diagnostics)
 
+          puts 'Import step: Raise CIRCT -> RHDL files'
           raise_result = RHDL::Codegen.raise_circt(
             import_result.modules,
             out_dir: out_dir,
             top: options[:top],
             strict: strict,
-            format: true
+            format: false
           )
           emit_diagnostics(raise_result.diagnostics)
 
           puts "Raised #{raise_result.files_written.length} DSL file(s):"
           raise_result.files_written.each { |path| puts "  - #{path}" }
 
+          puts 'Import step: Format RHDL output directory'
+          format_result = RHDL::Codegen.format_raised_dsl(out_dir)
+          emit_diagnostics(format_result.diagnostics)
+
+          puts 'Import step: Write import report'
+          combined_raise_diagnostics = Array(raise_result.diagnostics) + Array(format_result.diagnostics)
+          raise_success = raise_result.success? && format_result.success?
           report_path = write_report(
             out_dir: out_dir,
             strict: strict,
             extern_modules: extern_modules,
             import_result: import_result,
-            raise_result: raise_result
+            raise_result: raise_result,
+            raise_diagnostics: combined_raise_diagnostics,
+            raise_success: raise_success
           )
           puts "Wrote import report: #{report_path}"
 
-          unless import_result.success? && raise_result.success?
+          unless import_result.success? && raise_success
             raise RuntimeError, 'CIRCT import/raise completed with errors (partial output written)'
           end
         end
@@ -115,10 +127,13 @@ module RHDL
           end
         end
 
-        def write_report(out_dir:, strict:, extern_modules:, import_result:, raise_result:)
+        def write_report(out_dir:, strict:, extern_modules:, import_result:, raise_result:, raise_diagnostics: nil,
+                         raise_success: nil)
+          raise_diagnostics ||= Array(raise_result.diagnostics)
+          raise_success = raise_result.success? if raise_success.nil?
           path = options[:report] || File.join(out_dir, 'import_report.json')
           report = {
-            success: import_result.success? && raise_result.success?,
+            success: import_result.success? && raise_success,
             strict: strict,
             top: options[:top],
             extern_modules: extern_modules,
@@ -138,7 +153,7 @@ module RHDL
               }
             end,
             import_diagnostics: Array(import_result.diagnostics).map { |diag| diagnostic_to_hash(diag) },
-            raise_diagnostics: Array(raise_result.diagnostics).map { |diag| diagnostic_to_hash(diag) }
+            raise_diagnostics: Array(raise_diagnostics).map { |diag| diagnostic_to_hash(diag) }
           }
 
           File.write(path, JSON.pretty_generate(report))

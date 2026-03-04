@@ -10,13 +10,14 @@
 /spec/reports/
 /tmp/
 **/tmp/
+/.tmp/
 *.gem
 *.rbc
 .DS_Store
 .rspec_status
 .rspec_status*
 /spec/fixtures/apple2/
-/export/roms/
+/export/
 /vendor/
 # Native extension build artifacts
 *.so
@@ -25,22 +26,22 @@
 /examples/mos6502/utilities/isa_simulator_native/target/
 /examples/mos6502/utilities/isa_simulator_native/lib/
 
-# Native extension build artifacts (netlist/sim)
-lib/rhdl/codegen/netlist/sim/netlist_interpreter/target/
-lib/rhdl/codegen/netlist/sim/netlist_interpreter/lib/
-lib/rhdl/codegen/netlist/sim/netlist_jit/target/
-lib/rhdl/codegen/netlist/sim/netlist_jit/lib/
-lib/rhdl/codegen/netlist/sim/netlist_compiler/target/
-lib/rhdl/codegen/netlist/sim/netlist_compiler/lib/
+# Native extension build artifacts (sim/native/netlist)
+lib/rhdl/sim/native/netlist/netlist_interpreter/target/
+lib/rhdl/sim/native/netlist/netlist_interpreter/lib/
+lib/rhdl/sim/native/netlist/netlist_jit/target/
+lib/rhdl/sim/native/netlist/netlist_jit/lib/
+lib/rhdl/sim/native/netlist/netlist_compiler/target/
+lib/rhdl/sim/native/netlist/netlist_compiler/lib/
 
-# Native extension build artifacts (ir/sim)
-lib/rhdl/codegen/ir/sim/ir_interpreter/target/
-lib/rhdl/codegen/ir/sim/ir_interpreter/lib/
-lib/rhdl/codegen/ir/sim/ir_jit/target/
-lib/rhdl/codegen/ir/sim/ir_jit/lib/
-lib/rhdl/codegen/ir/sim/ir_compiler/target/
-lib/rhdl/codegen/ir/sim/ir_compiler/lib/
-lib/rhdl/codegen/ir/sim/ir_compiler/*.json
+# Native extension build artifacts (sim/native/ir)
+lib/rhdl/sim/native/ir/ir_interpreter/target/
+lib/rhdl/sim/native/ir/ir_interpreter/lib/
+lib/rhdl/sim/native/ir/ir_jit/target/
+lib/rhdl/sim/native/ir/ir_jit/lib/
+lib/rhdl/sim/native/ir/ir_compiler/target/
+lib/rhdl/sim/native/ir/ir_compiler/lib/
+lib/rhdl/sim/native/ir/ir_compiler/*.json
 
 # Verilator build artifacts
 .verilator_build/
@@ -61,6 +62,7 @@ web/node_modules/
 
 # Web bundler output
 web/dist/
+/web/test-results/
 
 # Web wasm build artifacts
 web/assets/pkg/*

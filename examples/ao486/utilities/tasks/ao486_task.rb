@@ -41,6 +41,7 @@ module RHDL
               raise ArgumentError, 'AO486 import requires output_dir (--out DIR or rake ao486:import[output_dir,...])'
             end
 
+            progress = options.fetch(:progress, nil) || lambda { |message| puts "AO486 import step: #{message}" }
             importer = importer_class.new(
               source_path: options[:source_path] || importer_class::DEFAULT_SOURCE_PATH,
               output_dir: output_dir,
@@ -51,7 +52,8 @@ module RHDL
               import_strategy: options[:import_strategy] || importer_class::DEFAULT_IMPORT_STRATEGY,
               fallback_to_stubbed: options.fetch(:fallback_to_stubbed, true),
               maintain_directory_structure: options.fetch(:maintain_directory_structure, true),
-              strict: options.fetch(:strict, true)
+              strict: options.fetch(:strict, true),
+              progress: progress
             )
 
             result = importer.run

@@ -79,6 +79,28 @@ RSpec.describe RHDL::CLI::Tasks::ImportTask do
     expect(File.exist?(File.join(tmp_dir, 'simple.rb'))).to be(true)
   end
 
+  it 'prints import progress steps during circt raise flow' do
+    mlir_file = File.join(tmp_dir, 'simple.mlir')
+    File.write(mlir_file, <<~MLIR)
+      hw.module @simple(%a: i1) -> (y: i1) {
+        hw.output %a : i1
+      }
+    MLIR
+
+    task = described_class.new(
+      mode: :circt,
+      input: mlir_file,
+      out: tmp_dir,
+      top: 'simple'
+    )
+
+    expect do
+      task.run
+    end.to output(
+      /Import step: Parse\/import CIRCT MLIR.*Import step: Raise CIRCT -> RHDL files.*Import step: Format RHDL output directory.*Import step: Write import report/m
+    ).to_stdout
+  end
+
   it 'requests formatted raised output during import raise flow' do
     mlir_file = File.join(tmp_dir, 'simple.mlir')
     File.write(mlir_file, <<~MLIR)
@@ -99,8 +121,9 @@ RSpec.describe RHDL::CLI::Tasks::ImportTask do
       out_dir: tmp_dir,
       top: 'simple',
       strict: true,
-      format: true
+      format: false
     ).and_call_original
+    expect(RHDL::Codegen).to receive(:format_raised_dsl).with(tmp_dir).and_call_original
 
     task.run
   end

@@ -27,8 +27,32 @@ bundle exec rhdl --help
 | `import` | Import Verilog/CIRCT MLIR and raise to RHDL DSL |
 | `gates` | Gate-level synthesis |
 | `examples` | Run MOS6502, Apple2, GameBoy, RISC-V, and AO486 workflows |
+| `disk` | Disk image utilities |
+| `generate` | Generate diagrams and HDL exports |
+| `clean` | Clean generated artifacts and local build temps |
+| `regenerate` | Clean then regenerate outputs |
+| `hygiene` | Run repository hygiene checks |
 
 ---
+
+## Generate/Clean/Hygiene Commands
+
+### Usage
+
+```bash
+rhdl generate
+rhdl clean
+rhdl regenerate
+rhdl hygiene
+```
+
+### Notes
+
+`rhdl clean` removes generated outputs plus local build/temp artifacts, including:
+
+- simulator build dirs (`.verilator_build*`, `.arcilator_build*`, `.hdl_build`)
+- web build outputs (`web/dist`, generated `web/build/*`, `web/test-results`)
+- local temp dirs (`tmp`, `.tmp`)
 
 ## TUI Command
 

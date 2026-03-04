@@ -41,7 +41,7 @@ module RHDL
       HRAM_END = 0xFFFE
 
       # Build directory for Verilator output
-      BUILD_DIR = File.expand_path('../../../../.verilator_build_gb', __dir__)
+      BUILD_DIR = File.expand_path('../../.verilator_build', __dir__)
       VERILOG_DIR = File.join(BUILD_DIR, 'verilog')
       OBJ_DIR = File.join(BUILD_DIR, 'obj_dir')
 

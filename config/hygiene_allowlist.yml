@@ -1,0 +1,18 @@
+intentional_duplicate_globs:
+  - diagrams/component/**
+  - diagrams/hierarchical/**
+  - web/app/components/runner/config/generated_presets.ts
+  - web/app/components/runner/config/generated_presets.mjs
+  - web/app/components/memory/config/generated_dump_assets.ts
+  - web/app/components/memory/config/generated_dump_assets.mjs
+
+shared_symlinks:
+  examples/mos6502/software/code/fig_forth/fig6502.asm: examples/apple2/software/code/fig_forth/fig6502.asm
+  examples/mos6502/software/code/fig_forth/Makefile: examples/apple2/software/code/fig_forth/Makefile
+  examples/mos6502/software/code/fig_forth/README.TXT: examples/apple2/software/code/fig_forth/README.TXT
+  examples/mos6502/software/disks/karateka.dsk: examples/apple2/software/disks/karateka.dsk
+  examples/mos6502/software/disks/karateka.bin: examples/apple2/software/disks/karateka.bin
+  examples/mos6502/software/disks/karateka_mem.bin: examples/apple2/software/disks/karateka_mem.bin
+  examples/mos6502/software/disks/karateka_mem_meta.txt: examples/apple2/software/disks/karateka_mem_meta.txt
+  examples/mos6502/software/roms/appleiigo.rom: examples/apple2/software/roms/appleiigo.rom
+  examples/mos6502/software/roms/disk2_boot.bin: examples/apple2/software/roms/disk2_boot.bin

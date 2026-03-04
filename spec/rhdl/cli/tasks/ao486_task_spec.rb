@@ -80,6 +80,7 @@ RSpec.describe RHDL::Examples::AO486::Tasks::AO486Task do
     expect(FakeImporter.last_init_kwargs[:fallback_to_stubbed]).to eq(true)
     expect(FakeImporter.last_init_kwargs[:maintain_directory_structure]).to eq(true)
     expect(FakeImporter.last_init_kwargs[:strict]).to eq(true)
+    expect(FakeImporter.last_init_kwargs[:progress]).to respond_to(:call)
   end
 
   it 'passes clean_output=false through to importer' do

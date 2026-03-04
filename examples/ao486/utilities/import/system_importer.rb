@@ -53,7 +53,8 @@ module RHDL
           end
 
           attr_reader :source_path, :output_dir, :top, :keep_workspace, :workspace_dir, :clean_output,
-                      :import_strategy, :fallback_to_stubbed, :maintain_directory_structure, :strict
+                      :import_strategy, :fallback_to_stubbed, :maintain_directory_structure, :strict,
+                      :progress_callback
 
           def initialize(source_path: DEFAULT_SOURCE_PATH,
                          output_dir:,
@@ -64,7 +65,8 @@ module RHDL
                          import_strategy: DEFAULT_IMPORT_STRATEGY,
                          fallback_to_stubbed: true,
                          maintain_directory_structure: true,
-                         strict: true)
+                         strict: true,
+                         progress: nil)
             @source_path = File.expand_path(source_path)
             raise ArgumentError, 'output_dir is required' if output_dir.to_s.strip.empty?
 
@@ -77,6 +79,7 @@ module RHDL
             @fallback_to_stubbed = fallback_to_stubbed
             @maintain_directory_structure = maintain_directory_structure
             @strict = strict
+            @progress_callback = progress
           end
 
           def run
@@ -85,6 +88,7 @@ module RHDL
             temp_workspace = nil
             prepared = nil
 
+            emit_progress('validate source and toolchain')
             unless File.exist?(source_path)
               diagnostics << "Source file not found: #{source_path}"
               return failed_result(diagnostics: diagnostics, command_log: command_log)
@@ -99,10 +103,12 @@ module RHDL
 
             workspace = workspace_dir || Dir.mktmpdir('rhdl_ao486_import')
             temp_workspace = workspace if workspace_dir.nil?
+            emit_progress("workspace ready: #{workspace}")
 
             attempts = strategy_attempts
             strategy_used = nil
             attempts.each_with_index do |strategy, idx|
+              emit_progress("strategy '#{strategy}': prepare + import")
               if strategy == :tree
                 tree_attempt = run_tree_strategy_attempt(workspace, diagnostics: diagnostics, command_log: command_log)
                 prepared = tree_attempt[:prepared]
@@ -120,6 +126,7 @@ module RHDL
               next_strategy = attempts[idx + 1]
               if next_strategy
                 diagnostics << "AO486 import strategy '#{strategy}' failed; retrying with '#{next_strategy}'"
+                emit_progress("strategy '#{strategy}' failed; retry '#{next_strategy}'")
                 next
               end
 
@@ -140,21 +147,28 @@ module RHDL
 
             raise "AO486 import strategy loop failed unexpectedly" unless strategy_used
 
+            emit_progress("strategy '#{strategy_used}': normalize core MLIR")
             normalized_core_mlir = normalize_core_mlir(File.read(prepared[:core_mlir_path]))
             File.write(prepared[:normalized_core_mlir_path], normalized_core_mlir)
 
             FileUtils.mkdir_p(output_dir)
+            emit_progress("clean output directory: #{output_dir}") if clean_output
             clean_output_dir! if clean_output
 
+            emit_progress("raise CIRCT -> RHDL: #{output_dir}")
             raise_result = RHDL::Codegen.raise_circt(
               normalized_core_mlir,
               out_dir: output_dir,
               top: top,
               strict: strict,
-              format: true
+              format: false
             )
+            emit_progress("format RHDL output directory: #{output_dir}")
+            format_result = RHDL::Codegen.format_raised_dsl(output_dir)
+
             files_written = raise_result.files_written
             if maintain_directory_structure
+              emit_progress('remap output to source directory layout')
               files_written = remap_output_layout(
                 files_written: files_written,
                 module_source_relpaths: prepared[:module_source_relpaths],
@@ -162,7 +176,8 @@ module RHDL
               )
             end
 
-            success = raise_result.success?
+            raise_diagnostics = Array(raise_result.diagnostics) + Array(format_result.diagnostics)
+            success = raise_result.success? && format_result.success?
             Result.new(
               success: success,
               output_dir: output_dir,
@@ -173,7 +188,7 @@ module RHDL
               normalized_core_mlir_path: prepared[:normalized_core_mlir_path],
               command_log: command_log,
               diagnostics: diagnostics,
-              raise_diagnostics: raise_result.diagnostics,
+              raise_diagnostics: raise_diagnostics,
               strategy_requested: import_strategy,
               strategy_used: strategy_used,
               fallback_used: strategy_used != import_strategy,
@@ -223,6 +238,7 @@ module RHDL
             pipeline = nil
 
             loop do
+              emit_progress("tree attempt #{retries + 1}: stage tree inputs")
               prepared = prepare_workspace(
                 workspace,
                 strategy: :tree,
@@ -248,6 +264,7 @@ module RHDL
               retries += 1
               forced_stub_modules.concat(inferred).uniq!
               diagnostics << "AO486 tree import retry #{retries}: forcing stubs for #{inferred.sort.join(', ')}"
+              emit_progress("tree retry #{retries}: force stubs #{inferred.sort.join(', ')}")
             end
 
             {
@@ -343,6 +360,7 @@ module RHDL
               '-o',
               prepared[:moore_mlir_path]
             ]
+            emit_progress("run circt-translate -> #{File.basename(prepared[:moore_mlir_path])}")
             import_result = run_command(import_cmd, chdir: prepared[:command_chdir])
             command_log << import_result[:command]
             append_diagnostics(diagnostics, import_result[:stderr], max_lines: 60)
@@ -360,11 +378,13 @@ module RHDL
               '-o',
               prepared[:core_mlir_path]
             ]
+            emit_progress("run circt-opt -> #{File.basename(prepared[:core_mlir_path])}")
             lower_result = run_command(lower_cmd, chdir: prepared[:command_chdir])
             command_log << lower_result[:command]
             append_diagnostics(diagnostics, lower_result[:stderr], max_lines: 60)
             return { success: false, stage: :lower, stderr: lower_result[:stderr] } unless lower_result[:success]
 
+            emit_progress('import pipeline complete')
             { success: true, stage: :done }
           end
 
@@ -773,6 +793,12 @@ module RHDL
               exe = File.join(path, cmd)
               File.executable?(exe) && !File.directory?(exe)
             end
+          end
+
+          def emit_progress(message)
+            return unless progress_callback.respond_to?(:call)
+
+            progress_callback.call(message)
           end
         end
       end

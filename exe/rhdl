@@ -24,6 +24,7 @@ def show_help
       generate      Generate all output files (diagrams + HDL exports)
       clean         Clean all generated files
       regenerate    Clean and regenerate all output files
+      hygiene       Run repository hygiene checks
 
     Run 'rhdl <command> --help' for more information on a command.
   HELP
@@ -648,12 +649,23 @@ def handle_clean(args)
     opts.banner = <<~BANNER
       Usage: rhdl clean [options]
 
-      Clean all generated files.
+      Clean generated files and local build artifacts.
 
       This is equivalent to running:
         rhdl diagram --clean
         rhdl export --clean
         rhdl gates --clean
+        rake native:clean
+
+      Also removes local simulator/web/temp build directories:
+        **/.verilator_build*
+        **/.arcilator_build*
+        **/.hdl_build
+        web/dist
+        web/build/* (preserving tracked .gitignore sentinels)
+        web/test-results
+        tmp
+        .tmp
 
       Options:
     BANNER
@@ -692,6 +704,26 @@ def handle_regenerate(args)
   RHDL::CLI::Tasks::GenerateTask.new(action: :regenerate).run
 end
 
+def handle_hygiene(args)
+  parser = OptionParser.new do |opts|
+    opts.banner = <<~BANNER
+      Usage: rhdl hygiene [options]
+
+      Run repository hygiene checks (submodules, ignore rules, tracked ephemera, shared symlink policy).
+
+      Options:
+    BANNER
+
+    opts.on('-h', '--help', 'Show this help') do
+      puts opts
+      exit 0
+    end
+  end
+
+  parser.parse!(args)
+  RHDL::CLI::Tasks::HygieneTask.new.run
+end
+
 # =============================================================================
 # Main Entry Point
 # =============================================================================
@@ -719,6 +751,8 @@ when 'clean', 'clean_all'
   handle_clean(ARGV)
 when 'regenerate'
   handle_regenerate(ARGV)
+when 'hygiene'
+  handle_hygiene(ARGV)
 when '-h', '--help', 'help', nil
   show_help
 else

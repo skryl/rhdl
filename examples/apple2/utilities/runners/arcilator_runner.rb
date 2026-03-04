@@ -39,7 +39,7 @@ module RHDL
         HIRES_BYTES_PER_LINE = 40
 
         # Build directory for arcilator output
-        BUILD_DIR = File.expand_path('../../../.arcilator_build', __dir__)
+        BUILD_DIR = File.expand_path('../../.arcilator_build', __dir__)
 
         def initialize(sub_cycles: 14)
           @sub_cycles = sub_cycles.clamp(1, 14)
