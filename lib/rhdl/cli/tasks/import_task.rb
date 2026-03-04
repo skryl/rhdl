@@ -2,6 +2,7 @@
 
 require_relative '../task'
 require 'fileutils'
+require 'json'
 
 module RHDL
   module CLI
@@ -69,23 +70,89 @@ module RHDL
 
         def run_raise_flow(mlir_out:, out_dir:)
           mlir = File.read(mlir_out)
-          result = RHDL::Codegen::CIRCT::Raise.to_dsl(
+          strict = options.fetch(:strict, true)
+          extern_modules = Array(options[:extern_modules]).map(&:to_s)
+
+          import_result = RHDL::Codegen.import_circt_mlir(
             mlir,
-            out_dir: out_dir,
-            top: options[:top]
+            strict: strict,
+            top: options[:top],
+            extern_modules: extern_modules
           )
+          emit_diagnostics(import_result.diagnostics)
 
-          result.diagnostics.each do |diag|
+          raise_result = RHDL::Codegen.raise_circt(
+            import_result.modules,
+            out_dir: out_dir,
+            top: options[:top],
+            strict: strict,
+            format: true
+          )
+          emit_diagnostics(raise_result.diagnostics)
+
+          puts "Raised #{raise_result.files_written.length} DSL file(s):"
+          raise_result.files_written.each { |path| puts "  - #{path}" }
+
+          report_path = write_report(
+            out_dir: out_dir,
+            strict: strict,
+            extern_modules: extern_modules,
+            import_result: import_result,
+            raise_result: raise_result
+          )
+          puts "Wrote import report: #{report_path}"
+
+          unless import_result.success? && raise_result.success?
+            raise RuntimeError, 'CIRCT import/raise completed with errors (partial output written)'
+          end
+        end
+
+        def emit_diagnostics(diags)
+          Array(diags).each do |diag|
             level = diag.severity.to_s.upcase
-            puts "[#{level}] #{diag.message}"
+            op = diag.respond_to?(:op) && diag.op ? " #{diag.op}:" : ''
+            puts "[#{level}]#{op} #{diag.message}"
           end
+        end
 
-          puts "Raised #{result.files_written.length} DSL file(s):"
-          result.files_written.each { |path| puts "  - #{path}" }
+        def write_report(out_dir:, strict:, extern_modules:, import_result:, raise_result:)
+          path = options[:report] || File.join(out_dir, 'import_report.json')
+          report = {
+            success: import_result.success? && raise_result.success?,
+            strict: strict,
+            top: options[:top],
+            extern_modules: extern_modules,
+            module_count: import_result.modules.length,
+            op_census: import_result.op_census,
+            modules: import_result.modules.map do |mod|
+              mod_name = mod.name.to_s
+              module_diags = Array(import_result.module_diagnostics.fetch(mod_name, []))
+              span = import_result.module_spans[mod_name] || {}
+              {
+                name: mod_name,
+                start_line: span[:start_line],
+                end_line: span[:end_line],
+                import_errors: module_diags.count { |diag| diag.severity.to_s == 'error' },
+                import_warnings: module_diags.count { |diag| diag.severity.to_s == 'warning' },
+                import_diagnostics: module_diags.map { |diag| diagnostic_to_hash(diag) }
+              }
+            end,
+            import_diagnostics: Array(import_result.diagnostics).map { |diag| diagnostic_to_hash(diag) },
+            raise_diagnostics: Array(raise_result.diagnostics).map { |diag| diagnostic_to_hash(diag) }
+          }
 
-          unless result.success?
-            raise RuntimeError, 'CIRCT->RHDL raise completed with errors (partial output written)'
-          end
+          File.write(path, JSON.pretty_generate(report))
+          path
+        end
+
+        def diagnostic_to_hash(diag)
+          {
+            severity: diag.respond_to?(:severity) ? diag.severity.to_s : nil,
+            op: diag.respond_to?(:op) ? diag.op : nil,
+            message: diag.respond_to?(:message) ? diag.message : diag.to_s,
+            line: diag.respond_to?(:line) ? diag.line : nil,
+            column: diag.respond_to?(:column) ? diag.column : nil
+          }
         end
 
         def fetch_input_path

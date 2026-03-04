@@ -9,7 +9,7 @@ RSpec.describe 'RV32F minimal subset (single-cycle + pipeline)', timeout: 30 do
   let(:pipe) { RHDL::Examples::RISCV::Pipeline::IRHarness.new('rv32f_pipe', backend: :jit) }
 
   before do
-    skip 'IR JIT not available' unless RHDL::Codegen::IR::IR_JIT_AVAILABLE
+    skip 'IR JIT not available' unless RHDL::Sim::Native::IR::JIT_AVAILABLE
     single.reset!
     pipe.reset!
   end

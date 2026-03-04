@@ -2,7 +2,7 @@
 # Runs the core in IR simulation and keeps memories/MMIO in Ruby.
 
 require 'rhdl/codegen'
-require 'rhdl/codegen/ir/sim/ir_simulator'
+require 'rhdl/sim/native/ir/simulator'
 require_relative 'cpu'
 require_relative '../memory'
 require_relative '../clint'
@@ -37,8 +37,8 @@ module RHDL
             @rst = 0
 
             ir = CPU.to_flat_circt_nodes(top_name: name || 'riscv_pipeline_ir')
-            ir_json = RHDL::Codegen::IR.sim_json(ir, backend: backend)
-            @sim = RHDL::Codegen::IR::IrSimulator.new(
+            ir_json = RHDL::Sim::Native::IR.sim_json(ir, backend: backend)
+            @sim = RHDL::Sim::Native::IR::Simulator.new(
               ir_json,
               backend: backend
             )

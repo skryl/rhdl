@@ -806,7 +806,7 @@ module RHDL
                   elsif ir_obj.is_a?(String)
                     deep_stringify_keys(JSON.parse(ir_obj, max_nesting: false))
                   else
-                    json = RHDL::Codegen::IR.sim_json(ir_obj, format: :circt)
+                    json = RHDL::Sim::Native::IR.sim_json(ir_obj, format: :circt)
                     deep_stringify_keys(JSON.parse(json, max_nesting: false))
                   end
 

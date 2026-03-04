@@ -112,11 +112,11 @@ RSpec.shared_examples 'xv6 shell UART I/O' do |pipeline:, backend_id:, boot_cycl
   it description, :slow, timeout: timeout_seconds do
     case backend_id
     when :jit
-      skip 'IR JIT not available' unless RHDL::Codegen::IR::IR_JIT_AVAILABLE
+      skip 'IR JIT not available' unless RHDL::Sim::Native::IR::JIT_AVAILABLE
     when :compiler
-      skip 'IR Compiler not available' unless RHDL::Codegen::IR::IR_COMPILER_AVAILABLE
+      skip 'IR Compiler not available' unless RHDL::Sim::Native::IR::COMPILER_AVAILABLE
     when :compiler_aot
-      skip 'IR Compiler not available' unless RHDL::Codegen::IR::IR_COMPILER_AVAILABLE
+      skip 'IR Compiler not available' unless RHDL::Sim::Native::IR::COMPILER_AVAILABLE
       skip "IR compiler AOT mode not enabled (set #{AOT_COMPILER_ENV_FLAG}=1 and build ir_compiler with --features aot)" unless ENV[AOT_COMPILER_ENV_FLAG] == '1'
     when :verilator
       skip 'Verilator not available' unless HdlToolchain.verilator_available?

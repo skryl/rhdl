@@ -1082,8 +1082,8 @@ RSpec.describe 'GameBoy RHDL Implementation' do
 
       # IR Compiler
       begin
-        require_relative '../../../lib/rhdl/codegen/ir/sim/ir_simulator'
-        if RHDL::Codegen::IR::COMPILER_AVAILABLE
+        require_relative '../../../lib/rhdl/sim/native/ir/simulator'
+        if RHDL::Sim::Native::IR::COMPILER_AVAILABLE
           runners[:compiler] = RHDL::Examples::GameBoy::IrRunner.new(backend: :compile)
           backends << :compiler
         end
@@ -1093,8 +1093,8 @@ RSpec.describe 'GameBoy RHDL Implementation' do
 
       # IR JIT (may have issues, validate before including)
       begin
-        require_relative '../../../lib/rhdl/codegen/ir/sim/ir_simulator'
-        if RHDL::Codegen::IR::JIT_AVAILABLE
+        require_relative '../../../lib/rhdl/sim/native/ir/simulator'
+        if RHDL::Sim::Native::IR::JIT_AVAILABLE
           jit_runner = RHDL::Examples::GameBoy::IrRunner.new(backend: :jit)
           # Quick validation: run a few cycles and check if PC changes
           jit_runner.load_rom(rom_data)
@@ -1111,11 +1111,10 @@ RSpec.describe 'GameBoy RHDL Implementation' do
         puts "  Skipping IR JIT: #{e.message}"
       end
 
-      # IR Interpreter (native extension may not be available, uses Ruby fallback)
+      # IR Interpreter (native extension may not be available)
       begin
-        require_relative '../../../lib/rhdl/codegen/ir/sim/ir_simulator'
-        # Note: IR_INTERPRETER_AVAILABLE may be false if native extension failed to load,
-        # but IrSimulator will fall back to Ruby implementation
+        require_relative '../../../lib/rhdl/sim/native/ir/simulator'
+        # Interpreter backend may be unavailable when native extension loading fails.
         interp_runner = RHDL::Examples::GameBoy::IrRunner.new(backend: :interpret)
         # Quick validation
         interp_runner.load_rom(rom_data)

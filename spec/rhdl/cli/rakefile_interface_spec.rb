@@ -156,6 +156,19 @@ RSpec.describe 'Rakefile interface' do
       Rake::Task['spec:bench'].invoke('hdl')
     end
 
+    it 'spec:bench scope ao486 invokes BenchmarkTask with ao486 pattern' do
+      task_instance = instance_double(RHDL::CLI::Tasks::BenchmarkTask)
+      allow(task_instance).to receive(:run)
+
+      expect(RHDL::CLI::Tasks::BenchmarkTask).to receive(:new) do |opts|
+        expect(opts[:type]).to eq(:tests)
+        expect(opts[:pattern]).to eq('spec/examples/ao486/')
+        task_instance
+      end
+
+      Rake::Task['spec:bench'].invoke('ao486')
+    end
+
     it 'spec:bench scope mos6502 invokes BenchmarkTask with mos6502 pattern' do
       task_instance = instance_double(RHDL::CLI::Tasks::BenchmarkTask)
       allow(task_instance).to receive(:run)
@@ -334,8 +347,56 @@ RSpec.describe 'Rakefile interface' do
       expect(SPEC_PATHS[:all]).to eq('spec/')
       expect(SPEC_PATHS[:lib]).to eq('spec/rhdl/')
       expect(SPEC_PATHS[:hdl]).to eq('spec/rhdl/hdl/')
+      expect(SPEC_PATHS[:ao486]).to eq('spec/examples/ao486/')
       expect(SPEC_PATHS[:mos6502]).to eq('spec/examples/mos6502/')
       expect(SPEC_PATHS[:apple2]).to eq('spec/examples/apple2/')
+      expect(SPEC_PATHS[:riscv]).to eq('spec/examples/riscv/')
+    end
+  end
+
+  describe 'ao486 tasks' do
+    it 'ao486:import invokes examples AO486Task with action: :import' do
+      require_relative '../../../examples/ao486/utilities/tasks/ao486_task'
+      task_instance = instance_double(RHDL::Examples::AO486::Tasks::AO486Task)
+      allow(task_instance).to receive(:run)
+
+      expect(RHDL::Examples::AO486::Tasks::AO486Task).to receive(:new) do |opts|
+        expect(opts[:action]).to eq(:import)
+        expect(opts[:output_dir]).to eq('/tmp/ao486_out')
+        task_instance
+      end
+
+      Rake::Task['ao486:import'].invoke('/tmp/ao486_out')
+    end
+
+    it 'ao486:parity invokes examples AO486Task with action: :parity' do
+      require_relative '../../../examples/ao486/utilities/tasks/ao486_task'
+      expect_task_class(RHDL::Examples::AO486::Tasks::AO486Task, action: :parity)
+      Rake::Task['ao486:parity'].invoke
+    end
+
+    it 'ao486:verify invokes examples AO486Task with action: :verify' do
+      require_relative '../../../examples/ao486/utilities/tasks/ao486_task'
+      expect_task_class(RHDL::Examples::AO486::Tasks::AO486Task, action: :verify)
+      Rake::Task['ao486:verify'].invoke
+    end
+  end
+
+  describe 'scope alias tasks' do
+    it 'spec:ao486 delegates to spec[ao486]' do
+      spec_task = Rake::Task['spec']
+      expect(spec_task).to receive(:reenable).and_call_original
+      expect(spec_task).to receive(:invoke).with('ao486')
+
+      Rake::Task['spec:ao486'].invoke
+    end
+
+    it 'pspec:ao486 delegates to pspec[ao486]' do
+      pspec_task = Rake::Task['pspec']
+      expect(pspec_task).to receive(:reenable).and_call_original
+      expect(pspec_task).to receive(:invoke).with('ao486')
+
+      Rake::Task['pspec:ao486'].invoke
     end
   end
 
@@ -343,12 +404,15 @@ RSpec.describe 'Rakefile interface' do
     # Verify all custom rake tasks exist
       %w[
         spec pspec
+        spec:lib spec:hdl spec:ao486 spec:mos6502 spec:apple2 spec:riscv
         spec:bench spec:bench:timing spec:bench:quick
+        pspec:lib pspec:hdl pspec:ao486 pspec:mos6502 pspec:apple2 pspec:riscv
         pspec:n pspec:prepare pspec:balanced
         deps deps:install deps:check deps:check_gpu
         bench:native bench:web
         gem:build gem:build:checksum gem:install gem:install:local gem:release
         native:build native:clean native:check
+        ao486:import ao486:parity ao486:verify
         web:start web:build web:generate
         build:setup build:setup:binstubs
         build:clean build:clobber

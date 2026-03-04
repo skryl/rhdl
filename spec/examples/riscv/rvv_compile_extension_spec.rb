@@ -38,7 +38,7 @@ RSpec.describe RHDL::Examples::RISCV::IRHarness do
   let(:cpu) { described_class.new(mem_size: 4096, backend: :compile) }
 
   before(:each) do
-    skip 'IR compiler backend unavailable' unless RHDL::Codegen::IR::IR_COMPILER_AVAILABLE
+    skip 'IR compiler backend unavailable' unless RHDL::Sim::Native::IR::COMPILER_AVAILABLE
   end
 
   include_examples 'rvv compile behavior', pipeline: false
@@ -48,7 +48,7 @@ RSpec.describe RHDL::Examples::RISCV::Pipeline::IRHarness do
   let(:cpu) { described_class.new('rvv_compile_pipeline', backend: :compile) }
 
   before(:each) do
-    skip 'IR compiler backend unavailable' unless RHDL::Codegen::IR::IR_COMPILER_AVAILABLE
+    skip 'IR compiler backend unavailable' unless RHDL::Sim::Native::IR::COMPILER_AVAILABLE
   end
 
   include_examples 'rvv compile behavior', pipeline: true

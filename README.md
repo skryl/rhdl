@@ -506,6 +506,7 @@ rhdl export --lang verilog --tool firtool --out ./out RHDL::HDL::Counter  # requ
 # CIRCT import/raise
 rhdl import --mode verilog --input ./cpu.v --out ./generated   # requires circt-translate (or another Verilog importer)
 rhdl import --mode circt --input ./cpu.mlir --out ./generated
+rhdl import --mode circt --input ./soc.mlir --out ./generated --top soc_top --extern pll --report ./generated/import_report.json
 
 # Gate-level synthesis
 rhdl gates --export                      # Export to JSON netlists
@@ -547,7 +548,7 @@ The compiler supports AVX2/AVX512 for 256-512 parallel test vectors.
 
 ```ruby
 ir = RHDL::Codegen::Netlist::Lower.from_components([alu])
-sim = RHDL::Codegen::Netlist::NetlistSimulator.new(ir, backend: :interpreter, lanes: 64)
+sim = RHDL::Sim::Native::Netlist::Simulator.new(ir, backend: :interpreter, lanes: 64)
 sim.poke('a', 0xFF)
 sim.evaluate
 result = sim.peek('y')
@@ -564,7 +565,7 @@ Word-level bytecode simulation for complex designs like CPUs:
 | AOT Compiler | 2.3M cycles/s (38x) | 0.5-2s | Long simulations, games |
 
 ```ruby
-sim = RHDL::Codegen::IR::IrSimulator.new(ir_json, backend: :jit)
+sim = RHDL::Sim::Native::IR::Simulator.new(ir_json, backend: :jit)
 sim.compile
 sim.run_ticks(1_000_000)
 ```
@@ -647,14 +648,17 @@ See [Performance Guide](docs/performance.md) for detailed benchmarks and optimiz
 ```bash
 # Testing
 bundle exec rake spec                  # Run all tests
+bundle exec rake spec[ao486]          # Run AO486 import/parity specs
 bundle exec rake spec[riscv]           # Run RISC-V specs
 bundle exec rake pspec                 # Run tests in parallel
+bundle exec rake pspec[ao486]         # Run AO486 specs in parallel
 bundle exec rake pspec[riscv]          # Run RISC-V specs in parallel
 
 # Test and simulation benchmarks
 bundle exec rake spec:bench[riscv,20]  # Benchmark 20 RISC-V spec files
-bundle exec rake bench:native[ir,5000000]     # Benchmark IR runners
-bundle exec rake bench:native[gates]          # Benchmark gate-level simulation
+bundle exec rake spec:bench[ao486,20] # Benchmark 20 AO486 spec files
+bundle exec rake bench:native[ir,5000000]      # Benchmark IR runners
+bundle exec rake bench:native[gates]           # Benchmark gate-level simulation
 bundle exec rake bench:native[cpu8bit,5000000] # Benchmark 8-bit CPU compiler vs arcilator_gpu
 bundle exec rake bench:web[apple2]     # Benchmark Apple II web compiler vs arcilator vs verilator
 bundle exec rake bench:web[riscv]      # Benchmark RISC-V web compiler vs arcilator vs verilator
@@ -667,6 +671,20 @@ RHDL_ENABLE_ARCILATOR_GPU=1 bundle exec rspec spec/examples/8bit/hdl/cpu/arcilat
 # Native backends
 bundle exec rake native:build          # Build native extensions
 bundle exec rake native:check          # Check extension availability
+
+# AO486 import/parity workflow (CLI)
+bundle exec rhdl examples ao486 import --out examples/ao486/hdl # Import rtl/system.v via CIRCT and regenerate examples/ao486/hdl
+bundle exec rhdl examples ao486 import --out examples/ao486/hdl --strategy tree # Attempt tree import first, then fallback to stubbed baseline
+bundle exec rhdl examples ao486 import --out examples/ao486/hdl --strategy tree --no-fallback --report tmp/ao486_import_report.json # Emit AO486 import report JSON
+bundle exec rhdl examples ao486 import --out examples/ao486/hdl --no-maintain-directory-structure # Keep flat output layout
+bundle exec rhdl examples ao486 parity # Run bounded Verilog (Verilator) vs raised RHDL (IR) parity harness
+bundle exec rhdl examples ao486 verify # Run AO486 importer + parity + import-path verification specs
+
+# AO486 import/parity workflow
+bundle exec rake "ao486:import[examples/ao486/hdl]" # Import rtl/system.v via CIRCT and regenerate examples/ao486/hdl
+bundle exec rake "ao486:import[examples/ao486/hdl,,tree,true]" # Same import with explicit strategy/fallback args
+bundle exec rake ao486:parity          # Run bounded Verilog (Verilator) vs raised RHDL (IR) parity harness
+bundle exec rake ao486:verify          # Run AO486 importer + parity + import-path verification specs
 
 # Web simulator
 bundle exec rake web:build             # Generate web simulator WASM artifacts

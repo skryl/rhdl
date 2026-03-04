@@ -338,7 +338,7 @@ Pure Ruby gate-level interpreter:
 
 ```ruby
 ir = RHDL::Codegen::Netlist::Lower.from_components([component])
-sim = RHDL::Codegen::Netlist::RubyNetlistSimulator.new(ir, lanes: 64)
+sim = RHDL::Sim::Native::Netlist::RubySimulator.new(ir, lanes: 64)
 
 # Set inputs (u64 bitmask per bit)
 sim.poke('comp.a', [0xFF, 0x00, 0xFF, 0x00, 0xFF, 0x00, 0xFF, 0x00])
@@ -387,12 +387,12 @@ RHDL provides high-performance Rust implementations for simulation backends.
 | Extension | Path | Binding | Purpose |
 |-----------|------|---------|---------|
 | ISA Simulator | `examples/mos6502/utilities/isa_simulator_native/` | Fiddle | 6502 CPU emulation |
-| Netlist Interpreter | `lib/rhdl/codegen/netlist/sim/netlist_interpreter/` | Fiddle | Gate interpretation |
-| Netlist JIT | `lib/rhdl/codegen/netlist/sim/netlist_jit/` | Cranelift + Fiddle | Gate JIT compilation |
-| Netlist Compiler | `lib/rhdl/codegen/netlist/sim/netlist_compiler/` | rustc + Fiddle | Gate AOT compilation |
-| IR Interpreter | `lib/rhdl/codegen/ir/sim/ir_interpreter/` | Fiddle | Bytecode interpreter |
-| IR JIT | `lib/rhdl/codegen/ir/sim/ir_jit/` | Cranelift + Fiddle | Bytecode JIT |
-| IR Compiler | `lib/rhdl/codegen/ir/sim/ir_compiler/` | rustc + Fiddle | Bytecode AOT |
+| Netlist Interpreter | `lib/rhdl/sim/native/netlist/netlist_interpreter/` | Fiddle | Gate interpretation |
+| Netlist JIT | `lib/rhdl/sim/native/netlist/netlist_jit/` | Cranelift + Fiddle | Gate JIT compilation |
+| Netlist Compiler | `lib/rhdl/sim/native/netlist/netlist_compiler/` | rustc + Fiddle | Gate AOT compilation |
+| IR Interpreter | `lib/rhdl/sim/native/ir/ir_interpreter/` | Fiddle | Bytecode interpreter |
+| IR JIT | `lib/rhdl/sim/native/ir/ir_jit/` | Cranelift + Fiddle | Bytecode JIT |
+| IR Compiler | `lib/rhdl/sim/native/ir/ir_compiler/` | rustc + Fiddle | Bytecode AOT |
 
 ### Building Extensions
 
@@ -417,8 +417,8 @@ Direct interpretation of gate-level netlist:
 ```ruby
 require 'rhdl'
 
-if RHDL::Codegen::Netlist::NETLIST_INTERPRETER_AVAILABLE
-  sim = RHDL::Codegen::Netlist::NetlistInterpreter.new(ir.to_json, 64)
+if RHDL::Sim::Native::Netlist::INTERPRETER_AVAILABLE
+  sim = RHDL::Sim::Native::Netlist::Interpreter.new(ir.to_json, 64)
   sim.poke('a', 0xFF)
   sim.evaluate
   result = sim.peek('y')
@@ -432,8 +432,8 @@ end
 Compiles gate logic to native code at load time:
 
 ```ruby
-if RHDL::Codegen::Netlist::NETLIST_JIT_AVAILABLE
-  sim = RHDL::Codegen::Netlist::NetlistJit.new(ir.to_json, 64)
+if RHDL::Sim::Native::Netlist::JIT_AVAILABLE
+  sim = RHDL::Sim::Native::Netlist::Jit.new(ir.to_json, 64)
   # First evaluate compiles the circuit
   sim.evaluate
   # Subsequent evaluates run native code
@@ -447,8 +447,8 @@ end
 Ahead-of-time compilation with SIMD vectorization:
 
 ```ruby
-if RHDL::Codegen::Netlist::NETLIST_COMPILER_AVAILABLE
-  sim = RHDL::Codegen::Netlist::NetlistCompiler.new(ir.to_json, 'avx2')
+if RHDL::Sim::Native::Netlist::COMPILER_AVAILABLE
+  sim = RHDL::Sim::Native::Netlist::Compiler.new(ir.to_json, 'avx2')
   sim.compile  # Generates and compiles Rust code
   sim.evaluate
 end
@@ -468,7 +468,7 @@ All native netlist backends are accessed through one class with strict native se
 
 ```ruby
 # Automatically uses best available backend
-sim = RHDL::Codegen::Netlist::NetlistSimulator.new(
+sim = RHDL::Sim::Native::Netlist::Simulator.new(
   ir,
   backend: :interpreter,
   lanes: 64
@@ -487,15 +487,10 @@ IR-level simulation operates on word-level bytecode, providing faster simulation
 
 ### IR Structure
 
-The behavior IR represents operations at the word level:
+IR simulation consumes CIRCT-lowered runtime JSON from components:
 
 ```ruby
-ir = RHDL::Codegen::Behavior::IR.new
-ir.add_signal(:a, width: 8, direction: :input)
-ir.add_signal(:b, width: 8, direction: :input)
-ir.add_signal(:result, width: 8, direction: :output)
-
-ir.add_operation(:add, dest: :result, src1: :a, src2: :b)
+ir_json = MyComponent.to_circt_runtime_json
 ```
 
 ### IR Interpreter (Rust + Fiddle)
@@ -503,10 +498,10 @@ ir.add_operation(:add, dest: :result, src1: :a, src2: :b)
 Bytecode interpreter with MOS6502 and Apple II extensions:
 
 ```ruby
-require 'rhdl/codegen/ir/sim/ir_simulator'
+require 'rhdl/sim/native/ir/simulator'
 
-if RHDL::Codegen::IR::IR_INTERPRETER_AVAILABLE
-  sim = RHDL::Codegen::IR::IrSimulator.new(
+if RHDL::Sim::Native::IR::INTERPRETER_AVAILABLE
+  sim = RHDL::Sim::Native::IR::Simulator.new(
     ir_json,
     backend: :interpreter,
     sub_cycles: 14  # MOS6502 cycles per instruction
@@ -529,8 +524,8 @@ end
 Runtime JIT compilation of IR:
 
 ```ruby
-if RHDL::Codegen::IR::JIT_AVAILABLE
-  sim = RHDL::Codegen::IR::IrSimulator.new(ir_json, backend: :jit)
+if RHDL::Sim::Native::IR::JIT_AVAILABLE
+  sim = RHDL::Sim::Native::IR::Simulator.new(ir_json, backend: :jit)
   sim.compile  # JIT compile
   sim.run_ticks(1_000_000)
 end
@@ -543,8 +538,8 @@ end
 Ahead-of-time compilation with full optimization:
 
 ```ruby
-if RHDL::Codegen::IR::COMPILER_AVAILABLE
-  sim = RHDL::Codegen::IR::IrSimulator.new(ir_json, backend: :compiler)
+if RHDL::Sim::Native::IR::COMPILER_AVAILABLE
+  sim = RHDL::Sim::Native::IR::Simulator.new(ir_json, backend: :compiler)
   sim.compile  # AOT compile with rustc
   sim.run_ticks(5_000_000)
 end
@@ -672,8 +667,8 @@ require 'benchmark'
 
 # Gate-level benchmark
 ir = RHDL::Codegen::Netlist::Lower.from_components([alu])
-ruby_sim = RHDL::Codegen::Netlist::RubyNetlistSimulator.new(ir, lanes: 64)
-native_sim = RHDL::Codegen::Netlist::NetlistInterpreter.new(ir.to_json, 64)
+ruby_sim = RHDL::Sim::Native::Netlist::RubySimulator.new(ir, lanes: 64)
+native_sim = RHDL::Sim::Native::Netlist::Interpreter.new(ir.to_json, 64)
 
 ruby_time = Benchmark.measure do
   10_000.times { ruby_sim.evaluate }
@@ -834,7 +829,7 @@ ir = RHDL::Codegen::Netlist::Lower.from_components([alu])
 puts "Gates: #{ir.gates.length}, DFFs: #{ir.dffs.length}"
 
 # 4. Gate-level simulation (verification)
-sim = RHDL::Codegen::Netlist::NetlistSimulator.new(ir, backend: :interpreter, lanes: 64)
+sim = RHDL::Sim::Native::Netlist::Simulator.new(ir, backend: :interpreter, lanes: 64)
 sim.poke('alu.a', 10)
 sim.poke('alu.b', 5)
 sim.poke('alu.op', 0)

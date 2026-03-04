@@ -169,7 +169,7 @@ RSpec.describe RHDL::Examples::RISCV::IRHarness do
   let(:cpu) { described_class.new(mem_size: 4096, backend: :jit) }
 
   before(:each) do
-    skip 'IR JIT not available' unless RHDL::Codegen::IR::IR_JIT_AVAILABLE
+    skip 'IR JIT not available' unless RHDL::Sim::Native::IR::JIT_AVAILABLE
   end
 
   include_examples 'virtio-blk MMIO visibility', pipeline: false
@@ -179,7 +179,7 @@ RSpec.describe RHDL::Examples::RISCV::Pipeline::IRHarness do
   let(:cpu) { described_class.new('virtio_blk_pipeline', backend: :jit) }
 
   before(:each) do
-    skip 'IR JIT not available' unless RHDL::Codegen::IR::IR_JIT_AVAILABLE
+    skip 'IR JIT not available' unless RHDL::Sim::Native::IR::JIT_AVAILABLE
   end
 
   include_examples 'virtio-blk MMIO visibility', pipeline: true

@@ -486,7 +486,7 @@ module NetlistHelper
   def run_ruby_netlist_simulation(ir, test_vectors, has_clock: false)
     require 'rhdl/codegen'
 
-    sim = RHDL::Codegen::Netlist::SimCPU.new(ir, lanes: 64)
+    sim = RHDL::Sim::Native::Netlist::RubySimulator.new(ir, lanes: 64)
     run_netlist_sim(sim, ir, test_vectors, has_clock: has_clock, name: 'Ruby SimCPU')
   end
 
@@ -495,11 +495,11 @@ module NetlistHelper
   def run_native_netlist_simulation(ir, test_vectors, has_clock: false)
     require 'rhdl/codegen'
 
-    unless RHDL::Codegen::Netlist::NATIVE_SIM_AVAILABLE
+    unless RHDL::Sim::Native::Netlist::INTERPRETER_AVAILABLE
       return { success: false, error: 'Native SimCPU extension not available', skipped: true }
     end
 
-    sim = RHDL::Codegen::Netlist::SimCPUNative.new(ir.to_json, 64)
+    sim = RHDL::Sim::Native::Netlist::Interpreter.new(ir.to_json, 64)
     run_netlist_sim(sim, ir, test_vectors, has_clock: has_clock, name: 'Native SimCPU')
   end
 
@@ -746,7 +746,7 @@ module NetlistHelper
   # Raises an error with details if validation fails
   def validate_comparison!(comparison)
     iverilog_available = HdlToolchain.iverilog_available?
-    native_available = RHDL::Codegen::Netlist::NATIVE_SIM_AVAILABLE
+    native_available = RHDL::Sim::Native::Netlist::INTERPRETER_AVAILABLE
 
     errors = []
 

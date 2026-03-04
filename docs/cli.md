@@ -26,7 +26,7 @@ bundle exec rhdl --help
 | `export` | Export components to Verilog |
 | `import` | Import Verilog/CIRCT MLIR and raise to RHDL DSL |
 | `gates` | Gate-level synthesis |
-| `examples` | Run MOS6502, Apple2, GameBoy, and RISC-V emulators |
+| `examples` | Run MOS6502, Apple2, GameBoy, RISC-V, and AO486 workflows |
 
 ---
 
@@ -283,6 +283,9 @@ rhdl import [options]
 | `--mlir-out FILE` | Verilog mode: write intermediate CIRCT MLIR path |
 | `--tool CMD` | Verilog mode: external import tool (default: `circt-translate`) |
 | `--tool-arg ARG` | Verilog mode: extra tool arg (repeatable) |
+| `--[no-]strict` | Enable strict no-skip import + strict raise checks (default: enabled) |
+| `--extern NAME` | Declare unresolved external module boundary (repeatable) |
+| `--report FILE` | Write import report JSON (default: `<out>/import_report.json`) |
 | `--[no-]raise` | Run CIRCT->RHDL raising step (default: enabled) |
 | `--top NAME` | Optional top module for CIRCT->DSL raise |
 | `-h, --help` | Show help |
@@ -299,9 +302,74 @@ rhdl import --mode verilog --input ./cpu.v --out ./generated --no-raise
 # CIRCT MLIR -> RHDL DSL
 rhdl import --mode circt --input ./cpu.mlir --out ./generated
 
+# Strict top-closure import with explicit extern boundary + report
+rhdl import --mode circt --input ./soc.mlir --out ./generated --top soc_top --extern pll --extern ddr_phy --report ./generated/import_report.json
+
 # Note: firtool does not support direct Verilog import in this flow.
 # Use circt-translate (or another Verilog importer) for --mode verilog.
 ```
+
+Raised DSL output from import flows is auto-formatted with RuboCop when available.
+
+---
+
+## Examples AO486 Command
+
+Run AO486-specific CIRCT import and bounded parity workflows.
+
+### Usage
+
+```bash
+rhdl examples ao486 <subcommand> [options]
+```
+
+### Subcommands
+
+| Subcommand | Description |
+|------------|-------------|
+| `import` | Import `examples/ao486/reference/rtl/system.v` via CIRCT and regenerate raised DSL |
+| `parity` | Run bounded Verilog (Verilator) vs raised RHDL parity harness |
+| `verify` | Run importer + parity + CIRCT import-path verification specs |
+
+### Examples
+
+```bash
+# Regenerate examples/ao486/hdl from rtl/system.v
+rhdl examples ao486 import --out examples/ao486/hdl
+
+# Attempt full RTL-tree import first; fallback to stubbed if CIRCT import fails
+rhdl examples ao486 import --out examples/ao486/hdl --strategy tree
+
+# Keep flat output (disable directory mirroring)
+rhdl examples ao486 import --out examples/ao486/hdl --no-maintain-directory-structure
+
+# Keep intermediate CIRCT/import workspace artifacts for debugging
+rhdl examples ao486 import --out examples/ao486/hdl --workspace tmp/ao486_ws --keep-workspace
+
+# Emit import diagnostics/report JSON
+rhdl examples ao486 import --out examples/ao486/hdl --strategy tree --no-fallback --report tmp/ao486_report.json
+
+# Run bounded parity checks
+rhdl examples ao486 parity
+
+# Run full AO486 verification bundle
+rhdl examples ao486 verify
+```
+
+### `import` options
+
+| Option | Description |
+|--------|-------------|
+| `--source FILE` | Override source Verilog path (default: `examples/ao486/reference/rtl/system.v`) |
+| `--out DIR` | Output directory for raised DSL (required) |
+| `--workspace DIR` | Workspace directory for intermediate artifacts |
+| `--report FILE` | Write AO486 import report JSON to this path |
+| `--top NAME` | Top module name override (default: `system`) |
+| `--strategy STRATEGY` | Import strategy: `stubbed` (default) or `tree` (attempts RTL-tree import) |
+| `--[no-]fallback` | For `tree` strategy, fallback to `stubbed` if CIRCT import fails (default: enabled) |
+| `--[no-]maintain-directory-structure` | Mirror source Verilog directory structure in output DSL paths (default: enabled) |
+| `--keep-workspace` | Keep workspace artifacts after import |
+| `--[no-]clean` | Clean existing output directory contents before writing (default: enabled) |
 
 ---
 

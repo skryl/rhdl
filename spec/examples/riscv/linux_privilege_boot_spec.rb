@@ -129,10 +129,10 @@ end
 
 RSpec.describe 'RISC-V Linux privilege boot compatibility', timeout: 30 do
   backends = {
-    jit: RHDL::Codegen::IR::IR_JIT_AVAILABLE,
-    interpreter: RHDL::Codegen::IR::IR_INTERPRETER_AVAILABLE
+    jit: RHDL::Sim::Native::IR::JIT_AVAILABLE,
+    interpreter: RHDL::Sim::Native::IR::INTERPRETER_AVAILABLE
   }
-  backends[:compiler] = RHDL::Codegen::IR::IR_COMPILER_AVAILABLE if ENV['RHDL_LINUX_INCLUDE_COMPILER'] == '1'
+  backends[:compiler] = RHDL::Sim::Native::IR::COMPILER_AVAILABLE if ENV['RHDL_LINUX_INCLUDE_COMPILER'] == '1'
 
   backends.each do |backend, available|
     context "single-cycle on #{backend}" do

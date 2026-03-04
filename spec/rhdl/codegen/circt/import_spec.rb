@@ -497,6 +497,38 @@ RSpec.describe RHDL::Codegen::CIRCT::Import do
       expect(result.diagnostics.map(&:message).join("\n")).to include('Unsupported MLIR line, skipped')
     end
 
+    it 'treats unsupported lines as errors in strict mode' do
+      mlir = <<~MLIR
+        hw.module @strict_mod(%a: i1) -> (y: i1) {
+          comb.unknown %a : i1
+          hw.output %a : i1
+        }
+      MLIR
+
+      result = described_class.from_mlir(mlir, strict: true)
+      expect(result.success?).to be(false)
+      expect(result.diagnostics.any? { |d| d.op == 'parser' && d.severity.to_s == 'error' }).to be(true)
+      expect(result.diagnostics.map(&:message).join("\n")).to include('Unsupported MLIR line, skipped')
+    end
+
+    it 'builds an operation census from MLIR text' do
+      mlir = <<~MLIR
+        hw.module @census(%a: i8, %b: i8) -> (y: i8) {
+          %sum = comb.add %a, %b : i8
+          %clk_sig = llhd.sig name "clk_sig" %a : i8
+          %sampled = llhd.prb %clk_sig : i8
+          hw.output %sampled : i8
+        }
+      MLIR
+
+      census = described_class.op_census(mlir)
+      expect(census['hw.module']).to eq(1)
+      expect(census['comb.add']).to eq(1)
+      expect(census['llhd.sig']).to eq(1)
+      expect(census['llhd.prb']).to eq(1)
+      expect(census['hw.output']).to eq(1)
+    end
+
     it 'reports errors for invalid ports and unterminated modules' do
       mlir = <<~MLIR
         hw.module @broken(%a i8) -> (y: i8) {
@@ -544,6 +576,269 @@ RSpec.describe RHDL::Codegen::CIRCT::Import do
       expect(mod.assigns.first.expr).to be_a(RHDL::Codegen::CIRCT::IR::BinaryOp)
       expect(mod.assigns.first.expr.op).to eq(:+)
       expect(mod.assigns.first.expr.width).to eq(8)
+    end
+
+    it 'preserves module body parsing across nested llhd.process regions' do
+      mlir = <<~MLIR
+        hw.module @proc_wrap(%a: i1) -> (y: i1) {
+          %false = hw.constant false
+          %sig = llhd.sig %false : i1
+          llhd.process {
+          ^bb0:
+            %t0 = llhd.constant_time <0s, 1ns>
+            llhd.drv %sig, %a after %t0 : i1
+            llhd.wait %t0, ^bb0
+          }
+          %sample = llhd.prb %sig : i1
+          hw.output %sample : i1
+        }
+
+        hw.module @after(%a: i1) -> (y: i1) {
+          hw.output %a : i1
+        }
+      MLIR
+
+      result = described_class.from_mlir(mlir, strict: true)
+      expect(result.success?).to be(true)
+      expect(result.modules.map(&:name)).to eq(%w[proc_wrap after])
+      expect(result.module_spans['proc_wrap']).not_to be_nil
+      expect(result.module_spans['after']).not_to be_nil
+
+      first_mod = result.modules.find { |m| m.name == 'proc_wrap' }
+      expect(first_mod.assigns.map(&:target)).to include('sig', 'y')
+    end
+
+    it 'imports variadic comb.or/comb.and operations' do
+      mlir = <<~MLIR
+        hw.module @variadic_logic(%a: i1, %b: i1, %c: i1) -> (yo: i1, ya: i1) {
+          %orv = comb.or %a, %b, %c : i1
+          %andv = comb.and %a, %b, %c : i1
+          hw.output %orv, %andv : i1, i1
+        }
+      MLIR
+
+      result = described_class.from_mlir(mlir, strict: true)
+      expect(result.success?).to be(true)
+      mod = result.modules.first
+
+      by_target = mod.assigns.each_with_object({}) { |assign, h| h[assign.target] = assign.expr }
+      expect(by_target['yo']).to be_a(RHDL::Codegen::CIRCT::IR::BinaryOp)
+      expect(by_target['yo'].op).to eq(:|)
+      expect(by_target['ya']).to be_a(RHDL::Codegen::CIRCT::IR::BinaryOp)
+      expect(by_target['ya'].op).to eq(:&)
+    end
+
+    it 'parses comb.icmp operands when rhs has an inline attribute dict' do
+      mlir = <<~MLIR
+        hw.module @icmp_rhs_attr(%a: i8) -> (y: i1) {
+          %c-16_i8 = hw.constant -16 : i8
+          %cmp = comb.icmp eq %a, %c-16_i8 {sv.namehint = "cmp_rhs"} : i8
+          hw.output %cmp : i1
+        }
+      MLIR
+
+      result = described_class.from_mlir(mlir, strict: true)
+      expect(result.success?).to be(true)
+      assign = result.modules.first.assigns.first
+      expect(assign.target).to eq('y')
+      expect(assign.expr).to be_a(RHDL::Codegen::CIRCT::IR::BinaryOp)
+      expect(assign.expr.op).to eq(:==)
+    end
+
+    it 'accepts untyped boolean hw.constant forms' do
+      mlir = <<~MLIR
+        hw.module @bool_const_untyped() -> (y: i1) {
+          %false = hw.constant false
+          hw.output %false : i1
+        }
+      MLIR
+
+      result = described_class.from_mlir(mlir, strict: true)
+      expect(result.success?).to be(true)
+      assign = result.modules.first.assigns.first
+      expect(assign.target).to eq('y')
+      expect(assign.expr).to be_a(RHDL::Codegen::CIRCT::IR::Literal)
+      expect(assign.expr.value).to eq(0)
+      expect(assign.expr.width).to eq(1)
+    end
+
+    it 'fails strict closure checks for unresolved instance targets when importing a top' do
+      mlir = <<~MLIR
+        hw.module @top(%a: i1) -> (y: i1) {
+          %child_y = hw.instance "u_child" @child(a: %a: i1) -> (y: i1)
+          hw.output %child_y : i1
+        }
+      MLIR
+
+      result = described_class.from_mlir(mlir, strict: true, top: 'top')
+      expect(result.success?).to be(false)
+      expect(
+        result.diagnostics.any? do |diag|
+          diag.op == 'import.closure' && diag.message.include?('Unresolved instance target @child')
+        end
+      ).to be(true)
+    end
+
+    it 'allows unresolved instance targets declared as extern modules' do
+      mlir = <<~MLIR
+        hw.module @top(%a: i1) -> (y: i1) {
+          %child_y = hw.instance "u_child" @child(a: %a: i1) -> (y: i1)
+          hw.output %child_y : i1
+        }
+      MLIR
+
+      result = described_class.from_mlir(mlir, strict: true, top: 'top', extern_modules: ['child'])
+      expect(result.success?).to be(true)
+      expect(result.diagnostics.any? { |diag| diag.op == 'import.closure' }).to be(false)
+    end
+
+    it 'ignores dbg.variable lines as non-semantic metadata' do
+      mlir = <<~MLIR
+        hw.module @dbg_ignored(%a: i1) -> (y: i1) {
+          dbg.variable "STATE_IDLE", %a : i1
+          hw.output %a : i1
+        }
+      MLIR
+
+      result = described_class.from_mlir(mlir, strict: true)
+      expect(result.success?).to be(true)
+      expect(result.diagnostics.any? { |diag| diag.op == 'parser' }).to be(false)
+    end
+
+    it 'parses attr-bearing comb.mux and comb.extract operations' do
+      mlir = <<~MLIR
+        hw.module @attr_ops(%sel: i1, %a: i8, %b: i8) -> (y: i1) {
+          %m = comb.mux %sel, %a, %b {sv.namehint = "mx"} : i8
+          %bit = comb.extract %m from 3 {sv.namehint = "bit3"} : (i8) -> i1
+          hw.output %bit : i1
+        }
+      MLIR
+
+      result = described_class.from_mlir(mlir, strict: true)
+      expect(result.success?).to be(true), result.diagnostics.map(&:message).join("\n")
+      expect(result.diagnostics.any? { |diag| diag.op == 'parser' }).to be(false)
+      assign = result.modules.first.assigns.first
+      expect(assign.expr).to be_a(RHDL::Codegen::CIRCT::IR::Slice)
+    end
+
+    it 'parses attr-bearing llhd.prb operations' do
+      mlir = <<~MLIR
+        hw.module @attr_prb(%a: i8) -> (y: i8) {
+          %sig = llhd.sig %a : i8
+          %sample = llhd.prb %sig {sv.namehint = "sample"} : i8
+          hw.output %sample : i8
+        }
+      MLIR
+
+      result = described_class.from_mlir(mlir, strict: true)
+      expect(result.success?).to be(true), result.diagnostics.map(&:message).join("\n")
+      expect(result.diagnostics.any? { |diag| diag.op == 'parser' }).to be(false)
+      assign = result.modules.first.assigns.first
+      expect(assign.expr).to be_a(RHDL::Codegen::CIRCT::IR::Signal)
+      expect(assign.expr.name).to eq('sig')
+    end
+
+    it 'parses comb.replicate by lowering to concat expression' do
+      mlir = <<~MLIR
+        hw.module @replicate(%a: i1) -> (y: i4) {
+          %rep = comb.replicate %a : (i1) -> i4
+          hw.output %rep : i4
+        }
+      MLIR
+
+      result = described_class.from_mlir(mlir, strict: true)
+      expect(result.success?).to be(true), result.diagnostics.map(&:message).join("\n")
+      expect(result.diagnostics.any? { |diag| diag.op == 'parser' }).to be(false)
+      expr = result.modules.first.assigns.first.expr
+      expect(expr).to be_a(RHDL::Codegen::CIRCT::IR::Concat)
+      expect(expr.parts.length).to eq(4)
+    end
+
+    it 'parses variadic comb.add as folded binary additions' do
+      mlir = <<~MLIR
+        hw.module @variadic_add(%a: i8, %b: i8, %c: i8) -> (y: i8) {
+          %sum = comb.add %a, %b, %c : i8
+          hw.output %sum : i8
+        }
+      MLIR
+
+      result = described_class.from_mlir(mlir, strict: true)
+      expect(result.success?).to be(true), result.diagnostics.map(&:message).join("\n")
+      expect(result.diagnostics.none? { |diag| diag.message.include?('Unsupported variadic comb.add') }).to be(true)
+      expr = result.modules.first.assigns.first.expr
+      expect(expr).to be_a(RHDL::Codegen::CIRCT::IR::BinaryOp)
+      expect(expr.op).to eq(:+)
+    end
+
+    it 'supports ceq/cne comb.icmp predicates without fallback diagnostics' do
+      mlir = <<~MLIR
+        hw.module @ceq_ops(%a: i8, %b: i8) -> (yeq: i1, yne: i1) {
+          %eqv = comb.icmp ceq %a, %b : i8
+          %nev = comb.icmp cne %a, %b : i8
+          hw.output %eqv, %nev : i1, i1
+        }
+      MLIR
+
+      result = described_class.from_mlir(mlir, strict: true)
+      expect(result.success?).to be(true), result.diagnostics.map(&:message).join("\n")
+      expect(result.diagnostics.none? { |diag| diag.op == 'comb.icmp' && diag.message.include?('Unsupported') }).to be(true)
+      by_target = result.modules.first.assigns.each_with_object({}) { |assign, h| h[assign.target] = assign.expr }
+      expect(by_target['yeq'].op).to eq(:==)
+      expect(by_target['yne'].op).to eq(:'!=')
+    end
+
+    it 'parses hw.array_create and hw.array_get with dynamic index' do
+      mlir = <<~MLIR
+        hw.module @array_get(%a: i8, %b: i8, %idx: i1) -> (y: i8) {
+          %arr = hw.array_create %a, %b : i8
+          %sel = hw.array_get %arr[%idx] : !hw.array<2xi8>, i1
+          hw.output %sel : i8
+        }
+      MLIR
+
+      result = described_class.from_mlir(mlir, strict: true)
+      expect(result.success?).to be(true), result.diagnostics.map(&:message).join("\n")
+      expect(result.diagnostics.any? { |diag| diag.op == 'parser' }).to be(false)
+      expect(result.modules.first.assigns.first.expr).to be_a(RHDL::Codegen::CIRCT::IR::Mux)
+    end
+
+    it 'parses hw.bitcast int<->array forms and llhd.sig.array_get' do
+      mlir = <<~MLIR
+        hw.module @array_llhd(%a: i16, %idx: i1) -> (y: i8, z: i16) {
+          %arr = hw.bitcast %a : (i16) -> !hw.array<2xi8>
+          %back = hw.bitcast %arr : (!hw.array<2xi8>) -> i16
+          %sig = llhd.sig %arr : !hw.array<2xi8>
+          %elem_sig = llhd.sig.array_get %sig[%idx] : <!hw.array<2xi8>>
+          %elem = llhd.prb %elem_sig : i8
+          hw.output %elem, %back : i8, i16
+        }
+      MLIR
+
+      result = described_class.from_mlir(mlir, strict: true)
+      expect(result.success?).to be(true), result.diagnostics.map(&:message).join("\n")
+      expect(result.diagnostics.any? { |diag| diag.op == 'parser' }).to be(false)
+      by_target = result.modules.first.assigns.each_with_object({}) { |assign, h| h[assign.target] = assign.expr }
+      expect(by_target['y']).to be_a(RHDL::Codegen::CIRCT::IR::Mux)
+      expect(by_target['z']).to be_a(RHDL::Codegen::CIRCT::IR::Concat)
+    end
+
+    it 'resolves forward SSA references used before definition' do
+      mlir = <<~MLIR
+        hw.module @forward_ref(%a: i8, %b: i8) -> (y: i1) {
+          %use = comb.and %cmp, %c1_i1 : i1
+          %c1_i1 = hw.constant 1 : i1
+          %cmp = comb.icmp eq %a, %b : i8
+          hw.output %use : i1
+        }
+      MLIR
+
+      result = described_class.from_mlir(mlir, strict: true)
+      expect(result.success?).to be(true), result.diagnostics.map(&:message).join("\n")
+
+      expr = result.modules.first.assigns.first.expr
+      expect(expr).to be_a(RHDL::Codegen::CIRCT::IR::BinaryOp)
+      expect(expr.left).to be_a(RHDL::Codegen::CIRCT::IR::BinaryOp)
+      expect(expr.left.op).to eq(:==)
     end
   end
 end

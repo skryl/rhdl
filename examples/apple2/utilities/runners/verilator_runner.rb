@@ -432,8 +432,9 @@ module RHDL
 
         # Export Apple2 to Verilog
         verilog_file = File.join(VERILOG_DIR, 'apple2.v')
-        verilog_codegen = File.expand_path('../../../../lib/rhdl/codegen/verilog/verilog.rb', __dir__)
-        export_deps = [__FILE__, verilog_codegen].select { |p| File.exist?(p) }
+        verilog_codegen = File.expand_path('../../../../lib/rhdl/dsl/codegen.rb', __dir__)
+        circt_codegen = File.expand_path('../../../../lib/rhdl/codegen/circt/tooling.rb', __dir__)
+        export_deps = [__FILE__, verilog_codegen, circt_codegen].select { |p| File.exist?(p) }
         needs_export = !File.exist?(verilog_file) ||
                        export_deps.any? { |p| File.mtime(p) > File.mtime(verilog_file) }
 

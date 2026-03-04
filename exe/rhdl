@@ -19,7 +19,7 @@ def show_help
       export        Export components to Verilog
       import        Import Verilog/CIRCT into RHDL DSL
       gates         Gate-level synthesis
-      examples      Run example emulators (mos6502, apple2)
+      examples      Run example emulators (mos6502, apple2, gameboy, riscv, ao486)
       disk          Disk image utilities for Apple II
       generate      Generate all output files (diagrams + HDL exports)
       clean         Clean all generated files
@@ -204,6 +204,9 @@ def handle_import(args)
     tool: 'circt-translate',
     tool_args: [],
     raise_to_dsl: true,
+    strict: true,
+    extern_modules: [],
+    report: nil,
     top: nil
   }
 
@@ -231,6 +234,9 @@ def handle_import(args)
     opts.on('--tool-arg ARG', 'Verilog mode: extra argument for external tool (repeatable)') do |v|
       options[:tool_args] << v
     end
+    opts.on('--[no-]strict', 'Enable strict no-skip import and strict raise checks (default: true)') { |v| options[:strict] = v }
+    opts.on('--extern NAME', 'Declare unresolved external module (repeatable)') { |v| options[:extern_modules] << v }
+    opts.on('--report FILE', 'Write import report JSON (default: <out>/import_report.json)') { |v| options[:report] = v }
     opts.on('--[no-]raise', 'Raise CIRCT MLIR into RHDL DSL (default: true)') { |v| options[:raise_to_dsl] = v }
     opts.on('--top NAME', 'Optional top module name for CIRCT->DSL raise') { |v| options[:top] = v }
     opts.on('-h', '--help', 'Show this help') do
@@ -377,6 +383,7 @@ def show_examples_help
         apple2        Apple II HDL emulator (cycle-accurate, supports netlist mode)
         gameboy       Game Boy HDL emulator (cycle-accurate with terminal renderers)
         riscv         RISC-V ISA emulator (with xv6 and interactive debugger support)
+        ao486         AO486 CIRCT import/parity workflow
 
       Examples:
         rhdl examples mos6502 --demo
@@ -385,6 +392,7 @@ def show_examples_help
         rhdl examples apple2 --mode netlist --sim jit --demo
         rhdl examples gameboy --demo
         rhdl examples riscv --xv6
+        rhdl examples ao486 import --out examples/ao486/hdl
 
     Run 'rhdl examples <subcommand> --help' for more information.
   HELP
@@ -593,6 +601,8 @@ def handle_examples(args)
     handle_examples_gameboy(args)
   when 'riscv'
     handle_examples_riscv(args)
+  when 'ao486'
+    handle_examples_ao486(args)
   when '-h', '--help', 'help', nil
     show_examples_help
     exit 0
@@ -602,6 +612,11 @@ def handle_examples(args)
     show_examples_help
     exit 1
   end
+end
+
+def handle_examples_ao486(args)
+  script = File.expand_path('../examples/ao486/bin/ao486', __dir__)
+  exec(script, *args)
 end
 
 def handle_generate(args)

@@ -85,6 +85,10 @@ def load_cli_tasks
   require_relative 'lib/rhdl/cli'
 end
 
+def load_ao486_tasks
+  require_relative 'examples/ao486/utilities/tasks/ao486_task'
+end
+
 # =============================================================================
 # Development Tasks
 # =============================================================================
@@ -142,6 +146,7 @@ SPEC_PATHS = {
   all: 'spec/',
   lib: 'spec/rhdl/',
   hdl: 'spec/rhdl/hdl/',
+  ao486: 'spec/examples/ao486/',
   mos6502: 'spec/examples/mos6502/',
   apple2: 'spec/examples/apple2/',
   riscv: 'spec/examples/riscv/'
@@ -151,7 +156,7 @@ SPEC_PATHS = {
 begin
   require "rspec/core/rake_task"
 
-  desc "Run specs by scope (all, lib, hdl, mos6502, apple2, riscv)"
+  desc "Run specs by scope (all, lib, hdl, ao486, mos6502, apple2, riscv)"
   task :spec, [:scope] => 'build:setup:binstubs' do |_, args|
     scope = (args[:scope] || 'all').to_sym
 
@@ -159,6 +164,7 @@ begin
       all: SPEC_PATHS[:all],
       lib: SPEC_PATHS[:lib],
       hdl: SPEC_PATHS[:hdl],
+      ao486: SPEC_PATHS[:ao486],
       mos6502: SPEC_PATHS[:mos6502],
       apple2: SPEC_PATHS[:apple2],
       riscv: SPEC_PATHS[:riscv]
@@ -167,7 +173,7 @@ begin
 
     if pattern.nil?
       puts "Unknown spec scope '#{scope}'."
-      puts "Available scopes: all, lib, hdl, mos6502, apple2, riscv"
+      puts "Available scopes: all, lib, hdl, ao486, mos6502, apple2, riscv"
       exit 1
     end
 
@@ -176,7 +182,7 @@ begin
   
   namespace :spec do
     # Benchmark tasks
-    desc "Benchmark specs by scope (all, lib, hdl, mos6502, apple2, riscv)"
+    desc "Benchmark specs by scope (all, lib, hdl, ao486, mos6502, apple2, riscv)"
     task :bench, [:scope, :count] => 'build:setup:binstubs' do |_, args|
       load_cli_tasks
 
@@ -187,6 +193,7 @@ begin
         all: SPEC_PATHS[:all],
         lib: SPEC_PATHS[:lib],
         hdl: SPEC_PATHS[:hdl],
+        ao486: SPEC_PATHS[:ao486],
         mos6502: SPEC_PATHS[:mos6502],
         apple2: SPEC_PATHS[:apple2],
         riscv: SPEC_PATHS[:riscv]
@@ -195,7 +202,7 @@ begin
 
       if pattern.nil?
         puts "Unknown spec benchmark scope '#{scope}'."
-        puts "Available scopes: all, lib, hdl, mos6502, apple2, riscv"
+        puts "Available scopes: all, lib, hdl, ao486, mos6502, apple2, riscv"
         exit 1
       end
 
@@ -222,13 +229,14 @@ begin
   end
 
 rescue LoadError
-  desc "Run specs by scope (all, lib, hdl, mos6502, apple2, riscv)"
+  desc "Run specs by scope (all, lib, hdl, ao486, mos6502, apple2, riscv)"
   task :spec, [:scope] => 'build:setup:binstubs' do |_, args|
     scope = (args[:scope] || 'all').to_sym
     patterns = {
       all: SPEC_PATHS[:all],
       lib: SPEC_PATHS[:lib],
       hdl: SPEC_PATHS[:hdl],
+      ao486: SPEC_PATHS[:ao486],
       mos6502: SPEC_PATHS[:mos6502],
       apple2: SPEC_PATHS[:apple2],
       riscv: SPEC_PATHS[:riscv]
@@ -237,7 +245,7 @@ rescue LoadError
 
     if pattern.nil?
       puts "Unknown spec scope '#{scope}'."
-      puts "Available scopes: all, lib, hdl, mos6502, apple2, riscv"
+      puts "Available scopes: all, lib, hdl, ao486, mos6502, apple2, riscv"
       exit 1
     end
 
@@ -246,7 +254,7 @@ rescue LoadError
 
   namespace :spec do
     # Benchmark tasks
-    desc "Benchmark specs by scope (all, lib, hdl, mos6502, apple2, riscv)"
+    desc "Benchmark specs by scope (all, lib, hdl, ao486, mos6502, apple2, riscv)"
     task :bench, [:scope, :count] do |_, args|
       load_cli_tasks
 
@@ -257,6 +265,7 @@ rescue LoadError
         all: SPEC_PATHS[:all],
         lib: SPEC_PATHS[:lib],
         hdl: SPEC_PATHS[:hdl],
+        ao486: SPEC_PATHS[:ao486],
         mos6502: SPEC_PATHS[:mos6502],
         apple2: SPEC_PATHS[:apple2],
         riscv: SPEC_PATHS[:riscv]
@@ -265,7 +274,7 @@ rescue LoadError
 
       if pattern.nil?
         puts "Unknown spec benchmark scope '#{scope}'."
-        puts "Available scopes: all, lib, hdl, mos6502, apple2, riscv"
+        puts "Available scopes: all, lib, hdl, ao486, mos6502, apple2, riscv"
         exit 1
       end
 
@@ -292,6 +301,25 @@ rescue LoadError
   end
 end
 
+# Convenience aliases:
+#   rake spec:lib, spec:hdl, spec:ao486, spec:mos6502, spec:apple2, spec:riscv
+namespace :spec do
+  {
+    lib: 'lib',
+    hdl: 'hdl',
+    ao486: 'ao486',
+    mos6502: 'mos6502',
+    apple2: 'apple2',
+    riscv: 'riscv'
+  }.each do |name, scope|
+    desc "Run #{scope} specs"
+    task name => 'build:setup:binstubs' do
+      Rake::Task[:spec].reenable
+      Rake::Task[:spec].invoke(scope)
+    end
+  end
+end
+
 # =============================================================================
 # Parallel Test Tasks (pspec namespace)
 # =============================================================================
@@ -314,13 +342,14 @@ begin
     sh "RUBYOPT=-W0 #{parallel_rspec_cmd} --quiet --test-options '--format progress' #{args}"
   end
 
-  desc "Run specs in parallel by scope (all, lib, hdl, mos6502, apple2, riscv)"
+  desc "Run specs in parallel by scope (all, lib, hdl, ao486, mos6502, apple2, riscv)"
   task :pspec, [:scope] => 'build:setup:binstubs' do |_, args|
     scope = (args[:scope] || 'all').to_sym
     patterns = {
       all: SPEC_PATHS[:all],
       lib: SPEC_PATHS[:lib],
       hdl: SPEC_PATHS[:hdl],
+      ao486: SPEC_PATHS[:ao486],
       mos6502: SPEC_PATHS[:mos6502],
       apple2: SPEC_PATHS[:apple2],
       riscv: SPEC_PATHS[:riscv]
@@ -329,7 +358,7 @@ begin
 
     if pattern.nil?
       puts "Unknown pspec scope '#{scope}'."
-      puts "Available scopes: all, lib, hdl, mos6502, apple2, riscv"
+      puts "Available scopes: all, lib, hdl, ao486, mos6502, apple2, riscv"
       exit 1
     end
 
@@ -370,6 +399,7 @@ rescue LoadError
       all: SPEC_PATHS[:all],
       lib: SPEC_PATHS[:lib],
       hdl: SPEC_PATHS[:hdl],
+      ao486: SPEC_PATHS[:ao486],
       mos6502: SPEC_PATHS[:mos6502],
       apple2: SPEC_PATHS[:apple2],
       riscv: SPEC_PATHS[:riscv]
@@ -377,10 +407,29 @@ rescue LoadError
 
     if patterns[scope].nil?
       puts "Unknown pspec scope '#{scope}'."
-      puts "Available scopes: all, lib, hdl, mos6502, apple2, riscv"
+      puts "Available scopes: all, lib, hdl, ao486, mos6502, apple2, riscv"
     end
 
     abort "parallel_tests gem not installed. Run: bundle install"
+  end
+end
+
+# Convenience aliases:
+#   rake pspec:lib, pspec:hdl, pspec:ao486, pspec:mos6502, pspec:apple2, pspec:riscv
+namespace :pspec do
+  {
+    lib: 'lib',
+    hdl: 'hdl',
+    ao486: 'ao486',
+    mos6502: 'mos6502',
+    apple2: 'apple2',
+    riscv: 'riscv'
+  }.each do |name, scope|
+    desc "Run #{scope} specs in parallel"
+    task name => 'build:setup:binstubs' do
+      Rake::Task[:pspec].reenable
+      Rake::Task[:pspec].invoke(scope)
+    end
   end
 end
 
@@ -469,6 +518,56 @@ namespace :bench do
       puts "Available scopes: apple2, riscv"
       exit 1
     end
+  end
+end
+
+# AO486 CIRCT import/parity tasks
+namespace :ao486 do
+  desc "Import AO486 rtl/system.v via CIRCT and raise DSL to output_dir (required arg)"
+  task :import, [:output_dir, :workspace_dir, :strategy, :fallback, :maintain_directory_structure, :clean] do |_t, args|
+    load_ao486_tasks
+    if args[:output_dir].to_s.strip.empty?
+      abort 'ao486:import requires output_dir. Usage: rake "ao486:import[output_dir,workspace_dir,strategy,fallback,maintain_directory_structure,clean]"'
+    end
+
+    import_strategy = args[:strategy]&.to_sym
+    fallback_to_stubbed = if args[:fallback].nil?
+      true
+    else
+      !%w[0 false no off].include?(args[:fallback].to_s.strip.downcase)
+    end
+    maintain_directory_structure = if args[:maintain_directory_structure].nil?
+                                     true
+                                   else
+                                     !%w[0 false no off].include?(args[:maintain_directory_structure].to_s.strip.downcase)
+                                   end
+    clean_output = if args[:clean].nil?
+                     true
+                   else
+                     !%w[0 false no off].include?(args[:clean].to_s.strip.downcase)
+                   end
+
+    RHDL::Examples::AO486::Tasks::AO486Task.new(
+      action: :import,
+      output_dir: args[:output_dir],
+      workspace_dir: args[:workspace_dir],
+      import_strategy: import_strategy,
+      fallback_to_stubbed: fallback_to_stubbed,
+      maintain_directory_structure: maintain_directory_structure,
+      clean_output: clean_output
+    ).run
+  end
+
+  desc "Run AO486 bounded parity harness (Verilog/Verilator vs raised RHDL/IR)"
+  task :parity => 'build:setup:binstubs' do
+    load_ao486_tasks
+    RHDL::Examples::AO486::Tasks::AO486Task.new(action: :parity).run
+  end
+
+  desc "Run AO486 import/parity verification suite"
+  task :verify => 'build:setup:binstubs' do
+    load_ao486_tasks
+    RHDL::Examples::AO486::Tasks::AO486Task.new(action: :verify).run
   end
 end
 

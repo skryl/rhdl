@@ -115,6 +115,158 @@ RSpec.describe RHDL::Codegen::CIRCT::Raise do
       expect(source).to include('parameter :WIDTH, default: 8')
       expect(result.diagnostics.any? { |d| d.op == 'raise.module_params' }).to be(false)
     end
+
+    it 'lowers expression-valued instance inputs through generated bridge wires' do
+      child = ir::ModuleOp.new(
+        name: 'child',
+        ports: [
+          ir::Port.new(name: :a, direction: :in, width: 8),
+          ir::Port.new(name: :y, direction: :out, width: 8)
+        ],
+        nets: [],
+        regs: [],
+        assigns: [ir::Assign.new(target: :y, expr: ir::Signal.new(name: :a, width: 8))],
+        processes: [],
+        instances: [],
+        memories: [],
+        write_ports: [],
+        sync_read_ports: [],
+        parameters: {}
+      )
+
+      top = ir::ModuleOp.new(
+        name: 'top_expr_input',
+        ports: [
+          ir::Port.new(name: :a, direction: :in, width: 8),
+          ir::Port.new(name: :b, direction: :in, width: 8),
+          ir::Port.new(name: :y, direction: :out, width: 8)
+        ],
+        nets: [ir::Net.new(name: 'u_y', width: 8)],
+        regs: [],
+        assigns: [ir::Assign.new(target: :y, expr: ir::Signal.new(name: 'u_y', width: 8))],
+        processes: [],
+        instances: [
+          ir::Instance.new(
+            name: 'u',
+            module_name: 'child',
+            connections: [
+              ir::PortConnection.new(
+                port_name: :a,
+                signal: ir::BinaryOp.new(
+                  op: :+,
+                  left: ir::Signal.new(name: :a, width: 8),
+                  right: ir::Signal.new(name: :b, width: 8),
+                  width: 8
+                ),
+                direction: :in
+              ),
+              ir::PortConnection.new(port_name: :y, signal: 'u_y', direction: :out)
+            ],
+            parameters: {}
+          )
+        ],
+        memories: [],
+        write_ports: [],
+        sync_read_ports: [],
+        parameters: {}
+      )
+
+      result = described_class.to_sources([child, top], top: 'top_expr_input', strict: true)
+      expect(result.success?).to be(true), result.diagnostics.map(&:message).join("\n")
+      expect(result.diagnostics.any? { |d| d.op == 'raise.structure' }).to be(false)
+
+      source = result.sources.fetch('top_expr_input')
+      expect(source).to include('wire :u__a__bridge, width: 8')
+      expect(source).to include('u__a__bridge <= (a + b)')
+      expect(source).to include('port :u__a__bridge => [:u, :a]')
+    end
+
+    it 'treats structurally-driven outputs as valid without placeholders' do
+      child = ir::ModuleOp.new(
+        name: 'child_passthrough',
+        ports: [
+          ir::Port.new(name: :a, direction: :in, width: 8),
+          ir::Port.new(name: :y, direction: :out, width: 8)
+        ],
+        nets: [],
+        regs: [],
+        assigns: [ir::Assign.new(target: :y, expr: ir::Signal.new(name: :a, width: 8))],
+        processes: [],
+        instances: [],
+        memories: [],
+        write_ports: [],
+        sync_read_ports: [],
+        parameters: {}
+      )
+
+      top = ir::ModuleOp.new(
+        name: 'top_struct_only',
+        ports: [
+          ir::Port.new(name: :a, direction: :in, width: 8),
+          ir::Port.new(name: :y, direction: :out, width: 8)
+        ],
+        nets: [],
+        regs: [],
+        assigns: [],
+        processes: [],
+        instances: [
+          ir::Instance.new(
+            name: 'u',
+            module_name: 'child_passthrough',
+            connections: [
+              ir::PortConnection.new(port_name: :a, signal: 'a', direction: :in),
+              ir::PortConnection.new(port_name: :y, signal: 'y', direction: :out)
+            ],
+            parameters: {}
+          )
+        ],
+        memories: [],
+        write_ports: [],
+        sync_read_ports: [],
+        parameters: {}
+      )
+
+      result = described_class.to_sources([child, top], top: 'top_struct_only', strict: true)
+      expect(result.success?).to be(true), result.diagnostics.map(&:message).join("\n")
+      expect(result.diagnostics.any? { |d| d.op == 'raise.behavior' }).to be(false)
+      source = result.sources.fetch('top_struct_only')
+      expect(source).to include('port [:u, :y] => :y')
+      expect(source).not_to include('y <= 0')
+    end
+
+    it 'pretty-prints long logic assignments in behavior blocks' do
+      input_names = (1..10).map { |idx| "input_signal_#{idx}" }
+      ports = input_names.map { |name| ir::Port.new(name: name, direction: :in, width: 32) }
+      ports << ir::Port.new(name: :y, direction: :out, width: 32)
+
+      expr = input_names.drop(1).reduce(ir::Signal.new(name: input_names.first, width: 32)) do |lhs, name|
+        ir::BinaryOp.new(
+          op: :+,
+          left: lhs,
+          right: ir::Signal.new(name: name, width: 32),
+          width: 32
+        )
+      end
+
+      mod = ir::ModuleOp.new(
+        name: 'long_logic',
+        ports: ports,
+        nets: [],
+        regs: [],
+        assigns: [ir::Assign.new(target: :y, expr: expr)],
+        processes: [],
+        instances: [],
+        memories: [],
+        write_ports: [],
+        sync_read_ports: [],
+        parameters: {}
+      )
+
+      result = described_class.to_sources(mod, top: 'long_logic')
+      expect(result.success?).to be(true)
+      source = result.sources.fetch('long_logic')
+      expect(source).to match(/y <=\n\s+\(/)
+    end
   end
 
   describe '.to_components' do
@@ -155,6 +307,30 @@ RSpec.describe RHDL::Codegen::CIRCT::Raise do
       expect(result.components.keys).to include('top', 'child')
       expect(namespace.const_defined?(:Top, false)).to be(true)
       expect(namespace.const_defined?(:Child, false)).to be(true)
+    end
+
+    it 'supports uppercase signal names in raised behavior when re-emitting MLIR' do
+      mod = ir::ModuleOp.new(
+        name: 'caps',
+        ports: [ir::Port.new(name: :DDRAM_CLK, direction: :out, width: 1)],
+        nets: [],
+        regs: [],
+        assigns: [ir::Assign.new(target: :DDRAM_CLK, expr: ir::Literal.new(value: 0, width: 1))],
+        processes: [],
+        instances: [],
+        memories: [],
+        write_ports: [],
+        sync_read_ports: [],
+        parameters: {}
+      )
+
+      result = described_class.to_components(mod, namespace: Module.new, top: 'caps')
+      expect(result.success?).to be(true)
+      expect(result.components).to include('caps')
+
+      emitted_mlir = nil
+      expect { emitted_mlir = result.components.fetch('caps').to_ir(top_name: 'caps') }.not_to raise_error
+      expect(emitted_mlir).to include('hw.module @caps')
     end
   end
 
@@ -198,7 +374,45 @@ RSpec.describe RHDL::Codegen::CIRCT::Raise do
       expect(generated).to include('y <= (a + b)')
     end
 
-    it 'emits placeholder output assignments when output recovery is partial' do
+    it 'preserves DSL <= assignment statements when format mode is enabled' do
+      mod = ir::ModuleOp.new(
+        name: 'formatted_assign',
+        ports: [
+          ir::Port.new(name: :a, direction: :in, width: 8),
+          ir::Port.new(name: :b, direction: :in, width: 8),
+          ir::Port.new(name: :y, direction: :out, width: 8)
+        ],
+        nets: [],
+        regs: [],
+        assigns: [
+          ir::Assign.new(
+            target: :y,
+            expr: ir::BinaryOp.new(
+              op: :+,
+              left: ir::Signal.new(name: :a, width: 8),
+              right: ir::Signal.new(name: :b, width: 8),
+              width: 8
+            )
+          )
+        ],
+        processes: [],
+        instances: [],
+        memories: [],
+        write_ports: [],
+        sync_read_ports: [],
+        parameters: {}
+      )
+
+      result = described_class.to_dsl(mod, out_dir: tmp_dir, top: 'formatted_assign', format: true)
+      expect(result.success?).to be(true)
+
+      generated = File.read(File.join(tmp_dir, 'formatted_assign.rb'))
+      expect(generated).to include('y <= ')
+      expect(generated).not_to match(/^\s*y\s*$/)
+      expect { Module.new.module_eval(generated, 'formatted_assign.rb', 1) }.not_to raise_error
+    end
+
+    it 'fails output recovery when assignments are missing instead of emitting placeholders' do
       mod = ir::ModuleOp.new(
         name: 'placeholder',
         ports: [ir::Port.new(name: :y, direction: :out, width: 1)],
@@ -213,12 +427,49 @@ RSpec.describe RHDL::Codegen::CIRCT::Raise do
         parameters: {}
       )
 
-      result = described_class.to_dsl(mod, out_dir: tmp_dir, top: 'placeholder')
-      expect(result.success?).to be(true)
-      expect(result.diagnostics.any? { |d| d.op == 'raise.behavior' }).to be(true)
+      result = described_class.to_dsl(mod, out_dir: tmp_dir, top: 'placeholder', strict: true)
+      expect(result.success?).to be(false)
+      expect(
+        result.diagnostics.any? do |d|
+          d.op == 'raise.behavior' && d.severity.to_s == 'error'
+        end
+      ).to be(true)
 
       generated = File.read(File.join(tmp_dir, 'placeholder.rb'))
-      expect(generated).to include('y <= 0')
+      expect(generated).not_to include('y <= 0')
+    end
+
+    it 'fails raise when expression lowering has unsupported semantics' do
+      mod = ir::ModuleOp.new(
+        name: 'unsupported_expr',
+        ports: [ir::Port.new(name: :y, direction: :out, width: 8)],
+        nets: [],
+        regs: [],
+        assigns: [
+          ir::Assign.new(
+            target: :y,
+            expr: ir::MemoryRead.new(
+              memory: :ram,
+              addr: ir::Literal.new(value: 0, width: 8),
+              width: 8
+            )
+          )
+        ],
+        processes: [],
+        instances: [],
+        memories: [],
+        write_ports: [],
+        sync_read_ports: [],
+        parameters: {}
+      )
+
+      result = described_class.to_dsl(mod, out_dir: tmp_dir, top: 'unsupported_expr', strict: true)
+      expect(result.success?).to be(false)
+      expect(
+        result.diagnostics.any? do |d|
+          d.op == 'raise.memory_read' && d.severity.to_s == 'error'
+        end
+      ).to be(true)
     end
 
     it 'returns an error diagnostic when requested top module is missing' do

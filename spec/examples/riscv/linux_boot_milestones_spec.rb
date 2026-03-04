@@ -51,7 +51,7 @@ LINUX_SHELL_MARKERS = begin
   markers.empty? ? ['# '] : markers
 end.freeze
 
-LINUX_BOOT_BACKEND = RHDL::Codegen::IR::IR_COMPILER_AVAILABLE ? :compile : nil
+LINUX_BOOT_BACKEND = RHDL::Sim::Native::IR::COMPILER_AVAILABLE ? :compile : nil
 
 RSpec.shared_examples 'linux boot milestones' do |core:, boot_cycles:, milestone_cycles:, timeout_seconds:|
   let(:runner) { RHDL::Examples::RISCV::HeadlessRunner.new(mode: :ir, sim: LINUX_BOOT_BACKEND, core: core) }

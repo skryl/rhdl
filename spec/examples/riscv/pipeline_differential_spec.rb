@@ -12,7 +12,7 @@ RSpec.describe 'RISC-V pipeline differential: OS-boot critical scenarios', timeo
   let(:asm) { RHDL::Examples::RISCV::Assembler }
 
   before(:each) do
-    skip 'IR JIT not available' unless RHDL::Codegen::IR::IR_JIT_AVAILABLE
+    skip 'IR JIT not available' unless RHDL::Sim::Native::IR::JIT_AVAILABLE
   end
 
   # -- Harness construction helpers ------------------------------------------

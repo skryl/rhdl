@@ -111,7 +111,7 @@ module RHDL
         # Generate gate-level IR
         @ir = Apple2Netlist.gate_ir
 
-        @sim = RHDL::Codegen::Netlist::NetlistSimulator.new(
+        @sim = RHDL::Sim::Native::Netlist::Simulator.new(
           @ir,
           backend: backend,
           lanes: 1,

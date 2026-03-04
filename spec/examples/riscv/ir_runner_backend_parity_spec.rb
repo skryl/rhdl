@@ -7,9 +7,9 @@ RSpec.describe 'RISC-V IR runner backend parity', timeout: 30 do
   let(:asm) { RHDL::Examples::RISCV::Assembler }
 
   backends = {
-    jit: RHDL::Codegen::IR::IR_JIT_AVAILABLE,
-    interpreter: RHDL::Codegen::IR::IR_INTERPRETER_AVAILABLE,
-    compiler: RHDL::Codegen::IR::IR_COMPILER_AVAILABLE
+    jit: RHDL::Sim::Native::IR::JIT_AVAILABLE,
+    interpreter: RHDL::Sim::Native::IR::INTERPRETER_AVAILABLE,
+    compiler: RHDL::Sim::Native::IR::COMPILER_AVAILABLE
   }
 
   backends.each do |backend, available|

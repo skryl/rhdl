@@ -9,6 +9,7 @@
 /pkg/
 /spec/reports/
 /tmp/
+**/tmp/
 *.gem
 *.rbc
 .DS_Store
@@ -95,3 +96,13 @@ web/build/verilator/*
 /examples/riscv/software/.buildroot.defconfig
 /examples/riscv/software/.docker-config*/
 /examples/riscv/software/.tmp_*/
+
+# ao486 auto import files
+/examples/ao486/hdl/
+
+# Submodule directories
+/examples/apple2/reference/
+/examples/gameboy/reference/
+/examples/riscv/software/xv6/
+/examples/riscv/software/linux/
+/examples/ao486/reference/

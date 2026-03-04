@@ -15,7 +15,7 @@ require_relative '../output/speaker'
 require_relative '../renderers/color_renderer'
 require_relative '../input/ps2_encoder'
 require 'rhdl/codegen'
-require 'rhdl/codegen/ir/sim/ir_simulator'
+require 'rhdl/sim/native/ir/simulator'
 
 module RHDL
   module Examples
@@ -75,11 +75,11 @@ module RHDL
 
         # Generate IR JSON from Apple2 component
         ir = Apple2.to_flat_circt_nodes
-        @ir_json = RHDL::Codegen::IR.sim_json(ir, backend: backend)
+        @ir_json = RHDL::Sim::Native::IR.sim_json(ir, backend: backend)
         @backend = backend
         @sub_cycles = sub_cycles.clamp(1, 14)
 
-        @sim = RHDL::Codegen::IR::IrSimulator.new(
+        @sim = RHDL::Sim::Native::IR::Simulator.new(
           @ir_json,
           backend: backend,
           sub_cycles: @sub_cycles

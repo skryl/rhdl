@@ -1,10 +1,7 @@
-# Behavior IR (intermediate representation for RTL codegen)
-require_relative "codegen/ir/ir"
-require_relative "codegen/ir/lower"
-require_relative "codegen/ir/sim/ir_simulator"
+# Native IR simulation backends
+require_relative "sim/native/ir/simulator"
 
-# Verilog codegen
-require_relative "codegen/verilog/verilog"
+# Verilog simulation backend utilities
 require_relative "codegen/verilog/sim/verilog_simulator"
 require_relative "codegen/source/source"
 require_relative "codegen/schematic/schematic"
@@ -23,7 +20,7 @@ require_relative "codegen/netlist/ir"
 require_relative "codegen/netlist/primitives"
 require_relative "codegen/netlist/toposort"
 require_relative "codegen/netlist/lower"
-require_relative "codegen/netlist/sim/netlist_simulator"
+require_relative "sim/native/netlist/simulator"
 
 require 'fileutils'
 require 'tmpdir'
@@ -122,23 +119,23 @@ module RHDL
       end
 
       # Parse CIRCT MLIR into CIRCT node IR.
-      def import_circt_mlir(text)
-        CIRCT::Import.from_mlir(text)
+      def import_circt_mlir(text, strict: false, top: nil, extern_modules: [])
+        CIRCT::Import.from_mlir(text, strict: strict, top: top, extern_modules: extern_modules)
       end
 
       # Raise CIRCT nodes/MLIR into in-memory Ruby DSL source strings.
-      def raise_circt_sources(nodes_or_mlir, top: nil)
-        CIRCT::Raise.to_sources(nodes_or_mlir, top: top)
+      def raise_circt_sources(nodes_or_mlir, top: nil, strict: false)
+        CIRCT::Raise.to_sources(nodes_or_mlir, top: top, strict: strict)
       end
 
       # Raise CIRCT nodes/MLIR into Ruby DSL source files.
-      def raise_circt(nodes_or_mlir, out_dir:, top: nil)
-        CIRCT::Raise.to_dsl(nodes_or_mlir, out_dir: out_dir, top: top)
+      def raise_circt(nodes_or_mlir, out_dir:, top: nil, strict: false, format: false)
+        CIRCT::Raise.to_dsl(nodes_or_mlir, out_dir: out_dir, top: top, strict: strict, format: format)
       end
 
       # Raise CIRCT nodes/MLIR into loaded Ruby DSL component classes.
-      def raise_circt_components(nodes_or_mlir, namespace: Module.new, top: nil)
-        CIRCT::Raise.to_components(nodes_or_mlir, namespace: namespace, top: top)
+      def raise_circt_components(nodes_or_mlir, namespace: Module.new, top: nil, strict: false)
+        CIRCT::Raise.to_components(nodes_or_mlir, namespace: namespace, top: top, strict: strict)
       end
 
       def write_circt(component, path:, top_name: nil)
@@ -159,7 +156,7 @@ module RHDL
                             else
                               raise ArgumentError, "Unknown backend: #{backend}. Valid: :interpreter, :jit, :compiler"
                             end
-        Netlist::NetlistSimulator.new(
+        Sim::Native::Netlist::Simulator.new(
           ir,
           backend: simulator_backend,
           lanes: lanes
@@ -249,10 +246,6 @@ module RHDL
         parts.map(&:underscore).join('/')
       end
     end
-
-    # Backwards compatibility aliases for old namespace
-    # IR module is now at top level in Codegen::IR, not nested in Verilog
-    Lower = IR::Lower
 
     # Backwards compatibility: Behavior -> Verilog, Structure -> Netlist
     Behavior = Verilog

@@ -10,7 +10,7 @@ RSpec.describe RHDL::Examples::RISCV::Pipeline::IRHarness, timeout: 30 do
   let(:asm) { RHDL::Examples::RISCV::Assembler }
 
   before(:each) do
-    skip 'IR JIT not available' unless RHDL::Codegen::IR::IR_JIT_AVAILABLE
+    skip 'IR JIT not available' unless RHDL::Sim::Native::IR::JIT_AVAILABLE
     cpu.reset!
   end
 

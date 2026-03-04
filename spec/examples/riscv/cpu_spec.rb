@@ -10,7 +10,7 @@ RSpec.describe RHDL::Examples::RISCV::IRHarness do
   let(:cpu) { described_class.new(mem_size: 4096, backend: :jit) }
 
   before(:each) do
-    skip 'IR JIT not available' unless RHDL::Codegen::IR::IR_JIT_AVAILABLE
+    skip 'IR JIT not available' unless RHDL::Sim::Native::IR::JIT_AVAILABLE
   end
 
   describe 'Reset behavior' do

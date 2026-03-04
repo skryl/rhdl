@@ -35,6 +35,41 @@ RSpec.describe 'RHDL::Codegen CIRCT APIs' do
       expect(result.success?).to be(true)
       expect(result.modules.map(&:name)).to eq(['top'])
     end
+
+    it 'supports strict mode for no-skip import contracts' do
+      strict_mlir = <<~MLIR
+        hw.module @strict_top(%a: i8) -> (y: i8) {
+          comb.unknown %a : i8
+          hw.output %a : i8
+        }
+      MLIR
+
+      result = RHDL::Codegen.import_circt_mlir(strict_mlir, strict: true)
+      expect(result.success?).to be(false)
+      expect(result.diagnostics.any? { |d| d.op == 'parser' && d.severity.to_s == 'error' }).to be(true)
+    end
+
+    it 'supports closure checks with top and extern module allowlist options' do
+      closure_mlir = <<~MLIR
+        hw.module @top(%a: i1) -> (y: i1) {
+          %child_y = hw.instance "u_child" @child(a: %a: i1) -> (y: i1)
+          hw.output %child_y : i1
+        }
+      MLIR
+
+      fail_result = RHDL::Codegen.import_circt_mlir(closure_mlir, strict: true, top: 'top')
+      expect(fail_result.success?).to be(false)
+      expect(fail_result.diagnostics.any? { |d| d.op == 'import.closure' && d.severity.to_s == 'error' }).to be(true)
+
+      pass_result = RHDL::Codegen.import_circt_mlir(
+        closure_mlir,
+        strict: true,
+        top: 'top',
+        extern_modules: ['child']
+      )
+      expect(pass_result.success?).to be(true)
+      expect(pass_result.diagnostics.any? { |d| d.op == 'import.closure' }).to be(false)
+    end
   end
 
   describe '.raise_circt_sources' do

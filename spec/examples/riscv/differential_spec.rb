@@ -11,7 +11,7 @@ RSpec.describe 'RISC-V single-cycle vs pipelined equivalence', timeout: 30 do
   let(:asm) { RHDL::Examples::RISCV::Assembler }
 
   before(:each) do
-    skip 'IR JIT not available' unless RHDL::Codegen::IR::IR_JIT_AVAILABLE
+    skip 'IR JIT not available' unless RHDL::Sim::Native::IR::JIT_AVAILABLE
   end
 
   def build_single

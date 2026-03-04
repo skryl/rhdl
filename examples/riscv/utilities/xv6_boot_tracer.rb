@@ -5,7 +5,7 @@ require 'time'
 
 require_relative '../../../lib/rhdl'
 require_relative '../../../lib/rhdl/codegen'
-require_relative '../../../lib/rhdl/codegen/ir/sim/ir_simulator'
+require_relative '../../../lib/rhdl/sim/native/ir/simulator'
 require_relative '../hdl/ir_harness'
 require_relative '../hdl/pipeline/ir_harness'
 

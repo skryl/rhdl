@@ -71,7 +71,7 @@ RSpec.describe RHDL::Examples::RISCV::IRHarness do
   let(:cpu) { described_class.new(mem_size: 4096, backend: :jit) }
 
   before(:each) do
-    skip 'IR JIT not available' unless RHDL::Codegen::IR::IR_JIT_AVAILABLE
+    skip 'IR JIT not available' unless RHDL::Sim::Native::IR::JIT_AVAILABLE
   end
 
   include_examples 'rvv baseline core behavior', pipeline: false
@@ -81,7 +81,7 @@ RSpec.describe RHDL::Examples::RISCV::Pipeline::IRHarness do
   let(:cpu) { described_class.new('rvv_pipeline', backend: :jit) }
 
   before(:each) do
-    skip 'IR JIT not available' unless RHDL::Codegen::IR::IR_JIT_AVAILABLE
+    skip 'IR JIT not available' unless RHDL::Sim::Native::IR::JIT_AVAILABLE
   end
 
   include_examples 'rvv baseline core behavior', pipeline: true
@@ -91,7 +91,7 @@ RSpec.describe 'RVV baseline differential parity', timeout: 30 do
   let(:asm) { RHDL::Examples::RISCV::Assembler }
 
   before(:each) do
-    skip 'IR JIT not available' unless RHDL::Codegen::IR::IR_JIT_AVAILABLE
+    skip 'IR JIT not available' unless RHDL::Sim::Native::IR::JIT_AVAILABLE
   end
 
   def build_single

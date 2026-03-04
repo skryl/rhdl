@@ -55,19 +55,19 @@ RSpec.describe 'Karateka MOS6502 4-Way Divergence Analysis' do
       # Interpreter is always available (has Ruby fallback)
       true
     when :jit
-      return false unless RHDL::Codegen::IR::IR_JIT_AVAILABLE
+      return false unless RHDL::Sim::Native::IR::JIT_AVAILABLE
       # Check if MOS6502 mode is available
       require_relative '../../../examples/mos6502/hdl/cpu'
       ir = RHDL::Examples::MOS6502::CPU.to_flat_circt_nodes
-      ir_json = RHDL::Codegen::IR.sim_json(ir, backend: :jit)
-      sim = RHDL::Codegen::IR::IrSimulator.new(ir_json, backend: :jit)
+      ir_json = RHDL::Sim::Native::IR.sim_json(ir, backend: :jit)
+      sim = RHDL::Sim::Native::IR::Simulator.new(ir_json, backend: :jit)
       sim.respond_to?(:runner_kind) && sim.runner_kind == :mos6502
     when :compile
-      return false unless RHDL::Codegen::IR::IR_COMPILER_AVAILABLE
+      return false unless RHDL::Sim::Native::IR::COMPILER_AVAILABLE
       require_relative '../../../examples/mos6502/hdl/cpu'
       ir = RHDL::Examples::MOS6502::CPU.to_flat_circt_nodes
-      ir_json = RHDL::Codegen::IR.sim_json(ir, backend: :compiler)
-      sim = RHDL::Codegen::IR::IrSimulator.new(ir_json, backend: :compiler)
+      ir_json = RHDL::Sim::Native::IR.sim_json(ir, backend: :compiler)
+      sim = RHDL::Sim::Native::IR::Simulator.new(ir_json, backend: :compiler)
       sim.respond_to?(:runner_kind) && sim.runner_kind == :mos6502
     else
       false

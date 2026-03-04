@@ -62,7 +62,7 @@ RSpec.describe 'SM83 CPU Instructions' do
       require_relative '../../../../../examples/gameboy/utilities/runners/ir_runner'
 
       # Check if IR compiler is available
-      @ir_available = RHDL::Codegen::IR::COMPILER_AVAILABLE rescue false
+      @ir_available = RHDL::Sim::Native::IR::COMPILER_AVAILABLE rescue false
     rescue LoadError => e
       @ir_available = false
     end

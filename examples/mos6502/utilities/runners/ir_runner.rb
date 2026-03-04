@@ -25,11 +25,11 @@ module RHDL
 
           # Generate IR JSON from RHDL::Examples::MOS6502::CPU component
           ir = RHDL::Examples::MOS6502::CPU.to_flat_circt_nodes
-          @ir_json = RHDL::Codegen::IR.sim_json(ir, backend: @sim_backend)
+          @ir_json = RHDL::Sim::Native::IR.sim_json(ir, backend: @sim_backend)
         end
 
         def create_simulator
-          sim = RHDL::Codegen::IR::IrSimulator.new(
+          sim = RHDL::Sim::Native::IR::Simulator.new(
             @ir_json,
             backend: @sim_backend
           )

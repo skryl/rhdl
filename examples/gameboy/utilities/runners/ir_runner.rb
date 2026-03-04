@@ -33,7 +33,7 @@ module RHDL
         # Convert to JSON format for the simulator
         def ir_json(backend: :interpreter)
           ir = flat_ir
-          RHDL::Codegen::IR.sim_json(ir, backend: backend)
+          RHDL::Sim::Native::IR.sim_json(ir, backend: backend)
         end
 
         # Get stats about the IR
@@ -87,7 +87,7 @@ module RHDL
       # @param backend [Symbol] :interpret, :jit, or :compile
       def initialize(backend: :interpret)
         require 'rhdl/codegen'
-        require 'rhdl/codegen/ir/sim/ir_simulator'
+        require 'rhdl/sim/native/ir/simulator'
 
         backend_names = { interpret: "Interpreter", jit: "JIT", compile: "Compiler" }
         log "Initializing Game Boy IR simulation [#{backend_names[backend]}]..."
@@ -97,7 +97,7 @@ module RHDL
         @ir_json = GameBoyIr.ir_json(backend: backend)
         @backend = backend
 
-        @sim = RHDL::Codegen::IR::IrSimulator.new(
+        @sim = RHDL::Sim::Native::IR::Simulator.new(
           @ir_json,
           backend: backend
         )

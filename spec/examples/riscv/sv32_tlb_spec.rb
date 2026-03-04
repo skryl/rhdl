@@ -17,7 +17,7 @@ RSpec.shared_examples 'sv32 tlb behavior' do |pipeline:|
   end
 
   before(:each) do
-    skip 'IR JIT not available' unless RHDL::Codegen::IR::IR_JIT_AVAILABLE
+    skip 'IR JIT not available' unless RHDL::Sim::Native::IR::JIT_AVAILABLE
   end
 
   def pte_pointer(next_level_ppn)

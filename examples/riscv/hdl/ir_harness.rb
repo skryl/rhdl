@@ -4,7 +4,7 @@
 # while keeping instruction/data memory and MMIO peripherals in Ruby for test ergonomics.
 
 require 'rhdl/codegen'
-require 'rhdl/codegen/ir/sim/ir_simulator'
+require 'rhdl/sim/native/ir/simulator'
 require_relative 'constants'
 require_relative 'cpu'
 require_relative 'memory'
@@ -41,8 +41,8 @@ module RHDL
           @rst = 0
 
           ir = CPU.to_flat_circt_nodes
-          ir_json = RHDL::Codegen::IR.sim_json(ir, backend: backend)
-          @sim = RHDL::Codegen::IR::IrSimulator.new(
+          ir_json = RHDL::Sim::Native::IR.sim_json(ir, backend: backend)
+          @sim = RHDL::Sim::Native::IR::Simulator.new(
             ir_json,
             backend: backend
           )

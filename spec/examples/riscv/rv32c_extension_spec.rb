@@ -12,7 +12,7 @@ RSpec.describe 'RISC-V RV32C extension', timeout: 30 do
     let(:cpu) { described_class.new(mem_size: 4096, backend: :jit) }
 
     before do
-      skip 'IR JIT not available' unless RHDL::Codegen::IR::IR_JIT_AVAILABLE
+      skip 'IR JIT not available' unless RHDL::Sim::Native::IR::JIT_AVAILABLE
       cpu.reset!
     end
 
@@ -79,7 +79,7 @@ RSpec.describe 'RISC-V RV32C extension', timeout: 30 do
     let(:cpu) { described_class.new('test_cpu', backend: :jit) }
 
     before do
-      skip 'IR JIT not available' unless RHDL::Codegen::IR::IR_JIT_AVAILABLE
+      skip 'IR JIT not available' unless RHDL::Sim::Native::IR::JIT_AVAILABLE
       cpu.reset!
     end
 

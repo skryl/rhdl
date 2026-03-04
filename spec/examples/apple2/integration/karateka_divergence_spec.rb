@@ -78,9 +78,9 @@ RSpec.describe 'Karateka ISA vs IR Compiler Divergence' do
     require 'rhdl/codegen'
 
     ir = RHDL::Examples::Apple2::Apple2.to_flat_circt_nodes
-    ir_json = RHDL::Codegen::IR.sim_json(ir, backend: :compiler)
+    ir_json = RHDL::Sim::Native::IR.sim_json(ir, backend: :compiler)
 
-    sim = RHDL::Codegen::IR::IrSimulator.new(ir_json, sub_cycles: 14, backend: :compiler)
+    sim = RHDL::Sim::Native::IR::Simulator.new(ir_json, sub_cycles: 14, backend: :compiler)
 
     karateka_rom = create_karateka_rom
     sim.runner_load_rom(karateka_rom)
@@ -422,7 +422,7 @@ RSpec.describe 'Karateka ISA vs IR Compiler Divergence' do
 
     begin
       require 'rhdl/codegen'
-      skip 'IR Compiler not available' unless RHDL::Codegen::IR::IR_COMPILER_AVAILABLE
+      skip 'IR Compiler not available' unless RHDL::Sim::Native::IR::COMPILER_AVAILABLE
     rescue LoadError
       skip 'IR Codegen not available'
     end
@@ -686,7 +686,7 @@ RSpec.describe 'Karateka ISA vs IR Compiler Divergence' do
 
     begin
       require 'rhdl/codegen'
-      skip 'IR Compiler not available' unless RHDL::Codegen::IR::IR_COMPILER_AVAILABLE
+      skip 'IR Compiler not available' unless RHDL::Sim::Native::IR::COMPILER_AVAILABLE
     rescue LoadError
       skip 'IR Codegen not available'
     end
@@ -898,7 +898,7 @@ RSpec.describe 'Karateka ISA vs IR Compiler Divergence' do
 
     begin
       require 'rhdl/codegen'
-      skip 'IR Compiler not available' unless RHDL::Codegen::IR::IR_COMPILER_AVAILABLE
+      skip 'IR Compiler not available' unless RHDL::Sim::Native::IR::COMPILER_AVAILABLE
     rescue LoadError
       skip 'IR Codegen not available'
     end

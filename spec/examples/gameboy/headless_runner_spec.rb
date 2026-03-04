@@ -173,7 +173,7 @@ RSpec.describe RHDL::Examples::GameBoy::HeadlessRunner, :slow do
   # Check if IR interpreter is available
   def ir_interpreter_available?
     require 'rhdl/codegen'
-    RHDL::Codegen::IR::IR_INTERPRETER_AVAILABLE
+    RHDL::Sim::Native::IR::INTERPRETER_AVAILABLE
   rescue LoadError, NameError
     false
   end
@@ -181,7 +181,7 @@ RSpec.describe RHDL::Examples::GameBoy::HeadlessRunner, :slow do
   # Check if IR JIT is available
   def ir_jit_available?
     require 'rhdl/codegen'
-    RHDL::Codegen::IR::IR_JIT_AVAILABLE
+    RHDL::Sim::Native::IR::JIT_AVAILABLE
   rescue LoadError, NameError
     false
   end
@@ -189,7 +189,7 @@ RSpec.describe RHDL::Examples::GameBoy::HeadlessRunner, :slow do
   # Check if IR Compiler is available
   def ir_compiler_available?
     require 'rhdl/codegen'
-    RHDL::Codegen::IR::IR_COMPILER_AVAILABLE
+    RHDL::Sim::Native::IR::COMPILER_AVAILABLE
   rescue LoadError, NameError
     false
   end
