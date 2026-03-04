@@ -99,7 +99,7 @@ RSpec.describe RHDL::HDL::NorGate do
 
   describe 'gate-level netlist' do
     let(:component) { RHDL::HDL::NorGate.new('nor_gate') }
-    let(:ir) { RHDL::Export::Structure::Lower.from_components([component], name: 'nor_gate') }
+    let(:ir) { RHDL::Codegen::Netlist::Lower.from_components([component], name: 'nor_gate') }
 
     it 'generates correct IR structure' do
       expect(ir.inputs.keys).to include('nor_gate.a0', 'nor_gate.a1')

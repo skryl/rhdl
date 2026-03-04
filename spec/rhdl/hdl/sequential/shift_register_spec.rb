@@ -180,7 +180,7 @@ RSpec.describe RHDL::HDL::ShiftRegister do
 
   describe 'gate-level netlist' do
     let(:component) { RHDL::HDL::ShiftRegister.new('shift_reg') }
-    let(:ir) { RHDL::Export::Structure::Lower.from_components([component], name: 'shift_reg') }
+    let(:ir) { RHDL::Codegen::Netlist::Lower.from_components([component], name: 'shift_reg') }
 
     it 'generates correct IR structure' do
       expect(ir.inputs.keys).to include('shift_reg.d', 'shift_reg.d_in', 'shift_reg.clk', 'shift_reg.rst', 'shift_reg.en', 'shift_reg.load', 'shift_reg.dir')

@@ -51,7 +51,7 @@ RSpec.describe RHDL::HDL::BitwiseXor do
 
   describe 'gate-level netlist' do
     let(:component) { RHDL::HDL::BitwiseXor.new('bitwise_xor', width: 4) }
-    let(:ir) { RHDL::Export::Structure::Lower.from_components([component], name: 'bitwise_xor') }
+    let(:ir) { RHDL::Codegen::Netlist::Lower.from_components([component], name: 'bitwise_xor') }
 
     it 'generates correct IR structure' do
       expect(ir.inputs.keys).to include('bitwise_xor.a', 'bitwise_xor.b')

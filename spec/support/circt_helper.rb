@@ -83,7 +83,7 @@ module CirctHelper
   def validate_circt_export(component_class, test_vectors:, base_dir:, has_clock: false)
     # Get RHDL outputs
     rhdl_verilog = component_class.to_verilog
-    rhdl_firrtl = component_class.to_circt
+    rhdl_firrtl = component_class.to_firrtl
 
     # Convert FIRRTL to Verilog using firtool
     circt_result = firtool_to_verilog(rhdl_firrtl, base_dir: File.join(base_dir, "circt"))
@@ -250,7 +250,7 @@ module CirctHelper
   # Simple validation that just checks firtool can parse and compile CIRCT text
   # without running full simulation comparison
   def validate_firrtl_syntax(component_class, base_dir:)
-    rhdl_firrtl = component_class.to_circt
+    rhdl_firrtl = component_class.to_firrtl
     result = firtool_to_verilog(rhdl_firrtl, base_dir: base_dir)
 
     {
@@ -264,7 +264,7 @@ module CirctHelper
   # Validate hierarchical CIRCT export using to_circt_hierarchy
   # This includes all submodule definitions in a single circuit
   def validate_hierarchical_firrtl(component_class, base_dir:)
-    rhdl_firrtl = component_class.to_circt_hierarchy
+    rhdl_firrtl = component_class.to_firrtl_hierarchy
     result = firtool_to_verilog(rhdl_firrtl, base_dir: base_dir)
 
     {

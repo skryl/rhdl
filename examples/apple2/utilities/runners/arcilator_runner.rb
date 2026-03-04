@@ -402,8 +402,8 @@ module RHDL
           obj = File.join(BUILD_DIR, 'apple2_arc.o')
           lib = shared_lib_path
 
-          # Write wrapper from template
-          write_cpp_wrapper(wrapper) unless File.exist?(wrapper)
+          # Always regenerate wrapper so offset defines stay in sync with state-file contents.
+          write_cpp_wrapper(wrapper)
 
           cxx = if darwin_host? && command_available?('clang++')
                   'clang++'
@@ -422,7 +422,7 @@ module RHDL
           # Read state file to get offsets
           state_file = File.join(BUILD_DIR, 'apple2_state.json')
           state = JSON.parse(File.read(state_file))
-          mod = state[0]
+          mod = state.find { |entry| entry['name'].to_s == 'apple2_apple2' } || state[0]
 
           # Build offset map
           offsets = {}
@@ -434,7 +434,7 @@ module RHDL
             #include <cstdlib>
             extern "C" void apple2_apple2_eval(void* state);
             #define STATE_SIZE 4096
-            #{offsets.map { |n, o| "#define OFF_#{n.upcase} #{o}" }.join("\n")}
+            #{offsets.map { |n, o| "#define OFF_#{n.to_s.upcase.gsub(/[^A-Z0-9]+/, '_')} #{o}" }.join("\n")}
             struct SimContext {
                 uint8_t state[STATE_SIZE];
                 uint8_t ram[65536];

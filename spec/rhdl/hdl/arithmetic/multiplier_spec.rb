@@ -55,7 +55,7 @@ RSpec.describe RHDL::HDL::Multiplier do
 
   describe 'gate-level netlist' do
     let(:component) { RHDL::HDL::Multiplier.new('mult', width: 8) }
-    let(:ir) { RHDL::Export::Structure::Lower.from_components([component], name: 'mult') }
+    let(:ir) { RHDL::Codegen::Netlist::Lower.from_components([component], name: 'mult') }
 
     it 'generates correct IR structure' do
       expect(ir.inputs.keys).to include('mult.a', 'mult.b')

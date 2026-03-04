@@ -114,7 +114,7 @@ RSpec.describe RHDL::HDL::FIFO do
 
   describe 'gate-level netlist' do
     let(:component) { RHDL::HDL::FIFO.new('fifo') }
-    let(:ir) { RHDL::Export::Structure::Lower.from_components([component], name: 'fifo') }
+    let(:ir) { RHDL::Codegen::Netlist::Lower.from_components([component], name: 'fifo') }
 
     it 'generates correct IR structure' do
       expect(ir.inputs.keys).to include('fifo.clk', 'fifo.rst', 'fifo.wr_en', 'fifo.rd_en', 'fifo.din')

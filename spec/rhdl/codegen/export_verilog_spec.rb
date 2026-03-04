@@ -24,7 +24,7 @@ RSpec.describe "Verilog HDL export" do
     module_path = File.join(base_dir, "#{top_name}.v")
     tb_path = File.join(base_dir, "tb.v")
 
-    File.write(module_path, RHDL::Export.verilog(component, top_name: top_name))
+    File.write(module_path, RHDL::Codegen.verilog(component, top_name: top_name))
     HdlExportHelper.write_verilog_testbench(
       tb_path,
       top_name: top_name,

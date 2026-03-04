@@ -55,7 +55,7 @@ RSpec.describe RHDL::HDL::CPU::CPU do
 
   describe 'gate-level netlist' do
     let(:component) { RHDL::HDL::CPU::CPU.new('cpu') }
-    let(:ir) { RHDL::Export::Structure::Lower.from_components([component], name: 'cpu') }
+    let(:ir) { RHDL::Codegen::Netlist::Lower.from_components([component], name: 'cpu') }
 
     it 'generates correct IR structure' do
       expect(ir.inputs.keys).to include('cpu.clk', 'cpu.rst', 'cpu.mem_data_in')

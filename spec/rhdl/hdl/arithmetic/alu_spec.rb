@@ -219,7 +219,7 @@ RSpec.describe RHDL::HDL::ALU do
 
   describe 'gate-level netlist' do
     let(:component) { RHDL::HDL::ALU.new('alu', width: 8) }
-    let(:ir) { RHDL::Export::Structure::Lower.from_components([component], name: 'alu') }
+    let(:ir) { RHDL::Codegen::Netlist::Lower.from_components([component], name: 'alu') }
 
     it 'generates correct IR structure' do
       expect(ir.inputs.keys).to include('alu.a', 'alu.b', 'alu.op', 'alu.cin')

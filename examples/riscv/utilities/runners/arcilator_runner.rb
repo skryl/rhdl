@@ -1799,14 +1799,14 @@ module RHDL
 
         def write_arcilator_wrapper(wrapper_path, state_file_path)
           state = JSON.parse(File.read(state_file_path))
-          mod = state[0]
+          mod = state.find { |entry| entry['name'].to_s == 'riscv_cpu' } || state[0]
 
           offsets = {}
           mod['states'].each { |s| offsets[s['name']] = s['offset'] }
 
           signal_defines = []
           signal_defines << "#define STATE_SIZE #{mod['numStateBytes']}"
-          offsets.each { |name, offset| signal_defines << "#define OFF_#{name.upcase} #{offset}" }
+          offsets.each { |name, offset| signal_defines << "#define OFF_#{name.to_s.upcase.gsub(/[^A-Z0-9]+/, '_')} #{offset}" }
 
           wrapper = <<~CPP
             #include <cstdint>

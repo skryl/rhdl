@@ -3,6 +3,7 @@
 require 'spec_helper'
 require 'tmpdir'
 require 'fileutils'
+require 'digest'
 
 require_relative '../../../../examples/ao486/utilities/import/system_importer'
 
@@ -37,6 +38,111 @@ RSpec.describe 'AO486 import AST roundtrip (full tree baseline)', slow: true do
     modules.each_with_object({}) do |mod, acc|
       acc[mod.name.to_s] = semantic_signature_for_module(mod)
     end
+  end
+
+  def module_preview(module_names, limit: 10)
+    sorted = Array(module_names).map(&:to_s).sort
+    return 'none' if sorted.empty?
+
+    preview = sorted.first(limit)
+    omitted = sorted.length - preview.length
+    suffix = omitted.positive? ? ", ... (+#{omitted} more)" : ''
+    "#{preview.join(', ')}#{suffix}"
+  end
+
+  def collection_count(value)
+    return 0 if value.nil?
+    return value.length if value.respond_to?(:length)
+
+    1
+  end
+
+  def stable_fingerprint(value)
+    Digest::SHA256.hexdigest(Marshal.dump(value))[0, 12]
+  rescue TypeError
+    Digest::SHA256.hexdigest(value.inspect)[0, 12]
+  end
+
+  def module_field_diffs(source_sig, roundtrip_sig)
+    fields = (source_sig.keys | roundtrip_sig.keys).sort_by(&:to_s)
+    fields.each_with_object({}) do |field, acc|
+      source_value = source_sig[field]
+      roundtrip_value = roundtrip_sig[field]
+      next if source_value == roundtrip_value
+
+      acc[field] = {
+        source_count: collection_count(source_value),
+        roundtrip_count: collection_count(roundtrip_value),
+        source_fingerprint: stable_fingerprint(source_value),
+        roundtrip_fingerprint: stable_fingerprint(roundtrip_value)
+      }
+    end
+  end
+
+  def format_field_mismatch_counts(field_counts)
+    return 'none' if field_counts.empty?
+
+    field_counts.sort_by { |field, count| [-count, field.to_s] }
+      .map { |field, count| "#{field}:#{count}" }
+      .join(', ')
+  end
+
+  def format_top_modules(module_diffs, limit: 10)
+    top_modules = module_diffs.sort_by { |name, fields| [-fields.size, name] }.first(limit)
+    return 'none' if top_modules.empty?
+
+    top_modules
+      .map { |name, fields| "#{name}(#{fields.size} fields)" }
+      .join(', ')
+  end
+
+  def diff_excerpt_limit
+    limit = ENV.fetch('AO486_ROUNDTRIP_DIFF_EXCERPT', '0').to_i
+    limit.positive? ? limit : 0
+  end
+
+  def format_module_diff_excerpt(module_diffs)
+    limit = diff_excerpt_limit
+    return [] unless limit.positive?
+
+    top_modules = module_diffs.sort_by { |name, fields| [-fields.size, name] }.first(limit)
+    lines = ["module_diff_excerpt(limit=#{limit})"]
+    top_modules.each do |module_name, field_diffs|
+      changed_fields = field_diffs.keys.map(&:to_s).sort.join(', ')
+      lines << "  #{module_name}: #{changed_fields}"
+      field_diffs.sort_by { |field, _detail| field.to_s }.each do |field, detail|
+        lines << "    #{field}: source_count=#{detail[:source_count]} roundtrip_count=#{detail[:roundtrip_count]} " \
+                 "source_fp=#{detail[:source_fingerprint]} roundtrip_fp=#{detail[:roundtrip_fingerprint]}"
+      end
+    end
+    lines
+  end
+
+  def build_mismatch_summary(source_sigs:, roundtrip_sigs:, missing_modules:, extra_modules:, mismatched_modules:)
+    lines = []
+    lines << "missing=#{missing_modules.size} (#{module_preview(missing_modules)})"
+    lines << "extra=#{extra_modules.size} (#{module_preview(extra_modules)})"
+    lines << "mismatched=#{mismatched_modules.size} (#{module_preview(mismatched_modules)})"
+
+    return lines.join("\n") if mismatched_modules.empty?
+
+    module_diffs = mismatched_modules.sort.each_with_object({}) do |module_name, acc|
+      acc[module_name] = module_field_diffs(
+        source_sigs.fetch(module_name),
+        roundtrip_sigs.fetch(module_name)
+      )
+    end
+
+    field_counts = Hash.new(0)
+    module_diffs.each_value do |field_diffs|
+      field_diffs.each_key { |field| field_counts[field] += 1 }
+    end
+
+    lines << "field_mismatch_counts=#{format_field_mismatch_counts(field_counts)}"
+    lines << "top_mismatched_modules=#{format_top_modules(module_diffs)}"
+    lines << "set AO486_ROUNDTRIP_DIFF_EXCERPT=<n> for per-module field excerpt" if diff_excerpt_limit.zero?
+    lines.concat(format_module_diff_excerpt(module_diffs))
+    lines.join("\n")
   end
 
   def semantic_signature_for_module(mod)
@@ -219,11 +325,13 @@ RSpec.describe 'AO486 import AST roundtrip (full tree baseline)', slow: true do
         common = source_sigs.keys & roundtrip_sigs.keys
         mismatched = common.reject { |name| source_sigs[name] == roundtrip_sigs[name] }
 
-        mismatch_summary = [
-          ("missing=#{missing_modules.size} (#{missing_modules.sort.first(10).join(', ')})" unless missing_modules.empty?),
-          ("extra=#{extra_modules.size} (#{extra_modules.sort.first(10).join(', ')})" unless extra_modules.empty?),
-          ("mismatched=#{mismatched.size} (#{mismatched.sort.first(10).join(', ')})" unless mismatched.empty?)
-        ].compact.join("\n")
+        mismatch_summary = build_mismatch_summary(
+          source_sigs: source_sigs,
+          roundtrip_sigs: roundtrip_sigs,
+          missing_modules: missing_modules,
+          extra_modules: extra_modules,
+          mismatched_modules: mismatched
+        )
 
         expect(missing_modules).to be_empty, mismatch_summary
         expect(extra_modules).to be_empty, mismatch_summary

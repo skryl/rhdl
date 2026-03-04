@@ -192,7 +192,7 @@ require 'rhdl'
 
 # Export a component to Verilog
 component = MyComponent.new
-verilog_code = RHDL::Export.verilog(component)
+verilog_code = RHDL::Codegen.verilog(component)
 
 # Or use the class method
 verilog_code = MyComponent.to_verilog
@@ -539,20 +539,18 @@ sim.run(100)  # 100 clock cycles
 
 ### Gate-Level (Netlist) Simulation
 
-Simulates primitive gate netlists (AND, OR, XOR, NOT, MUX, DFF). Four backend options:
+Simulates primitive gate netlists (AND, OR, XOR, NOT, MUX, DFF) via `RHDL::Sim.gate_level`.
 
 | Backend | Speed | Startup | Use Case |
 |---------|-------|---------|----------|
-| Ruby SimCPU | 22K iter/s | Immediate | Development, small circuits |
-| Rust Interpreter | 427K iter/s (20x) | Immediate | Functional verification |
-| Rust JIT (Cranelift) | 50-100M gates/s | 0.1-0.5s | Fast interactive simulation |
-| Rust Compiler (SIMD) | 100M+ gates/s | 1-2s | Maximum throughput, batch testing |
+| Interpreter | 427K iter/s | Immediate | Functional verification |
+| JIT (Cranelift) | 50-100M gates/s | 0.1-0.5s | Fast interactive simulation |
+| Compiler (SIMD) | 100M+ gates/s | 1-2s | Maximum throughput, batch testing |
 
 The compiler supports AVX2/AVX512 for 256-512 parallel test vectors.
 
 ```ruby
-ir = RHDL::Codegen::Netlist::Lower.from_components([alu])
-sim = RHDL::Sim::Native::Netlist::Simulator.new(ir, backend: :interpreter, lanes: 64)
+sim = RHDL::Sim.gate_level([alu], backend: :interpreter, lanes: 64, name: 'alu')
 sim.poke('a', 0xFF)
 sim.evaluate
 result = sim.peek('y')

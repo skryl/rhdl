@@ -36,12 +36,13 @@ module RHDL
           failed_result(tool: tool, out_path: out_path, cmd: cmd, stderr: "Tool not found: #{tool}")
         end
 
-        def circt_mlir_to_verilog(mlir_path:, out_path:, tool: DEFAULT_VERILOG_EXPORT_TOOL, extra_args: [])
+        def circt_mlir_to_verilog(mlir_path:, out_path:, tool: DEFAULT_VERILOG_EXPORT_TOOL, extra_args: [], input_format: nil)
           cmd = mlir_export_command(
             tool: tool,
             mlir_path: mlir_path,
             out_path: out_path,
-            extra_args: extra_args
+            extra_args: extra_args,
+            input_format: input_format
           )
           stdout, stderr, status = Open3.capture3(*cmd)
 
@@ -67,14 +68,17 @@ module RHDL
           end
         end
 
-        def mlir_export_command(tool:, mlir_path:, out_path:, extra_args:)
+        def mlir_export_command(tool:, mlir_path:, out_path:, extra_args:, input_format:)
           case tool_basename(tool)
           when 'firtool'
             args = Array(extra_args)
+            unless args.any? { |arg| arg.to_s.start_with?('--format=') }
+              args = ["--format=#{input_format || 'mlir'}"] + args
+            end
             unless args.any? { |arg| arg.to_s.start_with?('--lowering-options=') }
               args = ["--lowering-options=#{DEFAULT_FIRTOOL_LOWERING_OPTIONS}"] + args
             end
-            [tool, '--format=mlir', mlir_path.to_s, '--verilog', '-o', out_path.to_s] + args
+            [tool, mlir_path.to_s, '--verilog', '-o', out_path.to_s] + args
           else
             [tool, '--export-verilog', mlir_path.to_s, '-o', out_path.to_s] + Array(extra_args)
           end

@@ -65,7 +65,7 @@ RSpec.describe RHDL::HDL::LZCount do
 
   describe 'gate-level netlist' do
     let(:component) { RHDL::HDL::LZCount.new('lzcount', width: 8) }
-    let(:ir) { RHDL::Export::Structure::Lower.from_components([component], name: 'lzcount') }
+    let(:ir) { RHDL::Codegen::Netlist::Lower.from_components([component], name: 'lzcount') }
 
     it 'generates correct IR structure' do
       expect(ir.inputs.keys).to include('lzcount.a')

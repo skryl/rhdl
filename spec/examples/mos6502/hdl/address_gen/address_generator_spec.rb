@@ -145,7 +145,7 @@ RSpec.describe RHDL::Examples::MOS6502::AddressGenerator do
 
   describe 'gate-level netlist' do
     let(:component) { described_class.new('mos6502_address_generator') }
-    let(:ir) { RHDL::Export::Structure::Lower.from_components([component], name: 'mos6502_address_generator') }
+    let(:ir) { RHDL::Codegen::Netlist::Lower.from_components([component], name: 'mos6502_address_generator') }
 
     it 'generates correct IR structure' do
       expect(ir.inputs.keys).to include('mos6502_address_generator.mode')

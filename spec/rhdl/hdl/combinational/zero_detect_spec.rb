@@ -68,7 +68,7 @@ RSpec.describe RHDL::HDL::ZeroDetect do
 
   describe 'gate-level netlist' do
     let(:component) { RHDL::HDL::ZeroDetect.new('zero_detect', width: 4) }
-    let(:ir) { RHDL::Export::Structure::Lower.from_components([component], name: 'zero_detect') }
+    let(:ir) { RHDL::Codegen::Netlist::Lower.from_components([component], name: 'zero_detect') }
 
     it 'generates correct IR structure' do
       expect(ir.inputs.keys).to include('zero_detect.a')

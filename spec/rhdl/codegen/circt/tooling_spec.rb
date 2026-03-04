@@ -35,12 +35,12 @@ RSpec.describe RHDL::Codegen::CIRCT::Tooling do
       status = instance_double(Process::Status, success?: true)
       expect(Open3).to receive(:capture3).with(
         'firtool',
-        '--format=mlir',
         'in.mlir',
         '--verilog',
         '-o',
         'out.v',
-        "--lowering-options=#{described_class::DEFAULT_FIRTOOL_LOWERING_OPTIONS}"
+        "--lowering-options=#{described_class::DEFAULT_FIRTOOL_LOWERING_OPTIONS}",
+        '--format=mlir'
       ).and_return(['', '', status])
 
       result = described_class.circt_mlir_to_verilog(mlir_path: 'in.mlir', out_path: 'out.v')

@@ -5,7 +5,8 @@
 # This module provides methods for generating CIRCT/HDL output from components:
 # - to_ir: Generate CIRCT MLIR (hw/comb/seq)
 # - to_verilog: Generate Verilog via CIRCT MLIR tooling
-# - to_circt/to_firrtl: Generate CIRCT MLIR (compatibility aliases)
+# - to_circt: Generate CIRCT MLIR (hw/comb/seq)
+# - to_firrtl: Generate FIRRTL text from CIRCT IR
 #
 # These methods work with the behavior, structure, and sequential DSLs to produce
 # synthesizable HDL output.
@@ -49,7 +50,7 @@ module RHDL
           )
         end
 
-        # Compatibility aliases that now return CIRCT MLIR.
+        # Compatibility alias that returns CIRCT MLIR.
         def to_circt(top_name: nil)
           to_ir(top_name: top_name)
         end
@@ -59,18 +60,27 @@ module RHDL
           to_ir(top_name: top_name, parameters: parameters)
         end
 
-        # Compatibility aliases that now return CIRCT MLIR.
+        # Generate FIRRTL text from CIRCT IR for a single module.
         def to_firrtl(top_name: nil)
-          to_ir(top_name: top_name)
+          RHDL::Codegen::CIRCT::FIRRTL.generate(
+            to_circt_nodes(top_name: top_name)
+          )
         end
 
-        # Compatibility hierarchy aliases that now return CIRCT MLIR.
-        # @param top_name [String] Optional name override for top module
-        # @return [String] Complete MLIR with all module definitions
+        # Generate CIRCT MLIR for this component hierarchy.
         def to_circt_hierarchy(top_name: nil)
           to_mlir_hierarchy(top_name: top_name)
         end
-        alias_method :to_firrtl_hierarchy, :to_circt_hierarchy
+
+        # Generate FIRRTL text for this component hierarchy.
+        def to_firrtl_hierarchy(top_name: nil)
+          modules = collect_submodule_specs.map do |component_class, parameters|
+            component_class.to_circt_nodes(parameters: parameters || {})
+          end
+          modules << to_circt_nodes(top_name: top_name)
+          circuit_name = top_name || verilog_module_name
+          RHDL::Codegen::CIRCT::FIRRTL.generate_hierarchy(modules, top_name: circuit_name)
+        end
 
         # Generate CIRCT MLIR for this component hierarchy.
         def to_mlir_hierarchy(top_name: nil)

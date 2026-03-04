@@ -475,7 +475,7 @@ sim = RHDL::Sim::Native::Netlist::Simulator.new(
 )
 
 # Check which backend is in use
-puts sim.backend  # :interpret, :jit, or :compile
+puts sim.backend  # :interpreter, :jit, or :compiler
 puts sim.native?  # true if using native extension
 ```
 

@@ -355,12 +355,12 @@ RSpec.describe 'Rakefile interface' do
   end
 
   describe 'ao486 tasks' do
-    it 'ao486:import invokes examples AO486Task with action: :import' do
-      require_relative '../../../examples/ao486/utilities/tasks/ao486_task'
-      task_instance = instance_double(RHDL::Examples::AO486::Tasks::AO486Task)
+    it 'ao486:import invokes CLI AO486Task with action: :import' do
+      require_relative '../../../lib/rhdl/cli/tasks/ao486_task'
+      task_instance = instance_double(RHDL::CLI::Tasks::AO486Task)
       allow(task_instance).to receive(:run)
 
-      expect(RHDL::Examples::AO486::Tasks::AO486Task).to receive(:new) do |opts|
+      expect(RHDL::CLI::Tasks::AO486Task).to receive(:new) do |opts|
         expect(opts[:action]).to eq(:import)
         expect(opts[:output_dir]).to eq('/tmp/ao486_out')
         task_instance
@@ -369,15 +369,15 @@ RSpec.describe 'Rakefile interface' do
       Rake::Task['ao486:import'].invoke('/tmp/ao486_out')
     end
 
-    it 'ao486:parity invokes examples AO486Task with action: :parity' do
-      require_relative '../../../examples/ao486/utilities/tasks/ao486_task'
-      expect_task_class(RHDL::Examples::AO486::Tasks::AO486Task, action: :parity)
+    it 'ao486:parity invokes CLI AO486Task with action: :parity' do
+      require_relative '../../../lib/rhdl/cli/tasks/ao486_task'
+      expect_task_class(RHDL::CLI::Tasks::AO486Task, action: :parity)
       Rake::Task['ao486:parity'].invoke
     end
 
-    it 'ao486:verify invokes examples AO486Task with action: :verify' do
-      require_relative '../../../examples/ao486/utilities/tasks/ao486_task'
-      expect_task_class(RHDL::Examples::AO486::Tasks::AO486Task, action: :verify)
+    it 'ao486:verify invokes CLI AO486Task with action: :verify' do
+      require_relative '../../../lib/rhdl/cli/tasks/ao486_task'
+      expect_task_class(RHDL::CLI::Tasks::AO486Task, action: :verify)
       Rake::Task['ao486:verify'].invoke
     end
   end

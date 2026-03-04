@@ -56,7 +56,7 @@ RSpec.describe RHDL::HDL::Encoder8to3 do
 
   describe 'gate-level netlist' do
     let(:component) { RHDL::HDL::Encoder8to3.new('enc8to3') }
-    let(:ir) { RHDL::Export::Structure::Lower.from_components([component], name: 'enc8to3') }
+    let(:ir) { RHDL::Codegen::Netlist::Lower.from_components([component], name: 'enc8to3') }
 
     it 'generates correct IR structure' do
       expect(ir.inputs.keys).to include('enc8to3.a')

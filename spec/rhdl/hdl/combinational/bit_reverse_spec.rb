@@ -74,7 +74,7 @@ RSpec.describe RHDL::HDL::BitReverse do
 
   describe 'gate-level netlist' do
     let(:component) { RHDL::HDL::BitReverse.new('bitrev', width: 8) }
-    let(:ir) { RHDL::Export::Structure::Lower.from_components([component], name: 'bitrev') }
+    let(:ir) { RHDL::Codegen::Netlist::Lower.from_components([component], name: 'bitrev') }
 
     it 'generates correct IR structure' do
       expect(ir.inputs.keys).to include('bitrev.a')

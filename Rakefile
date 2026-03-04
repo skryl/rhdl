@@ -86,7 +86,7 @@ def load_cli_tasks
 end
 
 def load_ao486_tasks
-  require_relative 'examples/ao486/utilities/tasks/ao486_task'
+  require_relative 'lib/rhdl/cli/tasks/ao486_task'
 end
 
 # =============================================================================
@@ -555,7 +555,7 @@ namespace :ao486 do
                      !%w[0 false no off].include?(args[:clean].to_s.strip.downcase)
                    end
 
-    RHDL::Examples::AO486::Tasks::AO486Task.new(
+    RHDL::CLI::Tasks::AO486Task.new(
       action: :import,
       output_dir: args[:output_dir],
       workspace_dir: args[:workspace_dir],
@@ -569,13 +569,13 @@ namespace :ao486 do
   desc "Run AO486 bounded parity harness (Verilog/Verilator vs raised RHDL/IR)"
   task :parity => 'build:setup:binstubs' do
     load_ao486_tasks
-    RHDL::Examples::AO486::Tasks::AO486Task.new(action: :parity).run
+    RHDL::CLI::Tasks::AO486Task.new(action: :parity).run
   end
 
   desc "Run AO486 import/parity verification suite"
   task :verify => 'build:setup:binstubs' do
     load_ao486_tasks
-    RHDL::Examples::AO486::Tasks::AO486Task.new(action: :verify).run
+    RHDL::CLI::Tasks::AO486Task.new(action: :verify).run
   end
 end
 

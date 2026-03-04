@@ -105,7 +105,7 @@ RSpec.describe RHDL::HDL::XorGate do
 
   describe 'gate-level netlist' do
     let(:component) { RHDL::HDL::XorGate.new('xor_gate') }
-    let(:ir) { RHDL::Export::Structure::Lower.from_components([component], name: 'xor_gate') }
+    let(:ir) { RHDL::Codegen::Netlist::Lower.from_components([component], name: 'xor_gate') }
 
     it 'generates correct IR structure' do
       expect(ir.gates.length).to eq(1)

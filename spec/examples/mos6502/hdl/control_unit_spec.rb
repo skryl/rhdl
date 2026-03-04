@@ -112,7 +112,7 @@ RSpec.describe RHDL::Examples::MOS6502::ControlUnit do
 
   describe 'gate-level netlist' do
     let(:component) { described_class.new('mos6502_control_unit') }
-    let(:ir) { RHDL::Export::Structure::Lower.from_components([component], name: 'mos6502_control_unit') }
+    let(:ir) { RHDL::Codegen::Netlist::Lower.from_components([component], name: 'mos6502_control_unit') }
 
     it 'generates correct IR structure' do
       expect(ir.inputs.keys).to include('mos6502_control_unit.clk', 'mos6502_control_unit.rst')

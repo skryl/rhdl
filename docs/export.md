@@ -30,16 +30,16 @@ require 'rhdl'
 
 # Export a component instance to Verilog
 component = MyComponent.new
-verilog_code = RHDL::Export.verilog(component)
+verilog_code = RHDL::Codegen.verilog(component)
 
 # Or use the class method
 verilog_code = MyComponent.to_verilog
 
 # Write directly to file
-RHDL::Export.write_verilog(component, path: 'output.v')
+RHDL::Codegen.write_verilog(component, path: 'output.v')
 
 # Batch export all discovered components
-RHDL::Export.export_all_to_files('export/verilog/')
+RHDL::Codegen.export_all_to_files('export/verilog/')
 ```
 
 ### Signal Naming Rules
@@ -63,12 +63,13 @@ RHDL::Export.export_all_to_files('export/verilog/')
 
 All generated HDL files are placed in `/export/verilog/`.
 
-### Rake Tasks
+### CLI Commands
 
 ```bash
-rake hdl:export    # Export DSL components to Verilog
-rake hdl:verilog   # Export Verilog files
-rake hdl:clean     # Clean generated HDL files
+rhdl export --all
+rhdl export --all --scope lib
+rhdl export --lang verilog --out ./out RHDL::HDL::Counter
+rhdl export --clean
 ```
 
 ### Running Export Tests
@@ -76,37 +77,37 @@ rake hdl:clean     # Clean generated HDL files
 Verilog export tests require Icarus Verilog (`iverilog` and `vvp`). If the toolchain is missing, specs are skipped automatically.
 
 ```bash
-bundle exec rspec spec/export_verilog_spec.rb
+bundle exec rspec spec/rhdl/codegen/export_verilog_spec.rb
 ```
 
 ---
 
 ## Gate-Level Synthesis
 
-The gate-level backend flattens simulation components into a gate IR (`RHDL::Export::Structure::IR`) with dense 1-bit net indices and primitive gates.
+The gate-level backend flattens simulation components into a gate IR (`RHDL::Codegen::Netlist::IR`) with dense 1-bit net indices and primitive gates.
 
 ### Overview
 
 - Multi-bit buses are bit-blasted into per-bit nets
 - The lowering pass flattens connections and emits primitive gates plus DFFs
-- CPU backend evaluates gates in topological order with packed 64-lane bitmasks
-- GPU backend is a stub (optional build)
+- Native backends evaluate gates in topological order with packed 64-lane bitmasks
+- Supported backends: `:interpreter`, `:jit`, `:compiler`
 
 ### Key Files
 
 | File | Description |
 |------|-------------|
-| `lib/rhdl/export/structure/ir.rb` | Gate-level IR and JSON serialization |
-| `lib/rhdl/export/structure/lower.rb` | Lowering pass from HDL components into IR |
-| `lib/rhdl/export/structure/sim_cpu.rb` | Packed-lane CPU simulator backend |
-| `lib/rhdl/export/structure/sim_gpu.rb` | GPU backend stub (optional build) |
+| `lib/rhdl/codegen/netlist/ir.rb` | Gate-level IR and JSON serialization |
+| `lib/rhdl/codegen/netlist/lower.rb` | Lowering pass from HDL components into IR |
+| `lib/rhdl/codegen/netlist/toposort.rb` | Topological scheduling for gate evaluation |
+| `lib/rhdl/sim/native/netlist/simulator.rb` | Runtime simulator wrapper for interpreter/JIT/compiler backends |
 
 ### Basic Usage
 
 ```ruby
 components = [RHDL::HDL::FullAdder.new('fa')]
 # connect components via RHDL::HDL::SimComponent.connect as needed
-sim = RHDL::Export.gate_level(components, backend: :cpu, lanes: 64, name: 'demo')
+sim = RHDL::Sim.gate_level(components, backend: :interpreter, lanes: 64, name: 'demo')
 
 sim.poke('fa.a', 0xffff_ffff_ffff_ffff)
 sim.poke('fa.b', 0x0)
@@ -142,13 +143,13 @@ The netlist will be written to `tmp/netlists/<name>.json`.
 **CPU (2):**
 `InstructionDecoder`, `SynthDatapath` (hierarchical composition of decoder, ALU, PC, register)
 
-### Rake Tasks
+### CLI Commands
 
 ```bash
-rake gates:export   # Export all 53 components to gate-level JSON netlists
-rake gates:simcpu   # Export SynthDatapath CPU components
-rake gates:stats    # Show synthesis statistics (gate counts per component)
-rake gates:clean    # Clean gate-level output directory
+rhdl gates --export   # Export all supported components to gate-level JSON netlists
+rhdl gates --simcpu   # Export SimCPU datapath components
+rhdl gates --stats    # Show synthesis statistics (gate counts per component)
+rhdl gates --clean    # Clean gate-level output directory
 ```
 
 Output files are written to `/export/gates/` with JSON netlists and TXT summaries.
@@ -182,7 +183,7 @@ The gate-level IR uses these primitives:
 ### Limitations
 
 - DFF reset/enable are modeled on tick boundaries for parity with the synchronous simulator flow
-- GPU backend is a stub unless a compiled extension is provided
+- Native gate-level runtime backends require built extensions (`rake native:build`)
 - Memory components (RAM, ROM, RegisterFile, FIFO, Stack) use placeholder implementations for gate-level
 
 ## See Also

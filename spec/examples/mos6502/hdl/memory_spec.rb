@@ -56,7 +56,7 @@ RSpec.describe RHDL::Examples::MOS6502::Memory do
     it 'is not supported for behavior memory' do
       component = RHDL::Examples::MOS6502::Memory.new('mos6502_memory')
       expect {
-        RHDL::Export::Structure::Lower.from_components([component], name: 'mos6502_memory')
+        RHDL::Codegen::Netlist::Lower.from_components([component], name: 'mos6502_memory')
       }.to raise_error(ArgumentError, /Unsupported component/)
     end
   end

@@ -117,7 +117,7 @@ RSpec.describe RHDL::HDL::JKFlipFlop do
 
   describe 'gate-level netlist' do
     let(:component) { RHDL::HDL::JKFlipFlop.new('jkff') }
-    let(:ir) { RHDL::Export::Structure::Lower.from_components([component], name: 'jkff') }
+    let(:ir) { RHDL::Codegen::Netlist::Lower.from_components([component], name: 'jkff') }
 
     it 'generates correct IR structure' do
       expect(ir.inputs.keys).to include('jkff.j', 'jkff.k', 'jkff.clk', 'jkff.rst', 'jkff.en')

@@ -19,6 +19,7 @@ RSpec.describe RHDL::CLI::Tasks::HygieneTask do
       allow(task).to receive(:check_ignore_rules).and_return([])
       allow(task).to receive(:check_tracked_ephemera).and_return([])
       allow(task).to receive(:check_duplicate_policy).and_return([])
+      allow(task).to receive(:check_legacy_namespace_patterns).and_return([])
 
       expect { task.run }.to output(/All hygiene checks passed/).to_stdout
     end
@@ -29,6 +30,7 @@ RSpec.describe RHDL::CLI::Tasks::HygieneTask do
       allow(task).to receive(:check_ignore_rules).and_return([])
       allow(task).to receive(:check_tracked_ephemera).and_return([])
       allow(task).to receive(:check_duplicate_policy).and_return([])
+      allow(task).to receive(:check_legacy_namespace_patterns).and_return([])
 
       expect { task.run }.to raise_error(RuntimeError, /Hygiene check failed/)
     end
@@ -103,6 +105,46 @@ RSpec.describe RHDL::CLI::Tasks::HygieneTask do
 
         task = described_class.new(root: dir, allowlist_path: allowlist)
         expect(task.send(:check_duplicate_policy)).to eq([])
+      end
+    end
+
+    it 'rejects forbidden legacy namespace patterns in active files' do
+      Dir.mktmpdir('rhdl_hygiene_legacy_patterns_spec') do |dir|
+        FileUtils.mkdir_p(File.join(dir, 'lib/rhdl'))
+        FileUtils.mkdir_p(File.join(dir, 'docs'))
+
+        File.write(File.join(dir, 'lib/rhdl/legacy.rb'), <<~RUBY)
+          module Legacy
+            STRUCTURE = RHDL::Codegen::Structure
+            IR = RHDL::Codegen::IR
+            RHDL::Export.run!
+            RHDL::Codegen.gate_level([], backend: :gpu)
+          end
+        RUBY
+
+        task = described_class.new(root: dir)
+        failures = task.send(:check_legacy_namespace_patterns)
+
+        expect(failures).to include(a_string_matching(/RHDL::Export/))
+        expect(failures).to include(a_string_matching(/Codegen::Structure/))
+        expect(failures).to include(a_string_matching(/RHDL::Codegen::IR/))
+        expect(failures).to include(a_string_matching(/RHDL::Codegen\.gate_level/))
+        expect(failures).to include(a_string_matching(/legacy backend symbols/))
+      end
+    end
+
+    it 'allows canonical simulation and netlist namespaces' do
+      Dir.mktmpdir('rhdl_hygiene_legacy_clean_spec') do |dir|
+        FileUtils.mkdir_p(File.join(dir, 'lib/rhdl'))
+        File.write(File.join(dir, 'lib/rhdl/current.rb'), <<~RUBY)
+          module Current
+            IR = RHDL::Codegen::Netlist::IR
+            SIM = RHDL::Sim.gate_level([], backend: :interpreter, lanes: 64, name: 'demo')
+          end
+        RUBY
+
+        task = described_class.new(root: dir)
+        expect(task.send(:check_legacy_namespace_patterns)).to eq([])
       end
     end
   end

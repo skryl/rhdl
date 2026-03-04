@@ -1,11 +1,11 @@
 # frozen_string_literal: true
 
 require 'spec_helper'
-require_relative '../../../../examples/ao486/utilities/tasks/ao486_task'
+require_relative '../../../../lib/rhdl/cli/tasks/ao486_task'
 require 'json'
 require 'tmpdir'
 
-RSpec.describe RHDL::Examples::AO486::Tasks::AO486Task do
+RSpec.describe RHDL::CLI::Tasks::AO486Task do
   FakeDiag = Struct.new(:severity, :op, :message, :line, :column, keyword_init: true)
 
   FakeImportResult = Struct.new(

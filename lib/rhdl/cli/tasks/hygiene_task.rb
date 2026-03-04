@@ -76,6 +76,26 @@ module RHDL
           'examples/mos6502/software/roms/disk2_boot.bin' => 'examples/apple2/software/roms/disk2_boot.bin'
         }.freeze
 
+        LEGACY_NAMESPACE_PATTERNS = {
+          'RHDL::Export' => /\bRHDL::Export\b/,
+          'Codegen::Structure' => /\b(?:RHDL::)?Codegen::Structure\b/,
+          'RHDL::Codegen::IR' => /\bRHDL::Codegen::IR\b/,
+          'RHDL::Codegen.gate_level' => /\bRHDL::Codegen\.gate_level\b/,
+          'legacy backend symbols (:cpu/:gpu/:native_interpreter)' => /\bbackend:\s*:(?:cpu|gpu|native_interpreter)\b/
+        }.freeze
+
+        LEGACY_SCAN_GLOBS = %w[
+          README.md
+          Rakefile
+          exe/rhdl
+          lib/**/*.rb
+          docs/**/*.md
+        ].freeze
+
+        LEGACY_SCAN_EXCLUSIONS = %w[
+          lib/rhdl/cli/tasks/hygiene_task.rb
+        ].freeze
+
         def run
           puts_header('Repository Hygiene Check')
 
@@ -84,6 +104,7 @@ module RHDL
           failures.concat(check_ignore_rules)
           failures.concat(check_tracked_ephemera)
           failures.concat(check_duplicate_policy)
+          failures.concat(check_legacy_namespace_patterns)
 
           if failures.empty?
             puts '[OK] All hygiene checks passed.'
@@ -218,6 +239,40 @@ module RHDL
           end
 
           failures
+        end
+
+        def check_legacy_namespace_patterns
+          failures = []
+
+          active_files_for_legacy_scan.each do |path|
+            abs_path = File.join(root, path)
+            next unless File.file?(abs_path)
+
+            content = File.binread(abs_path)
+            next if content.include?("\x00")
+
+            text = content.encode('UTF-8', invalid: :replace, undef: :replace)
+            text.each_line.with_index(1) do |line, line_no|
+              LEGACY_NAMESPACE_PATTERNS.each do |label, pattern|
+                next unless pattern.match?(line)
+
+                failures << "Forbidden legacy pattern '#{label}' in #{path}:#{line_no}"
+              end
+            end
+          end
+
+          failures
+        end
+
+        def active_files_for_legacy_scan
+          files = []
+          Dir.chdir(root) do
+            LEGACY_SCAN_GLOBS.each do |glob|
+              files.concat(Dir.glob(glob))
+            end
+          end
+
+          files.uniq.reject { |path| LEGACY_SCAN_EXCLUSIONS.include?(path) }.sort
         end
 
         def parse_gitmodules_paths

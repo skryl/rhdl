@@ -76,7 +76,7 @@ RSpec.describe RHDL::HDL::ROM do
 
   describe 'gate-level netlist' do
     let(:component) { RHDL::HDL::ROM.new('rom', contents: [0x00, 0x11, 0x22, 0x33]) }
-    let(:ir) { RHDL::Export::Structure::Lower.from_components([component], name: 'rom') }
+    let(:ir) { RHDL::Codegen::Netlist::Lower.from_components([component], name: 'rom') }
 
     it 'generates correct IR structure' do
       expect(ir.inputs.keys).to include('rom.addr', 'rom.en')

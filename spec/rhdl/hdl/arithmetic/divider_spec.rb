@@ -73,7 +73,7 @@ RSpec.describe RHDL::HDL::Divider do
 
   describe 'gate-level netlist' do
     let(:component) { RHDL::HDL::Divider.new('div', width: 8) }
-    let(:ir) { RHDL::Export::Structure::Lower.from_components([component], name: 'div') }
+    let(:ir) { RHDL::Codegen::Netlist::Lower.from_components([component], name: 'div') }
 
     it 'generates correct IR structure' do
       expect(ir.inputs.keys).to include('div.dividend', 'div.divisor')

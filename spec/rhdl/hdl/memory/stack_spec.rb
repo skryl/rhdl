@@ -119,7 +119,7 @@ RSpec.describe RHDL::HDL::Stack do
 
   describe 'gate-level netlist' do
     let(:component) { RHDL::HDL::Stack.new('stack') }
-    let(:ir) { RHDL::Export::Structure::Lower.from_components([component], name: 'stack') }
+    let(:ir) { RHDL::Codegen::Netlist::Lower.from_components([component], name: 'stack') }
 
     it 'generates correct IR structure' do
       expect(ir.inputs.keys).to include('stack.clk', 'stack.rst', 'stack.push', 'stack.pop', 'stack.din')

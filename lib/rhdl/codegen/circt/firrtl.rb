@@ -639,13 +639,16 @@ module RHDL
 
         def statement(stmt, indent:, output_regs: Set.new, memory_reads: [], mem_read_index: Hash.new(0), rom_read_wires: {})
           pad = " " * indent
+
+          if memory_write_statement?(stmt)
+            return ["#{pad}connect #{sanitize(stmt.memory)}[#{expr(stmt.addr)}], #{expr(stmt.data)}"]
+          end
+
           case stmt
           when IR::SeqAssign
             # Rewrite target to use internal register if it's an output
             target = output_regs.include?(stmt.target) ? "#{stmt.target}_reg" : stmt.target
             ["#{pad}connect #{sanitize(target)}, #{expr_with_mem_reads(stmt.expr, memory_reads, mem_read_index, output_regs: output_regs, rom_read_wires: rom_read_wires)}"]
-          when IR::MemoryWrite
-            ["#{pad}connect #{sanitize(stmt.memory)}[#{expr(stmt.addr)}], #{expr(stmt.data)}"]
           when IR::If
             lines = []
             lines << "#{pad}when #{expr_with_mem_reads(stmt.condition, memory_reads, mem_read_index, output_regs: output_regs, rom_read_wires: rom_read_wires)}:"
@@ -658,6 +661,12 @@ module RHDL
           else
             []
           end
+        end
+
+        def memory_write_statement?(stmt)
+          return false unless IR.const_defined?(:MemoryWrite, false)
+
+          stmt.is_a?(IR.const_get(:MemoryWrite))
         end
 
         def expr(expr_node, output_regs: Set.new)

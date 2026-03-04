@@ -52,9 +52,9 @@ module RHDL
       end
       alias_method :to_circt, :circt
 
-      # Compatibility aliases that now return CIRCT MLIR.
+      # FIRRTL text generated from CIRCT IR nodes.
       def firrtl(component, top_name: nil)
-        mlir(component, top_name: top_name)
+        firrtl_for_verilog(component, top_name: top_name)
       end
       alias_method :to_firrtl, :firrtl
 
@@ -64,8 +64,9 @@ module RHDL
       end
       alias_method :to_mlir, :mlir
 
-      # Export CIRCT MLIR text to Verilog using external CIRCT tooling.
-      def verilog_from_mlir(mlir_text, tool: CIRCT::Tooling::DEFAULT_VERILOG_EXPORT_TOOL, extra_args: [])
+      # Export CIRCT text to Verilog using external tooling.
+      # `input_format` is passed through to tool adapters that support explicit format selection.
+      def verilog_from_mlir(mlir_text, tool: CIRCT::Tooling::DEFAULT_VERILOG_EXPORT_TOOL, extra_args: [], input_format: nil)
         tmpdir = Dir.mktmpdir('rhdl_circt_verilog')
         mlir_path = File.join(tmpdir, 'input.mlir')
         out_path = File.join(tmpdir, 'output.v')
@@ -75,7 +76,8 @@ module RHDL
           mlir_path: mlir_path,
           out_path: out_path,
           tool: tool,
-          extra_args: extra_args
+          extra_args: extra_args,
+          input_format: input_format
         )
 
         unless result[:success]
@@ -91,7 +93,17 @@ module RHDL
 
       # Export component via CIRCT path (RHDL DSL -> CIRCT MLIR -> external Verilog).
       def verilog_via_circt(component, top_name: nil, tool: CIRCT::Tooling::DEFAULT_VERILOG_EXPORT_TOOL, extra_args: [])
-        verilog_from_mlir(mlir_for_verilog(component, top_name: top_name), tool: tool, extra_args: extra_args)
+        verilog = verilog_from_mlir(
+          mlir_for_verilog(component, top_name: top_name),
+          tool: tool,
+          extra_args: extra_args,
+          input_format: 'mlir'
+        )
+        if CIRCT::Tooling.tool_basename(tool) == 'firtool'
+          restore_firtool_port_names(verilog, component)
+        else
+          verilog
+        end
       end
       alias_method :to_verilog_via_circt, :verilog_via_circt
 
@@ -104,6 +116,34 @@ module RHDL
           CIRCT::MLIR.generate(component.to_circt_nodes(top_name: top_name))
         else
           raise ArgumentError, "Component #{component.inspect} does not support CIRCT MLIR generation"
+        end
+      end
+
+      def firrtl_for_verilog(component, top_name:)
+        if component.respond_to?(:to_firrtl_hierarchy)
+          component.to_firrtl_hierarchy(top_name: top_name)
+        elsif component.respond_to?(:to_firrtl)
+          component.to_firrtl(top_name: top_name)
+        elsif component.respond_to?(:to_circt_nodes)
+          CIRCT::FIRRTL.generate(component.to_circt_nodes(top_name: top_name))
+        else
+          raise ArgumentError, "Component #{component.inspect} does not support FIRRTL generation"
+        end
+      end
+
+      def restore_firtool_port_names(verilog_text, component)
+        port_names = if component.respond_to?(:_port_defs)
+                       component._port_defs.map { |p| p[:name].to_s }
+                     elsif component.respond_to?(:_ports)
+                       component._ports.map { |p| p.name.to_s }
+                     else
+                       []
+                     end
+
+        return verilog_text if port_names.empty?
+
+        port_names.uniq.reduce(verilog_text) do |text, name|
+          text.gsub(/\b#{Regexp.escape(name)}_fir\b/, name)
         end
       end
 
@@ -149,23 +189,6 @@ module RHDL
 
       def write_firrtl(component, path:, top_name: nil)
         File.write(path, firrtl(component, top_name: top_name))
-      end
-
-      # Structure gate-level codegen
-      def gate_level(components, backend: :interpreter, lanes: 64, name: 'design')
-        ir = Netlist::Lower.from_components(components, name: name)
-        simulator_backend = case backend
-                            when :interpreter, :interpret then :interpreter
-                            when :jit then :jit
-                            when :compiler, :compile then :compiler
-                            else
-                              raise ArgumentError, "Unknown backend: #{backend}. Valid: :interpreter, :jit, :compiler"
-                            end
-        Sim::Native::Netlist::Simulator.new(
-          ir,
-          backend: simulator_backend,
-          lanes: lanes
-        )
       end
 
       # Component discovery and batch codegen
@@ -252,12 +275,7 @@ module RHDL
       end
     end
 
-    # Backwards compatibility: Behavior -> Verilog, Structure -> Netlist
-    Behavior = Verilog
-    Structure = Netlist
   end
 
-  # Backwards compatibility alias
-  Export = Codegen
   CIRCT = Codegen::CIRCT unless const_defined?(:CIRCT)
 end

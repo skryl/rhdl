@@ -53,7 +53,7 @@ RSpec.describe RHDL::HDL::Buffer do
 
   describe 'gate-level netlist' do
     let(:component) { RHDL::HDL::Buffer.new('buffer') }
-    let(:ir) { RHDL::Export::Structure::Lower.from_components([component], name: 'buffer') }
+    let(:ir) { RHDL::Codegen::Netlist::Lower.from_components([component], name: 'buffer') }
 
     it 'generates correct IR structure' do
       expect(ir.gates.length).to eq(1)

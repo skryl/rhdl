@@ -124,7 +124,7 @@ RSpec.describe RHDL::HDL::FullAdder do
 
   describe 'gate-level netlist' do
     let(:component) { RHDL::HDL::FullAdder.new('full_adder') }
-    let(:ir) { RHDL::Export::Structure::Lower.from_components([component], name: 'full_adder') }
+    let(:ir) { RHDL::Codegen::Netlist::Lower.from_components([component], name: 'full_adder') }
 
     it 'generates correct IR structure' do
       expect(ir.inputs.keys).to include('full_adder.a', 'full_adder.b', 'full_adder.cin')

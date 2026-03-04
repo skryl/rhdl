@@ -309,6 +309,31 @@ RSpec.describe RHDL::Codegen::CIRCT::Raise do
       expect(namespace.const_defined?(:Child, false)).to be(true)
     end
 
+    it 'preserves instance module refs when raising into an anonymous namespace' do
+      hierarchy_mlir = <<~MLIR
+        hw.module @top(%a: i8) -> (y: i8) {
+          %u_y = hw.instance "u" @child(a: %a: i8) -> (y: i8)
+          hw.output %u_y : i8
+        }
+
+        hw.module @child(%a: i8) -> (y: i8) {
+          hw.output %a : i8
+        }
+      MLIR
+
+      result = described_class.to_components(hierarchy_mlir, namespace: Module.new, top: 'top')
+      expect(result.success?).to be(true), result.diagnostics.map(&:message).join("\n")
+      expect(result.components.fetch('child').verilog_module_name).to eq('child')
+
+      top = result.components.fetch('top')
+      instance_def = top._instance_defs.find { |inst| inst[:name] == :u }
+      expect(instance_def).not_to be_nil
+      expect(instance_def[:module_name]).to eq('child')
+
+      emitted_mlir = top.to_ir(top_name: 'top')
+      expect(emitted_mlir).to include('hw.instance "u" @child(')
+    end
+
     it 'supports uppercase signal names in raised behavior when re-emitting MLIR' do
       mod = ir::ModuleOp.new(
         name: 'caps',
@@ -331,6 +356,50 @@ RSpec.describe RHDL::Codegen::CIRCT::Raise do
       emitted_mlir = nil
       expect { emitted_mlir = result.components.fetch('caps').to_ir(top_name: 'caps') }.not_to raise_error
       expect(emitted_mlir).to include('hw.module @caps')
+    end
+
+    it 'rewrites <= comparisons so output proxies are not treated as assignments in expressions' do
+      mod = ir::ModuleOp.new(
+        name: 'cmp_internal',
+        ports: [
+          ir::Port.new(name: :a, direction: :in, width: 8),
+          ir::Port.new(name: :b, direction: :in, width: 8),
+          ir::Port.new(name: :y, direction: :out, width: 1)
+        ],
+        nets: [ir::Net.new(name: :w, width: 8)],
+        regs: [],
+        assigns: [
+          ir::Assign.new(target: :w, expr: ir::Signal.new(name: :a, width: 8)),
+          ir::Assign.new(
+            target: :y,
+            expr: ir::BinaryOp.new(
+              op: :<=,
+              left: ir::Signal.new(name: :w, width: 8),
+              right: ir::Signal.new(name: :b, width: 8),
+              width: 1
+            )
+          )
+        ],
+        processes: [],
+        instances: [],
+        memories: [],
+        write_ports: [],
+        sync_read_ports: [],
+        parameters: {}
+      )
+
+      source_result = described_class.to_sources(mod, top: 'cmp_internal', strict: true)
+      expect(source_result.success?).to be(true), source_result.diagnostics.map(&:message).join("\n")
+      expect(source_result.sources.fetch('cmp_internal')).to include('y <= ((w < b) | (w == b))')
+
+      component_result = described_class.to_components(mod, namespace: Module.new, top: 'cmp_internal', strict: true)
+      expect(component_result.success?).to be(true), component_result.diagnostics.map(&:message).join("\n")
+
+      emitted_mlir = nil
+      expect do
+        emitted_mlir = component_result.components.fetch('cmp_internal').to_ir(top_name: 'cmp_internal')
+      end.not_to raise_error
+      expect(emitted_mlir).to include('comb.icmp')
     end
   end
 
@@ -533,7 +602,7 @@ RSpec.describe RHDL::Codegen::CIRCT::Raise do
 
       generated = File.read(File.join(tmp_dir, 'seq_if.rb'))
       expect(generated).to include('sequential clock: :clk do')
-      expect(generated).to include('q <= (d ? lit(1, width: 1) : q)')
+      expect(generated).to include('q <= mux(d, lit(1, width: 1), q)')
     end
   end
 end

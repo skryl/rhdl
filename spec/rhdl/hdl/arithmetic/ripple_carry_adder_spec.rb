@@ -65,7 +65,7 @@ RSpec.describe RHDL::HDL::RippleCarryAdder do
 
   describe 'gate-level netlist' do
     let(:component) { RHDL::HDL::RippleCarryAdder.new('rca', width: 4) }
-    let(:ir) { RHDL::Export::Structure::Lower.from_components([component], name: 'rca') }
+    let(:ir) { RHDL::Codegen::Netlist::Lower.from_components([component], name: 'rca') }
 
     it 'generates correct IR structure' do
       expect(ir.inputs.keys).to include('rca.a', 'rca.b', 'rca.cin')

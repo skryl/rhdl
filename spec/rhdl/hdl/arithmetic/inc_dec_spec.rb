@@ -81,7 +81,7 @@ RSpec.describe RHDL::HDL::IncDec do
 
   describe 'gate-level netlist' do
     let(:component) { RHDL::HDL::IncDec.new('incdec', width: 4) }
-    let(:ir) { RHDL::Export::Structure::Lower.from_components([component], name: 'incdec') }
+    let(:ir) { RHDL::Codegen::Netlist::Lower.from_components([component], name: 'incdec') }
 
     it 'generates correct IR structure' do
       expect(ir.inputs.keys).to include('incdec.a', 'incdec.inc')

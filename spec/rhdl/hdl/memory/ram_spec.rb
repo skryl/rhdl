@@ -118,7 +118,7 @@ RSpec.describe RHDL::HDL::RAM do
 
   describe 'gate-level netlist' do
     let(:component) { RHDL::HDL::RAM.new('ram') }
-    let(:ir) { RHDL::Export::Structure::Lower.from_components([component], name: 'ram') }
+    let(:ir) { RHDL::Codegen::Netlist::Lower.from_components([component], name: 'ram') }
 
     it 'generates correct IR structure' do
       expect(ir.inputs.keys).to include('ram.clk', 'ram.we', 'ram.addr', 'ram.din')

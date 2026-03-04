@@ -201,7 +201,7 @@ RSpec.describe RHDL::Examples::MOS6502::ALU do
 
   describe 'gate-level netlist' do
     let(:component) { RHDL::Examples::MOS6502::ALU.new('mos6502_alu') }
-    let(:ir) { RHDL::Export::Structure::Lower.from_components([component], name: 'mos6502_alu') }
+    let(:ir) { RHDL::Codegen::Netlist::Lower.from_components([component], name: 'mos6502_alu') }
 
     it 'generates correct IR structure' do
       expect(ir.inputs.keys).to include('mos6502_alu.a', 'mos6502_alu.b', 'mos6502_alu.op')

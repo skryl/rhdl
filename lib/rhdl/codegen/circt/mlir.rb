@@ -42,7 +42,11 @@ module RHDL
             @temp_idx = 0
             @values = {}
             @clock_values = {}
-            @assign_map = {}
+            @assigns_by_target = Hash.new { |h, k| h[k] = [] }
+            @internal_assign_targets = Set.new
+            @llhd_signal_tokens = {}
+            @llhd_probe_tokens = {}
+            @llhd_time_token = nil
             @resolving = Set.new
           end
 
@@ -51,6 +55,7 @@ module RHDL
             emit_header
             emit_reg_processes
             emit_instances
+            emit_internal_assign_drivers
             emit_output
             @lines << '}'
             @lines.join("\n")
@@ -59,8 +64,12 @@ module RHDL
           private
 
           def build_assign_map
+            @assigns_by_target.clear
+            @internal_assign_targets.clear
+
             @mod.assigns.each do |assign|
-              @assign_map[assign.target.to_s] = assign.expr
+              target = assign.target.to_s
+              @assigns_by_target[target] << assign.expr
             end
           end
 
@@ -102,21 +111,23 @@ module RHDL
 
               input_entries = input_ports.map do |port|
                 conn = conn_by_port[port.name.to_s]
-                width = conn ? connection_width(conn) : port.width
-                value = conn ? connection_value(conn, width) : emit_zero(width)
-                "#{sanitize(port.name)}: #{value}: #{iwidth(width)}"
+                source_width = conn ? connection_width(conn) : port.width
+                value = if conn
+                          raw = connection_value(conn, source_width)
+                          resize_value(raw, source_width, port.width)
+                        else
+                          emit_zero(port.width)
+                        end
+                "#{sanitize(port.name)}: #{value}: #{iwidth(port.width)}"
               end
 
               output_entries = output_ports.map do |port|
-                conn = conn_by_port[port.name.to_s]
-                width = conn ? connection_width(conn) : port.width
-                "#{sanitize(port.name)}: #{iwidth(width)}"
+                "#{sanitize(port.name)}: #{iwidth(port.width)}"
               end
 
               lhs = output_ports.map do |port|
                 conn = conn_by_port[port.name.to_s]
-                width = conn ? connection_width(conn) : port.width
-                ssa = fresh(width)
+                ssa = fresh(port.width)
                 if conn
                   @values[conn.signal.to_s] = ssa
                 end
@@ -149,7 +160,7 @@ module RHDL
             line << "#{lhs.join(', ')} = " unless lhs.empty?
             line << 'hw.instance '
             line << mlir_string(instance.name)
-            line << " @#{sanitize(instance.module_name)}#{instance_params_suffix(instance.parameters || {})}"
+            line << " @#{sanitize(instance.module_name)}#{instance_params_suffix(instance.parameters || {}, module_parameters: (target_mod&.parameters || {}))}"
             line << "(#{input_entries.join(', ')})"
             line << " -> (#{output_entries.join(', ')})"
             @lines << line
@@ -244,9 +255,30 @@ module RHDL
               return
             end
 
-            values = outputs.map { |port| resolve_signal(port.name.to_s, port.width) }
+            values = outputs.map do |port|
+              raw = resolve_signal(port.name.to_s, port.width)
+              raw_width = find_value_width(raw)
+              resize_value(raw, raw_width, port.width)
+            end
             types = outputs.map { |port| iwidth(port.width) }
             @lines << "  hw.output #{values.join(', ')} : #{types.join(', ')}"
+          end
+
+          def emit_internal_assign_drivers
+            @mod.assigns.each do |assign|
+              target = assign.target.to_s
+              next unless @internal_assign_targets.include?(target)
+              next if output_self_assign?(assign, target)
+
+              width = find_width(target)
+              signal_token = ensure_llhd_signal(target, width)
+              time_token = ensure_llhd_time_token
+
+              @resolving << target
+              expr_value = emit_expr(assign.expr)
+              @resolving.delete(target)
+              @lines << "  llhd.drv #{signal_token}, #{expr_value} after #{time_token} : #{iwidth(width)}"
+            end
           end
 
           def connection_width(conn)
@@ -269,12 +301,21 @@ module RHDL
             "\"#{escaped}\""
           end
 
-	          def instance_params_suffix(parameters)
+	          def instance_params_suffix(parameters, module_parameters: {})
+              module_parameter_widths = {}
+              module_parameters.each do |k, v|
+                key = k.to_s
+                next unless v.is_a?(Integer)
+
+                width = [v.abs.bit_length + (v.negative? ? 1 : 0), 1].max
+                module_parameter_widths[key] = width
+              end
+
 	            parts = parameters.map do |k, v|
 	              case v
               when Integer
-                width = [v.abs.bit_length + (v.negative? ? 1 : 0), 1].max
-                "#{sanitize(k)}: i#{width} = #{v}"
+                width = module_parameter_widths[k.to_s] || [v.abs.bit_length + (v.negative? ? 1 : 0), 1].max
+                "#{sanitize(k)}: i#{width} = #{normalize_const(v, width)}"
               when true, false
                 "#{sanitize(k)}: i1 = #{v ? 1 : 0}"
               end
@@ -292,6 +333,10 @@ module RHDL
             key = name.to_s
             return @values[key] if @values.key?(key)
 
+            if @internal_assign_targets.include?(key)
+              return probe_llhd_signal(key, width)
+            end
+
             if input_port?(key)
               value = "%#{sanitize(key)}"
               @values[key] = value
@@ -302,8 +347,9 @@ module RHDL
               return emit_zero(width)
             end
 
-            assigned = @assign_map[key]
-            if assigned
+            assigned_exprs = @assigns_by_target[key]
+            if assigned_exprs && !assigned_exprs.empty?
+              assigned = assigned_exprs.last
               @resolving << key
               @values[key] = emit_expr(assigned)
               @resolving.delete(key)
@@ -427,22 +473,31 @@ module RHDL
           end
 
           def emit_unary(expr)
-            operand = emit_expr(expr.operand)
+            operand_raw = emit_expr(expr.operand)
+            operand_width = expr.operand.respond_to?(:width) ? expr.operand.width : find_value_width(operand_raw)
             op = expr.op.to_s
 
             case op
             when '~', :'~'
+              operand = resize_value(operand_raw, operand_width, expr.width)
               all_ones = emit_const((1 << expr.width) - 1, expr.width)
               emit_comb('xor', operand, all_ones, expr.width)
             when '!', :'!'
-              zero = emit_const(0, expr.operand.width)
-              emit_icmp('eq', operand, zero, expr.operand.width)
+              zero = emit_const(0, operand_width)
+              emit_icmp('eq', operand_raw, zero, operand_width)
+            when 'reduce_or', :reduce_or
+              zero = emit_const(0, operand_width)
+              emit_icmp('ne', operand_raw, zero, operand_width)
+            when 'reduce_and', :reduce_and
+              all_ones = emit_const((1 << operand_width) - 1, operand_width)
+              emit_icmp('eq', operand_raw, all_ones, operand_width)
             when '-', :-@
+              operand = resize_value(operand_raw, operand_width, expr.width)
               zero = emit_const(0, expr.width)
               emit_comb('sub', zero, operand, expr.width)
             else
               @lines << "  // Unsupported unary op #{op.inspect}; emitting passthrough"
-              operand
+              operand_raw
             end
           end
 
@@ -474,10 +529,12 @@ module RHDL
 
           def emit_concat(expr)
             parts = expr.parts.map { |p| emit_expr(p) }
-            types = parts.map { |value| iwidth(find_value_width(value)) }
-            out = fresh(expr.width)
+            widths = parts.map { |value| find_value_width(value) }
+            types = widths.map { |width| iwidth(width) }
+            concat_width = [widths.sum, 1].max
+            out = fresh(concat_width)
             @lines << "  #{out} = comb.concat #{parts.join(', ')} : #{types.join(', ')}"
-            out
+            resize_value(out, concat_width, expr.width)
           end
 
           def emit_resize(expr)
@@ -488,13 +545,23 @@ module RHDL
           end
 
           def emit_const(value, width)
+            width = [width.to_i, 1].max
+            normalized = normalize_const(value, width)
             out = fresh(width)
-            @lines << "  #{out} = hw.constant #{value} : #{iwidth(width)}"
+            @lines << "  #{out} = hw.constant #{normalized} : #{iwidth(width)}"
             out
           end
 
           def emit_zero(width)
             emit_const(0, width)
+          end
+
+          def normalize_const(value, width)
+            modulus = 1 << width
+            wrapped = value.to_i % modulus
+            return wrapped if value.to_i >= 0
+
+            wrapped.zero? ? 0 : wrapped - modulus
           end
 
           def resolve_clock(name)
@@ -578,6 +645,113 @@ module RHDL
 
           def input_port?(name)
             @mod.ports.any? { |p| p.direction.to_s == 'in' && p.name.to_s == name }
+          end
+
+          def output_port?(name)
+            @mod.ports.any? { |p| p.direction.to_s == 'out' && p.name.to_s == name.to_s }
+          end
+
+          def ensure_llhd_signal(name, width)
+            key = name.to_s
+            return @llhd_signal_tokens[key] if @llhd_signal_tokens.key?(key)
+
+            init = emit_zero(width)
+            signal_token = fresh(width)
+            @lines << "  #{signal_token} = llhd.sig name #{mlir_string(key)} #{init} : #{iwidth(width)}"
+            @llhd_signal_tokens[key] = signal_token
+            signal_token
+          end
+
+          def probe_llhd_signal(name, width)
+            key = name.to_s
+            return @llhd_probe_tokens[key] if @llhd_probe_tokens.key?(key)
+
+            signal_token = ensure_llhd_signal(key, width)
+            probe_token = fresh(width)
+            @lines << "  #{probe_token} = llhd.prb #{signal_token} : #{iwidth(width)}"
+            @llhd_probe_tokens[key] = probe_token
+            @values[key] = probe_token
+          end
+
+          def ensure_llhd_time_token
+            return @llhd_time_token if @llhd_time_token
+
+            @llhd_time_token = fresh(1)
+            @lines << "  #{@llhd_time_token} = llhd.constant_time <0s, 1d, 0e>"
+            @llhd_time_token
+          end
+
+          def output_self_assign?(assign, target)
+            return false unless output_port?(target)
+            return false unless assign.expr.is_a?(IR::Signal)
+
+            assign.expr.name.to_s == target.to_s
+          end
+
+          def preserve_non_output_assign_target?(target, exprs, referenced_in_assign_exprs)
+            return true if exprs.length > 1
+            return true if exprs.any? { |expr| !expr.is_a?(IR::Signal) }
+            return true if referenced_in_assign_exprs.include?(target.to_s)
+
+            false
+          end
+
+          def collect_signal_refs_from_expr(expr, out)
+            case expr
+            when IR::Signal
+              out << expr.name.to_s
+            when IR::UnaryOp
+              collect_signal_refs_from_expr(expr.operand, out)
+            when IR::BinaryOp
+              collect_signal_refs_from_expr(expr.left, out)
+              collect_signal_refs_from_expr(expr.right, out)
+            when IR::Mux
+              collect_signal_refs_from_expr(expr.condition, out)
+              collect_signal_refs_from_expr(expr.when_true, out)
+              collect_signal_refs_from_expr(expr.when_false, out)
+            when IR::Concat
+              Array(expr.parts).each { |part| collect_signal_refs_from_expr(part, out) }
+            when IR::Slice
+              collect_signal_refs_from_expr(expr.base, out)
+            when IR::Resize
+              collect_signal_refs_from_expr(expr.expr, out)
+            when IR::Case
+              collect_signal_refs_from_expr(expr.selector, out)
+              expr.cases.each_value { |branch| collect_signal_refs_from_expr(branch, out) }
+              collect_signal_refs_from_expr(expr.default, out)
+            when IR::MemoryRead
+              collect_signal_refs_from_expr(expr.addr, out)
+            end
+          end
+
+          def signal_expr_references_target?(expr, target_name)
+            case expr
+            when IR::Signal
+              expr.name.to_s == target_name.to_s
+            when IR::UnaryOp
+              signal_expr_references_target?(expr.operand, target_name)
+            when IR::BinaryOp
+              signal_expr_references_target?(expr.left, target_name) ||
+                signal_expr_references_target?(expr.right, target_name)
+            when IR::Mux
+              signal_expr_references_target?(expr.condition, target_name) ||
+                signal_expr_references_target?(expr.when_true, target_name) ||
+                signal_expr_references_target?(expr.when_false, target_name)
+            when IR::Concat
+              Array(expr.parts).any? { |part| signal_expr_references_target?(part, target_name) }
+            when IR::Slice
+              signal_expr_references_target?(expr.base, target_name)
+            when IR::Resize
+              signal_expr_references_target?(expr.expr, target_name)
+            when IR::Case
+              signal_expr_references_target?(expr.selector, target_name) ||
+                expr.cases.any? { |_keys, branch| signal_expr_references_target?(branch, target_name) } ||
+                signal_expr_references_target?(expr.default, target_name)
+            when IR::MemoryRead
+              signal_expr_references_target?(expr.addr, target_name)
+            else
+              false
+            end
           end
 
           def fresh(width)

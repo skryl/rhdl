@@ -116,7 +116,7 @@ RSpec.describe RHDL::HDL::SRFlipFlop do
 
   describe 'gate-level netlist' do
     let(:component) { RHDL::HDL::SRFlipFlop.new('srff') }
-    let(:ir) { RHDL::Export::Structure::Lower.from_components([component], name: 'srff') }
+    let(:ir) { RHDL::Codegen::Netlist::Lower.from_components([component], name: 'srff') }
 
     it 'generates correct IR structure' do
       expect(ir.inputs.keys).to include('srff.s', 'srff.r', 'srff.clk', 'srff.rst', 'srff.en')

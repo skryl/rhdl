@@ -56,7 +56,7 @@ module RHDL
           RHDL::Sim::Component.connect(dff.outputs[:q], not_gate.inputs[:a])
           RHDL::Sim::Component.connect(not_gate.outputs[:y], dff.inputs[:d])
 
-          sim = RHDL::Export.gate_level([not_gate, dff], backend: :interpreter, lanes: lanes, name: 'bench_toggle')
+          sim = RHDL::Sim.gate_level([not_gate, dff], backend: :interpreter, lanes: lanes, name: 'bench_toggle')
 
           sim.poke('reg.rst', 0)
           sim.poke('reg.en', (1 << lanes) - 1)

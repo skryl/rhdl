@@ -226,11 +226,19 @@ module RHDL
           sequential = mod.processes.any?(&:clocked)
           base = sequential ? 'RHDL::Sim::SequentialComponent' : 'RHDL::Sim::Component'
           structure_plan = build_structure_plan(mod, diagnostics)
+          input_drive_wires = input_drive_wire_plan(mod)
+          input_drive_aliases = input_drive_wires.each_with_object({}) do |wire, map|
+            map[wire[:target].to_s] = wire[:name].to_s
+          end
 
           lines = []
           lines << '# frozen_string_literal: true'
           lines << ''
           lines << "class #{class_name} < #{base}"
+          lines << '  def self.verilog_module_name'
+          lines << "    #{mod.name.to_s.inspect}"
+          lines << '  end'
+          lines << ''
 
           emit_module_parameters(lines, mod, diagnostics)
 
@@ -240,8 +248,9 @@ module RHDL
           end
           lines << ''
 
-          inferred_wires = infer_referenced_internal_wires(mod, extra_wires: structure_plan[:bridge_wires])
-          emit_internal_wires(lines, mod, extra_wires: structure_plan[:bridge_wires] + inferred_wires)
+          extra_wires = structure_plan[:bridge_wires] + input_drive_wires
+          inferred_wires = infer_referenced_internal_wires(mod, extra_wires: extra_wires)
+          emit_internal_wires(lines, mod, extra_wires: extra_wires + inferred_wires)
           emit_structure(lines, structure_plan)
 
           if sequential
@@ -254,7 +263,8 @@ module RHDL
             diagnostics,
             strict: strict,
             bridge_assignments: structure_plan[:bridge_assignments],
-            structural_output_targets: structure_plan[:structural_output_targets]
+            structural_output_targets: structure_plan[:structural_output_targets],
+            input_drive_aliases: input_drive_aliases
           )
 
           lines << 'end'
@@ -315,6 +325,18 @@ module RHDL
 
           referenced = {}
 
+          mod.assigns.each do |assign|
+            target = sanitize_name(assign.target)
+            next if declared.include?(target)
+
+            width = if assign.expr.respond_to?(:width)
+                      assign.expr.width.to_i
+                    else
+                      1
+                    end
+            referenced[target] = [referenced[target].to_i, width].max
+          end
+
           mod.assigns.each { |assign| collect_signals_from_expr(assign.expr, referenced) }
           mod.processes.each { |process| collect_signals_from_statements(Array(process.statements), referenced) }
 
@@ -328,6 +350,21 @@ module RHDL
             next if declared.include?(name)
 
             wires << { name: name, width: width.to_i.positive? ? width.to_i : 1 }
+          end
+        end
+
+        def input_drive_wire_plan(mod)
+          seen = Set.new
+          mod.assigns.each_with_object([]) do |assign, wires|
+            target = sanitize_name(assign.target)
+            next unless input_port?(mod, target)
+            next if seen.include?(target)
+
+            width = find_target_width(mod, target)
+            width = [assign.expr.width.to_i, width].max if assign.expr.respond_to?(:width)
+            wire_name = "__rhdl_input_drv_#{target}"
+            wires << { target: target, name: wire_name, width: width.to_i.positive? ? width.to_i : 1 }
+            seen << target
           end
         end
 
@@ -601,9 +638,12 @@ module RHDL
           1
         end
 
-        def emit_behavior(lines, mod, diagnostics, strict: false, bridge_assignments: [], structural_output_targets: [])
+        def emit_behavior(lines, mod, diagnostics, strict: false, bridge_assignments: [], structural_output_targets: [],
+                          input_drive_aliases: {})
           lines << '  behavior do'
           driven_outputs = Set.new(Array(structural_output_targets).map { |name| sanitize_name(name) })
+          assign_counts = Hash.new(0)
+          mod.assigns.each { |assign| assign_counts[sanitize_name(assign.target)] += 1 }
 
           Array(bridge_assignments).each do |assign|
             target = sanitize_name(assign.target)
@@ -618,8 +658,10 @@ module RHDL
           end
 
           mod.assigns.each do |assign|
-            target = sanitize_name(assign.target)
-            next unless output_port?(mod, target)
+            original_target = sanitize_name(assign.target)
+            next if redundant_self_assign?(assign, original_target, assign_counts)
+
+            target = input_drive_aliases.fetch(original_target, original_target)
 
             emit_assignment(
               lines,
@@ -629,7 +671,7 @@ module RHDL
               strict: strict,
               indent: 4
             )
-            driven_outputs << target
+            driven_outputs << original_target if output_port?(mod, original_target)
           end
 
           output_targets = mod.ports.select { |p| p.direction == :out }.map { |p| sanitize_name(p.name) }.to_set
@@ -716,20 +758,20 @@ module RHDL
               expr.when_true,
               diagnostics,
               strict: strict,
-              indent: indent + 4,
+              indent: indent + 2,
               cache: cache
             )
             false_lines = render_expr_lines(
               expr.when_false,
               diagnostics,
               strict: strict,
-              indent: indent + 4,
+              indent: indent + 2,
               cache: cache
             )
-            append_suffix_to_last_line(condition_lines, ' ?')
-            append_suffix_to_last_line(true_lines, ' :')
+            append_suffix_to_last_line(condition_lines, ',')
+            append_suffix_to_last_line(true_lines, ',')
 
-            lines = ["#{' ' * indent}("]
+            lines = ["#{' ' * indent}mux("]
             lines.concat(condition_lines)
             lines.concat(true_lines)
             lines.concat(false_lines)
@@ -760,6 +802,8 @@ module RHDL
         end
 
         def pretty_breakable_expr?(expr)
+          return false if expr.is_a?(IR::BinaryOp) && comparison_op_conflicts_with_assignment?(expr.op)
+
           expr.is_a?(IR::BinaryOp) || expr.is_a?(IR::Mux) || expr.is_a?(IR::Concat)
         end
 
@@ -770,8 +814,25 @@ module RHDL
           lines
         end
 
+        def redundant_self_assign?(assign, target, assign_counts)
+          return false unless assign_counts[target].to_i > 1
+          return false unless assign.expr.is_a?(IR::Signal)
+
+          sanitize_name(assign.expr.name) == target
+        end
+
+        def input_port?(mod, name)
+          mod.ports.any? { |p| p.direction == :in && sanitize_name(p.name) == name.to_s }
+        end
+
         def output_port?(mod, name)
           mod.ports.any? { |p| p.direction == :out && sanitize_name(p.name) == name.to_s }
+        end
+
+        def comparison_op_conflicts_with_assignment?(op)
+          %i[<= >=].include?(op.to_sym)
+        rescue StandardError
+          false
         end
 
         def expr_to_ruby(expr, diagnostics, strict: false)
@@ -785,7 +846,18 @@ module RHDL
             right = expr_to_ruby(expr.right, diagnostics, strict: strict)
             return nil if left.nil? || right.nil?
 
-            "(#{left} #{expr.op} #{right})"
+            if comparison_op_conflicts_with_assignment?(expr.op)
+              case expr.op.to_sym
+              when :<=
+                "((#{left} < #{right}) | (#{left} == #{right}))"
+              when :>=
+                "((#{left} > #{right}) | (#{left} == #{right}))"
+              else
+                "(#{left} #{expr.op} #{right})"
+              end
+            else
+              "(#{left} #{expr.op} #{right})"
+            end
           when IR::UnaryOp
             operand = expr_to_ruby(expr.operand, diagnostics, strict: strict)
             return nil if operand.nil?
@@ -797,7 +869,7 @@ module RHDL
             when_false = expr_to_ruby(expr.when_false, diagnostics, strict: strict)
             return nil if condition.nil? || when_true.nil? || when_false.nil?
 
-            "(#{condition} ? #{when_true} : #{when_false})"
+            "mux(#{condition}, #{when_true}, #{when_false})"
           when IR::Slice
             range = expr.range
             if range.begin == range.end

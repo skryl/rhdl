@@ -31,7 +31,7 @@ module RHDL
           # Export lib components
           if %w[all lib].include?(options[:scope] || 'all')
             puts "Exporting lib/ components..."
-            components = RHDL::Export.list_components
+            components = RHDL::Codegen.list_components
 
             components.each do |info|
               component = info[:class]
@@ -119,7 +119,7 @@ module RHDL
                   "Unknown export backend: #{export_backend.inspect}. Expected one of: #{VALID_BACKENDS.join(', ')}"
           end
 
-          RHDL::Export.verilog_via_circt(
+          RHDL::Codegen.verilog_via_circt(
             component_class,
             top_name: top_name,
             tool: export_tool,

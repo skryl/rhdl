@@ -152,7 +152,7 @@ RSpec.describe RHDL::HDL::Mux4 do
 
   describe 'gate-level netlist' do
     let(:component) { RHDL::HDL::Mux4.new('mux4', width: 1) }
-    let(:ir) { RHDL::Export::Structure::Lower.from_components([component], name: 'mux4') }
+    let(:ir) { RHDL::Codegen::Netlist::Lower.from_components([component], name: 'mux4') }
 
     it 'generates correct IR structure' do
       expect(ir.inputs.keys).to include('mux4.a', 'mux4.b', 'mux4.c', 'mux4.d', 'mux4.sel')

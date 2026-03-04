@@ -122,15 +122,15 @@ RSpec.describe RHDL::CLI::Tasks::ExportTask do
 
     it 'exports via circt tooling for batch export' do
       allow(RHDL::CLI::Config).to receive(:verilog_dir).and_return(temp_dir)
-      allow(RHDL::Export).to receive(:list_components).and_return(
+      allow(RHDL::Codegen).to receive(:list_components).and_return(
         [{ class: RHDL::SpecFixtures::ExportTaskDummy, relative_path: 'fixtures/export_task_dummy' }]
       )
-      allow(RHDL::Export).to receive(:verilog_via_circt).and_return("module not_gate;\nendmodule\n")
+      allow(RHDL::Codegen).to receive(:verilog_via_circt).and_return("module not_gate;\nendmodule\n")
 
       task = described_class.new(all: true, scope: 'lib', tool: 'circt-translate', tool_args: ['--foo'])
       expect { task.export_all }.to output(/Exported 1 components/).to_stdout
 
-      expect(RHDL::Export).to have_received(:verilog_via_circt).with(
+      expect(RHDL::Codegen).to have_received(:verilog_via_circt).with(
         RHDL::SpecFixtures::ExportTaskDummy,
         top_name: nil,
         tool: 'circt-translate',
@@ -142,7 +142,7 @@ RSpec.describe RHDL::CLI::Tasks::ExportTask do
 
   describe '#export_single' do
     it 'exports via circt tooling for single exports' do
-      allow(RHDL::Export).to receive(:verilog_via_circt).and_return("module not_gate;\nendmodule\n")
+      allow(RHDL::Codegen).to receive(:verilog_via_circt).and_return("module not_gate;\nendmodule\n")
 
       task = described_class.new(
         component: 'RHDL::SpecFixtures::ExportTaskDummy',
@@ -153,7 +153,7 @@ RSpec.describe RHDL::CLI::Tasks::ExportTask do
       )
 
       expect { task.export_single }.to output(/Wrote verilog/).to_stdout
-      expect(RHDL::Export).to have_received(:verilog_via_circt).with(
+      expect(RHDL::Codegen).to have_received(:verilog_via_circt).with(
         RHDL::SpecFixtures::ExportTaskDummy,
         top_name: nil,
         tool: 'circt-translate',

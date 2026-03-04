@@ -14,7 +14,7 @@ use cranelift::prelude::*;
 use cranelift_jit::{JITBuilder, JITModule};
 use cranelift_module::{Linkage, Module};
 
-/// Gate types matching RHDL::Codegen::Structure::Primitives
+/// Gate types matching RHDL::Codegen::Netlist::Primitives
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "lowercase")]
 enum GateType {

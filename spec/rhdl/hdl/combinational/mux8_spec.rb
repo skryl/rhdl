@@ -59,7 +59,7 @@ RSpec.describe RHDL::HDL::Mux8 do
 
   describe 'gate-level netlist (1-bit)' do
     let(:component) { RHDL::HDL::Mux8.new('mux8', width: 1) }
-    let(:ir) { RHDL::Export::Structure::Lower.from_components([component], name: 'mux8') }
+    let(:ir) { RHDL::Codegen::Netlist::Lower.from_components([component], name: 'mux8') }
 
     it 'generates correct IR structure' do
       expect(ir.inputs.keys).to include('mux8.in0', 'mux8.in1', 'mux8.in2', 'mux8.in3')
