@@ -415,7 +415,7 @@ end
 
 # Benchmarking
 namespace :bench do
-  desc "Benchmark by scope (gates, cpu8bit, gem_metal, gem_metal_cpu8bit, gem_metal_riscv, mos6502, apple2, gameboy, ir, riscv)"
+  desc "Benchmark by scope (gates, cpu8bit, gem_metal, gem_metal_cpu8bit, gem_metal_apple2, mos6502, apple2, gameboy, ir, riscv)"
   task :native, [:scope, :count] do |_, args|
     load_cli_tasks
 
@@ -434,9 +434,9 @@ namespace :bench do
     when :gem_metal_cpu8bit
       cycles = count || 5_000
       RHDL::CLI::Tasks::BenchmarkTask.new(type: :gem_metal_cpu8bit, cycles: cycles).run
-    when :gem_metal_riscv
+    when :gem_metal_apple2
       cycles = count || 5_000
-      RHDL::CLI::Tasks::BenchmarkTask.new(type: :gem_metal_riscv, cycles: cycles).run
+      RHDL::CLI::Tasks::BenchmarkTask.new(type: :gem_metal_apple2, cycles: cycles).run
     when :mos6502
       cycles = count || 5_000_000
       RHDL::CLI::Tasks::BenchmarkTask.new(type: :mos6502, cycles: cycles).run
@@ -454,7 +454,7 @@ namespace :bench do
       RHDL::CLI::Tasks::BenchmarkTask.new(type: :riscv, cycles: cycles).run
     else
       puts "Unknown benchmark scope '#{scope}'."
-      puts "Available scopes: gates, cpu8bit, gem_metal, gem_metal_cpu8bit, gem_metal_riscv, mos6502, apple2, gameboy, ir, riscv"
+      puts "Available scopes: gates, cpu8bit, gem_metal, gem_metal_cpu8bit, gem_metal_apple2, mos6502, apple2, gameboy, ir, riscv"
       exit 1
     end
   end

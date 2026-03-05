@@ -34,13 +34,22 @@ module RHDL
               parsed
             end
 
-            def emit_metal_source(lowerer:, parsed:, state_layout:, metal_entry:, scalar_bits:, pack_wide_scalars:)
+            def emit_metal_source(
+              lowerer:,
+              parsed:,
+              state_layout:,
+              metal_entry:,
+              scalar_bits:,
+              pack_wide_scalars:,
+              gem_kernel_interpreter: false
+            )
               lowerer.emit_metal_source(
                 parsed: parsed,
                 state_layout: state_layout,
                 metal_entry: metal_entry,
                 scalar_bits: scalar_bits,
                 pack_wide_scalars: pack_wide_scalars,
+                gem_kernel_interpreter: gem_kernel_interpreter,
                 use_state_snapshot: false,
                 split_post_comb_liveness: true,
                 trust_state_masks: true,

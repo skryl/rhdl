@@ -441,8 +441,8 @@ Residual gap for final closeout:
 Commands:
 1. `bundle exec rspec spec/rhdl/codegen/firrtl/gem_to_gpu_lowering_spec.rb spec/examples/8bit/utilities/runners/synth_to_gpu_runner_spec.rb`
 2. `bundle exec rspec spec/examples/8bit/hdl/cpu/gem_gpu_instruction_stream_parity_spec.rb`
-3. `RHDL_GEM_GPU_EXECUTION_MODE=instruction_stream bundle exec rspec spec/examples/8bit/hdl/cpu/gem_gpu_complex_parity_spec.rb`
-4. `RHDL_GEM_GPU_EXECUTION_MODE=instruction_stream RHDL_BENCH_BACKENDS=compiler,gem_gpu bundle exec rake "bench:native[cpu8bit,50000]"`
+3. `bundle exec rspec spec/examples/8bit/hdl/cpu/gem_gpu_complex_parity_spec.rb`
+4. `RHDL_BENCH_BACKENDS=compiler,gem_gpu bundle exec rake "bench:native[cpu8bit,50000]"`
 
 Results:
 1. GEM metadata now emits deterministic instruction-stream artifacts:
@@ -453,7 +453,7 @@ Results:
      - `gem.execution.partition_dependency_edge_count`
      - `gem.execution.ready_layer_count`
      - `gem.execution.ready_layers`
-2. `gem_gpu` runner/wrapper now supports explicit execution mode selection (`legacy_eval` vs `instruction_stream`) and exposes runtime mode introspection.
+2. `gem_gpu` runner/wrapper now runs the instruction-stream path by default.
 3. Runner instruction-stream tuning now consumes stream/plan structure:
    - `GEM_INSTRUCTION_COUNT`
    - `GEM_STATE_READ_COUNT`
@@ -461,7 +461,7 @@ Results:
    - `GEM_DEPENDENCY_EDGE_COUNT`
    - `GEM_READY_LAYER_COUNT`
    to derive chunk scale in stream mode.
-4. GEM stream mode now enables kernel-side control-program interpretation during lowering (`RHDL_CPU8BIT_GEM_KERNEL_INTERPRETER=1`), emitting Metal control-op switch loop markers:
+4. GEM stream mode enables kernel-side control-program interpretation during lowering, emitting Metal control-op switch loop markers:
    - `constexpr ushort kGemControlOps[7]`
    - `switch (op)` over control micro-ops.
    - Kernel now binds instruction stream buffer (`[[buffer(3)]]`) and executes per-node `and_inv` shadow interpretation through `rhdl_gem_execute_shadow`.

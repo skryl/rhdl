@@ -680,7 +680,7 @@ module RHDL
               :ruby
             when :ir, :netlist
               :compile
-            when :verilog, :circt, :riscv_netlist
+            when :verilog, :circt, :arcilator_gpu
               :ruby
             else
               :compile

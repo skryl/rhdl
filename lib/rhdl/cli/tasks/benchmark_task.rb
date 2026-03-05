@@ -28,8 +28,8 @@ module RHDL
             benchmark_gem_metal
           when :gem_metal_cpu8bit
             benchmark_gem_metal_cpu8bit
-          when :gem_metal_riscv
-            benchmark_gem_metal_riscv
+          when :gem_metal_apple2
+            benchmark_gem_metal_apple2
           when :gameboy
             benchmark_gameboy
           when :riscv
@@ -221,8 +221,7 @@ module RHDL
             .split(',')
             .map { |name| name.strip.downcase.to_sym }
             .map { |name| name == :gpu ? :arcilator_gpu : name }
-            .map { |name| name == :synth ? :synth_to_gpu : name }
-            .map { |name| name == :arc ? :arc_to_gpu : name }
+            .map { |name| name == :arc ? :arcilator_gpu : name }
             .reject(&:empty?)
 
           puts_header("8-bit CPU FastHarness Benchmark")
@@ -245,18 +244,6 @@ module RHDL
               sim: :arcilator_gpu,
               filter_key: :arcilator_gpu,
               available: RHDL::HDL::CPU::FastHarness.arcilator_gpu_status[:ready]
-            },
-            {
-              name: 'ArcToGPU',
-              sim: :metal_arc_to_gpu,
-              filter_key: :arc_to_gpu,
-              available: RHDL::HDL::CPU::FastHarness.metal_arc_to_gpu_status[:ready]
-            },
-            {
-              name: 'SynthToGPU',
-              sim: :synth_to_gpu,
-              filter_key: :synth_to_gpu,
-              available: RHDL::HDL::CPU::FastHarness.synth_to_gpu_status[:ready]
             }
           ]
           runners.select! { |runner| runner_filter.include?(runner[:filter_key]) } unless runner_filter.empty?
@@ -325,7 +312,7 @@ module RHDL
         end
 
         # Benchmark external GEM Metal binary directly (submodule path).
-        # This measures the external GEM Metal kernel path, not FastHarness :gem_gpu.
+        # This measures the external GEM Metal kernel path.
         def benchmark_gem_metal
           require 'open3'
 
@@ -591,49 +578,47 @@ module RHDL
           end
         end
 
-        # Benchmark external GEM Metal binary on the RISC-V core workload.
-        # This builds (or reuses) a RISC-V AIGPDK-mapped netlist and gemparts.
-        def benchmark_gem_metal_riscv
+        # Benchmark external GEM Metal binary on the Apple2 workload.
+        # This builds (or reuses) an Apple2 AIGPDK-mapped netlist and gemparts.
+        def benchmark_gem_metal_apple2
           require 'fileutils'
           require 'open3'
-          require_relative '../../../../examples/riscv/hdl/cpu'
+          require_relative '../../../../examples/apple2/hdl'
 
           cycles = options[:cycles] || 5_000
-          num_blocks = (options[:blocks] || ENV.fetch('RHDL_GEM_METAL_RISCV_BLOCKS', '5')).to_i
+          num_blocks = (options[:blocks] || ENV.fetch('RHDL_GEM_METAL_APPLE2_BLOCKS', '5')).to_i
           num_blocks = 1 if num_blocks <= 0
-          top_module = ENV.fetch('RHDL_GEM_METAL_RISCV_TOP', 'riscv_cpu')
-          force_rebuild = truthy_env?(ENV.fetch('RHDL_GEM_METAL_RISCV_REBUILD', '0'))
+          top_module = ENV.fetch('RHDL_GEM_METAL_APPLE2_TOP', 'apple2_apple2')
+          force_rebuild = truthy_env?(ENV.fetch('RHDL_GEM_METAL_APPLE2_REBUILD', '0'))
 
           project_root = File.expand_path('../../../..', __dir__)
           gem_root = File.join(project_root, 'external', 'GEM')
           build_dir = File.expand_path(
-            ENV.fetch('RHDL_GEM_METAL_RISCV_BUILD_DIR', File.join(project_root, 'examples/riscv/.gem_metal_riscv'))
+            ENV.fetch('RHDL_GEM_METAL_APPLE2_BUILD_DIR', File.join(project_root, 'examples/apple2/.gem_metal_apple2'))
           )
           FileUtils.mkdir_p(build_dir)
 
-          rtl_path = File.join(build_dir, 'riscv_rtl.v')
-          yosys_script_path = File.join(build_dir, 'riscv_gem.ys')
-          yosys_log_path = File.join(build_dir, 'riscv_yosys.log')
-          cut_map_log_path = File.join(build_dir, 'riscv_cut_map.log')
-          metal_log_path = File.join(build_dir, 'riscv_metal_dummy.log')
+          rtl_path = File.join(build_dir, 'apple2_rtl.v')
+          yosys_script_path = File.join(build_dir, 'apple2_gem.ys')
+          yosys_log_path = File.join(build_dir, 'apple2_yosys.log')
+          cut_map_log_path = File.join(build_dir, 'apple2_cut_map.log')
+          metal_log_path = File.join(build_dir, 'apple2_metal_dummy.log')
 
           netlist_path = resolve_path_for_bench(
-            ENV['RHDL_GEM_METAL_RISCV_NETLIST'],
-            File.join(build_dir, 'riscv_gatelevel.gv'),
+            ENV['RHDL_GEM_METAL_APPLE2_NETLIST'],
+            File.join(build_dir, 'apple2_gatelevel.gv'),
             project_root
           )
           gemparts_path = resolve_path_for_bench(
-            ENV['RHDL_GEM_METAL_RISCV_GEMPARTS'],
-            File.join(build_dir, 'riscv.gemparts'),
+            ENV['RHDL_GEM_METAL_APPLE2_GEMPARTS'],
+            File.join(build_dir, 'apple2.gemparts'),
             project_root
           )
 
-          level_split = ENV.fetch('RHDL_GEM_METAL_RISCV_LEVEL_SPLIT', '').strip
-          max_stage_degrad = ENV.fetch('RHDL_GEM_METAL_RISCV_MAX_STAGE_DEGRAD', '').strip
-          flatten_for_yosys = truthy_env?(ENV.fetch('RHDL_GEM_METAL_RISCV_FLATTEN', '0'))
-          disable_mmu = truthy_env?(ENV.fetch('RHDL_GEM_METAL_RISCV_DISABLE_MMU', '1'))
+          level_split = ENV.fetch('RHDL_GEM_METAL_APPLE2_LEVEL_SPLIT', '').strip
+          max_stage_degrad = ENV.fetch('RHDL_GEM_METAL_APPLE2_MAX_STAGE_DEGRAD', '').strip
 
-          puts_header('External GEM Metal Benchmark (RISC-V)')
+          puts_header('External GEM Metal Benchmark (Apple2)')
           puts "Cycles per run: #{cycles}"
           puts "Blocks: #{num_blocks}"
           puts "Top module: #{top_module}"
@@ -642,8 +627,6 @@ module RHDL
           puts "Netlist: #{netlist_path}"
           puts "Gemparts: #{gemparts_path}"
           puts "Force rebuild: #{force_rebuild}"
-          puts "Flatten (yosys): #{flatten_for_yosys}"
-          puts "Disable MMU/TLB: #{disable_mmu}"
           puts
 
           unless Dir.exist?(gem_root)
@@ -661,8 +644,8 @@ module RHDL
 
           if need_netlist
             unless command_available?('yosys')
-              puts 'Error: yosys not found in PATH (required to synthesize RISC-V AIGPDK netlist)'
-              puts "Set RHDL_GEM_METAL_RISCV_NETLIST to a prebuilt netlist or install yosys, then retry."
+              puts 'Error: yosys not found in PATH (required to synthesize Apple2 AIGPDK netlist)'
+              puts "Set RHDL_GEM_METAL_APPLE2_NETLIST to a prebuilt netlist or install yosys, then retry."
               return
             end
 
@@ -672,18 +655,16 @@ module RHDL
               return
             end
 
-            puts 'Generating RISC-V Verilog hierarchy...'
+            puts 'Generating Apple2 Verilog hierarchy...'
             FileUtils.mkdir_p(File.dirname(rtl_path))
-            rtl = RHDL::Examples::RISCV::CPU.to_verilog_hierarchy(top_name: top_module)
-            rtl = disable_riscv_mmu_for_gem_rtl(rtl) if disable_mmu
+            rtl = RHDL::Examples::Apple2::Apple2.to_verilog_hierarchy(top_name: top_module)
             File.write(rtl_path, rtl)
 
-            puts 'Synthesizing/mapping RISC-V netlist with yosys...'
-            synth_cmd = flatten_for_yosys ? 'synth -flatten' : 'synth'
+            puts 'Synthesizing/mapping Apple2 netlist with yosys...'
             yosys_script = <<~YOSYS
               read_verilog "#{rtl_path}"
               hierarchy -check -top #{top_module}
-              #{synth_cmd}
+              synth -flatten
               delete t:\$print
               dfflibmap -liberty "#{aigpdk_nomem_lib}"
               opt_clean -purge
@@ -755,7 +736,7 @@ module RHDL
           unless status.success?
             puts out
             puts
-            puts "FAILED: external GEM RISC-V benchmark command exited with #{status.exitstatus}"
+            puts "FAILED: external GEM Apple2 benchmark command exited with #{status.exitstatus}"
             puts "Metal log: #{metal_log_path}"
             return
           end
@@ -1069,7 +1050,8 @@ module RHDL
             { name: 'JIT', backend: :jit, available_const: :IR_JIT_AVAILABLE },
             { name: 'Compiler', backend: :compiler, available_const: :IR_COMPILER_AVAILABLE },
             { name: 'Verilator', backend: :verilator },
-            { name: 'Arcilator', backend: :arcilator }
+            { name: 'Arcilator', backend: :arcilator },
+            { name: 'ArcilatorGPU', backend: :arcilator_gpu }
           ]
           runners.select! { |runner| runner_filter.include?(runner[:backend]) } unless runner_filter.empty?
 
@@ -1090,6 +1072,9 @@ module RHDL
               available = verilator_available?
             elsif runner[:backend] == :arcilator
               available = arcilator_available?
+            elsif runner[:backend] == :arcilator_gpu
+              require_relative '../../../../examples/apple2/utilities/runners/arcilator_gpu_runner'
+              available = RHDL::Examples::Apple2::ArcilatorGpuRunner.available?
             else
               available = false
             end
@@ -1103,7 +1088,7 @@ module RHDL
             print "\n#{runner[:name]}: "
             $stdout.flush
 
-            is_hdl_runner = runner[:backend] == :verilator || runner[:backend] == :arcilator
+            is_hdl_runner = %i[verilator arcilator arcilator_gpu].include?(runner[:backend])
 
             begin
               # Create simulator
@@ -1124,6 +1109,9 @@ module RHDL
               when :arcilator
                 require_relative '../../../../examples/apple2/utilities/runners/arcilator_runner'
                 RHDL::Examples::Apple2::ArcilatorRunner.new(sub_cycles: 14)
+              when :arcilator_gpu
+                require_relative '../../../../examples/apple2/utilities/runners/arcilator_gpu_runner'
+                RHDL::Examples::Apple2::ArcilatorGpuRunner.new(sub_cycles: 14)
               end
 
               init_elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - init_start
@@ -1382,7 +1370,8 @@ module RHDL
           runners = [
             { name: 'IR Compiler', mode: :ir, sim: :compile, filter_key: :compiler },
             { name: 'Verilator', mode: :verilog, sim: nil, filter_key: :verilator },
-            { name: 'CIRCT', mode: :circt, sim: nil, filter_key: :circt }
+            { name: 'CIRCT', mode: :circt, sim: nil, filter_key: :circt },
+            { name: 'ArcilatorGPU', mode: :arcilator_gpu, sim: nil, filter_key: :arcilator_gpu }
           ]
           runners.select! { |r| runner_filter.include?(r[:filter_key]) } unless runner_filter.empty?
 
@@ -1402,6 +1391,9 @@ module RHDL
                           verilator_available?
                         when :circt
                           arcilator_available?
+                        when :arcilator_gpu
+                          require_relative '../../../../examples/riscv/utilities/runners/arcilator_gpu_runner'
+                          RHDL::Examples::RISCV::ArcilatorGpuRunner.available?
                         end
 
             unless available

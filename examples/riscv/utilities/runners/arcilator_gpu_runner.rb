@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-# RV32I Metal Runner - Native RTL simulation via ArcToGPU/SynthToGPU + Metal
+# RV32I Arcilator GPU Runner - Native RTL simulation via ArcToGPU + Metal
 
 require_relative 'arcilator_runner'
 require 'fileutils'
@@ -9,20 +9,19 @@ require 'open3'
 require 'rbconfig'
 require 'rhdl/codegen/firrtl/firrtl'
 require 'rhdl/codegen/firrtl/arc_to_gpu_lowering'
-require 'rhdl/codegen/firrtl/synth_to_gpu_lowering'
 
 module RHDL
   module Examples
     module RISCV
-      class MetalRunner < ArcilatorRunner
+      class ArcilatorGpuRunner < ArcilatorRunner
         BUILD_BASE = File.expand_path('../../.hdl_build', __dir__)
         REQUIRED_TOOLS = %w[firtool circt-opt arcilator].freeze
         MAX_INSTANCE_COUNT = 1024
         DEFAULT_ARC_TO_GPU_PROFILE = :riscv
-        DEFAULT_BUILD_VARIANT = 'metal'
-        DEFAULT_SHARED_LIB_NAME = 'libriscv_metal_sim.so'
-        DEFAULT_BACKEND_SYMBOL = :metal
-        DEFAULT_SIMULATOR_TYPE = :hdl_metal
+        DEFAULT_BUILD_VARIANT = 'arcilator_gpu'
+        DEFAULT_SHARED_LIB_NAME = 'libriscv_arcilator_gpu_sim.so'
+        DEFAULT_BACKEND_SYMBOL = :arcilator_gpu
+        DEFAULT_SIMULATOR_TYPE = :hdl_arcilator_gpu
         ARC_TO_GPU_BUILD_ENV_VARS = %w[
           RHDL_ARC_TO_GPU_RISCV_CORE_SPECIALIZE
         ].freeze
@@ -59,7 +58,7 @@ module RHDL
             return info if info[:ready]
 
             raise LoadError,
-              "metal backend unavailable (missing tools: #{info[:missing_tools].join(', ')}). " \
+              "arcilator_gpu backend unavailable (missing tools: #{info[:missing_tools].join(', ')}). " \
               'Install CIRCT tools and the macOS Metal toolchain.'
           end
 
@@ -104,9 +103,9 @@ module RHDL
           @backend_symbol = backend_symbol.to_sym
           @simulator_type_symbol = simulator_type_symbol.to_sym
           env_overrides = {
-            'RHDL_RISCV_METAL_INSTANCES_RUNTIME' => @instance_count.to_s,
+            'RHDL_RISCV_ARCILATOR_GPU_INSTANCES_RUNTIME' => @instance_count.to_s,
             'RHDL_ARC_TO_GPU_RISCV_CORE_SPECIALIZE' => (@core_specialize ? '1' : '0'),
-            'RHDL_RISCV_METAL_CORE_SPECIALIZE_RUNTIME' => (@core_specialize ? '1' : '0')
+            'RHDL_RISCV_ARCILATOR_GPU_CORE_SPECIALIZE_RUNTIME' => (@core_specialize ? '1' : '0')
           }
           previous_env = env_overrides.to_h { |key, _value| [key, ENV[key]] }
           env_overrides.each { |key, value| ENV[key] = value }
@@ -256,7 +255,7 @@ module RHDL
 
           next_pow2 = 1
           next_pow2 <<= 1 while next_pow2 < size
-          warn "MetalRunner mem_size #{size} is not power-of-two; rounding up to #{next_pow2}."
+          warn "ArcilatorGpuRunner mem_size #{size} is not power-of-two; rounding up to #{next_pow2}."
           next_pow2
         end
 
@@ -265,7 +264,7 @@ module RHDL
         end
 
         def normalize_instance_count(instances)
-          raw = instances || ENV['RHDL_RISCV_METAL_INSTANCES'] || ENV['RHDL_BENCH_METAL_INSTANCES']
+          raw = instances || ENV['RHDL_RISCV_ARCILATOR_GPU_INSTANCES'] || ENV['RHDL_BENCH_ARCILATOR_GPU_INSTANCES']
           value = raw.to_i
           value = 1 if value <= 0
           [value, MAX_INSTANCE_COUNT].min
@@ -274,7 +273,7 @@ module RHDL
         def normalize_core_specialize(core_specialize)
           return core_specialize unless core_specialize.nil?
 
-          raw = ENV['RHDL_RISCV_METAL_CORE_SPECIALIZE']
+          raw = ENV['RHDL_RISCV_ARCILATOR_GPU_CORE_SPECIALIZE']
           return false if raw.nil?
 
           !%w[0 false no off].include?(raw.to_s.strip.downcase)
@@ -299,10 +298,7 @@ module RHDL
           parsed_mlir_file = File.join(build_dir, 'riscv_cpu_parsed.mlir')
           lowered_mlir_file = File.join(build_dir, 'riscv_cpu_lowered.mlir')
           hw_mlir_file = File.join(build_dir, 'riscv_cpu_hw.mlir')
-          hw_synth_mlir_file = File.join(build_dir, 'riscv_cpu_hw_synth_aig.mlir')
-          hw_synth_bits_mlir_file = File.join(build_dir, 'riscv_cpu_hw_synth_bits.mlir')
           arc_mlir_file = File.join(build_dir, 'riscv_cpu_arc.mlir')
-          synth_mlir_file = File.join(build_dir, 'riscv_cpu_synth.mlir')
           gpu_mlir_file = File.join(build_dir, 'riscv_cpu_arc_to_gpu.mlir')
           gpu_meta_file = File.join(build_dir, 'riscv_cpu_arc_to_gpu.json')
           metal_source_file = File.join(build_dir, 'riscv_cpu_arc_to_gpu.metal')
@@ -316,11 +312,6 @@ module RHDL
 
           needs_rebuild = !File.exist?(lib_file)
           outputs = [gpu_meta_file, metal_source_file, metal_lib_file, wrapper_file, lib_file, build_config_file]
-          if @arc_to_gpu_profile == :riscv_netlist
-            outputs << hw_synth_mlir_file
-            outputs << hw_synth_bits_mlir_file
-            outputs << synth_mlir_file
-          end
           needs_rebuild ||= outputs.any? { |path| !File.exist?(path) }
 
           unless needs_rebuild
@@ -329,7 +320,6 @@ module RHDL
               File.expand_path('../../hdl/cpu.rb', __dir__),
               File.expand_path('../../../../lib/rhdl/codegen/firrtl/firrtl.rb', __dir__),
               File.expand_path('../../../../lib/rhdl/codegen/firrtl/arc_to_gpu_lowering.rb', __dir__),
-              File.expand_path('../../../../lib/rhdl/codegen/firrtl/synth_to_gpu_lowering.rb', __dir__),
               File.expand_path(
                 "../../../../lib/rhdl/codegen/firrtl/arc_to_gpu_lowering/profiles/#{@arc_to_gpu_profile}.rb",
                 __dir__
@@ -358,30 +348,17 @@ module RHDL
             )
             emit_gpu_input_mlir(
               hw_mlir_file: hw_mlir_file,
-              hw_synth_mlir_file: hw_synth_mlir_file,
-              hw_synth_bits_mlir_file: hw_synth_bits_mlir_file,
               arc_mlir_file: arc_mlir_file,
-              synth_mlir_file: synth_mlir_file,
               log_file: log_file
             )
 
-            if @arc_to_gpu_profile == :riscv_netlist
-              RHDL::Codegen::FIRRTL::SynthToGpuLowering.lower(
-                synth_mlir_path: synth_mlir_file,
-                gpu_mlir_path: gpu_mlir_file,
-                metadata_path: gpu_meta_file,
-                metal_source_path: metal_source_file,
-                profile: @arc_to_gpu_profile
-              )
-            else
-              RHDL::Codegen::FIRRTL::ArcToGpuLowering.lower(
-                arc_mlir_path: arc_mlir_file,
-                gpu_mlir_path: gpu_mlir_file,
-                metadata_path: gpu_meta_file,
-                metal_source_path: metal_source_file,
-                profile: @arc_to_gpu_profile
-              )
-            end
+            RHDL::Codegen::FIRRTL::ArcToGpuLowering.lower(
+              arc_mlir_path: arc_mlir_file,
+              gpu_mlir_path: gpu_mlir_file,
+              metadata_path: gpu_meta_file,
+              metal_source_path: metal_source_file,
+              profile: @arc_to_gpu_profile
+            )
 
             compile_metal_shader(
               metal_source_file: metal_source_file,
@@ -474,37 +451,14 @@ module RHDL
 
         def emit_gpu_input_mlir(
           hw_mlir_file:,
-          hw_synth_mlir_file:,
-          hw_synth_bits_mlir_file:,
           arc_mlir_file:,
-          synth_mlir_file:,
           log_file:
         )
-          if @arc_to_gpu_profile == :riscv_netlist
-            synth_pipeline = [
-              'builtin.module(hw.module(' \
-              'hw-aggregate-to-comb,' \
-              'convert-comb-to-synth{target-ir=aig additional-legal-ops="comb.divu,comb.modu"}' \
-              '))'
-            ].join
-            run_or_raise(
-              ['circt-opt', hw_mlir_file, "--pass-pipeline=#{synth_pipeline}", '-o', hw_synth_mlir_file],
-              'circt-opt HW->Synth(AIG) netlistization',
-              log_file
-            )
-            run_or_raise(
-              ['circt-opt', hw_synth_mlir_file, '--synth-lower-word-to-bits', '-o', hw_synth_bits_mlir_file],
-              'circt-opt Synth word->bit lowering',
-              log_file
-            )
-            FileUtils.cp(hw_synth_bits_mlir_file, synth_mlir_file)
-          else
-            run_or_raise(
-              ['arcilator', hw_mlir_file, '--emit-mlir', '--until-after=arc-opt', '-o', arc_mlir_file],
-              'arcilator Arc emission',
-              log_file
-            )
-          end
+          run_or_raise(
+            ['arcilator', hw_mlir_file, '--emit-mlir', '--until-after=arc-opt', '-o', arc_mlir_file],
+            'arcilator Arc emission',
+            log_file
+          )
         end
 
         def last_log_lines(log_file, count = 20)
@@ -662,7 +616,7 @@ module RHDL
             }
 
             static inline uint32_t resolve_instance_count() {
-              const char* raw = getenv("RHDL_RISCV_METAL_INSTANCES_RUNTIME");
+              const char* raw = getenv("RHDL_RISCV_ARCILATOR_GPU_INSTANCES_RUNTIME");
               if (!raw || *raw == '\\0') {
                 return 1u;
               }
@@ -730,13 +684,13 @@ module RHDL
 
               self.device = MTLCreateSystemDefaultDevice();
               if (!self.device) {
-                fprintf(stderr, "[riscv-metal] init failed: no MTL device\\n");
+                fprintf(stderr, "[riscv-arcilator-gpu] init failed: no MTL device\\n");
                 return nil;
               }
 
               self.queue = [self.device newCommandQueue];
               if (!self.queue) {
-                fprintf(stderr, "[riscv-metal] init failed: no command queue\\n");
+                fprintf(stderr, "[riscv-arcilator-gpu] init failed: no command queue\\n");
                 return nil;
               }
 
@@ -744,19 +698,19 @@ module RHDL
               NSURL* libURL = [NSURL fileURLWithPath:metallibPath];
               self.library = [self.device newLibraryWithURL:libURL error:&error];
               if (!self.library) {
-                fprintf(stderr, "[riscv-metal] failed to load metallib: %s\\n", error.localizedDescription.UTF8String);
+                fprintf(stderr, "[riscv-arcilator-gpu] failed to load metallib: %s\\n", error.localizedDescription.UTF8String);
                 return nil;
               }
 
               id<MTLFunction> fn = [self.library newFunctionWithName:kernelName];
               if (!fn) {
-                fprintf(stderr, "[riscv-metal] kernel not found: %s\\n", kernelName.UTF8String);
+                fprintf(stderr, "[riscv-arcilator-gpu] kernel not found: %s\\n", kernelName.UTF8String);
                 return nil;
               }
 
               self.pipeline = [self.device newComputePipelineStateWithFunction:fn error:&error];
               if (!self.pipeline) {
-                fprintf(stderr, "[riscv-metal] failed to build pipeline: %s\\n", error.localizedDescription.UTF8String);
+                fprintf(stderr, "[riscv-arcilator-gpu] failed to build pipeline: %s\\n", error.localizedDescription.UTF8String);
                 return nil;
               }
 
@@ -784,7 +738,7 @@ module RHDL
               self.ioBuffer = [self.device newBufferWithLength:ioBytes options:MTLResourceStorageModeShared];
 
               if (!self.stateBuffer || !self.instBuffer || !self.ioBuffer) {
-                fprintf(stderr, "[riscv-metal] failed to allocate GPU buffers\\n");
+                fprintf(stderr, "[riscv-arcilator-gpu] failed to allocate GPU buffers\\n");
                 return nil;
               }
 

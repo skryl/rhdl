@@ -58,7 +58,7 @@ parser = OptionParser.new do |opts|
     options[:audio] = true
   end
 
-  opts.on("-m", "--mode TYPE", [:ruby, :ir, :netlist, :verilog, :circt], "Simulation mode: ruby (default), ir, netlist (gate-level), verilog (Verilator), circt (Arcilator)") do |v|
+  opts.on("-m", "--mode TYPE", [:ruby, :ir, :netlist, :verilog, :circt, :arcilator_gpu], "Simulation mode: ruby (default), ir, netlist (gate-level), verilog (Verilator), circt (Arcilator), arcilator_gpu (ArcToGPU Metal)") do |v|
     options[:mode] = v
   end
 
@@ -126,7 +126,7 @@ if options[:sim].nil?
   options[:sim] = case options[:mode]
                   when :ruby then :ruby
                   when :ir, :netlist then :compile
-                  when :verilog, :circt then :ruby
+                  when :verilog, :circt, :arcilator_gpu then :ruby
                   else :ruby
                   end
 end
@@ -149,7 +149,7 @@ if options[:speed].nil?
                       when :interpret then 1_000
                       else 1_000
                       end
-                    when :verilog, :circt
+                    when :verilog, :circt, :arcilator_gpu
                       33_333
                     else
                       100

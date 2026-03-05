@@ -94,7 +94,16 @@ module RHDL
               split_low_data_addr_eval_enabled? ? 'split' : 'inline'
             end
 
-            def emit_metal_source(lowerer:, parsed:, state_layout:, metal_entry:, scalar_bits:, pack_wide_scalars:)
+            def emit_metal_source(
+              lowerer:,
+              parsed:,
+              state_layout:,
+              metal_entry:,
+              scalar_bits:,
+              pack_wide_scalars:,
+              gem_kernel_interpreter: false
+            )
+              _ = gem_kernel_interpreter
               lowerer.with_scalar_config(
                 scalar_bits,
                 pack_wide_scalars: pack_wide_scalars,

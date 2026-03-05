@@ -95,13 +95,14 @@ RSpec.describe RHDL::CLI::Tasks::BenchmarkTask do
       end
     end
 
-    context 'with type: :gem_metal_riscv' do
-      it 'dispatches to benchmark_gem_metal_riscv' do
-        task = described_class.new(type: :gem_metal_riscv)
-        expect(task).to receive(:benchmark_gem_metal_riscv)
+    context 'with type: :gem_metal_apple2' do
+      it 'dispatches to benchmark_gem_metal_apple2' do
+        task = described_class.new(type: :gem_metal_apple2)
+        expect(task).to receive(:benchmark_gem_metal_apple2)
         task.run
       end
     end
+
   end
 
   describe '#benchmark_gates' do
@@ -112,37 +113,33 @@ RSpec.describe RHDL::CLI::Tasks::BenchmarkTask do
   end
 
   describe '#benchmark_cpu8bit' do
-    it 'maps synth filter alias to the synth_to_gpu runner' do
+    it 'maps arc filter alias to the arcilator_gpu runner' do
       original_filter = ENV['RHDL_BENCH_BACKENDS']
-      ENV['RHDL_BENCH_BACKENDS'] = 'synth'
+      ENV['RHDL_BENCH_BACKENDS'] = 'arc'
 
       task = described_class.new(type: :cpu8bit, cycles: 16, batch_size: 8)
       memory = double('memory', load: true)
       harness = double('fast_harness', memory: memory, pc: 0, run_cycles: 16, parallel_instances: 1, :"pc=" => true)
 
-      allow(RHDL::HDL::CPU::FastHarness).to receive(:arcilator_gpu_status).and_return({ ready: false })
-      allow(RHDL::HDL::CPU::FastHarness).to receive(:metal_arc_to_gpu_status).and_return({ ready: false })
-      allow(RHDL::HDL::CPU::FastHarness).to receive(:synth_to_gpu_status).and_return({ ready: true })
-      allow(RHDL::HDL::CPU::FastHarness).to receive(:new).with(nil, sim: :synth_to_gpu).and_return(harness)
+      allow(RHDL::HDL::CPU::FastHarness).to receive(:arcilator_gpu_status).and_return({ ready: true })
+      allow(RHDL::HDL::CPU::FastHarness).to receive(:new).with(nil, sim: :arcilator_gpu).and_return(harness)
 
-      expect { task.benchmark_cpu8bit }.to output(/SynthToGPU/).to_stdout
-      expect(RHDL::HDL::CPU::FastHarness).to have_received(:new).with(nil, sim: :synth_to_gpu)
+      expect { task.benchmark_cpu8bit }.to output(/ArcilatorGPU/).to_stdout
+      expect(RHDL::HDL::CPU::FastHarness).to have_received(:new).with(nil, sim: :arcilator_gpu)
     ensure
       ENV['RHDL_BENCH_BACKENDS'] = original_filter
     end
 
     it 'reports effective throughput when runner has parallel instances' do
       original_filter = ENV['RHDL_BENCH_BACKENDS']
-      ENV['RHDL_BENCH_BACKENDS'] = 'synth'
+      ENV['RHDL_BENCH_BACKENDS'] = 'arc'
 
       task = described_class.new(type: :cpu8bit, cycles: 16, batch_size: 8)
       memory = double('memory', load: true)
       harness = double('fast_harness', memory: memory, pc: 0, run_cycles: 16, parallel_instances: 8, :"pc=" => true)
 
-      allow(RHDL::HDL::CPU::FastHarness).to receive(:arcilator_gpu_status).and_return({ ready: false })
-      allow(RHDL::HDL::CPU::FastHarness).to receive(:metal_arc_to_gpu_status).and_return({ ready: false })
-      allow(RHDL::HDL::CPU::FastHarness).to receive(:synth_to_gpu_status).and_return({ ready: true })
-      allow(RHDL::HDL::CPU::FastHarness).to receive(:new).with(nil, sim: :synth_to_gpu).and_return(harness)
+      allow(RHDL::HDL::CPU::FastHarness).to receive(:arcilator_gpu_status).and_return({ ready: true })
+      allow(RHDL::HDL::CPU::FastHarness).to receive(:new).with(nil, sim: :arcilator_gpu).and_return(harness)
 
       output = capture_stdout { task.benchmark_cpu8bit }
       expect(output).to match(/Instances:\s+8/)

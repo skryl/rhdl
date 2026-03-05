@@ -58,6 +58,13 @@ lib/rhdl/codegen/ir/sim/ir_compiler/*.json
 /examples/8bit/.gem_metal_cpu8bit/
 /examples/riscv/.gem_metal_riscv/
 
+# Submodule trees
+/examples/apple2/reference/
+/examples/gameboy/reference/
+/examples/riscv/software/xv6/
+/examples/riscv/software/linux/
+/external/GEM/
+
 # Web simulator generated artifacts
 web/assets/fixtures/*
 
@@ -101,3 +108,12 @@ web/build/verilator/*
 /examples/riscv/software/.buildroot.defconfig
 /examples/riscv/software/.docker-config*/
 /examples/riscv/software/.tmp_*/
+
+# AO486 local scratch/import artifacts
+/examples/ao486/reference/
+/examples/ao486/tmp/
+/examples/ao486/software/tmp/
+/examples/ao486/hdl/tmp/
+/examples/ao486/hdl/reports/
+/examples/ao486/hdl/vendor/source_hdl/
+/examples/ao486/hdl/lib/hdl/modules/frontend_blackbox_stubs__*.rb

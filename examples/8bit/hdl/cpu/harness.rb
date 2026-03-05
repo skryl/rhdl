@@ -77,6 +77,28 @@ module RHDL
           }
         end
 
+        def self.arcilator_status
+          require_relative '../../utilities/runners/arcilator_runner'
+          RHDL::Examples::CPU8Bit::ArcilatorRunner.status
+        rescue LoadError, NameError => e
+          {
+            ready: false,
+            missing_tools: [],
+            missing_capabilities: ["arcilator runner unavailable: #{e.message}"]
+          }
+        end
+
+        def self.verilator_status
+          require_relative '../../utilities/runners/verilator_runner'
+          RHDL::Examples::CPU8Bit::VerilatorRunner.status
+        rescue LoadError, NameError => e
+          {
+            ready: false,
+            missing_tools: [],
+            missing_capabilities: ["verilator runner unavailable: #{e.message}"]
+          }
+        end
+
         def self.ensure_arcilator_gpu_available!
           status = arcilator_gpu_status
           return true if status[:ready]
@@ -89,61 +111,28 @@ module RHDL
             "Install an ArcToGPU-enabled arcilator build plus Metal/SPIR-V toolchain support."
         end
 
-        def self.synth_to_gpu_status
-          require_relative '../../utilities/runners/synth_to_gpu_runner'
-          RHDL::Examples::CPU8Bit::SynthToGpuRunner.status(pipeline: :synth_to_gpu)
-        rescue LoadError, NameError => e
-          {
-            ready: false,
-            missing_tools: ["synth_to_gpu runner unavailable: #{e.message}"]
-          }
-        end
-
-        def self.ensure_synth_to_gpu_available!
-          status = synth_to_gpu_status
+        def self.ensure_arcilator_available!
+          status = arcilator_status
           return true if status[:ready]
 
+          details = []
+          details << "missing tools: #{status[:missing_tools].join(', ')}" unless status[:missing_tools].empty?
+          details << "missing capabilities: #{status[:missing_capabilities].join(', ')}" unless status[:missing_capabilities].empty?
           raise ArgumentError,
-            "synth_to_gpu backend unavailable (missing tools: #{status[:missing_tools].join(', ')}). " \
-            'Install CIRCT tools and the macOS Metal toolchain.'
+            "arcilator backend unavailable (#{details.join('; ')}). " \
+            "Install an arcilator/firtool-enabled toolchain."
         end
 
-        def self.metal_arc_to_gpu_status
-          require_relative '../../utilities/runners/synth_to_gpu_runner'
-          RHDL::Examples::CPU8Bit::SynthToGpuRunner.status(pipeline: :arc_to_gpu)
-        rescue LoadError, NameError => e
-          {
-            ready: false,
-            missing_tools: ["metal_arc_to_gpu runner unavailable: #{e.message}"]
-          }
-        end
-
-        def self.ensure_metal_arc_to_gpu_available!
-          status = metal_arc_to_gpu_status
+        def self.ensure_verilator_available!
+          status = verilator_status
           return true if status[:ready]
 
+          details = []
+          details << "missing tools: #{status[:missing_tools].join(', ')}" unless status[:missing_tools].empty?
+          details << "missing capabilities: #{status[:missing_capabilities].join(', ')}" unless status[:missing_capabilities].empty?
           raise ArgumentError,
-            "metal_arc_to_gpu backend unavailable (missing tools: #{status[:missing_tools].join(', ')}). " \
-            'Install CIRCT/arcilator tools and the macOS Metal toolchain.'
-        end
-
-        def self.gem_gpu_status
-          require_relative '../../utilities/runners/synth_to_gpu_runner'
-          RHDL::Examples::CPU8Bit::SynthToGpuRunner.status(pipeline: :gem_gpu)
-        rescue LoadError, NameError => e
-          {
-            ready: false,
-            missing_tools: ["gem_gpu runner unavailable: #{e.message}"]
-          }
-        end
-
-        def self.ensure_gem_gpu_available!
-          status = gem_gpu_status
-          return true if status[:ready]
-
-          raise ArgumentError,
-            "gem_gpu backend unavailable (missing tools: #{status[:missing_tools].join(', ')}). " \
-            'Install CIRCT tools and the macOS Metal toolchain.'
+            "verilator backend unavailable (#{details.join('; ')}). " \
+            "Install a verilator-enabled native build toolchain."
         end
 
         def initialize(external_memory = nil, sim: :compile)
@@ -153,28 +142,23 @@ module RHDL
           @halted = false
           @sim_backend = normalize_sim_backend(sim)
 
-          if arcilator_gpu_mode?
-            self.class.ensure_arcilator_gpu_available!
-            require_relative '../../utilities/runners/arcilator_gpu_runner'
-            @sim = RHDL::Examples::CPU8Bit::ArcilatorGpuRunner.new
-            @memory = RunnerMemory64K.new(@sim)
-            ensure_runner_cpu8bit_mode!
-          elsif synth_to_gpu_mode?
-            self.class.ensure_synth_to_gpu_available!
-            require_relative '../../utilities/runners/synth_to_gpu_runner'
-            @sim = RHDL::Examples::CPU8Bit::SynthToGpuRunner.new(pipeline: :synth_to_gpu)
-            @memory = RunnerMemory64K.new(@sim)
-            ensure_runner_cpu8bit_mode!
-          elsif metal_arc_to_gpu_mode?
-            self.class.ensure_metal_arc_to_gpu_available!
-            require_relative '../../utilities/runners/synth_to_gpu_runner'
-            @sim = RHDL::Examples::CPU8Bit::SynthToGpuRunner.new(pipeline: :arc_to_gpu)
-            @memory = RunnerMemory64K.new(@sim)
-            ensure_runner_cpu8bit_mode!
-          elsif gem_gpu_mode?
-            self.class.ensure_gem_gpu_available!
-            require_relative '../../utilities/runners/synth_to_gpu_runner'
-            @sim = RHDL::Examples::CPU8Bit::SynthToGpuRunner.new(pipeline: :gem_gpu)
+          if runner_backend_mode?
+            @sim = case @sim_backend
+            when :arcilator_gpu
+              self.class.ensure_arcilator_gpu_available!
+              require_relative '../../utilities/runners/arcilator_gpu_runner'
+              RHDL::Examples::CPU8Bit::ArcilatorGpuRunner.new
+            when :arcilator
+              self.class.ensure_arcilator_available!
+              require_relative '../../utilities/runners/arcilator_runner'
+              RHDL::Examples::CPU8Bit::ArcilatorRunner.new
+            when :verilator
+              self.class.ensure_verilator_available!
+              require_relative '../../utilities/runners/verilator_runner'
+              RHDL::Examples::CPU8Bit::VerilatorRunner.new
+            else
+              raise ArgumentError, "Unsupported runner backend: #{@sim_backend.inspect}"
+            end
             @memory = RunnerMemory64K.new(@sim)
             ensure_runner_cpu8bit_mode!
           else
@@ -207,10 +191,7 @@ module RHDL
         end
 
         def backend
-          return :arcilator_gpu if arcilator_gpu_mode?
-          return :synth_to_gpu if synth_to_gpu_mode?
-          return :metal_arc_to_gpu if metal_arc_to_gpu_mode?
-          return :gem_gpu if gem_gpu_mode?
+          return @sim_backend if runner_backend_mode?
 
           @sim.backend
         end
@@ -366,7 +347,8 @@ module RHDL
         def normalize_sim_backend(sim)
           sym = sim.to_sym
           return :compile if sym == :compiler
-          return :gem_gpu if sym == :gem
+          return :arcilator_gpu if sym == :arc_to_gpu
+          return :arcilator if sym == :arc
 
           sym
         end
@@ -379,20 +361,16 @@ module RHDL
           @sim_backend == :arcilator_gpu
         end
 
-        def synth_to_gpu_mode?
-          @sim_backend == :synth_to_gpu
+        def arcilator_mode?
+          @sim_backend == :arcilator
         end
 
-        def metal_arc_to_gpu_mode?
-          @sim_backend == :metal_arc_to_gpu
-        end
-
-        def gem_gpu_mode?
-          @sim_backend == :gem_gpu
+        def verilator_mode?
+          @sim_backend == :verilator
         end
 
         def runner_backend_mode?
-          arcilator_gpu_mode? || synth_to_gpu_mode? || metal_arc_to_gpu_mode? || gem_gpu_mode?
+          arcilator_gpu_mode? || arcilator_mode? || verilator_mode?
         end
 
         def ensure_runner_cpu8bit_mode!

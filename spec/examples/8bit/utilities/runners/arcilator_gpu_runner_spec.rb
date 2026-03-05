@@ -33,7 +33,7 @@ RSpec.describe RHDL::Examples::CPU8Bit::ArcilatorGpuRunner do
       allow(described_class).to receive(:command_success?).and_return(true)
     end
 
-    it 'reports ready when tools and gpu option are available' do
+    it 'reports ready when tools are available' do
       allow(described_class).to receive(:command_available?).and_return(true)
       allow(described_class).to receive(:command_output).with(%w[arcilator --help]).and_return('--arc-to-gpu')
 
@@ -44,13 +44,14 @@ RSpec.describe RHDL::Examples::CPU8Bit::ArcilatorGpuRunner do
       expect(status[:gpu_option_tokens]).to eq(['--arc-to-gpu'])
     end
 
-    it 'reports missing ArcToGPU capability when no gpu option is present' do
+    it 'remains ready when no gpu option is advertised in arcilator help' do
       allow(described_class).to receive(:command_available?).and_return(true)
       allow(described_class).to receive(:command_output).with(%w[arcilator --help]).and_return('--help')
 
       status = described_class.status
-      expect(status[:ready]).to be(false)
-      expect(status[:missing_capabilities]).to include(/ArcToGPU/)
+      expect(status[:ready]).to be(true)
+      expect(status[:missing_capabilities]).to eq([])
+      expect(status[:gpu_option_tokens]).to eq([])
     end
   end
 end

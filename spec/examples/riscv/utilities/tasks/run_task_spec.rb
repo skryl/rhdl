@@ -290,13 +290,6 @@ RSpec.describe RHDL::Examples::RISCV::HeadlessRunner do
       skip "Arcilator backend unavailable: #{e.message}"
     end
 
-    it 'accepts riscv_netlist mode without fallback' do
-      runner = described_class.new(mode: :riscv_netlist)
-      expect(runner.mode).to eq(:riscv_netlist)
-      expect(runner.effective_mode).to eq(:riscv_netlist)
-    rescue LoadError, RuntimeError => e
-      skip "riscv_netlist backend unavailable: #{e.message}"
-    end
   end
 
   describe 'program execution' do

@@ -1,9 +1,9 @@
 # frozen_string_literal: true
 
 require 'spec_helper'
-require_relative '../../../../examples/apple2/utilities/runners/metal_runner'
+require_relative '../../../../examples/apple2/utilities/runners/arcilator_gpu_runner'
 
-RSpec.describe RHDL::Examples::Apple2::MetalRunner do
+RSpec.describe RHDL::Examples::Apple2::ArcilatorGpuRunner do
   describe '.status' do
     it 'reports ready when required tools are available' do
       allow(described_class).to receive(:command_available?).and_return(true)
@@ -33,21 +33,21 @@ RSpec.describe RHDL::Examples::Apple2::MetalRunner do
       )
 
       expect { described_class.ensure_available! }
-        .to raise_error(ArgumentError, /metal backend unavailable/i)
+        .to raise_error(ArgumentError, /arcilator_gpu backend unavailable/i)
     end
   end
 
   describe 'instance metadata' do
     let(:runner) { described_class.allocate }
 
-    it 'reports metal simulator type' do
-      expect(runner.simulator_type).to eq(:hdl_metal)
+    it 'reports arcilator gpu simulator type' do
+      expect(runner.simulator_type).to eq(:hdl_arcilator_gpu)
     end
 
-    it 'reports dry-run metadata for metal mode' do
+    it 'reports dry-run metadata for arcilator gpu mode' do
       expect(runner.dry_run_info).to include(
-        mode: :metal,
-        simulator_type: :hdl_metal,
+        mode: :arcilator_gpu,
+        simulator_type: :hdl_arcilator_gpu,
         native: true
       )
     end

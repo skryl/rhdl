@@ -5,28 +5,21 @@ require 'fiddle'
 require 'json'
 require 'open3'
 require 'rbconfig'
-require 'shellwords'
 require 'rhdl/codegen'
 require_relative '../../hdl/cpu/cpu'
 
 module RHDL
   module Examples
     module CPU8Bit
-      # Native runner for 8-bit CPU using arcilator ArcToGPU lowering.
+      # Native runner for 8-bit CPU using arcilator lowering.
       #
       # Pipeline:
-      #   RHDL CPU -> FIRRTL -> firtool (HW MLIR) -> arcilator (ArcToGPU LLVM IR)
+      #   RHDL CPU -> FIRRTL -> firtool (HW MLIR) -> arcilator (LLVM IR)
       #   -> clang/llc object -> C++ shim .so/.dylib -> Fiddle
-      class ArcilatorGpuRunner
-        BUILD_DIR = File.expand_path('../../.arcilator_gpu_build', __dir__)
+      class ArcilatorRunner
+        BUILD_DIR = File.expand_path('../../.arcilator_build', __dir__)
 
-        REQUIRED_TOOLS = %w[firtool arcilator mlir-opt spirv-cross].freeze
-        GPU_OPTION_PATTERNS = [
-          '--arc-to-gpu',
-          '--lowering=arc-to-gpu',
-          '--arc-lowering=to-gpu',
-          '--lower-arc-to-gpu'
-        ].freeze
+        REQUIRED_TOOLS = %w[firtool arcilator].freeze
 
         REQUIRED_SIGNAL_NAMES = %w[
           clk
@@ -50,21 +43,10 @@ module RHDL
           missing_tools << 'llc/clang' unless command_available?('llc') || command_available?('clang')
           missing_tools << 'c++/clang++/g++' unless command_available?('c++') || command_available?('clang++') || command_available?('g++')
 
-          arcilator_help = command_output(%w[arcilator --help])
-          gpu_option_tokens = detect_gpu_option_tokens(arcilator_help)
-          missing_capabilities = []
-
-          if macos_host?
-            missing_tools << 'xcrun' unless command_available?('xcrun')
-            missing_tools << 'metal' unless command_success?(%w[xcrun -f metal])
-            missing_tools << 'metallib' unless command_success?(%w[xcrun -f metallib])
-          end
-
           {
             ready: missing_tools.empty?,
             missing_tools: missing_tools.uniq,
-            missing_capabilities: missing_capabilities,
-            gpu_option_tokens: gpu_option_tokens
+            missing_capabilities: []
           }
         end
 
@@ -77,35 +59,13 @@ module RHDL
           details << "missing capabilities: #{info[:missing_capabilities].join(', ')}" unless info[:missing_capabilities].empty?
 
           raise ArgumentError,
-            "arcilator_gpu backend unavailable (#{details.join('; ')}). " \
-            "Install required arcilator/firtool and Metal/SPIR-V toolchain tools."
-        end
-
-        def self.detect_gpu_option_tokens(help_text)
-          env_value = ENV['RHDL_ARCILATOR_GPU_OPTION'].to_s.strip
-          return Shellwords.split(env_value) unless env_value.empty?
-
-          text = help_text.to_s
-          return [] if text.empty?
-
-          GPU_OPTION_PATTERNS.each do |opt|
-            return [opt] if text.include?(opt)
-          end
-
-          text.each_line do |line|
-            next unless line.match?(/arc/i) && line.match?(/gpu/i)
-
-            token = line[/--[A-Za-z0-9][A-Za-z0-9\-_=]*/]
-            return [token] if token
-          end
-
-          []
+            "arcilator backend unavailable (#{details.join('; ')}). " \
+            "Install required arcilator/firtool toolchain tools."
         end
 
         def initialize
-          @backend = :arcilator_gpu
-          @gpu_info = self.class.ensure_available!
-          @gpu_option_tokens = @gpu_info[:gpu_option_tokens]
+          @backend = :arcilator
+          self.class.ensure_available!
           build_simulation
           load_library
           reset
@@ -190,24 +150,6 @@ module RHDL
           end
         end
 
-        def self.command_output(cmd)
-          out, _status = Open3.capture2e(*cmd)
-          out
-        rescue StandardError
-          ''
-        end
-
-        def self.command_success?(cmd)
-          _out, status = Open3.capture2e(*cmd)
-          status.success?
-        rescue StandardError
-          false
-        end
-
-        def self.macos_host?
-          RUBY_PLATFORM.include?('darwin')
-        end
-
         def command_available?(tool)
           self.class.command_available?(tool)
         end
@@ -217,10 +159,10 @@ module RHDL
 
           fir_file = File.join(BUILD_DIR, 'cpu8bit.fir')
           mlir_file = File.join(BUILD_DIR, 'cpu8bit_hw.mlir')
-          ll_file = File.join(BUILD_DIR, 'cpu8bit_arcgpu.ll')
+          ll_file = File.join(BUILD_DIR, 'cpu8bit_arcilator.ll')
           state_file = File.join(BUILD_DIR, 'cpu8bit_state.json')
-          obj_file = File.join(BUILD_DIR, 'cpu8bit_arcgpu.o')
-          wrapper_file = File.join(BUILD_DIR, 'cpu8bit_arcgpu_wrapper.cpp')
+          obj_file = File.join(BUILD_DIR, 'cpu8bit_arcilator.o')
+          wrapper_file = File.join(BUILD_DIR, 'cpu8bit_arcilator_wrapper.cpp')
 
           needs_rebuild = !File.exist?(shared_lib_path)
 
@@ -239,13 +181,13 @@ module RHDL
         end
 
         def compile_with_arcilator(fir_file, mlir_file, ll_file, state_file, obj_file)
-          log_file = File.join(BUILD_DIR, 'cpu8bit_arcilator_gpu.log')
+          log_file = File.join(BUILD_DIR, 'cpu8bit_arcilator.log')
           File.delete(log_file) if File.exist?(log_file)
 
           run_or_raise(%W[firtool #{fir_file} --ir-hw -o #{mlir_file}], 'firtool HW lowering', log_file)
 
-          arcilator_cmd = ['arcilator', mlir_file] + @gpu_option_tokens + ["--state-file=#{state_file}", '-o', ll_file]
-          run_or_raise(arcilator_cmd, 'arcilator ArcToGPU lowering', log_file)
+          arcilator_cmd = ['arcilator', mlir_file, "--state-file=#{state_file}", '-o', ll_file]
+          run_or_raise(arcilator_cmd, 'arcilator lowering', log_file)
 
           if command_available?('clang')
             compile_object_with_clang(ll_file: ll_file, obj_file: obj_file, log_file: log_file)
@@ -305,7 +247,7 @@ module RHDL
           end
 
           cmd = [cxx, '-shared', '-fPIC', '-O2', '-o', output_file, wrapper_file, obj_file]
-          run_or_raise(cmd, 'C++ link', File.join(BUILD_DIR, 'cpu8bit_arcilator_gpu.log'))
+          run_or_raise(cmd, 'C++ link', File.join(BUILD_DIR, 'cpu8bit_arcilator.log'))
         end
 
         def write_wrapper(path, state_path)
@@ -540,7 +482,7 @@ module RHDL
           else
             '.so'
           end
-          File.join(BUILD_DIR, "libcpu8bit_arcgpu_sim#{ext}")
+          File.join(BUILD_DIR, "libcpu8bit_arcilator_sim#{ext}")
         end
 
         def normalize_payload(data)

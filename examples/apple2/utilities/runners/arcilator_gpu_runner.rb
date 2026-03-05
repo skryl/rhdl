@@ -1,15 +1,16 @@
 # frozen_string_literal: true
 
-# Apple II Metal Runner
+# Apple II Arcilator GPU Runner
 #
 # Pipeline:
 #   RHDL -> FIRRTL -> firtool (HW MLIR) -> arcilator (--until-after=arc-opt)
 #   -> ArcToGpuLowering(profile: :apple2) -> Metal shader -> native Metal executor
 #
 # This runner preserves the Apple II runner ABI exposed by ArcilatorRunner
-# (`sim_*` functions) while executing circuit eval on the generated Metal kernel.
+# (`sim_*` functions) while executing circuit eval on the generated ArcToGPU Metal kernel.
 
 require_relative 'arcilator_runner'
+require 'rhdl/codegen/firrtl/firrtl'
 require 'rhdl/codegen/firrtl/arc_to_gpu_lowering'
 require 'fileutils'
 require 'json'
@@ -19,8 +20,8 @@ require 'rbconfig'
 module RHDL
   module Examples
     module Apple2
-      class MetalRunner < ArcilatorRunner
-        BUILD_DIR = File.expand_path('../../../.metal_build', __dir__)
+      class ArcilatorGpuRunner < ArcilatorRunner
+        BUILD_DIR = File.expand_path('../../../.arcilator_gpu_build', __dir__)
 
         REQUIRED_TOOLS = %w[firtool arcilator].freeze
 
@@ -56,7 +57,7 @@ module RHDL
           return info if info[:ready]
 
           raise ArgumentError,
-            "metal backend unavailable (missing tools: #{info[:missing_tools].join(', ')}). " \
+            "arcilator_gpu backend unavailable (missing tools: #{info[:missing_tools].join(', ')}). " \
             "Install CIRCT tools and the macOS Metal toolchain."
         end
 
@@ -67,13 +68,14 @@ module RHDL
           @instance_count = normalize_instance_count(instances)
           self.class.ensure_available!
 
-          puts 'Initializing Apple2 Metal simulation...'
+          puts 'Initializing Apple2 ArcilatorGPU simulation...'
           start_time = Time.now
 
-          build_metal_simulation
+          build_arcilator_gpu_simulation
 
           elapsed = Time.now - start_time
-          puts "  Metal simulation built in #{elapsed.round(2)}s"
+          puts "  ArcilatorGPU simulation built in #{elapsed.round(2)}s"
+          puts "  Pipeline: #{pipeline}"
           puts "  Sub-cycles: #{@sub_cycles} (#{@sub_cycles == 14 ? 'full accuracy' : 'fast mode'})"
           puts "  Instances: #{@instance_count}"
 
@@ -88,13 +90,13 @@ module RHDL
         end
 
         def simulator_type
-          :hdl_metal
+          :hdl_arcilator_gpu
         end
 
         def dry_run_info
           {
-            mode: :metal,
-            simulator_type: :hdl_metal,
+            mode: :arcilator_gpu,
+            simulator_type: :hdl_arcilator_gpu,
             native: true,
             instances: @instance_count
           }
@@ -102,19 +104,37 @@ module RHDL
 
         private
 
-        def build_metal_simulation
-          FileUtils.mkdir_p(BUILD_DIR)
+        def build_dir
+          BUILD_DIR
+        end
 
-          fir_file = File.join(BUILD_DIR, 'apple2.fir')
-          hw_mlir_file = File.join(BUILD_DIR, 'apple2_hw.mlir')
-          arc_mlir_file = File.join(BUILD_DIR, 'apple2_arc.mlir')
-          gpu_mlir_file = File.join(BUILD_DIR, 'apple2_arc_to_gpu.mlir')
-          gpu_meta_file = File.join(BUILD_DIR, 'apple2_arc_to_gpu.json')
-          metal_source_file = File.join(BUILD_DIR, 'apple2_arc_to_gpu.metal')
-          metal_air_file = File.join(BUILD_DIR, 'apple2_arc_to_gpu.air')
-          metal_lib_file = File.join(BUILD_DIR, 'apple2_arc_to_gpu.metallib')
-          wrapper_file = File.join(BUILD_DIR, 'apple2_arcgpu_wrapper.mm')
-          log_file = File.join(BUILD_DIR, 'apple2_metal.log')
+        def pipeline
+          :arc_to_gpu
+        end
+
+        def pipeline_slug
+          'arc_to_gpu'
+        end
+
+        def shared_library_basename
+          'libapple2_arcilator_gpu_sim'
+        end
+
+        def build_arcilator_gpu_simulation
+          FileUtils.mkdir_p(build_dir)
+
+          pipeline_prefix = "apple2_#{pipeline_slug}"
+
+          fir_file = File.join(build_dir, 'apple2.fir')
+          hw_mlir_file = File.join(build_dir, 'apple2_hw.mlir')
+          arc_mlir_file = File.join(build_dir, 'apple2_arc.mlir')
+          gpu_mlir_file = File.join(build_dir, "#{pipeline_prefix}.mlir")
+          gpu_meta_file = File.join(build_dir, "#{pipeline_prefix}.json")
+          metal_source_file = File.join(build_dir, "#{pipeline_prefix}.metal")
+          metal_air_file = File.join(build_dir, "#{pipeline_prefix}.air")
+          metal_lib_file = File.join(build_dir, "#{pipeline_prefix}.metallib")
+          wrapper_file = File.join(build_dir, "#{pipeline_prefix}_wrapper.mm")
+          log_file = File.join(build_dir, "#{pipeline_prefix}.log")
 
           File.delete(log_file) if File.exist?(log_file)
 
@@ -134,7 +154,7 @@ module RHDL
             profile: :apple2
           )
 
-          module_cache_dir = File.join(BUILD_DIR, 'clang_module_cache')
+          module_cache_dir = File.join(build_dir, 'clang_module_cache')
           FileUtils.mkdir_p(module_cache_dir)
           run_or_raise(
             [
@@ -161,7 +181,7 @@ module RHDL
           load_shared_library(shared_lib_path)
           if !@sim_ctx || (@sim_ctx.respond_to?(:to_i) && @sim_ctx.to_i.zero?)
             raise LoadError,
-              'Metal simulation context initialization failed (sim_create returned null). ' \
+              'ArcilatorGPU simulation context initialization failed (sim_create returned null). ' \
               'Check Metal pipeline/toolchain compatibility for generated ArcToGPU kernel.'
           end
         end
@@ -333,33 +353,33 @@ module RHDL
 
               self.device = MTLCreateSystemDefaultDevice();
               if (!self.device) {
-                fprintf(stderr, "[apple2-metal] init failed: no MTL device\\n");
+                fprintf(stderr, "[apple2-arcilator-gpu] init failed: no MTL device\\n");
                 return nil;
               }
 
               self.queue = [self.device newCommandQueue];
               if (!self.queue) {
-                fprintf(stderr, "[apple2-metal] init failed: no command queue\\n");
+                fprintf(stderr, "[apple2-arcilator-gpu] init failed: no command queue\\n");
                 return nil;
               }
 
               NSError* error = nil;
               self.library = [self.device newLibraryWithFile:metallibPath error:&error];
               if (!self.library) {
-                fprintf(stderr, "[apple2-metal] init failed: newLibraryWithFile %s\\n",
+                fprintf(stderr, "[apple2-arcilator-gpu] init failed: newLibraryWithFile %s\\n",
                         error ? [[error localizedDescription] UTF8String] : "unknown");
                 return nil;
               }
 
               id<MTLFunction> fn = [self.library newFunctionWithName:kernelName];
               if (!fn) {
-                fprintf(stderr, "[apple2-metal] init failed: missing kernel function %s\\n", [kernelName UTF8String]);
+                fprintf(stderr, "[apple2-arcilator-gpu] init failed: missing kernel function %s\\n", [kernelName UTF8String]);
                 return nil;
               }
 
               self.pipeline = [self.device newComputePipelineStateWithFunction:fn error:&error];
               if (!self.pipeline) {
-                fprintf(stderr, "[apple2-metal] init failed: pipeline creation %s\\n",
+                fprintf(stderr, "[apple2-arcilator-gpu] init failed: pipeline creation %s\\n",
                         error ? [[error localizedDescription] UTF8String] : "unknown");
                 return nil;
               }
@@ -369,7 +389,7 @@ module RHDL
               self.romBuffer = [self.device newBufferWithLength:ROM_SIZE * instanceCount options:MTLResourceStorageModeShared];
               self.ioBuffer = [self.device newBufferWithLength:sizeof(RhdlArcGpuIo) * instanceCount options:MTLResourceStorageModeShared];
               if (!self.stateBuffer || !self.ramBuffer || !self.romBuffer || !self.ioBuffer) {
-                fprintf(stderr, "[apple2-metal] init failed: buffer allocation\\n");
+                fprintf(stderr, "[apple2-arcilator-gpu] init failed: buffer allocation\\n");
                 return nil;
               }
 
@@ -407,7 +427,7 @@ module RHDL
               if (commandBuffer.status != MTLCommandBufferStatusCompleted) {
                 NSError* cbError = commandBuffer.error;
                 if (cbError) {
-                  fprintf(stderr, "[apple2-metal] command buffer error: %s\\n", [[cbError localizedDescription] UTF8String]);
+                  fprintf(stderr, "[apple2-arcilator-gpu] command buffer error: %s\\n", [[cbError localizedDescription] UTF8String]);
                 }
                 return NO;
               }
@@ -455,7 +475,7 @@ module RHDL
               @autoreleasepool {
                 RhdlApple2MetalSim* sim = [[RhdlApple2MetalSim alloc] initWithMetallibPath:kMetallibPath kernelName:kKernelName stateCount:STATE_COUNT instanceCount:INSTANCE_COUNT];
                 if (!sim) {
-                  fprintf(stderr, "[apple2-metal] sim_create failed during init\\n");
+                  fprintf(stderr, "[apple2-arcilator-gpu] sim_create failed during init\\n");
                   return nullptr;
                 }
                 RhdlArcGpuIo* io = [sim io];
@@ -466,7 +486,7 @@ module RHDL
                 io[0].cycle_budget = 0u;
                 io[0].last_clock = io[0].#{cpp_ident('clk_14m')};
                 if (![sim dispatchKernel]) {
-                  fprintf(stderr, "[apple2-metal] sim_create failed initial dispatch\\n");
+                  fprintf(stderr, "[apple2-arcilator-gpu] sim_create failed initial dispatch\\n");
                   return nullptr;
                 }
                 return (__bridge_retained void*)sim;
@@ -641,7 +661,7 @@ module RHDL
           else
             '.so'
           end
-          File.join(BUILD_DIR, "libapple2_metal_sim#{ext}")
+          File.join(build_dir, "#{shared_library_basename}#{ext}")
         end
 
         def cpp_ident(name)
@@ -663,7 +683,7 @@ module RHDL
         end
 
         def normalize_instance_count(instances)
-          raw = instances || ENV['RHDL_APPLE2_METAL_INSTANCES']
+          raw = instances || ENV['RHDL_APPLE2_ARCILATOR_GPU_INSTANCES']
           value = raw.to_i
           value = 1 if value <= 0
           [value, 1024].min
