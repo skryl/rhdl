@@ -18,26 +18,3 @@ require_relative 'synth/memory_read'
 require_relative 'synth/signal_proxy'
 require_relative 'synth/output_proxy'
 require_relative 'synth/context'
-
-# Backwards compatibility aliases for old class names
-module RHDL
-  module HDL
-    # Alias old RHDL::HDL::Synth* names to new RHDL::Synth::* names
-    SynthExpr = Synth::Expr
-    SynthLiteral = Synth::Literal
-    SynthBinaryOp = Synth::BinaryOp
-    SynthUnaryOp = Synth::UnaryOp
-    SynthBitSelect = Synth::BitSelect
-    SynthSlice = Synth::Slice
-    SynthConcat = Synth::Concat
-    SynthReplicate = Synth::Replicate
-    SynthMux = Synth::Mux
-    SynthMemoryRead = Synth::MemoryRead
-    SynthSignalProxy = Synth::SignalProxy
-    SynthOutputProxy = Synth::OutputProxy
-    BehaviorSynthContext = Synth::Context
-    SynthLocal = Synth::Local
-    SynthVecProxy = Synth::VecProxy
-    SynthVecAccess = Synth::VecAccess
-  end
-end

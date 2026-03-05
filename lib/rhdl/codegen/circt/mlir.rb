@@ -41,21 +41,28 @@ module RHDL
             @lines = []
             @temp_idx = 0
             @values = {}
+            @instance_output_tokens = build_instance_output_tokens
             @clock_values = {}
             @assigns_by_target = Hash.new { |h, k| h[k] = [] }
             @internal_assign_targets = Set.new
             @llhd_signal_tokens = {}
             @llhd_probe_tokens = {}
             @llhd_time_token = nil
+            @memory_tokens = {}
+            @memory_by_name = {}
+            @used_memories = Set.new
             @resolving = Set.new
           end
 
           def emit
             build_assign_map
+            build_memory_map
             emit_header
+            emit_memories
             emit_reg_processes
             emit_instances
             emit_internal_assign_drivers
+            emit_memory_write_ports
             emit_output
             @lines << '}'
             @lines.join("\n")
@@ -70,6 +77,28 @@ module RHDL
             @mod.assigns.each do |assign|
               target = assign.target.to_s
               @assigns_by_target[target] << assign.expr
+            end
+          end
+
+          def build_memory_map
+            @memory_by_name.clear
+            @used_memories.clear
+            @mod.memories.each do |memory|
+              @memory_by_name[memory.name.to_s] = memory
+            end
+
+            @mod.write_ports.each do |write_port|
+              @used_memories << write_port.memory.to_s
+            end
+
+            @mod.assigns.each do |assign|
+              collect_memory_reads(assign.expr)
+            end
+
+            @mod.processes.each do |process|
+              process.statements.each do |statement|
+                collect_memory_reads(statement)
+              end
             end
           end
 
@@ -96,6 +125,44 @@ module RHDL
           def emit_instances
             @mod.instances.each do |instance|
               emit_instance(instance)
+            end
+          end
+
+          def emit_memories
+            @mod.memories.each do |memory|
+              next unless @used_memories.include?(memory.name.to_s)
+
+              token = memory_token(memory.name.to_s)
+              @lines << "  #{token} = seq.firmem 0, 1, undefined, port_order : <#{memory.depth} x #{memory.width}>"
+            end
+          end
+
+          def emit_memory_write_ports
+            @mod.write_ports.each do |write_port|
+              memory_name = write_port.memory.to_s
+              memory = @memory_by_name[memory_name]
+              next unless memory
+
+              mem_token = memory_token(memory_name)
+              addr_width = memory_addr_width(memory.depth)
+
+              addr_raw = emit_expr(write_port.addr)
+              addr_raw_width = write_port.addr.respond_to?(:width) ? write_port.addr.width : find_value_width(addr_raw)
+              addr_value = resize_value(addr_raw, addr_raw_width, addr_width)
+
+              data_raw = emit_expr(write_port.data)
+              data_raw_width = write_port.data.respond_to?(:width) ? write_port.data.width : find_value_width(data_raw)
+              data_value = resize_value(data_raw, data_raw_width, memory.width)
+
+              enable_raw = emit_expr(write_port.enable)
+              enable_raw_width = write_port.enable.respond_to?(:width) ? write_port.enable.width : find_value_width(enable_raw)
+              enable_value = resize_value(enable_raw, enable_raw_width, 1)
+
+              clock_name = write_port.clock.to_s
+              clock_value = resolve_clock(clock_name.empty? ? default_memory_clock(memory_name) : clock_name)
+
+              @lines << "  seq.firmem.write_port #{mem_token}[#{addr_value}] = #{data_value}, " \
+                        "clock #{clock_value} enable #{enable_value} : <#{memory.depth} x #{memory.width}>"
             end
           end
 
@@ -127,7 +194,11 @@ module RHDL
 
               lhs = output_ports.map do |port|
                 conn = conn_by_port[port.name.to_s]
-                ssa = fresh(port.width)
+                ssa = if conn
+                        instance_output_token(conn.signal.to_s, port.width)
+                      else
+                        fresh(port.width)
+                      end
                 if conn
                   @values[conn.signal.to_s] = ssa
                 end
@@ -150,7 +221,7 @@ module RHDL
 
               lhs = output_conns.map do |conn|
                 width = connection_width(conn)
-                ssa = fresh(width)
+                ssa = instance_output_token(conn.signal.to_s, width)
                 @values[conn.signal.to_s] = ssa
                 ssa
               end
@@ -169,6 +240,44 @@ module RHDL
           def resolve_instance_module(module_name)
             key = module_name.to_s
             @module_lookup[key] || @module_lookup[sanitize(key)]
+          end
+
+          def build_instance_output_tokens
+            tokens = {}
+            used = Set.new
+
+            @mod.instances.each do |instance|
+              instance.connections.each do |conn|
+                next unless conn.direction.to_s == 'out'
+
+                signal_name = conn.signal.to_s
+                next if signal_name.empty?
+                next if tokens.key?(signal_name)
+
+                width = connection_width(conn)
+                base = "%#{sanitize(signal_name)}_#{[width.to_i, 1].max}"
+                token = base
+                suffix = 2
+                while used.include?(token)
+                  token = "#{base}_#{suffix}"
+                  suffix += 1
+                end
+
+                tokens[signal_name] = token
+                used << token
+              end
+            end
+
+            tokens
+          end
+
+          def instance_output_token(signal_name, width)
+            key = signal_name.to_s
+            return @instance_output_tokens[key] if @instance_output_tokens.key?(key)
+
+            token = "%#{sanitize(key)}_#{[width.to_i, 1].max}"
+            @instance_output_tokens[key] = token
+            token
           end
 
           def emit_seq_statements(statements, clock_value)
@@ -281,6 +390,75 @@ module RHDL
             end
           end
 
+          def emit_memory_read(expr)
+            memory_name = expr.memory.to_s
+            memory = @memory_by_name[memory_name]
+            return emit_zero(expr.width) unless memory
+
+            mem_token = memory_token(memory_name)
+            addr_width = memory_addr_width(memory.depth)
+            addr_raw = emit_expr(expr.addr)
+            addr_raw_width = expr.addr.respond_to?(:width) ? expr.addr.width : find_value_width(addr_raw)
+            addr_value = resize_value(addr_raw, addr_raw_width, addr_width)
+
+            clock_name = default_memory_clock(memory_name)
+            clock_value = resolve_clock(clock_name)
+            read_value = fresh(memory.width)
+            @lines << "  #{read_value} = seq.firmem.read_port #{mem_token}[#{addr_value}], " \
+                      "clock #{clock_value} : <#{memory.depth} x #{memory.width}>"
+            resize_value(read_value, memory.width, expr.width)
+          end
+
+          def collect_memory_reads(node, visited = Set.new)
+            return if node.nil?
+
+            case node
+            when Array
+              node.each { |child| collect_memory_reads(child, visited) }
+              return
+            end
+
+            return unless node.respond_to?(:instance_variables)
+
+            node_id = node.object_id
+            return if visited.include?(node_id)
+
+            visited << node_id
+
+            if node.is_a?(IR::MemoryRead)
+              @used_memories << node.memory.to_s
+              collect_memory_reads(node.addr, visited)
+            end
+
+            node.instance_variables.each do |ivar|
+              collect_memory_reads(node.instance_variable_get(ivar), visited)
+            end
+          end
+
+          def memory_token(name)
+            key = name.to_s
+            @memory_tokens[key] ||= "%#{sanitize(key)}"
+          end
+
+          def memory_addr_width(depth)
+            value = depth.to_i
+            return 1 if value <= 1
+
+            Math.log2(value).ceil
+          end
+
+          def default_memory_clock(memory_name)
+            write_port = @mod.write_ports.find { |port| port.memory.to_s == memory_name.to_s }
+            clock = write_port&.clock.to_s
+            return clock unless clock.nil? || clock.empty?
+
+            clocked_process = @mod.processes.find(&:clocked)
+            process_clock = clocked_process&.clock.to_s
+            return process_clock unless process_clock.nil? || process_clock.empty?
+
+            'clk'
+          end
+
           def connection_width(conn)
             signal = conn.signal
             return signal.width if signal.respond_to?(:width)
@@ -335,6 +513,11 @@ module RHDL
 
             if @internal_assign_targets.include?(key)
               return probe_llhd_signal(key, width)
+            end
+
+            if @instance_output_tokens.key?(key)
+              @values[key] = @instance_output_tokens[key]
+              return @values[key]
             end
 
             if input_port?(key)
@@ -408,10 +591,7 @@ module RHDL
             when IR::Case
               emit_case(expr)
             when IR::MemoryRead
-              out = fresh(expr.width)
-              @lines << "  // Unsupported memory read lowering for #{expr.memory}; emitting zero"
-              @lines << "  #{out} = hw.constant 0 : #{iwidth(expr.width)}"
-              out
+              emit_memory_read(expr)
             else
               emit_zero(expr.respond_to?(:width) ? expr.width : 1)
             end

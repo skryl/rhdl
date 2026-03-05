@@ -43,6 +43,26 @@ RSpec.describe 'CIRCT core IR pipeline' do
       expect(mlir).to include('hw.output')
     end
 
+    it 'keeps to_circt as an alias to to_ir' do
+      expect(RHDL::SpecFixtures::CIRCTAdder.to_circt).to eq(RHDL::SpecFixtures::CIRCTAdder.to_ir)
+    end
+
+    it 'keeps hierarchy aliases for CIRCT and IR naming' do
+      circt = RHDL::SpecFixtures::CIRCTHierTop.to_circt_hierarchy
+      ir = RHDL::SpecFixtures::CIRCTHierTop.to_ir_hierarchy
+      ir_misspelled = RHDL::SpecFixtures::CIRCTHierTop.to_ir_heirarchy
+
+      expect(ir).to eq(circt)
+      expect(ir_misspelled).to eq(circt)
+      expect(circt).to include('hw.instance "u" @spec_fixtures_circt_wire_child')
+    end
+
+    it 'keeps RHDL::Codegen aliases for CIRCT and IR naming' do
+      component = RHDL::SpecFixtures::CIRCTAdder
+      expect(RHDL::Codegen.to_circt(component)).to eq(RHDL::Codegen.to_ir(component))
+      expect(RHDL::Codegen.to_ir(component)).to include('hw.module @spec_fixtures_circt_adder')
+    end
+
     it 'exposes CIRCT nodes and flattened CIRCT nodes explicitly' do
       circt_nodes = RHDL::SpecFixtures::CIRCTAdder.to_circt_nodes
       flat_circt_nodes = RHDL::SpecFixtures::CIRCTAdder.to_flat_circt_nodes

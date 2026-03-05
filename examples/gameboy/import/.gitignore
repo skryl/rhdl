@@ -1,0 +1,4 @@
+# Generated import output directory for Game Boy mixed HDL import flows.
+# Keep directory tracked, but ignore generated files by default.
+*
+!.gitignore

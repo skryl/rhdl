@@ -79,6 +79,22 @@ module RHDL
                 next
               end
 
+              if body.match?(/\A#{SSA_TOKEN_PATTERN}\s*=\s*scf\.if\b/)
+                consumed = parse_scf_if_block(
+                  lines,
+                  idx,
+                  value_map: value_map,
+                  diagnostics: diagnostics,
+                  line_no: idx + 1,
+                  strict: strict
+                )
+                if consumed
+                  body_depth += brace_delta(lines, idx, consumed)
+                  idx += consumed
+                  next
+                end
+              end
+
               if body.include?('hw.instance')
                 combined, consumed = collect_multiline_instance(lines, idx)
                 parse_body_line(
@@ -255,7 +271,7 @@ module RHDL
 
           header = header_lines.join(' ').gsub(/\s+/, ' ').strip
           header = strip_module_attributes(header)
-          match = header.match(/\Ahw\.module\s+@(?<name>[A-Za-z0-9_$.]+)(?:<(?<params>.*?)>)?\s*\((?<inputs>.*?)\)\s*(?:->\s*\((?<outputs>.*?)\))?\s*\{\s*\z/)
+          match = header.match(/\Ahw\.module(?:\s+private)?\s+@(?<name>[A-Za-z0-9_$.]+)(?:<(?<params>.*?)>)?\s*\((?<inputs>.*?)\)\s*(?:->\s*\((?<outputs>.*?)\))?\s*\{\s*\z/)
           unless match
             diagnostics << Diagnostic.new(
               severity: :error,
@@ -451,6 +467,125 @@ module RHDL
           [text, consumed]
         end
 
+        def parse_scf_if_block(lines, start_idx, value_map:, diagnostics:, line_no:, strict:)
+          header = normalize_body_line(lines[start_idx].to_s.strip)
+          match = header.match(/\A(#{SSA_TOKEN_PATTERN})\s*=\s*scf\.if\s+(#{SSA_TOKEN_PATTERN})\s*->\s*\(i(\d+)\)\s*\{\z/)
+          return nil unless match
+
+          result_ssa = match[1]
+          condition_ssa = match[2]
+          result_width = match[3].to_i
+
+          then_lines = []
+          else_lines = []
+          branch = :then
+
+          idx = start_idx + 1
+          depth = 1
+
+          while idx < lines.length && depth.positive?
+            line = lines[idx].to_s.strip
+
+            if depth == 1 && line == '} else {'
+              branch = :else
+              idx += 1
+              next
+            end
+
+            if line.end_with?('{')
+              depth += 1
+            elsif line == '}'
+              depth -= 1
+              break if depth.zero?
+            end
+
+            if depth.positive?
+              if branch == :then
+                then_lines << line
+              else
+                else_lines << line
+              end
+            end
+
+            idx += 1
+          end
+
+          consumed = idx - start_idx + 1
+          then_expr = evaluate_scf_branch_value(
+            then_lines,
+            value_map: value_map,
+            diagnostics: diagnostics,
+            line_no: line_no,
+            strict: strict,
+            expected_width: result_width
+          )
+          else_expr = evaluate_scf_branch_value(
+            else_lines,
+            value_map: value_map,
+            diagnostics: diagnostics,
+            line_no: line_no,
+            strict: strict,
+            expected_width: result_width
+          )
+          condition = lookup_value(value_map, condition_ssa, width: 1)
+
+          if then_expr && else_expr
+            value_map[result_ssa] = IR::Mux.new(
+              condition: condition,
+              when_true: then_expr,
+              when_false: else_expr,
+              width: result_width
+            )
+          else
+            diagnostics << Diagnostic.new(
+              severity: strict ? :error : :warning,
+              message: "Unsupported scf.if branch syntax, skipped: #{header}",
+              line: line_no,
+              column: 1,
+              op: 'scf.if'
+            )
+          end
+
+          consumed
+        end
+
+        def evaluate_scf_branch_value(lines, value_map:, diagnostics:, line_no:, strict:, expected_width:)
+          yield_token = nil
+          temp_assigns = []
+          temp_regs = []
+          temp_nets = []
+          temp_processes = []
+          temp_instances = []
+
+          lines.each do |line|
+            body = normalize_body_line(line)
+            next if body.empty? || body.start_with?('//')
+
+            if (m = body.match(/\Ascf\.yield\s+(.+)\s*:\s*i\d+\z/))
+              yield_token = normalize_value_token(m[1])
+              next
+            end
+
+            parse_body_line(
+              body,
+              value_map: value_map,
+              assigns: temp_assigns,
+              regs: temp_regs,
+              nets: temp_nets,
+              processes: temp_processes,
+              instances: temp_instances,
+              output_ports: [],
+              diagnostics: diagnostics,
+              line_no: line_no,
+              strict: strict
+            )
+          end
+
+          return nil if yield_token.nil? || yield_token.empty?
+
+          lookup_value(value_map, yield_token, width: expected_width)
+        end
+
         def parse_input_ports(raw, diagnostics, line_no, directional: false)
           return [] if raw.nil? || raw.strip.empty?
 
@@ -531,6 +666,7 @@ module RHDL
           return if body.start_with?('cf.br ') || body.start_with?('cf.cond_br ')
           return if body.match?(/\Allhd\.process\s*\{\z/)
           return if body.start_with?('llhd.wait ')
+          return if body == 'llhd.halt'
 
           if (m = body.match(/\A(#{SSA_TOKEN_PATTERN})\s*=\s*hw\.constant\s+(-?\d+|true|false)(?:\s*:\s*i(\d+))?\z/))
             literal_value = case m[2]
@@ -838,6 +974,24 @@ module RHDL
             return
           end
 
+          if (m = body.match(/\A(#{SSA_TOKEN_PATTERN})\s*=\s*comb\.parity\s+(#{SSA_TOKEN_PATTERN})\s*:\s*i(\d+)\z/))
+            in_width = m[3].to_i
+            if in_width <= 0
+              diagnostics << Diagnostic.new(
+                severity: strict ? :error : :warning,
+                message: "Invalid comb.parity width, skipped: #{body}",
+                line: line_no,
+                column: 1,
+                op: 'comb.parity'
+              )
+              return
+            end
+
+            source = lookup_value(value_map, m[2], width: in_width)
+            value_map[m[1]] = build_parity_reduce(source: source, in_width: in_width)
+            return
+          end
+
           if (m = body.match(/\A(#{SSA_TOKEN_PATTERN})\s*=\s*comb\.concat\s+(.+)\s*:\s*(.+)\z/))
             tokens = split_top_level_csv(m[2])
             type_tokens = split_top_level_csv(m[3])
@@ -855,6 +1009,33 @@ module RHDL
 
             parts = tokens.each_with_index.map { |tok, i| lookup_value(value_map, tok, width: widths[i]) }
             value_map[m[1]] = IR::Concat.new(parts: parts, width: widths.sum)
+            return
+          end
+
+          if (m = body.match(/\A(#{SSA_TOKEN_PATTERN})\s*=\s*func\.call\s+@([A-Za-z0-9_$.]+)\(([^)]*)\)\s*:\s*\(([^)]*)\)\s*->\s*i(\d+)\z/))
+            result_ssa = m[1]
+            callee = m[2]
+            args = split_top_level_csv(m[3]).map { |token| normalize_value_token(token) }.reject(&:empty?)
+            input_types = split_top_level_csv(m[4]).map(&:strip)
+            output_width = m[5].to_i
+
+            if callee == 'bit_reverse' && args.length == 1
+              input_width = integer_type_width(input_types.first) || output_width
+              arg_expr = lookup_value(value_map, args.first, width: input_width)
+              parts = (0...output_width).map do |bit|
+                IR::Slice.new(base: arg_expr, range: (bit..bit), width: 1)
+              end
+              value_map[result_ssa] = IR::Concat.new(parts: parts, width: output_width)
+              return
+            end
+
+            diagnostics << Diagnostic.new(
+              severity: strict ? :error : :warning,
+              message: "Unsupported func.call target '#{callee}', skipped: #{body}",
+              line: line_no,
+              column: 1,
+              op: 'func.call'
+            )
             return
           end
 
@@ -1371,16 +1552,95 @@ module RHDL
             return elements[idx]
           end
 
-          muxed = elements.each_with_index.reduce(nil) do |acc, (element, idx)|
+          default_expr = elements[0]
+          entries = elements.each_with_index.map { |element, idx| [idx, element] }
+          index_width = [index_expr.width.to_i, 1].max
+          build_index_select_tree(
+            entries: entries,
+            index_expr: index_expr,
+            index_width: index_width,
+            default_expr: default_expr,
+            element_width: element_width
+          )
+        end
+
+        def build_index_select_tree(entries:, index_expr:, index_width:, default_expr:, element_width:)
+          return default_expr if entries.empty?
+
+          if entries.length == 1
+            idx, element_expr = entries.first
             cond = IR::BinaryOp.new(
               op: :==,
               left: index_expr,
-              right: IR::Literal.new(value: idx, width: index_expr.width),
+              right: IR::Literal.new(value: idx, width: index_width),
               width: 1
             )
-            acc ? IR::Mux.new(condition: cond, when_true: element, when_false: acc, width: element_width) : element
+            return IR::Mux.new(
+              condition: cond,
+              when_true: element_expr,
+              when_false: default_expr,
+              width: element_width
+            )
           end
-          muxed || IR::Literal.new(value: 0, width: element_width)
+
+          mid = entries.length / 2
+          left_entries = entries[0...mid]
+          right_entries = entries[mid..]
+          pivot = right_entries.first.first
+
+          left_expr = build_index_select_tree(
+            entries: left_entries,
+            index_expr: index_expr,
+            index_width: index_width,
+            default_expr: default_expr,
+            element_width: element_width
+          )
+          right_expr = build_index_select_tree(
+            entries: right_entries,
+            index_expr: index_expr,
+            index_width: index_width,
+            default_expr: default_expr,
+            element_width: element_width
+          )
+          cond = IR::BinaryOp.new(
+            op: :<,
+            left: index_expr,
+            right: IR::Literal.new(value: pivot, width: index_width),
+            width: 1
+          )
+          IR::Mux.new(
+            condition: cond,
+            when_true: left_expr,
+            when_false: right_expr,
+            width: element_width
+          )
+        end
+
+        def build_parity_reduce(source:, in_width:)
+          return source if in_width == 1
+
+          bits = Array.new(in_width) do |idx|
+            IR::Slice.new(base: source, range: (idx..idx), width: 1)
+          end
+          fold_balanced_binary(bits, op: :^, width: 1)
+        end
+
+        def fold_balanced_binary(exprs, op:, width:)
+          layer = Array(exprs)
+          return IR::Literal.new(value: 0, width: width) if layer.empty?
+
+          while layer.length > 1
+            next_layer = []
+            layer.each_slice(2) do |lhs, rhs|
+              next_layer << if rhs
+                              IR::BinaryOp.new(op: op, left: lhs, right: rhs, width: width)
+                            else
+                              lhs
+                            end
+            end
+            layer = next_layer
+          end
+          layer.first
         end
 
         def normalize_value_token(token)
@@ -1648,6 +1908,8 @@ module RHDL
           else
             expr
           end
+        rescue SystemStackError
+          expr
         end
 
         def enforce_dependency_closure(modules:, module_spans:, diagnostics:, strict:, top:, extern_modules:)

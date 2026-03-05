@@ -9,7 +9,7 @@ RSpec.describe '8-bit CPU arcilator_gpu parity' do
 
   it 'matches compiler backend for a simple store program' do
     skip 'set RHDL_ENABLE_ARCILATOR_GPU=1 to run ArcToGPU parity checks' unless ENV['RHDL_ENABLE_ARCILATOR_GPU'] == '1'
-    skip 'IR compiler backend unavailable' unless RHDL::Codegen::IR::IR_COMPILER_AVAILABLE
+    skip 'IR compiler backend unavailable' unless RHDL::Sim::Native::IR::COMPILER_AVAILABLE
 
     gpu_status = RHDL::HDL::CPU::FastHarness.arcilator_gpu_status
     expect(gpu_status[:ready]).to be(true), "arcilator_gpu backend unavailable: #{gpu_status.inspect}"

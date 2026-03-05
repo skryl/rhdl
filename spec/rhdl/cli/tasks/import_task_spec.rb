@@ -242,4 +242,308 @@ RSpec.describe RHDL::CLI::Tasks::ImportTask do
     task = described_class.new(mode: :unknown, input: 'x', out: tmp_dir)
     expect { task.run }.to raise_error(ArgumentError, /Unknown import mode/)
   end
+
+  it 'postprocesses generated VHDL Verilog for known positional-parameter modules' do
+    out_path = File.join(tmp_dir, 'eReg_SavestateV.v')
+    File.write(out_path, "module eReg_SavestateV (\n  input clk\n);\nendmodule\n")
+    task = described_class.new(mode: :mixed, out: tmp_dir)
+
+    task.send(:postprocess_generated_vhdl_verilog!, entity: 'eReg_SavestateV', out_path: out_path)
+
+    text = File.read(out_path)
+    expect(text).to include('module eReg_SavestateV')
+    expect(text).to include('parameter P4 = 0')
+  end
+
+  it 'postprocesses generated VHDL Verilog by renaming reserved do token for GBse' do
+    out_path = File.join(tmp_dir, 'GBse.v')
+    File.write(out_path, "module GBse(input do, output do); assign do = do; endmodule\n")
+    task = described_class.new(mode: :mixed, out: tmp_dir)
+
+    task.send(:postprocess_generated_vhdl_verilog!, entity: 'GBse', out_path: out_path)
+
+    text = File.read(out_path)
+    expect(text).to include('do_o')
+    expect(text).not_to match(/\bdo\b/)
+  end
+
+  it 'lowers Moore MLIR to core before raise when mixed import emits moore.module' do
+    mlir_path = File.join(tmp_dir, 'mixed.moore.mlir')
+    File.write(mlir_path, "moore.module @top() {\n}\n")
+    lowered_path = "#{mlir_path}.core.lowered"
+    task = described_class.new(mode: :mixed, out: tmp_dir)
+    status = instance_double(Process::Status, success?: true)
+
+    expect(Open3).to receive(:capture3).with(
+      'circt-opt',
+      '--moore-lower-concatref',
+      '--canonicalize',
+      '--moore-lower-concatref',
+      '--convert-moore-to-core',
+      '--llhd-sig2reg',
+      '--canonicalize',
+      mlir_path,
+      '-o',
+      lowered_path
+    ) do
+      File.write(lowered_path, "hw.module @top() {\n  hw.output\n}\n")
+      ['', '', status]
+    end
+
+    expect do
+      task.send(:lower_moore_to_core_mlir_if_needed!, mlir_out: mlir_path)
+    end.to output(/Lower Moore MLIR -> core\/llhd/).to_stdout
+
+    expect(File.read(mlir_path)).to include('hw.module @top')
+  end
+
+  describe 'mixed mode' do
+    it 'requires either --manifest or a top source file --input' do
+      task = described_class.new(
+        mode: :mixed,
+        out: tmp_dir,
+        raise_to_dsl: false
+      )
+
+      expect { task.run }.to raise_error(ArgumentError, /Mixed mode requires --manifest or --input/)
+    end
+
+    it 'requires --input to be a file path when manifest is omitted' do
+      task = described_class.new(
+        mode: :mixed,
+        input: tmp_dir,
+        out: tmp_dir,
+        raise_to_dsl: false
+      )
+
+      expect { task.run }.to raise_error(ArgumentError, /Mixed mode autoscan requires --input to be a file path/)
+    end
+
+    it 'imports mixed sources through staging without raise step' do
+      manifest_path = File.join(tmp_dir, 'mixed_import.yml')
+      File.write(
+        manifest_path,
+        <<~YAML
+          version: 1
+          top:
+            name: mixed_top
+            language: verilog
+            file: top.sv
+          files:
+            - path: top.sv
+              language: verilog
+            - path: leaf.vhd
+              language: vhdl
+        YAML
+      )
+
+      staged_verilog = File.join(tmp_dir, 'staged.v')
+      task = described_class.new(
+        mode: :mixed,
+        manifest: manifest_path,
+        out: tmp_dir,
+        raise_to_dsl: false,
+        tool: 'circt-translate'
+      )
+
+      allow(task).to receive(:build_mixed_import_staging).and_return(
+        {
+          staged_verilog_path: staged_verilog,
+          provenance: { source_files: [] }
+        }
+      )
+      allow(RHDL::Codegen::CIRCT::Tooling).to receive(:verilog_to_circt_mlir).and_return(
+        {
+          success: true,
+          command: 'circt-translate --import-verilog staged.v -o mixed_top.mlir',
+          stdout: '',
+          stderr: ''
+        }
+      )
+
+      expect { task.run }.to output(/Wrote CIRCT MLIR/).to_stdout
+      expect(task).to have_received(:build_mixed_import_staging)
+    end
+
+    it 'writes mixed import provenance into report when raise flow is enabled' do
+      manifest_path = File.join(tmp_dir, 'mixed_import.yml')
+      report_path = File.join(tmp_dir, 'mixed_report.json')
+      File.write(
+        manifest_path,
+        <<~YAML
+          version: 1
+          top:
+            name: mixed_top
+            language: verilog
+            file: top.sv
+          files:
+            - path: top.sv
+              language: verilog
+        YAML
+      )
+
+      staged_verilog = File.join(tmp_dir, 'staged.v')
+      File.write(staged_verilog, "module mixed_top(input logic a, output logic y); assign y = a; endmodule\n")
+
+      task = described_class.new(
+        mode: :mixed,
+        manifest: manifest_path,
+        out: tmp_dir,
+        strict: true,
+        report: report_path,
+        tool: 'circt-translate'
+      )
+
+      allow(task).to receive(:build_mixed_import_staging).and_return(
+        {
+          staged_verilog_path: staged_verilog,
+          top_name: 'mixed_top',
+          tool_args: [],
+          provenance: {
+            top_name: 'mixed_top',
+            top_language: 'verilog',
+            top_file: staged_verilog,
+            source_files: [{ path: staged_verilog, language: 'verilog' }]
+          }
+        }
+      )
+      allow(RHDL::Codegen::CIRCT::Tooling).to receive(:verilog_to_circt_mlir) do |**args|
+        File.write(
+          args.fetch(:out_path),
+          <<~MLIR
+            hw.module @mixed_top(%a: i1) -> (y: i1) {
+              hw.output %a : i1
+            }
+          MLIR
+        )
+        {
+          success: true,
+          command: 'circt-translate --import-verilog staged.v -o mixed_top.mlir',
+          stdout: '',
+          stderr: ''
+        }
+      end
+
+      expect { task.run }.to output(/Wrote import report/).to_stdout
+      expect(File.exist?(File.join(tmp_dir, 'mixed_top.rb'))).to be(true)
+      report = JSON.parse(File.read(report_path))
+      expect(report.fetch('success')).to be(true)
+      expect(report.fetch('top')).to eq('mixed_top')
+      expect(report.fetch('mixed_import').fetch('top_name')).to eq('mixed_top')
+      expect(report.fetch('mixed_import').fetch('source_files').first.fetch('language')).to eq('verilog')
+    end
+
+    it 'runs mixed autoscan end-to-end through raise flow and writes report provenance' do
+      rtl_dir = File.join(tmp_dir, 'rtl')
+      FileUtils.mkdir_p(rtl_dir)
+      top_path = File.join(rtl_dir, 'mixed_top.sv')
+      leaf_vhdl = File.join(rtl_dir, 'leaf.vhd')
+      report_path = File.join(tmp_dir, 'mixed_autoscan_report.json')
+      File.write(top_path, "module mixed_top(input logic a, output logic y); assign y = a; endmodule\n")
+      File.write(leaf_vhdl, <<~VHDL)
+        entity leaf is
+        end entity;
+        architecture rtl of leaf is
+        begin
+        end architecture;
+      VHDL
+
+      task = described_class.new(
+        mode: :mixed,
+        input: top_path,
+        out: tmp_dir,
+        top: 'mixed_top',
+        strict: true,
+        report: report_path,
+        tool: 'circt-translate'
+      )
+
+      allow(RHDL::Codegen::CIRCT::Tooling).to receive(:ghdl_analyze).and_return(
+        {
+          success: true,
+          command: 'ghdl -a --std=08 leaf.vhd',
+          stdout: '',
+          stderr: ''
+        }
+      )
+      allow(RHDL::Codegen::CIRCT::Tooling).to receive(:ghdl_synth_to_verilog) do |**args|
+        FileUtils.mkdir_p(File.dirname(args.fetch(:out_path)))
+        File.write(args.fetch(:out_path), "module leaf; endmodule\n")
+        {
+          success: true,
+          command: 'ghdl --synth --out=verilog leaf',
+          stdout: '',
+          stderr: ''
+        }
+      end
+      allow(RHDL::Codegen::CIRCT::Tooling).to receive(:verilog_to_circt_mlir) do |**args|
+        File.write(
+          args.fetch(:out_path),
+          <<~MLIR
+            hw.module @mixed_top(%a: i1) -> (y: i1) {
+              hw.output %a : i1
+            }
+          MLIR
+        )
+        {
+          success: true,
+          command: 'circt-translate --import-verilog mixed_staged.v -o mixed_top.mlir',
+          stdout: '',
+          stderr: ''
+        }
+      end
+
+      expect { task.run }.to output(/Wrote import report/).to_stdout
+      expect(File.exist?(File.join(tmp_dir, 'mixed_top.rb'))).to be(true)
+      expect(File.exist?(report_path)).to be(true)
+
+      report = JSON.parse(File.read(report_path))
+      expect(report.fetch('success')).to be(true)
+      expect(report.fetch('top')).to eq('mixed_top')
+      mixed = report.fetch('mixed_import')
+      expect(mixed.fetch('autoscan_root')).to eq(File.expand_path(rtl_dir))
+      expect(mixed.fetch('top_file')).to eq(File.expand_path(top_path))
+      expect(mixed.fetch('top_language')).to eq('verilog')
+      expect(mixed.fetch('vhdl_analysis_commands')).not_to be_empty
+      expect(mixed.fetch('vhdl_synth_outputs')).not_to be_empty
+      expect(mixed.fetch('staging_entry_path')).to include('.mixed_import/mixed_staged.v')
+    end
+
+    it 'fails fast when VHDL synth fails during mixed import run' do
+      rtl_dir = File.join(tmp_dir, 'rtl')
+      FileUtils.mkdir_p(rtl_dir)
+      top_path = File.join(rtl_dir, 'mixed_top.sv')
+      leaf_vhdl = File.join(rtl_dir, 'leaf.vhd')
+      File.write(top_path, "module mixed_top(input logic a, output logic y); assign y = a; endmodule\n")
+      File.write(leaf_vhdl, "entity leaf is end entity;\narchitecture rtl of leaf is begin end architecture;\n")
+
+      task = described_class.new(
+        mode: :mixed,
+        input: top_path,
+        out: tmp_dir,
+        strict: true,
+        tool: 'circt-translate'
+      )
+
+      allow(RHDL::Codegen::CIRCT::Tooling).to receive(:ghdl_analyze).and_return(
+        {
+          success: true,
+          command: 'ghdl -a --std=08 leaf.vhd',
+          stdout: '',
+          stderr: ''
+        }
+      )
+      allow(RHDL::Codegen::CIRCT::Tooling).to receive(:ghdl_synth_to_verilog).and_return(
+        {
+          success: false,
+          command: 'ghdl --synth --out=verilog leaf',
+          stdout: '',
+          stderr: 'synth failed'
+        }
+      )
+      expect(RHDL::Codegen::CIRCT::Tooling).not_to receive(:verilog_to_circt_mlir)
+
+      expect { task.run }.to raise_error(RuntimeError, /VHDL synth->Verilog failed/)
+    end
+  end
 end

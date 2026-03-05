@@ -230,7 +230,7 @@ module RHDL
               name: 'Compiler',
               sim: :compile,
               filter_key: :compiler,
-              available: RHDL::Codegen::IR::IR_COMPILER_AVAILABLE
+              available: RHDL::Sim::Native::IR::COMPILER_AVAILABLE
             },
             {
               name: 'ArcilatorGPU',

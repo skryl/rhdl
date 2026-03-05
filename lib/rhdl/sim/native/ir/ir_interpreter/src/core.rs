@@ -45,13 +45,23 @@ pub struct RegDef {
 pub enum ExprDef {
     Signal { name: String, width: usize },
     Literal { value: i64, width: usize },
+    #[serde(alias = "unary")]
     UnaryOp { op: String, operand: Box<ExprDef>, width: usize },
+    #[serde(alias = "binary")]
     BinaryOp { op: String, left: Box<ExprDef>, right: Box<ExprDef>, width: usize },
     Mux { condition: Box<ExprDef>, when_true: Box<ExprDef>, when_false: Box<ExprDef>, width: usize },
     #[allow(dead_code)]
-    Slice { base: Box<ExprDef>, low: usize, high: usize, width: usize },
+    Slice {
+        base: Box<ExprDef>,
+        #[serde(alias = "range_begin")]
+        low: usize,
+        #[serde(alias = "range_end")]
+        high: usize,
+        width: usize,
+    },
     Concat { parts: Vec<ExprDef>, width: usize },
     Resize { expr: Box<ExprDef>, width: usize },
+    #[serde(alias = "memory_read")]
     MemRead { memory: String, addr: Box<ExprDef>, width: usize },
 }
 

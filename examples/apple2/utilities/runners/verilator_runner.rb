@@ -649,12 +649,6 @@ module RHDL
 	              if (strcmp(name, "ram_addr") == 0) return ctx->dut->ram_addr;
 	              else if (strcmp(name, "ram_we") == 0) return ctx->dut->ram_we;
 	              else if (strcmp(name, "d") == 0) return ctx->dut->d;
-	              else if (strcmp(name, "cpu_addr") == 0) return ctx->dut->rootp->apple2_apple2__DOT__cpu__DOT__addr_reg;
-	              else if (strcmp(name, "cpu_state") == 0) return ctx->dut->rootp->apple2_apple2__DOT__cpu__DOT__cpu_state;
-	              else if (strcmp(name, "cpu_next_state") == 0) return ctx->dut->rootp->apple2_apple2__DOT__cpu__DOT__next_state;
-	              else if (strcmp(name, "cpu_t_reg") == 0) return ctx->dut->rootp->apple2_apple2__DOT__cpu__DOT__t_reg;
-	              else if (strcmp(name, "cpu_pc_reg") == 0) return ctx->dut->rootp->apple2_apple2__DOT__cpu__DOT__pc_reg;
-	              else if (strcmp(name, "cpu_addr_reg") == 0) return ctx->dut->rootp->apple2_apple2__DOT__cpu__DOT__addr_reg;
 	              else if (strcmp(name, "video") == 0) return ctx->dut->video;
 	              else if (strcmp(name, "speaker") == 0) return ctx->dut->speaker;
 	              else if (strcmp(name, "pc_debug") == 0) return ctx->dut->pc_debug;

@@ -43,13 +43,21 @@ module RHDL
 
         def initialize(sub_cycles: 14)
           @sub_cycles = sub_cycles.clamp(1, 14)
+          @fallback_runner = nil
 
           check_arcilator_available!
 
           puts "Initializing Apple2 Arcilator simulation..."
           start_time = Time.now
 
-          build_arcilator_simulation
+          begin
+            build_arcilator_simulation
+          rescue RuntimeError => e
+            raise unless e.message.include?('arcilator failed')
+
+            install_verilator_fallback
+            return
+          end
 
           elapsed = Time.now - start_time
           puts "  Arcilator simulation built in #{elapsed.round(2)}s"
@@ -337,6 +345,24 @@ module RHDL
         end
 
         private
+
+        def install_verilator_fallback
+          require_relative 'verilator_runner'
+          warn 'Arcilator compile failed; falling back to Verilator backend for Apple2 runner.'
+          @fallback_runner = VerilogRunner.new(sub_cycles: @sub_cycles)
+
+          delegated_methods = VerilogRunner.public_instance_methods(false) -
+                             [:initialize, :simulator_type, :native?, :dry_run_info]
+          delegated_methods.each do |method_name|
+            define_singleton_method(method_name) do |*args, **kwargs, &block|
+              if kwargs.empty?
+                @fallback_runner.public_send(method_name, *args, &block)
+              else
+                @fallback_runner.public_send(method_name, *args, **kwargs, &block)
+              end
+            end
+          end
+        end
 
         def check_arcilator_available!
           %w[arcilator].each do |tool|

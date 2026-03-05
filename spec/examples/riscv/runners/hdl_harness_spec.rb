@@ -11,6 +11,8 @@ RSpec.describe 'RISC-V HDL Runners' do
     if @verilator_available || @arcilator_available
       require_relative '../../../../examples/riscv/utilities/runners/headless_runner'
       require_relative '../../../../examples/riscv/utilities/assembler'
+      require_relative '../../../../examples/riscv/utilities/runners/verilator_runner' if @verilator_available
+      require_relative '../../../../examples/riscv/utilities/runners/arcilator_runner' if @arcilator_available
     end
   end
 

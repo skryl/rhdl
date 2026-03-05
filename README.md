@@ -509,6 +509,8 @@ rhdl export --lang verilog --tool firtool --out ./out RHDL::HDL::Counter  # requ
 
 # CIRCT import/raise
 rhdl import --mode verilog --input ./cpu.v --out ./generated   # requires circt-translate (or another Verilog importer)
+rhdl import --mode mixed --manifest ./import.yml --out ./generated # requires ghdl + circt-translate
+rhdl import --mode mixed --input ./rtl/top.sv --top top --out ./generated # mixed autoscan fallback when manifest omitted
 rhdl import --mode circt --input ./cpu.mlir --out ./generated
 rhdl import --mode circt --input ./soc.mlir --out ./generated --top soc_top --extern pll --report ./generated/import_report.json
 

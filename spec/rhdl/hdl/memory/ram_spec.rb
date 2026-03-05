@@ -92,7 +92,10 @@ RSpec.describe RHDL::HDL::RAM do
       expect(verilog).to include('module ram')
       expect(verilog).to include('input [7:0] addr')
       expect(verilog).to match(/output.*\[7:0\].*dout/)
-      expect(verilog).to include('assign dout')
+      expect(verilog).to include('dout')
+      expect(verilog).to satisfy do |text|
+        text.include?('assign dout') || text.include?('.R0_data (dout)')
+      end
     end
 
     it 'generates valid CIRCT MLIR' do

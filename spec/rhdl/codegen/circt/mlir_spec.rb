@@ -384,6 +384,80 @@ RSpec.describe RHDL::Codegen::CIRCT::MLIR do
       expect(instance_line).to include('-> (a: i8, done: i1)')
     end
 
+    it 'preserves forward references to later instance outputs through assign chains' do
+      child = ir::ModuleOp.new(
+        name: 'child_buf',
+        ports: [
+          ir::Port.new(name: :in, direction: :in, width: 8),
+          ir::Port.new(name: :y, direction: :out, width: 8)
+        ],
+        nets: [],
+        regs: [],
+        assigns: [
+          ir::Assign.new(
+            target: :y,
+            expr: ir::Signal.new(name: :in, width: 8)
+          )
+        ],
+        processes: [],
+        instances: [],
+        memories: [],
+        write_ports: [],
+        sync_read_ports: [],
+        parameters: {}
+      )
+
+      parent = ir::ModuleOp.new(
+        name: 'parent_forward_ref',
+        ports: [
+          ir::Port.new(name: :a, direction: :in, width: 8),
+          ir::Port.new(name: :y, direction: :out, width: 8)
+        ],
+        nets: [
+          ir::Net.new(name: :forwarded, width: 8),
+          ir::Net.new(name: :prod__y, width: 8),
+          ir::Net.new(name: :cons__y, width: 8)
+        ],
+        regs: [],
+        assigns: [
+          ir::Assign.new(target: :forwarded, expr: ir::Signal.new(name: :prod__y, width: 8)),
+          ir::Assign.new(target: :y, expr: ir::Signal.new(name: :cons__y, width: 8))
+        ],
+        processes: [],
+        instances: [
+          ir::Instance.new(
+            name: 'cons',
+            module_name: 'child_buf',
+            connections: [
+              ir::PortConnection.new(port_name: :in, signal: 'forwarded', direction: :in),
+              ir::PortConnection.new(port_name: :y, signal: 'cons__y', direction: :out)
+            ],
+            parameters: {}
+          ),
+          ir::Instance.new(
+            name: 'prod',
+            module_name: 'child_buf',
+            connections: [
+              ir::PortConnection.new(port_name: :in, signal: 'a', direction: :in),
+              ir::PortConnection.new(port_name: :y, signal: 'prod__y', direction: :out)
+            ],
+            parameters: {}
+          )
+        ],
+        memories: [],
+        write_ports: [],
+        sync_read_ports: [],
+        parameters: {}
+      )
+
+      mlir = described_class.generate(ir::Package.new(modules: [child, parent]))
+      cons_line = mlir.lines.find { |line| line.include?('hw.instance "cons" @child_buf(') }
+      prod_line = mlir.lines.find { |line| line.include?('hw.instance "prod" @child_buf(') }
+
+      expect(cons_line).to include('in: %prod__y_8: i8')
+      expect(prod_line).to include('%prod__y_8 = hw.instance "prod" @child_buf(')
+    end
+
     it 'emits hw.instance parameter lists for integer and boolean params' do
       mod = ir::ModuleOp.new(
         name: 'top_with_param_instance',

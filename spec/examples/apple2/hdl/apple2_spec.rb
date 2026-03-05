@@ -1349,10 +1349,60 @@ RSpec.describe 'MOS6502 ISA vs Apple2 Comparison', :slow do
   # Number of iterations for each test type
   # Ruby ISA is slow, so use fewer iterations
   RUBY_ITERATIONS = 1_000
+  # Ruby HDL runner is much slower than IR/native simulators
+  RUBY_HDL_ITERATIONS = 200
   # IR interpreter is very slow (cycle-level simulation), use minimal iterations
   INTERPRETER_ITERATIONS = 1_000
   # JIT is fast, so we can run many more iterations
   JIT_ITERATIONS = 100_000
+
+  # Adapter that gives RubyRunner the same probe/control shape as IR simulator.
+  class RubyHdlSimulatorAdapter
+    ROM_BASE_ADDR = 0xD000
+
+    def initialize(runner)
+      @runner = runner
+    end
+
+    def runner_load_rom(data, offset = 0)
+      @runner.load_rom(data, base_addr: ROM_BASE_ADDR + offset)
+    end
+
+    def runner_load_memory(data, offset = 0, is_rom = false)
+      if is_rom
+        @runner.load_rom(data, base_addr: ROM_BASE_ADDR + offset)
+      else
+        @runner.load_ram(data, base_addr: offset)
+      end
+    end
+
+    def runner_run_cycles(n, key_data = 0, key_ready = false)
+      @runner.inject_key(key_data) if key_ready && key_data.to_i.nonzero?
+      @runner.run_steps(n)
+    end
+
+    def poke(name, value)
+      case name.to_s
+      when 'reset'
+        @runner.apple2.set_input(:reset, value.to_i.zero? ? 0 : 1)
+      else
+        raise ArgumentError, "Unsupported poke signal for Ruby HDL adapter: #{name}"
+      end
+    end
+
+    def tick
+      @runner.run_14m_cycle
+    end
+
+    def peek(name)
+      case name.to_s
+      when 'cpu__pc_reg'
+        @runner.cpu_state[:pc]
+      else
+        raise ArgumentError, "Unsupported peek signal for Ruby HDL adapter: #{name}"
+      end
+    end
+  end
 
   before(:all) do
     @rom_available = File.exist?(ROM_PATH_ISA)
@@ -1413,6 +1463,11 @@ RSpec.describe 'MOS6502 ISA vs Apple2 Comparison', :slow do
       skip 'IR Compiler not available' unless RHDL::Sim::Native::IR::COMPILER_AVAILABLE
       RHDL::Sim::Native::IR::Simulator.new(ir_json, backend: :compiler)
     end
+  end
+
+  def create_ruby_hdl_simulator
+    require_relative '../../../../examples/apple2/utilities/runners/ruby_runner'
+    RubyHdlSimulatorAdapter.new(RHDL::Examples::Apple2::RubyRunner.new)
   end
 
   # Extract PC transitions (unique consecutive PC values) from a raw PC sequence

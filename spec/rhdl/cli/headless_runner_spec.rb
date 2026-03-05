@@ -21,25 +21,25 @@ RSpec.describe 'Headless Runners', :slow do
     end
   end
 
-  describe 'MOS6502::HeadlessRunner' do
+  describe 'RHDL::Examples::MOS6502::HeadlessRunner' do
 
     describe 'ISA mode (default)' do
       it 'creates ISA mode runner by default with demo' do
-        runner = MOS6502::HeadlessRunner.with_demo(mode: :isa)
+        runner = RHDL::Examples::MOS6502::HeadlessRunner.with_demo(mode: :isa)
         expect(runner.mode).to eq(:isa)
         # simulator_type is :ruby when native extensions not available
         expect(runner.simulator_type).to be_a(Symbol)
       end
 
       it 'loads demo program into memory' do
-        runner = MOS6502::HeadlessRunner.with_demo(mode: :isa)
+        runner = RHDL::Examples::MOS6502::HeadlessRunner.with_demo(mode: :isa)
         program_area = runner.memory_sample[:program_area]
         expect(program_area.any? { |b| b != 0 }).to be true
       end
 
       it 'loads binary file' do
         with_temp_program do |path|
-          runner = MOS6502::HeadlessRunner.new(mode: :isa)
+          runner = RHDL::Examples::MOS6502::HeadlessRunner.new(mode: :isa)
           runner.load_program(path, base_addr: 0x0800)
           runner.setup_reset_vector(0x0800)
           program_area = runner.memory_sample[:program_area]
@@ -56,21 +56,21 @@ RSpec.describe 'Headless Runners', :slow do
       end
 
       it 'creates IR mode runner with interpret backend' do
-        runner = MOS6502::HeadlessRunner.new(mode: :ir, sim: :interpret)
+        runner = RHDL::Examples::MOS6502::HeadlessRunner.new(mode: :ir, sim: :interpret)
         expect(runner.mode).to eq(:ir)
         expect(runner.backend).to eq(:interpret)
       end
 
       it 'creates IR mode runner with jit backend' do
         skip 'IR JIT not available' unless ir_jit_available?
-        runner = MOS6502::HeadlessRunner.new(mode: :ir, sim: :jit)
+        runner = RHDL::Examples::MOS6502::HeadlessRunner.new(mode: :ir, sim: :jit)
         expect(runner.mode).to eq(:ir)
         expect(runner.backend).to eq(:jit)
       end
 
       it 'creates IR mode runner with compile backend' do
         skip 'IR Compiler not available' unless ir_compiler_available?
-        runner = MOS6502::HeadlessRunner.new(mode: :ir, sim: :compile)
+        runner = RHDL::Examples::MOS6502::HeadlessRunner.new(mode: :ir, sim: :compile)
         expect(runner.mode).to eq(:ir)
         expect(runner.backend).to eq(:compile)
       end
@@ -78,7 +78,7 @@ RSpec.describe 'Headless Runners', :slow do
 
     describe 'runner interface' do
       it 'returns all required fields' do
-        runner = MOS6502::HeadlessRunner.with_demo(mode: :isa)
+        runner = RHDL::Examples::MOS6502::HeadlessRunner.with_demo(mode: :isa)
         expect(runner.mode).to be_a(Symbol)
         expect(runner.simulator_type).to be_a(Symbol)
         expect([true, false]).to include(runner.native?)
@@ -87,7 +87,7 @@ RSpec.describe 'Headless Runners', :slow do
       end
 
       it 'returns cpu_state with all register fields' do
-        runner = MOS6502::HeadlessRunner.with_demo(mode: :isa)
+        runner = RHDL::Examples::MOS6502::HeadlessRunner.with_demo(mode: :isa)
         cpu_state = runner.cpu_state
         expect(cpu_state).to have_key(:pc)
         expect(cpu_state).to have_key(:a)
@@ -100,7 +100,7 @@ RSpec.describe 'Headless Runners', :slow do
       end
 
       it 'returns memory_sample with all memory regions' do
-        runner = MOS6502::HeadlessRunner.with_demo(mode: :isa)
+        runner = RHDL::Examples::MOS6502::HeadlessRunner.with_demo(mode: :isa)
         memory = runner.memory_sample
         expect(memory).to have_key(:zero_page)
         expect(memory).to have_key(:stack)
@@ -119,7 +119,7 @@ RSpec.describe 'Headless Runners', :slow do
 
     describe 'error handling' do
       it 'raises error for invalid mode' do
-        expect { MOS6502::HeadlessRunner.new(mode: :invalid) }.to raise_error(RuntimeError)
+        expect { RHDL::Examples::MOS6502::HeadlessRunner.new(mode: :invalid) }.to raise_error(RuntimeError)
       end
     end
   end

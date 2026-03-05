@@ -140,6 +140,7 @@ module RHDL
 
         def read_inst_word(addr)
           if @sim_read_mem_word_fn
+            ensure_synced!
             a = addr.to_i & 0xFFFF_FFFF
             a -= 0x1_0000_0000 if a > 0x7FFF_FFFF
             @sim_read_mem_word_fn.call(@sim_ctx, 0, a) & 0xFFFF_FFFF
@@ -150,6 +151,7 @@ module RHDL
 
         def read_data_word(addr)
           if @sim_read_mem_word_fn
+            ensure_synced!
             a = addr.to_i & 0xFFFF_FFFF
             a -= 0x1_0000_0000 if a > 0x7FFF_FFFF
             @sim_read_mem_word_fn.call(@sim_ctx, 1, a) & 0xFFFF_FFFF
@@ -1629,7 +1631,7 @@ module RHDL
         private
 
         def check_tools_available!
-          %w[arcilator].each do |tool|
+          %w[arcilator firtool].each do |tool|
             raise LoadError, "#{tool} not found in PATH" unless command_available?(tool)
           end
 
@@ -1685,8 +1687,12 @@ module RHDL
 
         def compile_arcilator(mlir_file, ll_file, state_file, obj_file)
           log = File.join(build_dir, 'arcilator.log')
+          lowered_mlir_file = File.join(build_dir, 'riscv_cpu_hw_lowered.mlir')
 
-          run_or_raise("arcilator #{mlir_file} --observe-registers --state-file=#{state_file} -o #{ll_file} 2>>#{log}",
+          run_or_raise("firtool #{mlir_file} --format=mlir --ir-hw -o #{lowered_mlir_file} 2>>#{log}",
+                       'firtool', log)
+
+          run_or_raise("arcilator #{lowered_mlir_file} --observe-registers --state-file=#{state_file} -o #{ll_file} 2>>#{log}",
                        'arcilator', log)
 
           if darwin_host? && command_available?('clang')

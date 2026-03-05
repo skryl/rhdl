@@ -72,6 +72,14 @@ module RHDL
           to_mlir_hierarchy(top_name: top_name)
         end
 
+        # IR-named hierarchy alias to match CIRCT hierarchy export.
+        def to_ir_hierarchy(top_name: nil)
+          to_circt_hierarchy(top_name: top_name)
+        end
+
+        # Backward-compatible misspelling retained by request.
+        alias_method :to_ir_heirarchy, :to_ir_hierarchy
+
         # Generate FIRRTL text for this component hierarchy.
         def to_firrtl_hierarchy(top_name: nil)
           modules = collect_submodule_specs.map do |component_class, parameters|

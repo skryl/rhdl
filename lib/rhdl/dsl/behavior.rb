@@ -781,12 +781,6 @@ module RHDL
           }
         end
 
-        # Simple version for backwards compatibility - returns flat list of assigns
-        def evaluate_for_synthesis_flat(&block)
-          result = evaluate_for_synthesis(&block)
-          result[:wire_assigns] + result[:output_assigns]
-        end
-
         private
 
         def resize_to_target(ir_expr, target_width)

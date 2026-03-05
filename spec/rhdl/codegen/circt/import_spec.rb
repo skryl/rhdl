@@ -40,6 +40,50 @@ RSpec.describe RHDL::Codegen::CIRCT::Import do
       expect(process.statements.first.expr.width).to eq(8)
     end
 
+    it 'imports comb.parity and ignores llhd.halt in strict mode' do
+      mlir = <<~MLIR
+        hw.module @parity_mod(%a: i2) -> (y: i1) {
+          %p = comb.parity %a : i2
+          llhd.halt
+          hw.output %p : i1
+        }
+      MLIR
+
+      result = described_class.from_mlir(mlir, strict: true)
+      expect(result.success?).to be(true), result.diagnostics.map(&:message).join("\n")
+      mod = result.modules.first
+      expect(mod.assigns.length).to eq(1)
+      expect(mod.assigns.first.target).to eq('y')
+      expect(mod.assigns.first.expr).to be_a(RHDL::Codegen::CIRCT::IR::BinaryOp)
+      expect(mod.assigns.first.expr.op).to eq(:^)
+    end
+
+    it 'builds balanced mux depth for dynamic array selects' do
+      const_lines = (0...64).map { |idx| "  %c#{idx} = hw.constant #{idx} : i8" }.join("\n")
+      elem_tokens = (0...64).map { |idx| "%c#{idx}" }.join(', ')
+
+      mlir = <<~MLIR
+        hw.module @array_sel(%idx: i6) -> (y: i8) {
+      #{const_lines}
+          %arr = hw.array_create #{elem_tokens} : i8
+          %v = hw.array_get %arr[%idx] : !hw.array<64xi8>, i6
+          hw.output %v : i8
+        }
+      MLIR
+
+      result = described_class.from_mlir(mlir, strict: true)
+      expect(result.success?).to be(true), result.diagnostics.map(&:message).join("\n")
+      mod = result.modules.first
+      expr = mod.assigns.first.expr
+
+      mux_depth = lambda do |node|
+        next 0 unless node.is_a?(RHDL::Codegen::CIRCT::IR::Mux)
+
+        1 + [mux_depth.call(node.when_true), mux_depth.call(node.when_false)].max
+      end
+      expect(mux_depth.call(expr)).to be <= 20
+    end
+
     it 'imports modules with multiline hw.module signatures' do
       mlir = <<~MLIR
         hw.module @wide_adder(

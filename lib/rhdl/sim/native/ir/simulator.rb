@@ -28,6 +28,7 @@ module RHDL
 
         def self.sim_backend_available?(lib_path)
           return false unless File.exist?(lib_path)
+          return true unless ENV['RHDL_NATIVE_EAGER_PROBE'] == '1'
 
           _test_lib = Fiddle.dlopen(lib_path)
           _test_lib['sim_create']

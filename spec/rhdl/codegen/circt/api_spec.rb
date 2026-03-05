@@ -36,6 +36,23 @@ RSpec.describe 'RHDL::Codegen CIRCT APIs' do
       expect(result.modules.map(&:name)).to eq(['top'])
     end
 
+    it 'accepts hw.module private headers produced by moore-to-core lowering' do
+      private_mlir = <<~MLIR
+        hw.module @top(%a: i1) -> (y: i1) {
+          %child_y = hw.instance "u_child" @child(a: %a: i1) -> (y: i1)
+          hw.output %child_y : i1
+        }
+
+        hw.module private @child(%a: i1) -> (y: i1) {
+          hw.output %a : i1
+        }
+      MLIR
+
+      result = RHDL::Codegen.import_circt_mlir(private_mlir, strict: true, top: 'top')
+      expect(result.success?).to be(true)
+      expect(result.modules.map(&:name)).to include('top', 'child')
+    end
+
     it 'supports strict mode for no-skip import contracts' do
       strict_mlir = <<~MLIR
         hw.module @strict_top(%a: i8) -> (y: i8) {
@@ -69,6 +86,31 @@ RSpec.describe 'RHDL::Codegen CIRCT APIs' do
       )
       expect(pass_result.success?).to be(true)
       expect(pass_result.diagnostics.any? { |d| d.op == 'import.closure' }).to be(false)
+    end
+
+    it 'parses scf.if plus bit_reverse func.call as a mux expression' do
+      mlir_with_scf = <<~MLIR
+        hw.module @top(%a: i8, %sel: i1) -> (y: i8) {
+          %x = scf.if %sel -> (i8) {
+            %r = func.call @bit_reverse(%a) : (i8) -> i8
+            scf.yield %r : i8
+          } else {
+            scf.yield %a : i8
+          }
+          hw.output %x : i8
+        }
+
+        func.func private @bit_reverse(%arg0: i8) -> i8 {
+          return %arg0 : i8
+        }
+      MLIR
+
+      result = RHDL::Codegen.import_circt_mlir(mlir_with_scf, strict: true, top: 'top')
+      expect(result.success?).to be(true)
+      top_mod = result.modules.find { |m| m.name == 'top' }
+      expect(top_mod).not_to be_nil
+      expect(top_mod.assigns.length).to eq(1)
+      expect(top_mod.assigns.first.expr).to be_a(RHDL::Codegen::CIRCT::IR::Mux)
     end
   end
 

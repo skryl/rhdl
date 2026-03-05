@@ -2,6 +2,7 @@
 
 require 'fileutils'
 require 'set'
+require 'timeout'
 
 module RHDL
   module Codegen
@@ -226,10 +227,6 @@ module RHDL
           sequential = mod.processes.any?(&:clocked)
           base = sequential ? 'RHDL::Sim::SequentialComponent' : 'RHDL::Sim::Component'
           structure_plan = build_structure_plan(mod, diagnostics)
-          input_drive_wires = input_drive_wire_plan(mod)
-          input_drive_aliases = input_drive_wires.each_with_object({}) do |wire, map|
-            map[wire[:target].to_s] = wire[:name].to_s
-          end
 
           lines = []
           lines << '# frozen_string_literal: true'
@@ -248,7 +245,7 @@ module RHDL
           end
           lines << ''
 
-          extra_wires = structure_plan[:bridge_wires] + input_drive_wires
+          extra_wires = structure_plan[:bridge_wires]
           inferred_wires = infer_referenced_internal_wires(mod, extra_wires: extra_wires)
           emit_internal_wires(lines, mod, extra_wires: extra_wires + inferred_wires)
           emit_structure(lines, structure_plan)
@@ -263,8 +260,7 @@ module RHDL
             diagnostics,
             strict: strict,
             bridge_assignments: structure_plan[:bridge_assignments],
-            structural_output_targets: structure_plan[:structural_output_targets],
-            input_drive_aliases: input_drive_aliases
+            structural_output_targets: structure_plan[:structural_output_targets]
           )
 
           lines << 'end'
@@ -350,21 +346,6 @@ module RHDL
             next if declared.include?(name)
 
             wires << { name: name, width: width.to_i.positive? ? width.to_i : 1 }
-          end
-        end
-
-        def input_drive_wire_plan(mod)
-          seen = Set.new
-          mod.assigns.each_with_object([]) do |assign, wires|
-            target = sanitize_name(assign.target)
-            next unless input_port?(mod, target)
-            next if seen.include?(target)
-
-            width = find_target_width(mod, target)
-            width = [assign.expr.width.to_i, width].max if assign.expr.respond_to?(:width)
-            wire_name = "__rhdl_input_drv_#{target}"
-            wires << { target: target, name: wire_name, width: width.to_i.positive? ? width.to_i : 1 }
-            seen << target
           end
         end
 
@@ -638,8 +619,7 @@ module RHDL
           1
         end
 
-        def emit_behavior(lines, mod, diagnostics, strict: false, bridge_assignments: [], structural_output_targets: [],
-                          input_drive_aliases: {})
+        def emit_behavior(lines, mod, diagnostics, strict: false, bridge_assignments: [], structural_output_targets: [])
           lines << '  behavior do'
           driven_outputs = Set.new(Array(structural_output_targets).map { |name| sanitize_name(name) })
           assign_counts = Hash.new(0)
@@ -661,11 +641,9 @@ module RHDL
             original_target = sanitize_name(assign.target)
             next if redundant_self_assign?(assign, original_target, assign_counts)
 
-            target = input_drive_aliases.fetch(original_target, original_target)
-
             emit_assignment(
               lines,
-              target: signal_ref(target),
+              target: signal_ref(original_target),
               expr: assign.expr,
               diagnostics: diagnostics,
               strict: strict,
@@ -731,7 +709,7 @@ module RHDL
           inline = expr_to_ruby_cached(expr, diagnostics, strict: strict, cache: cache)
           return [] if inline.nil? || inline.empty?
 
-          if indent + inline.length <= MAX_EMITTED_LINE_LENGTH || !pretty_breakable_expr?(expr)
+          if indent + inline.length <= MAX_EMITTED_LINE_LENGTH || !pretty_breakable_expr?(expr) || expr.is_a?(IR::Mux)
             return ["#{' ' * indent}#{inline}"]
           end
 
@@ -864,12 +842,7 @@ module RHDL
 
             "(#{expr.op}#{operand})"
           when IR::Mux
-            condition = expr_to_ruby(expr.condition, diagnostics, strict: strict)
-            when_true = expr_to_ruby(expr.when_true, diagnostics, strict: strict)
-            when_false = expr_to_ruby(expr.when_false, diagnostics, strict: strict)
-            return nil if condition.nil? || when_true.nil? || when_false.nil?
-
-            "mux(#{condition}, #{when_true}, #{when_false})"
+            expr_to_ruby_mux(expr, diagnostics, strict: strict)
           when IR::Slice
             range = expr.range
             if range.begin == range.end
@@ -953,18 +926,80 @@ module RHDL
           end
         end
 
+        def expr_to_ruby_mux(expr, diagnostics, strict:)
+          chain = []
+          seen = Set.new
+          current = expr
+
+          while current.is_a?(IR::Mux)
+            key = current.object_id
+            if seen.include?(key)
+              diagnostics << Diagnostic.new(
+                severity: strict ? :error : :warning,
+                message: 'Detected cyclic mux chain while raising expression',
+                line: nil,
+                column: nil,
+                op: 'raise.expr'
+              )
+              return nil if strict
+              return '0'
+            end
+
+            seen << key
+            chain << [current.condition, current.when_true]
+            current = current.when_false
+          end
+
+          tail = expr_to_ruby(current, diagnostics, strict: strict)
+          return nil if tail.nil?
+
+          rendered_pairs = []
+          chain.each do |condition_expr, true_expr|
+            condition = expr_to_ruby(condition_expr, diagnostics, strict: strict)
+            when_true = expr_to_ruby(true_expr, diagnostics, strict: strict)
+            return nil if condition.nil? || when_true.nil?
+
+            rendered_pairs << [condition, when_true]
+          end
+
+          return tail if rendered_pairs.empty?
+
+          rendered = +''
+          rendered_pairs.each do |condition, when_true|
+            rendered << 'mux('
+            rendered << condition
+            rendered << ', '
+            rendered << when_true
+            rendered << ', '
+          end
+          rendered << tail
+          rendered << (')' * rendered_pairs.length)
+          rendered
+        end
+
         def format_generated_output_dir(out_dir, diagnostics)
           return unless out_dir && Dir.exist?(out_dir)
 
           cmd = rubocop_format_command(out_dir: out_dir)
-          ok = system(*cmd, out: File::NULL, err: File::NULL)
-          return if ok
+          status, timed_out = run_command_with_timeout(cmd, timeout_seconds: rubocop_timeout_seconds)
+          if timed_out
+            diagnostics << Diagnostic.new(
+              severity: :warning,
+              message: "RuboCop formatting timed out after #{rubocop_timeout_seconds}s for output directory #{out_dir}",
+              line: nil,
+              column: nil,
+              op: 'raise.format'
+            )
+            return
+          end
 
-          status = $?.exitstatus
-          severity = status == 1 ? :warning : :error
+          return if status&.success?
+
+          exit_code = status&.exitstatus
+          severity = exit_code == 1 ? :warning : :error
           diagnostics << Diagnostic.new(
             severity: severity,
-            message: "RuboCop formatting reported status=#{status} for output directory #{out_dir}",
+            message: "RuboCop formatting reported status=#{exit_code.inspect} for output directory #{out_dir}",
             line: nil,
             column: nil,
             op: 'raise.format'
@@ -985,6 +1020,46 @@ module RHDL
             column: nil,
             op: 'raise.format'
           )
+        end
+
+        def run_command_with_timeout(cmd, timeout_seconds:)
+          pid = Process.spawn(*cmd, out: File::NULL, err: File::NULL, pgroup: true)
+          _pid, status = Timeout.timeout(timeout_seconds) { Process.wait2(pid) }
+          [status, false]
+        rescue Timeout::Error
+          terminate_process_group(pid)
+          [nil, true]
+        end
+
+        def terminate_process_group(pid)
+          return unless pid
+
+          begin
+            Process.kill('TERM', -pid)
+          rescue Errno::ESRCH
+            nil
+          end
+
+          begin
+            Timeout.timeout(2) { Process.wait(pid) }
+          rescue Timeout::Error
+            begin
+              Process.kill('KILL', -pid)
+            rescue Errno::ESRCH
+              nil
+            end
+            Process.wait(pid)
+          rescue Errno::ECHILD
+            nil
+          end
+        end
+
+        def rubocop_timeout_seconds
+          raw = ENV.fetch('RHDL_RUBOCOP_TIMEOUT_SECONDS', '300')
+          value = raw.to_i
+          value.positive? ? value : 300
+        rescue StandardError
+          300
         end
 
         def rubocop_format_command(out_dir:)

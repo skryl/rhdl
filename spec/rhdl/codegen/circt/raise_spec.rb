@@ -267,6 +267,40 @@ RSpec.describe RHDL::Codegen::CIRCT::Raise do
       source = result.sources.fetch('long_logic')
       expect(source).to match(/y <=\n\s+\(/)
     end
+
+    it 'raises deep mux chains without stack overflow' do
+      chain = ir::Literal.new(value: 0, width: 1)
+      sel = ir::Signal.new(name: :sel, width: 1)
+      3000.times do |idx|
+        chain = ir::Mux.new(
+          condition: sel,
+          when_true: ir::Literal.new(value: (idx & 1), width: 1),
+          when_false: chain,
+          width: 1
+        )
+      end
+
+      mod = ir::ModuleOp.new(
+        name: 'deep_mux',
+        ports: [
+          ir::Port.new(name: :sel, direction: :in, width: 1),
+          ir::Port.new(name: :y, direction: :out, width: 1)
+        ],
+        nets: [],
+        regs: [],
+        assigns: [ir::Assign.new(target: :y, expr: chain)],
+        processes: [],
+        instances: [],
+        memories: [],
+        write_ports: [],
+        sync_read_ports: [],
+        parameters: {}
+      )
+
+      result = described_class.to_sources(mod, top: 'deep_mux', strict: true)
+      expect(result.success?).to be(true), result.diagnostics.map(&:message).join("\n")
+      expect(result.sources.fetch('deep_mux')).to include('y <=')
+    end
   end
 
   describe '.to_components' do

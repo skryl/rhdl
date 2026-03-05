@@ -108,3 +108,6 @@ web/build/verilator/*
 /examples/riscv/software/xv6/
 /examples/riscv/software/linux/
 /examples/ao486/reference/
+
+# Import directories
+# /examples/gameboy/import/

@@ -80,6 +80,8 @@ module RHDL
           'RHDL::Export' => /\bRHDL::Export\b/,
           'Codegen::Structure' => /\b(?:RHDL::)?Codegen::Structure\b/,
           'RHDL::Codegen::IR' => /\bRHDL::Codegen::IR\b/,
+          "require 'rhdl/simulation'" => /require\s+['"]rhdl\/simulation['"]/,
+          'RHDL::HDL::Synth* aliases' => /\bRHDL::HDL::Synth[A-Za-z0-9_]*\b/,
           'RHDL::Codegen.gate_level' => /\bRHDL::Codegen\.gate_level\b/,
           'legacy backend symbols (:cpu/:gpu/:native_interpreter)' => /\bbackend:\s*:(?:cpu|gpu|native_interpreter)\b/
         }.freeze

@@ -51,7 +51,11 @@ RSpec.describe RHDL::Examples::Apple2::NetlistRunner do
       end
     end
 
-    describe 'compile backend', :slow do
+    describe 'compile backend', :slow, timeout: 240 do
+      before(:each) do
+        skip 'Netlist compiler backend unavailable' unless netlist_compiler_available?
+      end
+
       # Compile backend takes 60+ seconds to initialize due to rustc compilation
       # of 30K gates, so we skip by default. Run with: rspec --tag slow
       subject(:runner) { described_class.new(backend: :compile, simd: :scalar) }
@@ -74,7 +78,11 @@ RSpec.describe RHDL::Examples::Apple2::NetlistRunner do
       end
     end
 
-    describe 'default backend', :slow do
+    describe 'default backend', :slow, timeout: 240 do
+      before(:each) do
+        skip 'Netlist compiler backend unavailable' unless netlist_compiler_available?
+      end
+
       subject(:runner) { described_class.new }
 
       it 'defaults to compile backend' do
@@ -201,5 +209,13 @@ RSpec.describe RHDL::Examples::Apple2::NetlistRunner do
         end
       end
     end
+  end
+
+  private
+
+  def netlist_compiler_available?
+    RHDL::Sim::Native::Netlist::COMPILER_AVAILABLE
+  rescue LoadError, NameError
+    false
   end
 end

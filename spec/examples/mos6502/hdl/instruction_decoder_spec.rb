@@ -183,8 +183,16 @@ RSpec.describe RHDL::Examples::MOS6502::InstructionDecoder do
         expect(result[:success]).to be(true), result[:error]
 
         vectors.each_with_index do |vec, idx|
-          expect(result[:results][idx]).to eq(vec[:expected]),
-            "Opcode 0x#{test_opcodes[idx].to_s(16)}: expected #{vec[:expected]}, got #{result[:results][idx]}"
+          actual = result[:results][idx]
+          comparable = {
+            addr_mode: actual[:addr_mode],
+            alu_op: actual[:alu_op],
+            instr_type: actual[:instr_type],
+            illegal: actual[:illegal]
+          }
+
+          expect(comparable).to eq(vec[:expected]),
+            "Opcode 0x#{test_opcodes[idx].to_s(16)}: expected #{vec[:expected]}, got #{actual}"
         end
       end
     end

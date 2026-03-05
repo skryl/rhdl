@@ -126,6 +126,26 @@ module RHDL
             end
           end
 
+          # Check for ghdl (mixed-language import path)
+          puts
+          ghdl_available = command_available?('ghdl')
+
+          if ghdl_available
+            version = `ghdl --version 2>&1`.lines.first&.strip
+            puts "[OK] ghdl is installed: #{version}"
+
+            synth_capable, synth_detail = ghdl_synth_probe
+            if synth_capable
+              puts "[OK] ghdl synth frontend is available (--synth)"
+            else
+              puts "[WARN] ghdl is installed but synth frontend probe failed (--synth)"
+              puts "  #{synth_detail}" if synth_detail && !synth_detail.empty?
+            end
+          else
+            puts "[OPTIONAL] ghdl is not installed (required for mixed Verilog+VHDL import mode)"
+            puts "  Install GHDL from https://ghdl.github.io/ghdl/"
+          end
+
           # Check for graphviz (dot)
           puts
           dot_available = command_available?('dot')
@@ -194,6 +214,7 @@ module RHDL
             'mlir-opt' => { cmd: 'mlir-opt --version', optional: true, desc: 'MLIR optimizer (GPU/SPIR-V lowering passes)' },
             'spirv-cross' => { cmd: 'spirv-cross --version', optional: true, desc: 'SPIR-V to Metal shader cross-compiler' },
             'circt-translate' => { cmd: 'circt-translate --version', optional: true, desc: 'CIRCT translate utility (MLIR/Verilog translation)' },
+            'ghdl' => { cmd: 'ghdl --version', optional: true, desc: 'GHDL (VHDL synth frontend for mixed-language import)' },
             'dot' => { cmd: 'dot -V', optional: true, desc: 'Graphviz (for diagram rendering)' },
             'bun' => { cmd: 'bun --version', optional: true, desc: 'Bun (for web and desktop tooling)' },
             'ruby' => { cmd: 'ruby --version', optional: false, desc: 'Ruby interpreter' },
@@ -208,6 +229,11 @@ module RHDL
             puts "#{status.ljust(12)} #{name.ljust(12)} - #{info[:desc]}"
             puts "             #{version}" if available
           end
+
+          ghdl_synth_capable, ghdl_synth_detail = ghdl_synth_probe
+          synth_status = ghdl_synth_capable ? '[OK]' : '[OPTIONAL]'
+          puts "#{synth_status.ljust(12)} #{'ghdl-synth'.ljust(12)} - GHDL synth frontend capability (--synth)"
+          puts "             #{ghdl_synth_detail}" if ghdl_synth_detail && !ghdl_synth_detail.empty?
 
           if detect_platform == :macos
             metal_tools = {
@@ -311,6 +337,21 @@ module RHDL
 
           _, status = run_command_with_timeout(version_cmd)
           status&.success? || false
+        end
+
+        def ghdl_synth_probe
+          return [false, 'ghdl not installed'] unless command_available?('ghdl')
+
+          output, status = run_command_with_timeout('ghdl --synth --help')
+          return [true, output.lines.first&.strip] if status&.success?
+
+          help_output, help_status = run_command_with_timeout('ghdl --help')
+          if help_status&.success? && help_output.include?('--synth')
+            synth_line = help_output.lines.find { |line| line.include?('--synth') }&.strip
+            return [true, synth_line]
+          end
+
+          [false, output.lines.first&.strip]
         end
 
         def command_output_first_line(command)

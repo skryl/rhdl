@@ -80,6 +80,18 @@ RSpec.describe RHDL::CLI::Tasks::DepsTask do
         expect { task.run }.to output(/circt-translate/).to_stdout
       end
 
+      it 'shows ghdl in dependency check' do
+        task = described_class.new(check: true)
+
+        expect { task.run }.to output(/ghdl/).to_stdout
+      end
+
+      it 'shows ghdl-synth capability in dependency check' do
+        task = described_class.new(check: true)
+
+        expect { task.run }.to output(/ghdl-synth/).to_stdout
+      end
+
       it 'shows arcilator in dependency check' do
         task = described_class.new(check: true)
 
@@ -235,6 +247,18 @@ RSpec.describe RHDL::CLI::Tasks::DepsTask do
     it 'shows circt-translate status' do
       output = capture_stdout { task.check_status }
       expect(output).to match(/circt-translate/)
+      expect(output).to match(/\[(OK|OPTIONAL)\]/)
+    end
+
+    it 'shows ghdl status' do
+      output = capture_stdout { task.check_status }
+      expect(output).to match(/ghdl/)
+      expect(output).to match(/\[(OK|OPTIONAL)\]/)
+    end
+
+    it 'shows ghdl-synth capability status' do
+      output = capture_stdout { task.check_status }
+      expect(output).to match(/ghdl-synth/)
       expect(output).to match(/\[(OK|OPTIONAL)\]/)
     end
 

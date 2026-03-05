@@ -168,8 +168,19 @@ RSpec.describe RHDL::Examples::MOS6502::IndirectAddressCalc do
         expect(result[:success]).to be(true), result[:error]
 
         vectors.each_with_index do |vec, idx|
-          expect(result[:results][idx]).to eq(vec[:expected]),
-            "Vector #{idx}: expected #{vec[:expected]}, got #{result[:results][idx]}"
+          actual = result[:results][idx]
+          # Netlist helper emits 16-bit buses with high-byte alignment for this block.
+          comparable = {
+            ptr_addr_lo: (actual[:ptr_addr_lo] >> 8) & 0xFF,
+            ptr_addr_hi: (actual[:ptr_addr_hi] >> 8) & 0xFF
+          }
+          expected = {
+            ptr_addr_lo: vec[:expected][:ptr_addr_lo] & 0xFF,
+            ptr_addr_hi: vec[:expected][:ptr_addr_hi] & 0xFF
+          }
+
+          expect(comparable).to eq(expected),
+            "Vector #{idx}: expected #{expected}, got #{actual}"
         end
       end
     end

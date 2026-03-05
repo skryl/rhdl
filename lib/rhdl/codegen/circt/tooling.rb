@@ -12,6 +12,7 @@ module RHDL
         DEFAULT_VERILOG_IMPORT_TOOL = 'circt-translate'
         DEFAULT_VERILOG_EXPORT_TOOL = 'firtool'
         DEFAULT_FIRTOOL_LOWERING_OPTIONS = 'disallowPackedArrays,disallowMuxInlining,disallowPortDeclSharing,disallowLocalVariables,locationInfoStyle=none,omitVersionComment'
+        DEFAULT_VHDL_IMPORT_TOOL = 'ghdl'
 
         def verilog_to_circt_mlir(verilog_path:, out_path:, tool: DEFAULT_VERILOG_IMPORT_TOOL, extra_args: [])
           cmd, preflight_error = verilog_import_command(
@@ -58,6 +59,27 @@ module RHDL
           failed_result(tool: tool, out_path: out_path, cmd: cmd, stderr: "Tool not found: #{tool}")
         end
 
+        def ghdl_analyze(vhdl_path:, workdir:, std: '08', work: 'work', tool: DEFAULT_VHDL_IMPORT_TOOL, extra_args: [])
+          cmd = [tool, '-a', "--std=#{std}", "--workdir=#{workdir}", "--work=#{work}"] + Array(extra_args) + [vhdl_path.to_s]
+          run_external_command(tool: tool, cmd: cmd, out_path: vhdl_path.to_s)
+        end
+
+        def ghdl_synth_to_verilog(entity:, out_path:, workdir:, std: '08', work: 'work', tool: DEFAULT_VHDL_IMPORT_TOOL, extra_args: [])
+          cmd = [tool, '--synth', "--std=#{std}", "--workdir=#{workdir}", "--work=#{work}"] + Array(extra_args) + ['--out=verilog', entity.to_s]
+          stdout, stderr, status = Open3.capture3(*cmd)
+          File.write(out_path, stdout) if status.success?
+          {
+            success: status.success?,
+            command: shell_join(cmd),
+            stdout: stdout,
+            stderr: stderr,
+            output_path: out_path.to_s,
+            tool: tool
+          }
+        rescue Errno::ENOENT
+          failed_result(tool: tool, out_path: out_path, cmd: cmd, stderr: "Tool not found: #{tool}")
+        end
+
         def verilog_import_command(tool:, verilog_path:, out_path:, extra_args:)
           case tool_basename(tool)
           when 'firtool'
@@ -86,6 +108,20 @@ module RHDL
 
         def tool_basename(tool)
           File.basename(tool.to_s.strip)
+        end
+
+        def run_external_command(tool:, cmd:, out_path:)
+          stdout, stderr, status = Open3.capture3(*cmd)
+          {
+            success: status.success?,
+            command: shell_join(cmd),
+            stdout: stdout,
+            stderr: stderr,
+            output_path: out_path.to_s,
+            tool: tool
+          }
+        rescue Errno::ENOENT
+          failed_result(tool: tool, out_path: out_path, cmd: cmd, stderr: "Tool not found: #{tool}")
         end
 
         def failed_result(tool:, out_path:, cmd:, stderr:)

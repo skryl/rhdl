@@ -6,10 +6,8 @@ require 'rbconfig'
 
 module RHDL
   module Codegen
-    module Verilog
-      # Backend manager for native Verilog simulators (Verilator today).
-      # The API is backend-parameterized so additional backends (e.g. Icarus)
-      # can be added without changing runner call sites.
+  module Verilog
+      # Backend manager for native Verilog simulation (Verilator).
       class VerilogSimulator
         DEFAULT_WARNING_FLAGS = %w[
           -Wno-fatal
@@ -52,7 +50,6 @@ module RHDL
         def ensure_backend_available!
           cmd = case backend
                 when :verilator then 'verilator'
-                when :iverilog then 'iverilog'
                 else
                   raise ArgumentError, "Unsupported Verilog simulator backend: #{backend.inspect}"
                 end
@@ -66,14 +63,6 @@ module RHDL
                           Ubuntu/Debian: sudo apt-get install verilator
                           macOS: brew install verilator
                           Fedora: sudo dnf install verilator
-                      MSG
-                    when :iverilog
-                      <<~MSG
-                        Icarus Verilog not found in PATH.
-                        Install Icarus Verilog:
-                          Ubuntu/Debian: sudo apt-get install iverilog
-                          macOS: brew install icarus-verilog
-                          Fedora: sudo dnf install iverilog
                       MSG
                     end
           raise LoadError, message
@@ -99,8 +88,6 @@ module RHDL
           case backend
           when :verilator
             compile_verilator(verilog_file: verilog_file, wrapper_file: wrapper_file, log_file: log_file)
-          when :iverilog
-            raise NotImplementedError, 'Icarus backend is not implemented yet'
           else
             raise ArgumentError, "Unsupported Verilog simulator backend: #{backend.inspect}"
           end
@@ -110,8 +97,6 @@ module RHDL
           case backend
           when :verilator
             link_verilator_shared_library
-          when :iverilog
-            raise NotImplementedError, 'Icarus backend is not implemented yet'
           else
             raise ArgumentError, "Unsupported Verilog simulator backend: #{backend.inspect}"
           end

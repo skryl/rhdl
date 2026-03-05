@@ -118,7 +118,7 @@ module RHDL
       end
 
       # Load ROM data
-      def load_rom(bytes)
+      def load_rom(bytes, base_addr: 0)
         bytes = bytes.bytes if bytes.is_a?(String)
         @rom = bytes.dup
         @rom.concat(Array.new(1024 * 1024 - @rom.size, 0)) if @rom.size < 1024 * 1024

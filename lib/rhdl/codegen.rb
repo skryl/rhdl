@@ -52,6 +52,12 @@ module RHDL
       end
       alias_method :to_circt, :circt
 
+      # IR alias retained alongside CIRCT naming.
+      def ir(component, top_name: nil)
+        circt(component, top_name: top_name)
+      end
+      alias_method :to_ir, :ir
+
       # FIRRTL text generated from CIRCT IR nodes.
       def firrtl(component, top_name: nil)
         firrtl_for_verilog(component, top_name: top_name)
@@ -93,13 +99,16 @@ module RHDL
 
       # Export component via CIRCT path (RHDL DSL -> CIRCT MLIR -> external Verilog).
       def verilog_via_circt(component, top_name: nil, tool: CIRCT::Tooling::DEFAULT_VERILOG_EXPORT_TOOL, extra_args: [])
+        tool_name = CIRCT::Tooling.tool_basename(tool)
+        input_text, input_format = [mlir_for_verilog(component, top_name: top_name), 'mlir']
+
         verilog = verilog_from_mlir(
-          mlir_for_verilog(component, top_name: top_name),
+          input_text,
           tool: tool,
           extra_args: extra_args,
-          input_format: 'mlir'
+          input_format: input_format
         )
-        if CIRCT::Tooling.tool_basename(tool) == 'firtool'
+        if tool_name == 'firtool'
           restore_firtool_port_names(verilog, component)
         else
           verilog

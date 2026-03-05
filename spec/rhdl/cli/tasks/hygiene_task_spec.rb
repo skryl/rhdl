@@ -117,6 +117,8 @@ RSpec.describe RHDL::CLI::Tasks::HygieneTask do
           module Legacy
             STRUCTURE = RHDL::Codegen::Structure
             IR = RHDL::Codegen::IR
+            SYNTH = RHDL::HDL::SynthExpr
+            require 'rhdl/simulation'
             RHDL::Export.run!
             RHDL::Codegen.gate_level([], backend: :gpu)
           end
@@ -128,6 +130,8 @@ RSpec.describe RHDL::CLI::Tasks::HygieneTask do
         expect(failures).to include(a_string_matching(/RHDL::Export/))
         expect(failures).to include(a_string_matching(/Codegen::Structure/))
         expect(failures).to include(a_string_matching(/RHDL::Codegen::IR/))
+        expect(failures).to include(a_string_matching(/rhdl\/simulation/))
+        expect(failures).to include(a_string_matching(/RHDL::HDL::Synth\*/))
         expect(failures).to include(a_string_matching(/RHDL::Codegen\.gate_level/))
         expect(failures).to include(a_string_matching(/legacy backend symbols/))
       end

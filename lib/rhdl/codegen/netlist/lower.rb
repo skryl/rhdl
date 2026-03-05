@@ -3498,21 +3498,7 @@ module RHDL
 
       # MOS6502 IndirectAddressCalc: combinational indirect address calculation
       def lower_mos6502_indirect_addr_calc(component)
-        mode_nets = map_bus(component.inputs[:mode])
-        operand_lo_nets = map_bus(component.inputs[:operand_lo])
-        operand_hi_nets = map_bus(component.inputs[:operand_hi])
-        x_reg_nets = map_bus(component.inputs[:x_reg])
-        ptr_addr_lo_nets = map_bus(component.outputs[:ptr_addr_lo])
-        ptr_addr_hi_nets = map_bus(component.outputs[:ptr_addr_hi])
-
-        # Simplified: output zero addresses
-        [ptr_addr_lo_nets, ptr_addr_hi_nets].each do |nets|
-          nets.each do |out|
-            const_zero = new_temp
-            @ir.add_gate(type: Primitives::CONST, inputs: [], output: const_zero, value: 0)
-            @ir.add_gate(type: Primitives::BUF, inputs: [const_zero], output: out)
-          end
-        end
+        lower_component_with_behavior(component)
       end
 
       # MOS6502 ALU: 8-bit ALU with BCD support
@@ -3627,46 +3613,7 @@ module RHDL
 
       # MOS6502 InstructionDecoder: ROM-style opcode decoder
       def lower_mos6502_instruction_decoder(component)
-        opcode_nets = map_bus(component.inputs[:opcode])
-
-        # Output nets
-        addr_mode_nets = map_bus(component.outputs[:addr_mode])
-        alu_op_nets = map_bus(component.outputs[:alu_op])
-        instr_type_nets = map_bus(component.outputs[:instr_type])
-        src_reg_nets = map_bus(component.outputs[:src_reg])
-        dst_reg_nets = map_bus(component.outputs[:dst_reg])
-        branch_cond_nets = map_bus(component.outputs[:branch_cond])
-        cycles_base_nets = map_bus(component.outputs[:cycles_base])
-        is_read_net = map_bus(component.outputs[:is_read]).first
-        is_write_net = map_bus(component.outputs[:is_write]).first
-        is_rmw_net = map_bus(component.outputs[:is_rmw]).first
-        sets_nz_net = map_bus(component.outputs[:sets_nz]).first
-        sets_c_net = map_bus(component.outputs[:sets_c]).first
-        sets_v_net = map_bus(component.outputs[:sets_v]).first
-        writes_reg_net = map_bus(component.outputs[:writes_reg]).first
-        is_status_op_net = map_bus(component.outputs[:is_status_op]).first
-        illegal_net = map_bus(component.outputs[:illegal]).first
-
-        # Simplified: output zeros for all decode outputs
-        # Full implementation would require complete decode ROM
-        all_outputs = [
-          addr_mode_nets, alu_op_nets, instr_type_nets, src_reg_nets,
-          dst_reg_nets, branch_cond_nets, cycles_base_nets
-        ]
-        all_outputs.each do |nets|
-          nets.each do |out|
-            const_zero = new_temp
-            @ir.add_gate(type: Primitives::CONST, inputs: [], output: const_zero, value: 0)
-            @ir.add_gate(type: Primitives::BUF, inputs: [const_zero], output: out)
-          end
-        end
-
-        [is_read_net, is_write_net, is_rmw_net, sets_nz_net, sets_c_net,
-         sets_v_net, writes_reg_net, is_status_op_net, illegal_net].each do |out|
-          const_zero = new_temp
-          @ir.add_gate(type: Primitives::CONST, inputs: [], output: const_zero, value: 0)
-          @ir.add_gate(type: Primitives::BUF, inputs: [const_zero], output: out)
-        end
+        lower_component_with_behavior(component)
       end
 
       # MOS6502 ControlUnit: state machine
@@ -3958,6 +3905,14 @@ module RHDL
             signal_nets[reg.name.to_s] = reg.width.times.map { new_temp }
             signal_nets[reg.name.to_sym] = signal_nets[reg.name.to_s]
           end
+        end
+
+        # Map local/combinational IR nets (for DSL locals and temporaries).
+        behavior_ir.nets&.each do |net|
+          next if signal_nets[net.name.to_s]
+
+          signal_nets[net.name.to_s] = net.width.times.map { new_temp }
+          signal_nets[net.name.to_sym] = signal_nets[net.name.to_s]
         end
 
         # Lower combinational assignments
@@ -4329,8 +4284,8 @@ module RHDL
         when RHDL::Codegen::CIRCT::IR::Signal
           nets = signal_nets[expr.name.to_s] || signal_nets[expr.name.to_sym]
           return nets if nets
-          # Create new nets for unknown signal
-          expr.width.times.map { new_temp }
+          # Unknown signal - treat as tied-low to avoid X-propagation.
+          expr.width.times.map { zero_net }
 
         when RHDL::Codegen::CIRCT::IR::Literal
           # Create constant gates
@@ -4493,7 +4448,7 @@ module RHDL
           # Create MUX for each bit
           expr.width.times.map do |i|
             out = new_temp
-            @ir.add_gate(type: Primitives::MUX, inputs: [cond_net, true_nets[i], false_nets[i]], output: out)
+            @ir.add_gate(type: Primitives::MUX, inputs: [false_nets[i], true_nets[i], cond_net], output: out)
             out
           end
 
@@ -4525,23 +4480,23 @@ module RHDL
               # If still not integers, use width-based extraction
               unless range_begin.is_a?(Integer) && range_end.is_a?(Integer)
                 # Extract bits based on expr.width
-                return (0...expr.width).map { |i| base_nets[i] || new_temp }
+                return (0...expr.width).map { |i| ensure_net(base_nets[i]) }
               end
             end
 
             # Now both are integers
             low = [range_begin, range_end].min
             high = [range_begin, range_end].max
-            (low..high).map { |i| base_nets[i] || new_temp }
+            (low..high).map { |i| ensure_net(base_nets[i]) }
           elsif expr.range.is_a?(Integer)
-            [base_nets[expr.range] || new_temp]
+            [ensure_net(base_nets[expr.range])]
           elsif expr.range.respond_to?(:to_ir)
             # Dynamic slice - convert range expression to IR and create mux
             # For now, just return based on width
-            (0...expr.width).map { |i| base_nets[i] || new_temp }
+            (0...expr.width).map { |i| ensure_net(base_nets[i]) }
           else
             # Unknown range type - return based on width
-            (0...expr.width).map { |i| base_nets[i] || new_temp }
+            (0...expr.width).map { |i| ensure_net(base_nets[i]) }
           end
 
         when RHDL::Codegen::CIRCT::IR::Concat
@@ -4592,7 +4547,7 @@ module RHDL
               # XOR each bit and NOR the results
               xors = selector_nets.zip(val_nets).map do |s, v|
                 out = new_temp
-                @ir.add_gate(type: Primitives::XOR, inputs: [s || new_temp, v || new_temp], output: out)
+                @ir.add_gate(type: Primitives::XOR, inputs: [ensure_net(s), ensure_net(v)], output: out)
                 out
               end
               or_result = reduce_gate_chain(Primitives::OR, xors)
@@ -4606,7 +4561,7 @@ module RHDL
             # MUX between current result and case value based on match
             result = expr.width.times.map do |i|
               out = new_temp
-              @ir.add_gate(type: Primitives::MUX, inputs: [match, case_nets[i], result[i]], output: out)
+              @ir.add_gate(type: Primitives::MUX, inputs: [result[i], case_nets[i], match], output: out)
               out
             end
           end
@@ -4668,6 +4623,16 @@ module RHDL
         result
       end
 
+      def zero_net
+        z = new_temp
+        @ir.add_gate(type: Primitives::CONST, inputs: [], output: z, value: 0)
+        z
+      end
+
+      def ensure_net(net)
+        net.nil? ? zero_net : net
+      end
+
       # Lower adder (ripple carry)
       def lower_adder(a_nets, b_nets, width)
         result = []
@@ -4675,8 +4640,8 @@ module RHDL
         @ir.add_gate(type: Primitives::CONST, inputs: [], output: carry, value: 0)
 
         width.times do |i|
-          a = a_nets[i] || new_temp
-          b = b_nets[i] || new_temp
+          a = ensure_net(a_nets[i])
+          b = ensure_net(b_nets[i])
 
           # Full adder: sum = a ^ b ^ cin, cout = (a & b) | (cin & (a ^ b))
           a_xor_b = new_temp
@@ -4706,7 +4671,7 @@ module RHDL
         # Invert b
         b_inv = b_nets.map do |b|
           out = new_temp
-          @ir.add_gate(type: Primitives::NOT, inputs: [b || new_temp], output: out)
+          @ir.add_gate(type: Primitives::NOT, inputs: [ensure_net(b)], output: out)
           out
         end
 
@@ -4716,8 +4681,8 @@ module RHDL
         @ir.add_gate(type: Primitives::CONST, inputs: [], output: carry, value: 1)
 
         width.times do |i|
-          a = a_nets[i] || new_temp
-          b = b_inv[i] || new_temp
+          a = ensure_net(a_nets[i])
+          b = ensure_net(b_inv[i])
 
           a_xor_b = new_temp
           @ir.add_gate(type: Primitives::XOR, inputs: [a, b], output: a_xor_b)
@@ -4751,8 +4716,8 @@ module RHDL
         @ir.add_gate(type: Primitives::CONST, inputs: [], output: result, value: 0)
 
         (0...width).reverse_each do |i|
-          a = a_nets[i] || new_temp
-          b = b_nets[i] || new_temp
+          a = ensure_net(a_nets[i])
+          b = ensure_net(b_nets[i])
 
           # a[i] < b[i] when ~a[i] & b[i]
           not_a = new_temp

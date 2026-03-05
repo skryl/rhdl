@@ -17,7 +17,7 @@ def show_help
       tui           Launch interactive TUI debugger
       diagram       Generate circuit diagrams
       export        Export components to Verilog
-      import        Import Verilog/CIRCT into RHDL DSL
+      import        Import Verilog/mixed/CIRCT into RHDL DSL
       gates         Gate-level synthesis
       examples      Run example emulators (mos6502, apple2, gameboy, riscv, ao486)
       disk          Disk image utilities for Apple II
@@ -208,6 +208,7 @@ def handle_import(args)
     strict: true,
     extern_modules: [],
     report: nil,
+    manifest: nil,
     top: nil
   }
 
@@ -217,18 +218,22 @@ def handle_import(args)
 
       Import paths:
         1) Verilog -> (external LLVM/CIRCT tools) -> CIRCT MLIR -> RHDL DSL
-        2) CIRCT MLIR -> RHDL DSL
+        2) Mixed Verilog+VHDL -> (ghdl + external LLVM/CIRCT tools) -> CIRCT MLIR -> RHDL DSL
+        3) CIRCT MLIR -> RHDL DSL
 
       Examples:
         rhdl import --mode verilog --input ./cpu.v --out ./generated
+        rhdl import --mode mixed --manifest ./import.yml --out ./generated
+        rhdl import --mode mixed --input ./rtl/top.sv --top top --out ./generated
         rhdl import --mode verilog --input ./cpu.v --out ./generated --no-raise
         rhdl import --mode circt --input ./cpu.mlir --out ./generated
 
       Options:
     BANNER
 
-    opts.on('--mode MODE', [:verilog, :circt], 'Import mode: verilog or circt') { |v| options[:mode] = v }
-    opts.on('--input FILE', 'Input file (.v for verilog mode, .mlir for circt mode)') { |v| options[:input] = v }
+    opts.on('--mode MODE', [:verilog, :mixed, :circt], 'Import mode: verilog, mixed, or circt') { |v| options[:mode] = v }
+    opts.on('--input FILE', 'Input file (.v for verilog mode, top source file for mixed autoscan, .mlir for circt mode)') { |v| options[:input] = v }
+    opts.on('--manifest FILE', 'Mixed mode: YAML/JSON manifest describing mixed-language import inputs') { |v| options[:manifest] = v }
     opts.on('--out DIR', 'Output directory for generated files') { |v| options[:out] = v }
     opts.on('--mlir-out FILE', 'Verilog mode: write intermediate CIRCT MLIR to this path') { |v| options[:mlir_out] = v }
     opts.on('--tool CMD', 'Verilog mode: external tool command (default: circt-translate)') { |v| options[:tool] = v }

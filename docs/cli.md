@@ -24,7 +24,7 @@ bundle exec rhdl --help
 | `tui` | Launch interactive TUI debugger |
 | `diagram` | Generate circuit diagrams |
 | `export` | Export components to Verilog |
-| `import` | Import Verilog/CIRCT MLIR and raise to RHDL DSL |
+| `import` | Import Verilog, mixed Verilog+VHDL, or CIRCT MLIR and raise to RHDL DSL |
 | `gates` | Gate-level synthesis |
 | `examples` | Run MOS6502, Apple2, GameBoy, RISC-V, and AO486 workflows |
 | `disk` | Disk image utilities |
@@ -289,7 +289,7 @@ export/verilog/
 
 ## Import Command
 
-Import Verilog or CIRCT MLIR and raise to RHDL DSL source files.
+Import Verilog, mixed Verilog+VHDL, or CIRCT MLIR and raise to RHDL DSL source files.
 
 ### Usage
 
@@ -301,12 +301,13 @@ rhdl import [options]
 
 | Option | Description |
 |--------|-------------|
-| `--mode MODE` | Import mode: `verilog` or `circt` |
-| `--input FILE` | Input file (`.v` for verilog mode, `.mlir` for circt mode) |
+| `--mode MODE` | Import mode: `verilog`, `mixed`, or `circt` |
+| `--input FILE` | Input file (`.v/.sv` for verilog mode, top source file for mixed autoscan mode, `.mlir` for circt mode) |
+| `--manifest FILE` | Mixed mode: YAML/JSON manifest describing source files/top/include/defines |
 | `--out DIR` | Output directory |
-| `--mlir-out FILE` | Verilog mode: write intermediate CIRCT MLIR path |
-| `--tool CMD` | Verilog mode: external import tool (default: `circt-translate`) |
-| `--tool-arg ARG` | Verilog mode: extra tool arg (repeatable) |
+| `--mlir-out FILE` | Verilog/mixed mode: write intermediate CIRCT MLIR path |
+| `--tool CMD` | Verilog/mixed mode: external Verilog import tool (default: `circt-translate`) |
+| `--tool-arg ARG` | Verilog/mixed mode: extra tool arg (repeatable) |
 | `--[no-]strict` | Enable strict no-skip import + strict raise checks (default: enabled) |
 | `--extern NAME` | Declare unresolved external module boundary (repeatable) |
 | `--report FILE` | Write import report JSON (default: `<out>/import_report.json`) |
@@ -320,6 +321,12 @@ rhdl import [options]
 # Verilog -> external LLVM/CIRCT tooling -> CIRCT MLIR -> RHDL DSL
 rhdl import --mode verilog --input ./cpu.v --out ./generated
 
+# Mixed Verilog+VHDL via manifest -> staged Verilog -> CIRCT MLIR -> RHDL DSL
+rhdl import --mode mixed --manifest ./import.yml --out ./generated
+
+# Mixed autoscan fallback (top file required when manifest is omitted)
+rhdl import --mode mixed --input ./rtl/top.sv --top top --out ./generated
+
 # Verilog -> CIRCT MLIR only (skip raising)
 rhdl import --mode verilog --input ./cpu.v --out ./generated --no-raise
 
@@ -331,6 +338,31 @@ rhdl import --mode circt --input ./soc.mlir --out ./generated --top soc_top --ex
 
 # Note: firtool does not support direct Verilog import in this flow.
 # Use circt-translate (or another Verilog importer) for --mode verilog.
+# Mixed mode also requires ghdl for VHDL analyze/synth conversion.
+```
+
+### Mixed Import Manifest (YAML/JSON)
+
+```yaml
+version: 1
+top:
+  name: top
+  language: verilog # verilog|vhdl
+  file: rtl/top.sv
+  library: work      # optional, vhdl only
+files:
+  - path: rtl/top.sv
+    language: verilog
+  - path: rtl/leaf.vhd
+    language: vhdl
+    library: work
+include_dirs:
+  - rtl/include
+defines:
+  WIDTH: "32"
+vhdl:
+  standard: "08" # default
+  workdir: tmp/ghdl_work # optional
 ```
 
 Raised DSL output from import flows is auto-formatted with RuboCop when available.

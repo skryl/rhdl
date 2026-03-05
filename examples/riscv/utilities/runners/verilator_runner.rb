@@ -138,6 +138,7 @@ module RHDL
 
         def read_inst_word(addr)
           if @sim_read_mem_word_fn
+            ensure_synced!
             a = addr.to_i & 0xFFFF_FFFF
             a -= 0x1_0000_0000 if a > 0x7FFF_FFFF
             @sim_read_mem_word_fn.call(@sim_ctx, 0, a) & 0xFFFF_FFFF
@@ -148,6 +149,7 @@ module RHDL
 
         def read_data_word(addr)
           if @sim_read_mem_word_fn
+            ensure_synced!
             a = addr.to_i & 0xFFFF_FFFF
             a -= 0x1_0000_0000 if a > 0x7FFF_FFFF
             @sim_read_mem_word_fn.call(@sim_ctx, 1, a) & 0xFFFF_FFFF
@@ -1719,6 +1721,7 @@ module RHDL
             #include "sim_wrapper.h"
             #include <cstring>
             #include <cstdlib>
+            #include <type_traits>
 
             double sc_time_stamp() { return 0; }
 
@@ -1757,6 +1760,29 @@ module RHDL
             #define DUT_EVAL(c)               (CTX(c)->dut->eval())
 
             #{riscv_sim_run_cycles_impl}
+
+            template <typename T, typename = void>
+            struct HasPcLegacyField : std::false_type {};
+            template <typename T>
+            struct HasPcLegacyField<T, std::void_t<decltype(&T::riscv_cpu__DOT__pc_reg___05Fpc)>> : std::true_type {};
+
+            template <typename T, typename = void>
+            struct HasPcCurrentField : std::false_type {};
+            template <typename T>
+            struct HasPcCurrentField<T, std::void_t<decltype(&T::riscv_cpu__DOT__pc_reg__DOT__v2_32)>> : std::true_type {};
+
+            template <typename RootT>
+            static inline void set_pc_register_impl(RootT* rootp, unsigned int value) {
+                if constexpr (HasPcLegacyField<RootT>::value) {
+                    rootp->riscv_cpu__DOT__pc_reg___05Fpc = value;
+                } else if constexpr (HasPcCurrentField<RootT>::value) {
+                    rootp->riscv_cpu__DOT__pc_reg__DOT__v2_32 = value;
+                }
+            }
+
+            static inline void set_pc_register(SimContext* ctx, unsigned int value) {
+                set_pc_register_impl(ctx->dut->rootp, value);
+            }
 
             extern "C" {
 
@@ -1845,7 +1871,7 @@ module RHDL
 
             void sim_write_pc(void* sim, unsigned int value) {
                 SimContext* ctx = static_cast<SimContext*>(sim);
-                ctx->dut->rootp->riscv_cpu__DOT__pc_reg___05Fpc = value;
+                set_pc_register(ctx, value);
                 ctx->dut->eval();
             }
 

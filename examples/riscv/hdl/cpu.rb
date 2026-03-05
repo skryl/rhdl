@@ -1866,28 +1866,7 @@ module RHDL
 
     # Generate complete Verilog hierarchy
     def self.to_verilog_hierarchy(top_name: nil)
-      parts = []
-
-      # Generate sub-modules first
-      parts << ALU.to_verilog
-      parts << RegisterFile.to_verilog
-      parts << FPRegisterFile.to_verilog
-      parts << VectorRegisterFile.to_verilog
-      parts << VectorCSRFile.to_verilog
-      parts << CSRFile.to_verilog
-      parts << ImmGen.to_verilog
-      parts << CompressedDecoder.to_verilog
-      parts << Decoder.to_verilog
-      parts << BranchCond.to_verilog
-      parts << ProgramCounter.to_verilog
-      parts << AtomicReservation.to_verilog
-      parts << PrivModeReg.to_verilog
-      parts << Sv32Tlb.to_verilog
-
-      # Generate top-level last
-      parts << to_verilog(top_name: top_name)
-
-      parts.join("\n\n")
+      to_verilog(top_name: top_name)
     end
       end
     end

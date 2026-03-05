@@ -75,4 +75,42 @@ RSpec.describe RHDL::Codegen::CIRCT::Tooling do
       expect(result[:stderr]).to include('Tool not found')
     end
   end
+
+  describe '.ghdl_analyze' do
+    it 'invokes ghdl analyze command with expected args' do
+      status = instance_double(Process::Status, success?: true)
+      expect(Open3).to receive(:capture3).with(
+        'ghdl', '-a', '--std=08', '--workdir=/tmp/ghdl_work', '--work=work', 'leaf.vhd'
+      ).and_return(['', '', status])
+
+      result = described_class.ghdl_analyze(
+        vhdl_path: 'leaf.vhd',
+        workdir: '/tmp/ghdl_work'
+      )
+      expect(result[:success]).to be(true)
+      expect(result[:command]).to include('ghdl')
+      expect(result[:command]).to match(/--workdir\\?=\/tmp\/ghdl_work/)
+    end
+  end
+
+  describe '.ghdl_synth_to_verilog' do
+    it 'invokes ghdl synth command and writes stdout to output file' do
+      status = instance_double(Process::Status, success?: true)
+      expect(Open3).to receive(:capture3).with(
+        'ghdl', '--synth', '--std=08', '--workdir=/tmp/ghdl_work', '--work=work', '--out=verilog', 'leaf'
+      ).and_return(["module leaf; endmodule\n", '', status])
+
+      Dir.mktmpdir('tooling_spec_ghdl') do |dir|
+        out = File.join(dir, 'leaf.v')
+        result = described_class.ghdl_synth_to_verilog(
+          entity: 'leaf',
+          out_path: out,
+          workdir: '/tmp/ghdl_work'
+        )
+        expect(result[:success]).to be(true)
+        expect(File.exist?(out)).to be(true)
+        expect(File.read(out)).to include('module leaf')
+      end
+    end
+  end
 end

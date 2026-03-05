@@ -1204,11 +1204,15 @@ runtime_json = MyComponent.to_circt_runtime_json
 ```ruby
 # CIRCT MLIR
 mlir = MyComponent.to_ir
+mlir = MyComponent.to_ir_hierarchy
 mlir = MyComponent.to_mlir_hierarchy
 
 # Compatibility aliases (still MLIR output)
-firrtl = MyComponent.to_circt
-firrtl = MyComponent.to_circt_hierarchy
+mlir = MyComponent.to_circt
+mlir = MyComponent.to_circt_hierarchy
+mlir = MyComponent.to_ir_heirarchy # compatibility misspelling alias
+
+# FIRRTL text
 firrtl = MyComponent.to_firrtl
 firrtl = MyComponent.to_firrtl_hierarchy
 ```

@@ -56,12 +56,23 @@ pub struct RegDef {
 pub enum ExprDef {
     Signal { name: String, width: usize },
     Literal { value: i64, width: usize },
+    #[serde(alias = "unary")]
     UnaryOp { op: String, operand: Box<ExprDef>, width: usize },
+    #[serde(alias = "binary")]
     BinaryOp { op: String, left: Box<ExprDef>, right: Box<ExprDef>, width: usize },
     Mux { condition: Box<ExprDef>, when_true: Box<ExprDef>, when_false: Box<ExprDef>, width: usize },
-    Slice { base: Box<ExprDef>, low: usize, #[allow(dead_code)] high: usize, width: usize },
+    Slice {
+        base: Box<ExprDef>,
+        #[serde(alias = "range_begin")]
+        low: usize,
+        #[allow(dead_code)]
+        #[serde(alias = "range_end")]
+        high: usize,
+        width: usize,
+    },
     Concat { parts: Vec<ExprDef>, width: usize },
     Resize { expr: Box<ExprDef>, width: usize },
+    #[serde(alias = "memory_read")]
     MemRead { memory: String, addr: Box<ExprDef>, width: usize },
 }
 
@@ -1468,7 +1479,12 @@ impl CoreSimulator {
             }
             ExprDef::Slice { base, low, width, .. } => {
                 let base_code = self.expr_to_rust_ptr(base, signals_ptr);
-                format!("(({} >> {}) & {})", base_code, low, Self::mask_const(*width))
+                format!(
+                    "(({} >> ({}usize).min(63)) & {})",
+                    base_code,
+                    low,
+                    Self::mask_const(*width)
+                )
             }
             ExprDef::Concat { parts, width } => {
                 let mut result = String::from("((");
@@ -1477,6 +1493,10 @@ impl CoreSimulator {
                 for part in parts.iter().rev() {
                     let part_code = self.expr_to_rust_ptr(part, signals_ptr);
                     let part_width = self.expr_width(part);
+                    if shift >= 64 {
+                        shift += part_width;
+                        continue;
+                    }
                     if !first {
                         result.push_str(" | ");
                     }
@@ -1576,7 +1596,12 @@ impl CoreSimulator {
             }
             ExprDef::Slice { base, low, width, .. } => {
                 let base_code = self.expr_to_rust_ptr_cached(base, signals_ptr, cache);
-                format!("(({} >> {}) & {})", base_code, low, Self::mask_const(*width))
+                format!(
+                    "(({} >> ({}usize).min(63)) & {})",
+                    base_code,
+                    low,
+                    Self::mask_const(*width)
+                )
             }
             ExprDef::Concat { parts, width } => {
                 let mut result = String::from("((");
@@ -1585,6 +1610,10 @@ impl CoreSimulator {
                 for part in parts.iter().rev() {
                     let part_code = self.expr_to_rust_ptr_cached(part, signals_ptr, cache);
                     let part_width = self.expr_width(part);
+                    if shift >= 64 {
+                        shift += part_width;
+                        continue;
+                    }
                     if !first {
                         result.push_str(" | ");
                     }
