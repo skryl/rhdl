@@ -7,10 +7,26 @@ RSpec.describe 'RISC-V HDL Runners' do
   before(:all) do
     @verilator_available = HdlToolchain.verilator_available?
     @arcilator_available = HdlToolchain.arcilator_available?
+    @metal_available = false
+    @riscv_netlist_available = false
 
     if @verilator_available || @arcilator_available
       require_relative '../../../../examples/riscv/utilities/runners/headless_runner'
       require_relative '../../../../examples/riscv/utilities/assembler'
+    end
+
+    begin
+      require_relative '../../../../examples/riscv/utilities/runners/metal_runner'
+      @metal_available = RHDL::Examples::RISCV::MetalRunner.available?
+    rescue LoadError, NameError
+      @metal_available = false
+    end
+
+    begin
+      require_relative '../../../../examples/riscv/utilities/runners/riscv_netlist_runner'
+      @riscv_netlist_available = RHDL::Examples::RISCV::RiscvNetlistRunner.available?
+    rescue LoadError, NameError
+      @riscv_netlist_available = false
     end
   end
 
@@ -69,6 +85,68 @@ RSpec.describe 'RISC-V HDL Runners' do
 
       required_methods.each do |method|
         expect(RHDL::Examples::RISCV::ArcilatorRunner.instance_methods).to include(method),
+          "Missing method: #{method}"
+      end
+    end
+  end
+
+  describe 'MetalRunner' do
+    it 'is defined when metal toolchain is available' do
+      skip 'Metal runner not available' unless @metal_available
+      require_relative '../../../../examples/riscv/utilities/runners/metal_runner'
+      expect(defined?(RHDL::Examples::RISCV::MetalRunner)).to eq('constant')
+    end
+
+    it 'has the required public interface methods' do
+      skip 'Metal runner not available' unless @metal_available
+      require_relative '../../../../examples/riscv/utilities/runners/metal_runner'
+
+      required_methods = %i[
+        native? simulator_type backend reset!
+        run_cycles clock_count
+        read_reg read_pc load_program load_data
+        read_inst_word read_data_word write_data_word
+        set_interrupts set_plic_sources
+        uart_receive_byte uart_receive_bytes uart_receive_text
+        uart_tx_bytes clear_uart_tx_bytes
+        load_virtio_disk read_virtio_disk_byte
+        state current_inst
+        dispatch_count wait_count fast_dispatch_count fallback_dispatch_count
+      ]
+
+      required_methods.each do |method|
+        expect(RHDL::Examples::RISCV::MetalRunner.instance_methods).to include(method),
+          "Missing method: #{method}"
+      end
+    end
+  end
+
+  describe 'RiscvNetlistRunner' do
+    it 'is defined when metal toolchain is available' do
+      skip 'RiscvNetlist runner not available' unless @riscv_netlist_available
+      require_relative '../../../../examples/riscv/utilities/runners/riscv_netlist_runner'
+      expect(defined?(RHDL::Examples::RISCV::RiscvNetlistRunner)).to eq('constant')
+    end
+
+    it 'has the required public interface methods' do
+      skip 'RiscvNetlist runner not available' unless @riscv_netlist_available
+      require_relative '../../../../examples/riscv/utilities/runners/riscv_netlist_runner'
+
+      required_methods = %i[
+        native? simulator_type backend reset!
+        run_cycles clock_count
+        read_reg read_pc load_program load_data
+        read_inst_word read_data_word write_data_word
+        set_interrupts set_plic_sources
+        uart_receive_byte uart_receive_bytes uart_receive_text
+        uart_tx_bytes clear_uart_tx_bytes
+        load_virtio_disk read_virtio_disk_byte
+        state current_inst
+        dispatch_count wait_count fast_dispatch_count fallback_dispatch_count
+      ]
+
+      required_methods.each do |method|
+        expect(RHDL::Examples::RISCV::RiscvNetlistRunner.instance_methods).to include(method),
           "Missing method: #{method}"
       end
     end

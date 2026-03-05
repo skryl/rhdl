@@ -89,6 +89,63 @@ module RHDL
             "Install an ArcToGPU-enabled arcilator build plus Metal/SPIR-V toolchain support."
         end
 
+        def self.synth_to_gpu_status
+          require_relative '../../utilities/runners/synth_to_gpu_runner'
+          RHDL::Examples::CPU8Bit::SynthToGpuRunner.status(pipeline: :synth_to_gpu)
+        rescue LoadError, NameError => e
+          {
+            ready: false,
+            missing_tools: ["synth_to_gpu runner unavailable: #{e.message}"]
+          }
+        end
+
+        def self.ensure_synth_to_gpu_available!
+          status = synth_to_gpu_status
+          return true if status[:ready]
+
+          raise ArgumentError,
+            "synth_to_gpu backend unavailable (missing tools: #{status[:missing_tools].join(', ')}). " \
+            'Install CIRCT tools and the macOS Metal toolchain.'
+        end
+
+        def self.metal_arc_to_gpu_status
+          require_relative '../../utilities/runners/synth_to_gpu_runner'
+          RHDL::Examples::CPU8Bit::SynthToGpuRunner.status(pipeline: :arc_to_gpu)
+        rescue LoadError, NameError => e
+          {
+            ready: false,
+            missing_tools: ["metal_arc_to_gpu runner unavailable: #{e.message}"]
+          }
+        end
+
+        def self.ensure_metal_arc_to_gpu_available!
+          status = metal_arc_to_gpu_status
+          return true if status[:ready]
+
+          raise ArgumentError,
+            "metal_arc_to_gpu backend unavailable (missing tools: #{status[:missing_tools].join(', ')}). " \
+            'Install CIRCT/arcilator tools and the macOS Metal toolchain.'
+        end
+
+        def self.gem_gpu_status
+          require_relative '../../utilities/runners/synth_to_gpu_runner'
+          RHDL::Examples::CPU8Bit::SynthToGpuRunner.status(pipeline: :gem_gpu)
+        rescue LoadError, NameError => e
+          {
+            ready: false,
+            missing_tools: ["gem_gpu runner unavailable: #{e.message}"]
+          }
+        end
+
+        def self.ensure_gem_gpu_available!
+          status = gem_gpu_status
+          return true if status[:ready]
+
+          raise ArgumentError,
+            "gem_gpu backend unavailable (missing tools: #{status[:missing_tools].join(', ')}). " \
+            'Install CIRCT tools and the macOS Metal toolchain.'
+        end
+
         def initialize(external_memory = nil, sim: :compile)
           require 'rhdl/codegen'
 
@@ -100,6 +157,24 @@ module RHDL
             self.class.ensure_arcilator_gpu_available!
             require_relative '../../utilities/runners/arcilator_gpu_runner'
             @sim = RHDL::Examples::CPU8Bit::ArcilatorGpuRunner.new
+            @memory = RunnerMemory64K.new(@sim)
+            ensure_runner_cpu8bit_mode!
+          elsif synth_to_gpu_mode?
+            self.class.ensure_synth_to_gpu_available!
+            require_relative '../../utilities/runners/synth_to_gpu_runner'
+            @sim = RHDL::Examples::CPU8Bit::SynthToGpuRunner.new(pipeline: :synth_to_gpu)
+            @memory = RunnerMemory64K.new(@sim)
+            ensure_runner_cpu8bit_mode!
+          elsif metal_arc_to_gpu_mode?
+            self.class.ensure_metal_arc_to_gpu_available!
+            require_relative '../../utilities/runners/synth_to_gpu_runner'
+            @sim = RHDL::Examples::CPU8Bit::SynthToGpuRunner.new(pipeline: :arc_to_gpu)
+            @memory = RunnerMemory64K.new(@sim)
+            ensure_runner_cpu8bit_mode!
+          elsif gem_gpu_mode?
+            self.class.ensure_gem_gpu_available!
+            require_relative '../../utilities/runners/synth_to_gpu_runner'
+            @sim = RHDL::Examples::CPU8Bit::SynthToGpuRunner.new(pipeline: :gem_gpu)
             @memory = RunnerMemory64K.new(@sim)
             ensure_runner_cpu8bit_mode!
           else
@@ -132,7 +207,20 @@ module RHDL
         end
 
         def backend
-          arcilator_gpu_mode? ? :arcilator_gpu : @sim.backend
+          return :arcilator_gpu if arcilator_gpu_mode?
+          return :synth_to_gpu if synth_to_gpu_mode?
+          return :metal_arc_to_gpu if metal_arc_to_gpu_mode?
+          return :gem_gpu if gem_gpu_mode?
+
+          @sim.backend
+        end
+
+        def parallel_instances
+          return 1 unless runner_backend_mode?
+          return 1 unless @sim.respond_to?(:runner_parallel_instances)
+
+          instances = @sim.runner_parallel_instances.to_i
+          instances.positive? ? instances : 1
         end
 
         # Read CPU state
@@ -172,7 +260,7 @@ module RHDL
           @halted = false
           @cycle_count = 0
 
-          if arcilator_gpu_mode?
+          if runner_backend_mode?
             @sim.poke('rst', 1)
             run_runner_cycles(1)
             @sim.poke('rst', 0)
@@ -189,7 +277,7 @@ module RHDL
         end
 
         def clock_cycle
-          if arcilator_gpu_mode?
+          if runner_backend_mode?
             run_runner_cycles(1)
             @halted = true if @sim.peek('halted') == 1
             return
@@ -224,7 +312,7 @@ module RHDL
           n = count.to_i
           return 0 if n <= 0
 
-          unless arcilator_gpu_mode?
+          unless runner_backend_mode?
             ran = 0
             n.times do
               break if @halted
@@ -236,22 +324,9 @@ module RHDL
             return ran
           end
 
-          remaining = n
-          ran = 0
-          batch = [batch_size.to_i, 1].max
-          while remaining.positive?
-            step = [remaining, batch].min
-            batch_ran = run_runner_cycles(step)
-            break if batch_ran <= 0
-
-            ran += batch_ran
-            remaining -= batch_ran
-            if @sim.peek('halted') == 1
-              @halted = true
-              break
-            end
-          end
-
+          # Native runner backends handle internal batching/scheduling.
+          # Keep host-side execution as a single call to avoid extra sync points.
+          ran = run_runner_cycles(n)
           @cycle_count += ran
           @halted = true if @sim.peek('halted') == 1
           ran
@@ -291,6 +366,7 @@ module RHDL
         def normalize_sim_backend(sim)
           sym = sim.to_sym
           return :compile if sym == :compiler
+          return :gem_gpu if sym == :gem
 
           sym
         end
@@ -303,11 +379,27 @@ module RHDL
           @sim_backend == :arcilator_gpu
         end
 
+        def synth_to_gpu_mode?
+          @sim_backend == :synth_to_gpu
+        end
+
+        def metal_arc_to_gpu_mode?
+          @sim_backend == :metal_arc_to_gpu
+        end
+
+        def gem_gpu_mode?
+          @sim_backend == :gem_gpu
+        end
+
+        def runner_backend_mode?
+          arcilator_gpu_mode? || synth_to_gpu_mode? || metal_arc_to_gpu_mode? || gem_gpu_mode?
+        end
+
         def ensure_runner_cpu8bit_mode!
           return if @sim.runner_mode? && @sim.runner_kind == :cpu8bit
 
           raise ArgumentError,
-            "arcilator_gpu backend requires native cpu8bit runner mode " \
+            "#{@sim_backend} backend requires native cpu8bit runner mode " \
             "(runner_mode=#{@sim.runner_mode?}, runner_kind=#{@sim.runner_kind.inspect})"
         end
 

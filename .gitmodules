@@ -10,3 +10,6 @@
 [submodule "examples/riscv/software/linux"]
 	path = examples/riscv/software/linux
 	url = https://github.com/torvalds/linux.git
+[submodule "external/GEM"]
+	path = external/GEM
+	url = https://github.com/skryl/GEM

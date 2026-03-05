@@ -78,12 +78,77 @@ RSpec.describe RHDL::CLI::Tasks::BenchmarkTask do
         task.run
       end
     end
+
+    context 'with type: :gem_metal' do
+      it 'dispatches to benchmark_gem_metal' do
+        task = described_class.new(type: :gem_metal)
+        expect(task).to receive(:benchmark_gem_metal)
+        task.run
+      end
+    end
+
+    context 'with type: :gem_metal_cpu8bit' do
+      it 'dispatches to benchmark_gem_metal_cpu8bit' do
+        task = described_class.new(type: :gem_metal_cpu8bit)
+        expect(task).to receive(:benchmark_gem_metal_cpu8bit)
+        task.run
+      end
+    end
+
+    context 'with type: :gem_metal_riscv' do
+      it 'dispatches to benchmark_gem_metal_riscv' do
+        task = described_class.new(type: :gem_metal_riscv)
+        expect(task).to receive(:benchmark_gem_metal_riscv)
+        task.run
+      end
+    end
   end
 
   describe '#benchmark_gates' do
     it 'runs gate benchmark and reports results' do
       task = described_class.new(type: :gates, lanes: 2, cycles: 10)
       expect { task.benchmark_gates }.to output(/Result:/).to_stdout
+    end
+  end
+
+  describe '#benchmark_cpu8bit' do
+    it 'maps synth filter alias to the synth_to_gpu runner' do
+      original_filter = ENV['RHDL_BENCH_BACKENDS']
+      ENV['RHDL_BENCH_BACKENDS'] = 'synth'
+
+      task = described_class.new(type: :cpu8bit, cycles: 16, batch_size: 8)
+      memory = double('memory', load: true)
+      harness = double('fast_harness', memory: memory, pc: 0, run_cycles: 16, parallel_instances: 1, :"pc=" => true)
+
+      allow(RHDL::HDL::CPU::FastHarness).to receive(:arcilator_gpu_status).and_return({ ready: false })
+      allow(RHDL::HDL::CPU::FastHarness).to receive(:metal_arc_to_gpu_status).and_return({ ready: false })
+      allow(RHDL::HDL::CPU::FastHarness).to receive(:synth_to_gpu_status).and_return({ ready: true })
+      allow(RHDL::HDL::CPU::FastHarness).to receive(:new).with(nil, sim: :synth_to_gpu).and_return(harness)
+
+      expect { task.benchmark_cpu8bit }.to output(/SynthToGPU/).to_stdout
+      expect(RHDL::HDL::CPU::FastHarness).to have_received(:new).with(nil, sim: :synth_to_gpu)
+    ensure
+      ENV['RHDL_BENCH_BACKENDS'] = original_filter
+    end
+
+    it 'reports effective throughput when runner has parallel instances' do
+      original_filter = ENV['RHDL_BENCH_BACKENDS']
+      ENV['RHDL_BENCH_BACKENDS'] = 'synth'
+
+      task = described_class.new(type: :cpu8bit, cycles: 16, batch_size: 8)
+      memory = double('memory', load: true)
+      harness = double('fast_harness', memory: memory, pc: 0, run_cycles: 16, parallel_instances: 8, :"pc=" => true)
+
+      allow(RHDL::HDL::CPU::FastHarness).to receive(:arcilator_gpu_status).and_return({ ready: false })
+      allow(RHDL::HDL::CPU::FastHarness).to receive(:metal_arc_to_gpu_status).and_return({ ready: false })
+      allow(RHDL::HDL::CPU::FastHarness).to receive(:synth_to_gpu_status).and_return({ ready: true })
+      allow(RHDL::HDL::CPU::FastHarness).to receive(:new).with(nil, sim: :synth_to_gpu).and_return(harness)
+
+      output = capture_stdout { task.benchmark_cpu8bit }
+      expect(output).to match(/Instances:\s+8/)
+      expect(output).to include('Effective:')
+    ensure
+      ENV['RHDL_BENCH_BACKENDS'] = original_filter
     end
   end
 
@@ -138,5 +203,59 @@ RSpec.describe RHDL::CLI::Tasks::BenchmarkTask do
         )
       end
     end
+
+    describe '#disable_riscv_mmu_for_gem_rtl' do
+      it 'forces satp_translate low and replaces TLB instances with constants' do
+        rtl = <<~VERILOG
+          module riscv_cpu;
+            wire itlb__hit;
+            wire [19:0] itlb__ppn;
+            wire itlb__perm_r;
+            wire itlb__perm_w;
+            wire itlb__perm_x;
+            wire itlb__perm_u;
+            wire dtlb__hit;
+            wire [19:0] dtlb__ppn;
+            wire dtlb__perm_r;
+            wire dtlb__perm_w;
+            wire dtlb__perm_x;
+            wire dtlb__perm_u;
+            assign satp_translate = some_expr;
+            riscv_sv32_tlb itlb (
+              .hit(itlb__hit),
+              .ppn(itlb__ppn),
+              .perm_r(itlb__perm_r),
+              .perm_w(itlb__perm_w),
+              .perm_x(itlb__perm_x),
+              .perm_u(itlb__perm_u)
+            );
+            riscv_sv32_tlb dtlb (
+              .hit(dtlb__hit),
+              .ppn(dtlb__ppn),
+              .perm_r(dtlb__perm_r),
+              .perm_w(dtlb__perm_w),
+              .perm_x(dtlb__perm_x),
+              .perm_u(dtlb__perm_u)
+            );
+          endmodule
+        VERILOG
+
+        patched = task.send(:disable_riscv_mmu_for_gem_rtl, rtl)
+        expect(patched).to include("assign satp_translate = 1'b0;")
+        expect(patched).to include("assign itlb__hit = 1'b0;")
+        expect(patched).to include("assign dtlb__hit = 1'b0;")
+        expect(patched).not_to include('riscv_sv32_tlb itlb')
+        expect(patched).not_to include('riscv_sv32_tlb dtlb')
+      end
+    end
+  end
+
+  def capture_stdout
+    original_stdout = $stdout
+    $stdout = StringIO.new
+    yield
+    $stdout.string
+  ensure
+    $stdout = original_stdout
   end
 end

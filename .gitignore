@@ -49,8 +49,14 @@ lib/rhdl/codegen/ir/sim/ir_compiler/*.json
 .arcilator_build/
 .arcilator_gpu_build/
 
+# Metal backend build artifacts
+.metal_build/
+.metal_probe/
+
 # HDL build artifacts (Verilator/Arcilator for example systems)
 .hdl_build/
+/examples/8bit/.gem_metal_cpu8bit/
+/examples/riscv/.gem_metal_riscv/
 
 # Web simulator generated artifacts
 web/assets/fixtures/*
