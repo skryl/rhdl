@@ -8,6 +8,13 @@ require 'json'
 RSpec.describe RHDL::CLI::Tasks::ImportTask do
   let(:tmp_dir) { Dir.mktmpdir('rhdl_import_task_spec') }
 
+  def circt_verilog_import_command(verilog_path, extra_args: [])
+    RHDL::Codegen::CIRCT::Tooling.circt_verilog_import_command_string(
+      verilog_path: verilog_path,
+      extra_args: extra_args
+    )
+  end
+
   after do
     FileUtils.rm_rf(tmp_dir)
   end
@@ -26,7 +33,7 @@ RSpec.describe RHDL::CLI::Tasks::ImportTask do
     allow(RHDL::Codegen::CIRCT::Tooling).to receive(:verilog_to_circt_mlir).and_return(
       {
         success: true,
-        command: 'circt-verilog design.v',
+        command: circt_verilog_import_command(input),
         stdout: '',
         stderr: ''
       }
@@ -76,7 +83,7 @@ RSpec.describe RHDL::CLI::Tasks::ImportTask do
       MLIR
       {
         success: true,
-        command: 'circt-verilog --ir-hw design.v',
+        command: circt_verilog_import_command(input),
         stdout: '',
         stderr: ''
       }
@@ -107,7 +114,7 @@ RSpec.describe RHDL::CLI::Tasks::ImportTask do
       MLIR
       {
         success: true,
-        command: 'circt-verilog --ir-hw simple.v',
+        command: circt_verilog_import_command(input),
         stdout: '',
         stderr: ''
       }
@@ -131,7 +138,7 @@ RSpec.describe RHDL::CLI::Tasks::ImportTask do
     allow(RHDL::Codegen::CIRCT::Tooling).to receive(:verilog_to_circt_mlir).and_return(
       {
         success: false,
-        command: 'circt-verilog broken.v',
+        command: circt_verilog_import_command(input),
         stdout: '',
         stderr: 'parse failed'
       }
@@ -472,7 +479,7 @@ RSpec.describe RHDL::CLI::Tasks::ImportTask do
     input = File.join(tmp_dir, 'design.v')
     File.write(input, 'module design(input logic a, output logic y); assign y = a; endmodule')
 
-    task = described_class.new(mode: :verilog, input: input, out: tmp_dir, raise_to_dsl: false, tool: 'circt-translate')
+    task = described_class.new(mode: :verilog, input: input, out: tmp_dir, raise_to_dsl: false, tool: 'custom-import-tool')
 
     expect(RHDL::Codegen::CIRCT::Tooling).to receive(:verilog_to_circt_mlir).with(
       verilog_path: input,
@@ -481,7 +488,7 @@ RSpec.describe RHDL::CLI::Tasks::ImportTask do
       extra_args: []
     ).and_return(
       success: true,
-      command: 'circt-verilog design.v',
+      command: circt_verilog_import_command(input),
       stdout: '',
       stderr: ''
     )
@@ -624,7 +631,7 @@ RSpec.describe RHDL::CLI::Tasks::ImportTask do
       allow(RHDL::Codegen::CIRCT::Tooling).to receive(:verilog_to_circt_mlir).and_return(
         {
           success: true,
-          command: 'circt-verilog staged.v',
+          command: circt_verilog_import_command(staged_verilog),
           stdout: '',
           stderr: ''
         }
@@ -688,7 +695,7 @@ RSpec.describe RHDL::CLI::Tasks::ImportTask do
         )
         {
           success: true,
-          command: 'circt-verilog staged.v',
+          command: circt_verilog_import_command(staged_verilog),
           stdout: '',
           stderr: ''
         }
@@ -780,7 +787,7 @@ RSpec.describe RHDL::CLI::Tasks::ImportTask do
         )
         {
           success: true,
-          command: 'circt-verilog mixed_staged.v',
+          command: circt_verilog_import_command(args.fetch(:verilog_path)),
           stdout: '',
           stderr: ''
         }

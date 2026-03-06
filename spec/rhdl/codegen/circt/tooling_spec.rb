@@ -37,18 +37,38 @@ RSpec.describe RHDL::Codegen::CIRCT::Tooling do
     MLIR
   end
 
+  describe '.circt_verilog_import_command' do
+    it 'builds the canonical circt-verilog import command with --ir-hw by default' do
+      expect(described_class.circt_verilog_import_command(verilog_path: 'in.v')).to eq(
+        ['circt-verilog', '--ir-hw', 'in.v']
+      )
+      expect(described_class.circt_verilog_import_command_string(verilog_path: 'in.v')).to eq(
+        'circt-verilog --ir-hw in.v'
+      )
+    end
+
+    it 'preserves an explicit circt-verilog IR mode override' do
+      expect(
+        described_class.circt_verilog_import_command(
+          verilog_path: 'in.v',
+          extra_args: ['--ir-moore']
+        )
+      ).to eq(['circt-verilog', '--ir-moore', 'in.v'])
+    end
+  end
+
   describe '.verilog_to_circt_mlir' do
     it 'invokes circt-verilog import command with expected args and writes stdout to the target file' do
       Dir.mktmpdir('tooling_spec_import') do |dir|
         status = instance_double(Process::Status, success?: true)
         out_path = File.join(dir, 'out.mlir')
-        expect(Open3).to receive(:capture3).with(
-          'circt-verilog', '--ir-hw', 'in.v'
-        ).and_return(["hw.module @in() {\n  hw.output\n}\n", '', status])
+        expected_cmd = described_class.circt_verilog_import_command(verilog_path: 'in.v')
+        expect(Open3).to receive(:capture3).with(*expected_cmd)
+                                             .and_return(["hw.module @in() {\n  hw.output\n}\n", '', status])
 
         result = described_class.verilog_to_circt_mlir(verilog_path: 'in.v', out_path: out_path)
         expect(result[:success]).to be(true)
-        expect(result[:command]).to eq('circt-verilog --ir-hw in.v')
+        expect(result[:command]).to eq(described_class.circt_verilog_import_command_string(verilog_path: 'in.v'))
         expect(result[:output_path]).to eq(out_path)
         expect(File.read(out_path)).to include('hw.module @in')
       end
@@ -58,9 +78,12 @@ RSpec.describe RHDL::Codegen::CIRCT::Tooling do
       Dir.mktmpdir('tooling_spec_import_override') do |dir|
         status = instance_double(Process::Status, success?: true)
         out_path = File.join(dir, 'out.mlir')
-        expect(Open3).to receive(:capture3).with(
-          'circt-verilog', '--ir-moore', 'in.v'
-        ).and_return(["module {\n}\n", '', status])
+        expected_cmd = described_class.circt_verilog_import_command(
+          verilog_path: 'in.v',
+          extra_args: ['--ir-moore']
+        )
+        expect(Open3).to receive(:capture3).with(*expected_cmd)
+                                             .and_return(["module {\n}\n", '', status])
 
         result = described_class.verilog_to_circt_mlir(
           verilog_path: 'in.v',
@@ -68,7 +91,12 @@ RSpec.describe RHDL::Codegen::CIRCT::Tooling do
           extra_args: ['--ir-moore']
         )
         expect(result[:success]).to be(true)
-        expect(result[:command]).to eq('circt-verilog --ir-moore in.v')
+        expect(result[:command]).to eq(
+          described_class.circt_verilog_import_command_string(
+            verilog_path: 'in.v',
+            extra_args: ['--ir-moore']
+          )
+        )
       end
     end
 

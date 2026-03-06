@@ -8,6 +8,7 @@ Phase 2 cleanup update - selective LLHD module cleanup and canonical firtool exp
 Phase 2 raise stabilization update - shared-subexpression hoisting in behavior and sequential emission eliminated the GameBoy CIRCT->RHDL raise blowups; the real mixed importer path now completes again with 77 raised files and green GameBoy import coverage specs - March 5, 2026
 Phase 2 runtime export update - mixed import now preserves the raw `firtool` Verilog artifact separately and overlays only true generated-VHDL memory modules onto the canonical runtime Verilog artifact so Verilator can compile the imported GameBoy design again without losing the raw exported comparison artifact - March 6, 2026
 Phase 2 runtime artifact update - mixed import now emits and mirrors a cached `runtime_json_path` artifact derived from the imported CIRCT core package so imported GameBoy runtime specs can reuse the flattened CIRCT runtime payload instead of reparsing MLIR every time - March 6, 2026
+Phase 1 import command centralization update - shared import tooling now exposes one canonical `circt-verilog --ir-hw` command helper, import-side specs consume that helper, and remaining `circt-translate` references are now explicitly export-side or historical-only - March 6, 2026
 
 ## Context
 

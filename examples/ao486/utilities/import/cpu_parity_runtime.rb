@@ -78,6 +78,7 @@ module RHDL
             @sim.poke('clk', 0)
             @sim.poke('rst_n', 1)
             @sim.evaluate
+            arm_read_burst_if_needed
 
             @sim.poke('clk', 1)
             @sim.poke('rst_n', 1)
@@ -85,7 +86,6 @@ module RHDL
 
             commit_write_if_needed
             advance_read_burst
-            arm_read_burst_if_needed
 
             capture_step_event(cycle)
           end

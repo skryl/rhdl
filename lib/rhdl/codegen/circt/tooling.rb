@@ -17,6 +17,22 @@ module RHDL
         DEFAULT_FIRTOOL_LOWERING_OPTIONS = 'disallowMuxInlining,disallowPortDeclSharing,disallowLocalVariables,locationInfoStyle=none,omitVersionComment'
         DEFAULT_VHDL_IMPORT_TOOL = 'ghdl'
 
+        def circt_verilog_import_args(extra_args: [])
+          args = Array(extra_args).dup
+          unless args.any? { |arg| arg.to_s.start_with?('--ir-') }
+            args.unshift(DEFAULT_CIRCT_VERILOG_IMPORT_MODE)
+          end
+          args
+        end
+
+        def circt_verilog_import_command(verilog_path:, tool: DEFAULT_VERILOG_IMPORT_TOOL, extra_args: [])
+          [tool] + circt_verilog_import_args(extra_args: extra_args) + [verilog_path.to_s]
+        end
+
+        def circt_verilog_import_command_string(verilog_path:, tool: DEFAULT_VERILOG_IMPORT_TOOL, extra_args: [])
+          shell_join(circt_verilog_import_command(verilog_path: verilog_path, tool: tool, extra_args: extra_args))
+        end
+
         def verilog_to_circt_mlir(verilog_path:, out_path:, tool: DEFAULT_VERILOG_IMPORT_TOOL, extra_args: [])
           cmd, preflight_error = verilog_import_command(
             tool: tool,
@@ -231,11 +247,7 @@ module RHDL
         def verilog_import_command(tool:, verilog_path:, out_path:, extra_args:)
           case tool_basename(tool)
           when 'circt-verilog'
-            args = Array(extra_args).dup
-            unless args.any? { |arg| arg.to_s.start_with?('--ir-') }
-              args.unshift(DEFAULT_CIRCT_VERILOG_IMPORT_MODE)
-            end
-            [[tool] + args + [verilog_path.to_s], nil]
+            [circt_verilog_import_command(verilog_path: verilog_path, tool: tool, extra_args: extra_args), nil]
           else
             cmd = [tool] + Array(extra_args) + [verilog_path.to_s]
             [cmd, "Tool '#{tool}' is not supported for Verilog import in this flow. Verilog import requires circt-verilog."]

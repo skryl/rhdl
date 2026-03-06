@@ -108,9 +108,10 @@ RSpec.describe RHDL::Examples::AO486::Import::SystemImporter do
         expect(normalized).not_to include('hw.module private @')
 
         expect(result.command_log.any? do |cmd|
-          cmd.start_with?("#{RHDL::Codegen::CIRCT::Tooling::DEFAULT_VERILOG_IMPORT_TOOL} ")
+          cmd.include?(RHDL::Codegen::CIRCT::Tooling::DEFAULT_VERILOG_IMPORT_TOOL) &&
+            cmd.include?(RHDL::Codegen::CIRCT::Tooling::DEFAULT_CIRCT_VERILOG_IMPORT_MODE)
         end).to be(true)
-        expect(result.command_log.none? { |cmd| cmd.start_with?('circt-translate ') }).to be(true)
+        expect(result.command_log.none? { |cmd| cmd.include?('--import-verilog') }).to be(true)
       end
     end
   end

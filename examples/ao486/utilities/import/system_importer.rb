@@ -370,7 +370,7 @@ module RHDL
           end
 
           def run_import_pipeline(prepared, diagnostics:, command_log:)
-            emit_progress("run #{RHDL::Codegen::CIRCT::Tooling::DEFAULT_VERILOG_IMPORT_TOOL} -> #{File.basename(prepared[:moore_mlir_path])}")
+            emit_progress("run #{circt_verilog_import_command_string(prepared[:wrapper_path])} -> #{File.basename(prepared[:moore_mlir_path])}")
             import_result = RHDL::Codegen::CIRCT::Tooling.verilog_to_circt_mlir(
               verilog_path: prepared[:wrapper_path],
               out_path: prepared[:moore_mlir_path],
@@ -405,6 +405,10 @@ module RHDL
 
             emit_progress('import pipeline complete')
             { success: true, stage: :done }
+          end
+
+          def circt_verilog_import_command_string(verilog_path)
+            RHDL::Codegen::CIRCT::Tooling.circt_verilog_import_command_string(verilog_path: verilog_path)
           end
 
           def normalize_system_source!(path)

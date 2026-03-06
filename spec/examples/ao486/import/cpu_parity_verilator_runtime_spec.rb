@@ -99,7 +99,7 @@ RSpec.describe RHDL::Examples::AO486::Import::CpuParityVerilatorRuntime do
     end
   end
 
-  it 'matches JIT on the flattened write-trace PC byte stream for the currently stable parity programs', timeout: 600 do
+  it 'matches JIT on the flattened write-trace PC byte stream for the benchmark parity programs', timeout: 600 do
     require_import_tool!
     require_program_assembler!
     skip 'circt-opt not available' unless HdlToolchain.which('circt-opt')
@@ -107,9 +107,7 @@ RSpec.describe RHDL::Examples::AO486::Import::CpuParityVerilatorRuntime do
     skip 'verilator not available' unless HdlToolchain.verilator_available?
     skip 'IR JIT backend unavailable' unless RHDL::Sim::Native::IR::JIT_AVAILABLE
 
-    stable_programs = %i[reset_smoke prime_sieve game_of_life].map do |name|
-      RHDL::Examples::AO486::Import::CpuParityPrograms.fetch(name)
-    end
+    benchmark_programs = RHDL::Examples::AO486::Import::CpuParityPrograms.benchmark_programs
 
     Dir.mktmpdir('ao486_cpu_step_byte_out') do |out_dir|
       Dir.mktmpdir('ao486_cpu_step_byte_ws') do |workspace|
@@ -120,7 +118,7 @@ RSpec.describe RHDL::Examples::AO486::Import::CpuParityVerilatorRuntime do
         Dir.mktmpdir('ao486_cpu_step_byte_build') do |build_dir|
           verilator_runtime = described_class.build_from_cleaned_mlir(cleaned_mlir, work_dir: build_dir)
 
-          stable_programs.each do |program|
+          benchmark_programs.each do |program|
             program.load_into(jit_runtime)
             jit_trace = flatten_step_trace(jit_runtime.run(max_cycles: program.max_cycles))
 

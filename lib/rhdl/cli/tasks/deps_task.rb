@@ -214,7 +214,7 @@ module RHDL
             'circt-verilog' => { cmd: 'circt-verilog --version', optional: false, desc: 'CIRCT Verilog frontend (core-dialect import)' },
             'mlir-opt' => { cmd: 'mlir-opt --version', optional: true, desc: 'MLIR optimizer (GPU/SPIR-V lowering passes)' },
             'spirv-cross' => { cmd: 'spirv-cross --version', optional: true, desc: 'SPIR-V to Metal shader cross-compiler' },
-            'circt-translate' => { cmd: 'circt-translate --version', optional: true, desc: 'CIRCT translate utility (legacy/alternate translation paths)' },
+            'circt-translate' => { cmd: 'circt-translate --version', optional: true, desc: 'CIRCT translate utility (MLIR export fallback / legacy translation paths)' },
             'ghdl' => { cmd: 'ghdl --version', optional: true, desc: 'GHDL (VHDL synth frontend for mixed-language import)' },
             'dot' => { cmd: 'dot -V', optional: true, desc: 'Graphviz (for diagram rendering)' },
             'bun' => { cmd: 'bun --version', optional: true, desc: 'Bun (for web and desktop tooling)' },

@@ -354,7 +354,14 @@ module RHDL
                   dut->clk = 0;
                   dut->rst_n = 1;
                   dut->eval();
-                  emit_step_trace();
+
+                  if (!burst.active && dut->avm_read) {
+                    burst.active = true;
+                    burst.started = false;
+                    burst.base = static_cast<uint32_t>(dut->avm_address) << 2;
+                    burst.beat_index = 0;
+                    burst.beats_total = dut->avm_burstcount > 0 ? dut->avm_burstcount : 1;
+                  }
 
                   dut->clk = 1;
                   dut->rst_n = 1;
@@ -377,13 +384,6 @@ module RHDL
                     }
                   }
 
-                  if (!burst.active && dut->avm_read) {
-                    burst.active = true;
-                    burst.started = false;
-                    burst.base = static_cast<uint32_t>(dut->avm_address) << 2;
-                    burst.beat_index = 0;
-                    burst.beats_total = dut->avm_burstcount > 0 ? dut->avm_burstcount : 1;
-                  }
                 }
 
                 save_memory(argv[1], mem);
