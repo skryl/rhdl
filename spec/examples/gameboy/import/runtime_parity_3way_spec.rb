@@ -65,6 +65,7 @@ RSpec.describe 'GameBoy mixed import runtime parity (Verilator/Arcilator/IR)', s
   def write_verilator_trace_harness(path)
     source = <<~CPP
       #include "Vgb.h"
+      #include "Vgb___024root.h"
       #include "verilated.h"
       #include <cstdint>
       #include <cstdio>
@@ -94,7 +95,7 @@ RSpec.describe 'GameBoy mixed import runtime parity (Verilator/Arcilator/IR)', s
         Vgb dut;
         auto rom = load_rom(rom_path);
 
-        auto tick = [&]() {
+        auto tick_clock = [&]() {
           dut.ce = 1;
           dut.ce_n = 0;
           dut.ce_2x = 1;
@@ -113,25 +114,27 @@ RSpec.describe 'GameBoy mixed import runtime parity (Verilator/Arcilator/IR)', s
           dut.eval();
         };
 
+        auto run_machine_cycle = [&]() {
+          for (int i = 0; i < 4; ++i) tick_clock();
+        };
+
         dut.joystick = 0xFF;
         dut.cart_oe = 1;
         dut.reset = 1;
-        for (int i = 0; i < 12; ++i) tick();
+        for (int i = 0; i < 10; ++i) tick_clock();
         dut.reset = 0;
-        for (int i = 0; i < 4; ++i) tick();
+        for (int i = 0; i < 100; ++i) tick_clock();
 
         uint16_t last_pc = 0xFFFF;
         for (int i = 0; i < max_cycles; ++i) {
-          tick();
-          if (dut.cart_rd) {
-            uint16_t pc =
-              (static_cast<uint16_t>(dut.ext_bus_a15 & 0x1) << 15) |
-              static_cast<uint16_t>(dut.ext_bus_addr & 0x7FFF);
-            if (pc != last_pc) {
-              uint8_t opcode = rom_read(rom, pc);
-              std::printf("%u,%u\\n", static_cast<unsigned>(pc), static_cast<unsigned>(opcode));
-              last_pc = pc;
-            }
+          run_machine_cycle();
+          const bool fetch = (dut.rootp->gb__DOT___cpu_M1_n == 0);
+          if (fetch) {
+            uint16_t pc = static_cast<uint16_t>(dut.rootp->gb__DOT___cpu_A);
+            if (pc == last_pc) continue;
+            uint8_t opcode = rom_read(rom, pc);
+            std::printf("%u,%u\\n", static_cast<unsigned>(pc), static_cast<unsigned>(opcode));
+            last_pc = pc;
           }
         }
 
@@ -216,24 +219,42 @@ RSpec.describe 'GameBoy mixed import runtime parity (Verilator/Arcilator/IR)', s
     end
   end
 
-  def collect_ir_trace(mlir_path:, rom_bytes:)
-    runner = RHDL::Examples::GameBoy::Import::IrRunner.new(
-      mlir: File.read(mlir_path),
+  def collect_ir_trace(mlir_path: nil, runtime_json_path: nil, rom_bytes:)
+    runner_args = {
       top: 'gb',
       backend: :jit
-    )
+    }
+    if runtime_json_path
+      runner_args[:runtime_json] = File.read(runtime_json_path)
+    else
+      runner_args[:mlir] = File.read(mlir_path)
+    end
+    runner = RHDL::Examples::GameBoy::Import::IrRunner.new(**runner_args)
     runner.load_rom(rom_bytes)
     runner.reset
+
+    cpu_addr_candidates = %w[cpu_A_16 cpu__A cpu_addr]
+    cpu_fetch_candidates = %w[cpu_M1_n_1 cpu__M1_n cpu_m1_n]
+    use_cpu_fetch =
+      runner.signal_available?(cpu_addr_candidates) &&
+      runner.signal_available?(cpu_fetch_candidates)
 
     trace = []
     last_pc = nil
     MAX_CYCLES.times do
       runner.run_steps(1)
-      next unless (runner.peek('cart_rd') & 0x1) == 1
+      pc =
+        if use_cpu_fetch
+          next unless (runner.peek(cpu_fetch_candidates) & 0x1).zero?
 
-      bus_addr = runner.peek('ext_bus_addr').to_i & 0x7FFF
-      a15 = runner.peek('ext_bus_a15').to_i & 0x1
-      pc = (a15 << 15) | bus_addr
+          runner.peek(cpu_addr_candidates).to_i & 0xFFFF
+        else
+          next unless (runner.peek('cart_rd') & 0x1) == 1
+
+          bus_addr = runner.peek('ext_bus_addr').to_i & 0x7FFF
+          a15 = runner.peek('ext_bus_a15').to_i & 0x1
+          (a15 << 15) | bus_addr
+        end
       next if pc == last_pc
 
       trace << [pc, rom_bytes.getbyte(pc) || 0]
@@ -349,7 +370,7 @@ RSpec.describe 'GameBoy mixed import runtime parity (Verilator/Arcilator/IR)', s
 
         auto eval = [&]() { #{eval_symbol}(state.data()); };
 
-        auto tick = [&]() {
+        auto tick_clock = [&]() {
           set_bit(state, OFF_CE, 1);
           set_bit(state, OFF_CE_N, 0);
           set_bit(state, OFF_CE_2X, 1);
@@ -367,19 +388,23 @@ RSpec.describe 'GameBoy mixed import runtime parity (Verilator/Arcilator/IR)', s
           eval();
         };
 
+        auto run_machine_cycle = [&]() {
+          for (int i = 0; i < 4; ++i) tick_clock();
+        };
+
         set_u8(state, OFF_JOYSTICK, 0xFF);
         set_bit(state, OFF_CART_OE, 1);
 
         set_bit(state, OFF_RESET, 1);
-        for (int i = 0; i < 12; ++i) tick();
+        for (int i = 0; i < 10; ++i) tick_clock();
         set_bit(state, OFF_RESET, 0);
-        for (int i = 0; i < 4; ++i) tick();
+        for (int i = 0; i < 100; ++i) tick_clock();
 
         const bool has_fetch_signals = has(OFF_CPU_M1_N) && has(OFF_CPU_ADDR);
         uint16_t last_pc = 0xFFFF;
 
         for (int i = 0; i < max_cycles; ++i) {
-          tick();
+          run_machine_cycle();
           bool fetch = has_fetch_signals ? (get_bit(state, OFF_CPU_M1_N) == 0) : (get_bit(state, OFF_CART_RD) == 1);
           if (!fetch) continue;
 
@@ -535,10 +560,12 @@ RSpec.describe 'GameBoy mixed import runtime parity (Verilator/Arcilator/IR)', s
           mixed = report.fetch('mixed_import')
           pure_verilog_entry = mixed.fetch('pure_verilog_entry_path')
           normalized_verilog = mixed.fetch('normalized_verilog_path')
+          runtime_json_path = mixed.fetch('runtime_json_path')
           workspace_normalized_verilog = mixed['workspace_normalized_verilog_path']
           pure_verilog_root = mixed.fetch('pure_verilog_root')
           expect(File.file?(pure_verilog_entry)).to be(true)
           expect(File.file?(normalized_verilog)).to be(true)
+          expect(File.file?(runtime_json_path)).to be(true)
           expect(File.directory?(pure_verilog_root)).to be(true)
           expect(File.file?(workspace_normalized_verilog)).to be(true) if workspace_normalized_verilog
 
@@ -567,7 +594,7 @@ RSpec.describe 'GameBoy mixed import runtime parity (Verilator/Arcilator/IR)', s
             summary_lines << "Verilator: #{verilator_trace.length} events"
           end
 
-          ir_trace = collect_ir_trace(mlir_path: import_result.mlir_path, rom_bytes: rom_bytes)
+          ir_trace = collect_ir_trace(runtime_json_path: runtime_json_path, rom_bytes: rom_bytes)
           if ir_trace.empty?
             failures << 'Raised-RHDL IR trace is empty'
             summary_lines << 'IR JIT: empty trace'

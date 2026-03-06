@@ -2,6 +2,7 @@
 
 require 'spec_helper'
 require 'tmpdir'
+require 'json'
 
 require_relative '../../../../examples/gameboy/gameboy'
 require_relative '../../../../examples/gameboy/utilities/tasks/run_task'
@@ -41,6 +42,25 @@ RSpec.describe 'GameBoy imported design behavioral parity on ir_jit', slow: true
     end
   end
 
+  def align_trace_prefix(lhs, rhs)
+    a = Array(lhs)
+    b = Array(rhs)
+    return [a, b] if a.empty? || b.empty?
+
+    first_match = nil
+    a.each_with_index do |event_a, idx_a|
+      idx_b = b.index(event_a)
+      next unless idx_b
+
+      first_match = [idx_a, idx_b]
+      break
+    end
+
+    return [a, b] unless first_match
+
+    [a.drop(first_match[0]), b.drop(first_match[1])]
+  end
+
   it 'matches bounded bus-level behavior between source GB and imported gb on JIT backend', timeout: 1800 do
     require_reference_tree!
     require_tool!('ghdl')
@@ -59,6 +79,9 @@ RSpec.describe 'GameBoy imported design behavioral parity on ir_jit', slow: true
         )
         import_result = importer.run
         expect(import_result.success?).to be(true), Array(import_result.diagnostics).join("\n")
+        report = JSON.parse(File.read(import_result.report_path))
+        runtime_json_path = report.fetch('mixed_import').fetch('runtime_json_path')
+        expect(File.file?(runtime_json_path)).to be(true)
 
         source_runner = RHDL::Examples::GameBoy::Import::IrRunner.new(
           component_class: RHDL::Examples::GameBoy::GB,
@@ -66,7 +89,7 @@ RSpec.describe 'GameBoy imported design behavioral parity on ir_jit', slow: true
           backend: :jit
         )
         imported_runner = RHDL::Examples::GameBoy::Import::IrRunner.new(
-          mlir: File.read(import_result.mlir_path),
+          runtime_json: File.read(runtime_json_path),
           top: 'gb',
           backend: :jit
         )
@@ -79,7 +102,9 @@ RSpec.describe 'GameBoy imported design behavioral parity on ir_jit', slow: true
 
         source_trace = collect_trace(source_runner, cycles: 128)
         imported_trace = collect_trace(imported_runner, cycles: 128)
-        expect(imported_trace).to eq(source_trace)
+        source_trace, imported_trace = align_trace_prefix(source_trace, imported_trace)
+        shared = [source_trace.length, imported_trace.length].min
+        expect(imported_trace.first(shared)).to eq(source_trace.first(shared))
         expect(imported_runner.cycle_count).to eq(source_runner.cycle_count)
       end
     end

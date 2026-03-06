@@ -9,7 +9,7 @@ require_relative '../../../../examples/ao486/utilities/import/cpu_parity_program
 require_relative '../../../../examples/ao486/utilities/import/cpu_parity_runtime'
 require_relative '../../../../examples/ao486/utilities/import/cpu_parity_verilator_runtime'
 
-RSpec.describe RHDL::Examples::AO486::Import::CpuParityVerilatorRuntime do
+RSpec.describe 'AO486 CPU parity-package fetch parity', slow: true do
   def require_import_tool!
     tool = RHDL::Codegen::CIRCT::Tooling::DEFAULT_VERILOG_IMPORT_TOOL
     skip "#{tool} not available" unless HdlToolchain.which(tool)
@@ -29,7 +29,7 @@ RSpec.describe RHDL::Examples::AO486::Import::CpuParityVerilatorRuntime do
     ).run
   end
 
-  it 'matches JIT on the named parity programs for the parity package', timeout: 600 do
+  it 'matches JIT and Verilator on the named AO486 parity programs', timeout: 900 do
     require_import_tool!
     require_program_assembler!
     skip 'circt-opt not available' unless HdlToolchain.which('circt-opt')
@@ -37,15 +37,18 @@ RSpec.describe RHDL::Examples::AO486::Import::CpuParityVerilatorRuntime do
     skip 'verilator not available' unless HdlToolchain.verilator_available?
     skip 'IR JIT backend unavailable' unless RHDL::Sim::Native::IR::JIT_AVAILABLE
 
-    Dir.mktmpdir('ao486_cpu_parity_verilator_out') do |out_dir|
-      Dir.mktmpdir('ao486_cpu_parity_verilator_ws') do |workspace|
+    Dir.mktmpdir('ao486_cpu_fetch_parity_out') do |out_dir|
+      Dir.mktmpdir('ao486_cpu_fetch_parity_ws') do |workspace|
         result = run_importer(out_dir: out_dir, workspace: workspace)
         cleaned_mlir = File.read(result.normalized_core_mlir_path)
 
         jit_runtime = RHDL::Examples::AO486::Import::CpuParityRuntime.build_from_cleaned_mlir(cleaned_mlir)
 
-        Dir.mktmpdir('ao486_cpu_parity_verilator_build') do |build_dir|
-          verilator_runtime = described_class.build_from_cleaned_mlir(cleaned_mlir, work_dir: build_dir)
+        Dir.mktmpdir('ao486_cpu_fetch_parity_vl') do |build_dir|
+          verilator_runtime = RHDL::Examples::AO486::Import::CpuParityVerilatorRuntime.build_from_cleaned_mlir(
+            cleaned_mlir,
+            work_dir: build_dir
+          )
 
           RHDL::Examples::AO486::Import::CpuParityPrograms.all_programs.each do |program|
             program.load_into(jit_runtime)

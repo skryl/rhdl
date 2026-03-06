@@ -1,5 +1,5 @@
 ## Status
-In Progress (regression reopened 2026-03-05)
+Completed (2026-03-06)
 
 ## Context
 Game Boy mixed HDL import coverage does not yet have the same end-to-end validation shape as AO486:
@@ -609,3 +609,24 @@ Acceptance closure:
 2. `examples/gameboy/import` regeneration determinism is now covered by integration spec.
 3. Mixed roundtrip semantic signatures are strict-parity (`EXPECTED_STRUCTURAL_MISMATCHES = []`).
 4. Imported RHDL design behavioral checks pass on `ir_compiler`, with direct `bin/gb` smoke runs also passing.
+
+## Execution Notes (2026-03-06, Update 12)
+Completed in this iteration:
+1. Fixed a real emitter bug in `lib/rhdl/codegen/circt/mlir.rb`:
+   - signed comparisons against negative literals now emit `slt/sle/sgt/sge` instead of unsigned predicates,
+   - this removed the `altsyncram_*` zero-collapse in canonical roundtrip Verilog.
+2. Tightened whole-design roundtrip verifier performance in `spec/examples/gameboy/import/roundtrip_spec.rb`:
+   - duplicate OR-mask normalization now uses compact fingerprints instead of hashing giant nested signature arrays,
+   - whole-design compare now uses source core MLIR vs roundtrip MLIR semantic signatures while still exporting roundtrip Verilog as part of the flow.
+3. Revalidated the previously red 16-module mismatch set directly:
+   - all `altsyncram_*` candidates => `OK`
+   - all `eReg_*` / `ereg_*` candidates => `OK`
+   - targeted remaining count => `0`
+4. Revalidated the full whole-design roundtrip through the updated probe path:
+   - `source_only=[]`
+   - `roundtrip_only=[]`
+   - `mismatched=[]`
+   - `unexpected=[]`
+5. Re-ran the full slow roundtrip spec:
+   - `INCLUDE_SLOW_TESTS=1 bundle exec rspec spec/examples/gameboy/import/roundtrip_spec.rb`
+   - result: `3 examples, 0 failures`

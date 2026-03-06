@@ -704,16 +704,20 @@ module RHDL
               emit_icmp('ne', resize_value(left, left_width, cmp_width), resize_value(right, right_width, cmp_width), cmp_width)
             when '<', :<
               cmp_width = [left_width.to_i, right_width.to_i, 1].max
-              emit_icmp('ult', resize_value(left, left_width, cmp_width), resize_value(right, right_width, cmp_width), cmp_width)
+              pred = signed_comparison?(expr.left, expr.right) ? 'slt' : 'ult'
+              emit_icmp(pred, resize_value(left, left_width, cmp_width), resize_value(right, right_width, cmp_width), cmp_width)
             when '<=', :<=
               cmp_width = [left_width.to_i, right_width.to_i, 1].max
-              emit_icmp('ule', resize_value(left, left_width, cmp_width), resize_value(right, right_width, cmp_width), cmp_width)
+              pred = signed_comparison?(expr.left, expr.right) ? 'sle' : 'ule'
+              emit_icmp(pred, resize_value(left, left_width, cmp_width), resize_value(right, right_width, cmp_width), cmp_width)
             when '>', :>
               cmp_width = [left_width.to_i, right_width.to_i, 1].max
-              emit_icmp('ugt', resize_value(left, left_width, cmp_width), resize_value(right, right_width, cmp_width), cmp_width)
+              pred = signed_comparison?(expr.left, expr.right) ? 'sgt' : 'ugt'
+              emit_icmp(pred, resize_value(left, left_width, cmp_width), resize_value(right, right_width, cmp_width), cmp_width)
             when '>=', :>=
               cmp_width = [left_width.to_i, right_width.to_i, 1].max
-              emit_icmp('uge', resize_value(left, left_width, cmp_width), resize_value(right, right_width, cmp_width), cmp_width)
+              pred = signed_comparison?(expr.left, expr.right) ? 'sge' : 'uge'
+              emit_icmp(pred, resize_value(left, left_width, cmp_width), resize_value(right, right_width, cmp_width), cmp_width)
             else
               @lines << "  // Unsupported binary op #{op.inspect}; emitting zero"
               emit_zero(result_width)
@@ -836,6 +840,14 @@ module RHDL
             out = fresh(width)
             @lines << "  #{out} = comb.#{op} #{left}, #{right} : #{iwidth(width)}"
             out
+          end
+
+          def signed_comparison?(left_expr, right_expr)
+            negative_literal?(left_expr) || negative_literal?(right_expr)
+          end
+
+          def negative_literal?(expr)
+            expr.is_a?(IR::Literal) && expr.value.to_i.negative?
           end
 
           def resize_value(value, current_width, target_width)

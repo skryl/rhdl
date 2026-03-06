@@ -2,6 +2,8 @@
 In Progress (2026-03-05)
 Runtime update - Verilator vs imported IR JIT parity gate is green. Imported runtime initialization now uses CIRCT-native flattening + runtime JSON normalization instead of a raised-DSL round trip. The local Arcilator harness also now uses an `llc` invocation compatible with the installed toolchain. (2026-03-05)
 Validation update - targeted GameBoy runtime specs are green; full `spec/examples/gameboy/import` validation was started but not allowed to finish in this pass because a long roundtrip spec was still running without an early failure signal. (2026-03-05)
+Runtime export update - the canonical imported runtime Verilog now preserves raw `firtool` output as a separate artifact and overlays only the generated VHDL memory modules needed to keep Verilator healthy on the imported GameBoy design; fresh direct import verification shows the canonical `gb.normalized.v` now passes `verilator --lint-only`, `verilator --cc`, and a short POP-ROM execution harness again. (2026-03-06)
+Runtime cache update - mixed import now emits a cached `gb.runtime.json` artifact and the imported GameBoy `IrRunner` can consume it directly, cutting imported JIT startup materially versus reparsing the full cleaned CIRCT MLIR on each run while preserving the preexisting manual cycle semantics. (2026-03-06)
 
 ## Context
 Game Boy mixed import coverage currently validates:

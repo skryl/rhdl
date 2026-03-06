@@ -513,6 +513,39 @@ RSpec.describe RHDL::Codegen::CIRCT::MLIR do
       expect(mlir).to include('hw.output %')
     end
 
+    it 'emits signed icmp predicates when comparing against negative literals' do
+      mod = ir::ModuleOp.new(
+        name: 'signed_compare',
+        ports: [
+          ir::Port.new(name: :addr, direction: :in, width: 32),
+          ir::Port.new(name: :y, direction: :out, width: 1)
+        ],
+        nets: [],
+        regs: [],
+        assigns: [
+          ir::Assign.new(
+            target: :y,
+            expr: ir::BinaryOp.new(
+              op: :>,
+              left: ir::Signal.new(name: :addr, width: 32),
+              right: ir::Literal.new(value: -1, width: 32),
+              width: 1
+            )
+          )
+        ],
+        processes: [],
+        instances: [],
+        memories: [],
+        write_ports: [],
+        sync_read_ports: [],
+        parameters: {}
+      )
+
+      mlir = described_class.generate(mod)
+      expect(mlir).to include('comb.icmp sgt')
+      expect(mlir).not_to include('comb.icmp ugt')
+    end
+
     it 'emits hw.instance parameter lists for integer and boolean params' do
       mod = ir::ModuleOp.new(
         name: 'top_with_param_instance',

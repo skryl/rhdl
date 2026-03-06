@@ -25,6 +25,8 @@ module RHDL
 
             modules = Array(imported.modules).map { |mod| CpuTracePackage.dup_module(mod) }
             patch_icache_bypass!(modules)
+            patch_prefetch_fifo_passthrough!(modules)
+            patch_prefetch_startup_limit!(modules)
 
             package = CpuTracePackage.build_from_modules(modules)
 
@@ -46,6 +48,9 @@ module RHDL
           def patch_icache_bypass!(modules)
             mod = CpuTracePackage.find_module!(modules, 'icache')
             inst = CpuTracePackage.find_instance!(mod, 'l1_icache_inst')
+            ir = RHDL::Codegen::CIRCT::IR
+
+            rewrite_icache_partial_length_literals!(mod)
 
             cpu_valid_name = output_signal_name!(inst, 'CPU_VALID')
             cpu_done_name = output_signal_name!(inst, 'CPU_DONE')
@@ -55,27 +60,239 @@ module RHDL
 
             cpu_req_expr = connection_expr!(inst, 'CPU_REQ')
             cpu_addr_expr = connection_expr!(inst, 'CPU_ADDR')
-            prefetched_length_expr = assign_expr!(mod, 'prefetched_length')
+            prefetched_length_expr = CpuTracePackage.signal('prefetched_length', 5)
+            remaining_length_expr = CpuTracePackage.signal('length', 5)
+            has_pending_words = CpuTracePackage.binop(:!=, prefetched_length_expr, ir::Literal.new(value: 0, width: 5), 1)
+            final_word = CpuTracePackage.binop(:<=, remaining_length_expr, prefetched_length_expr, 1)
 
             mod.instances.reject! { |entry| entry.name.to_s == 'l1_icache_inst' }
             mod.assigns << CpuTracePackage.assign(mem_req_name, cpu_req_expr)
             mod.assigns << CpuTracePackage.assign(mem_addr_name, cpu_addr_expr)
-            mod.assigns << CpuTracePackage.assign(cpu_valid_name, CpuTracePackage.signal('readcode_done', 1))
+            mod.assigns << CpuTracePackage.assign(
+              cpu_valid_name,
+              CpuTracePackage.binop(:&, CpuTracePackage.signal('readcode_done', 1), has_pending_words, 1)
+            )
             mod.assigns << CpuTracePackage.assign(cpu_data_name, CpuTracePackage.signal('readcode_partial', 32))
             mod.assigns << CpuTracePackage.assign(
               cpu_done_name,
-              CpuTracePackage.binop(
-                :&,
-                CpuTracePackage.signal('readcode_done', 1),
-                CpuTracePackage.binop(
-                  :<=,
-                  CpuTracePackage.signal('v9_5', 5),
-                  prefetched_length_expr,
-                  1
-                ),
-                1
+              CpuTracePackage.binop(:&, CpuTracePackage.signal('readcode_done', 1), final_word, 1)
+            )
+          end
+
+          def patch_prefetch_fifo_passthrough!(modules)
+            mod = CpuTracePackage.find_module!(modules, 'prefetch_fifo')
+            ir = RHDL::Codegen::CIRCT::IR
+
+            mod.instances.clear
+
+            write_do = CpuTracePackage.signal('prefetchfifo_write_do', 1)
+            limit_do = CpuTracePackage.signal('prefetchfifo_signal_limit_do', 1)
+            pf_do = CpuTracePackage.signal('prefetchfifo_signal_pf_do', 1)
+            write_data = CpuTracePackage.signal('prefetchfifo_write_data', 36)
+
+            any_valid = CpuTracePackage.binop(
+              :|,
+              limit_do,
+              CpuTracePackage.binop(:|, pf_do, write_do, 1),
+              1
+            )
+
+            gp_payload = ir::Concat.new(
+              parts: [
+                ir::Literal.new(value: 15, width: 4),
+                ir::Literal.new(value: 0, width: 32),
+                ir::Literal.new(value: 0, width: 32)
+              ],
+              width: 68
+            )
+            pf_payload = ir::Concat.new(
+              parts: [
+                ir::Literal.new(value: 14, width: 4),
+                ir::Literal.new(value: 0, width: 32),
+                ir::Literal.new(value: 0, width: 32)
+              ],
+              width: 68
+            )
+            write_payload = ir::Concat.new(
+              parts: [
+                ir::Slice.new(base: write_data, range: 32..35, width: 4),
+                ir::Literal.new(value: 0, width: 32),
+                ir::Slice.new(base: write_data, range: 0..31, width: 32)
+              ],
+              width: 68
+            )
+            accept_data = ir::Mux.new(
+              condition: limit_do,
+              when_true: gp_payload,
+              when_false: ir::Mux.new(
+                condition: pf_do,
+                when_true: pf_payload,
+                when_false: write_payload,
+                width: 68
+              ),
+              width: 68
+            )
+
+            mod.assigns.reject! do |assign|
+              %w[prefetchfifo_used prefetchfifo_accept_data prefetchfifo_accept_empty].include?(assign.target.to_s)
+            end
+            mod.assigns << CpuTracePackage.assign(
+              'prefetchfifo_used',
+              ir::Mux.new(
+                condition: any_valid,
+                when_true: ir::Literal.new(value: 1, width: 5),
+                when_false: ir::Literal.new(value: 0, width: 5),
+                width: 5
               )
             )
+            mod.assigns << CpuTracePackage.assign('prefetchfifo_accept_data', accept_data)
+            mod.assigns << CpuTracePackage.assign(
+              'prefetchfifo_accept_empty',
+              CpuTracePackage.binop(:^, any_valid, ir::Literal.new(value: 1, width: 1), 1)
+            )
+          end
+
+          def patch_prefetch_startup_limit!(modules)
+            mod = CpuTracePackage.find_module!(modules, 'prefetch')
+            proc = mod.processes.find do |entry|
+              stmt = Array(entry.instance_variable_get(:@statements)).first
+              stmt.is_a?(RHDL::Codegen::CIRCT::IR::SeqAssign) && stmt.target.to_s == 'limit'
+            end
+            raise KeyError, "SeqAssign target 'limit' not found in module '#{mod.name}'" unless proc
+
+            stmt = proc.instance_variable_get(:@statements).first
+            stmt.instance_variable_set(:@expr, rewrite_prefetch_limit_expr(stmt.expr))
+          end
+
+          def rewrite_prefetch_limit_expr(expr)
+            case expr
+            when RHDL::Codegen::CIRCT::IR::Literal
+              value = (expr.width == 32 && expr.value == 16) ? 65_535 : expr.value
+              RHDL::Codegen::CIRCT::IR::Literal.new(value: value, width: expr.width)
+            when RHDL::Codegen::CIRCT::IR::Signal
+              expr
+            when RHDL::Codegen::CIRCT::IR::UnaryOp
+              RHDL::Codegen::CIRCT::IR::UnaryOp.new(
+                op: expr.op,
+                operand: rewrite_prefetch_limit_expr(expr.operand),
+                width: expr.width
+              )
+            when RHDL::Codegen::CIRCT::IR::BinaryOp
+              RHDL::Codegen::CIRCT::IR::BinaryOp.new(
+                op: expr.op,
+                left: rewrite_prefetch_limit_expr(expr.left),
+                right: rewrite_prefetch_limit_expr(expr.right),
+                width: expr.width
+              )
+            when RHDL::Codegen::CIRCT::IR::Mux
+              RHDL::Codegen::CIRCT::IR::Mux.new(
+                condition: rewrite_prefetch_limit_expr(expr.condition),
+                when_true: rewrite_prefetch_limit_expr(expr.when_true),
+                when_false: rewrite_prefetch_limit_expr(expr.when_false),
+                width: expr.width
+              )
+            when RHDL::Codegen::CIRCT::IR::Concat
+              RHDL::Codegen::CIRCT::IR::Concat.new(
+                parts: expr.parts.map { |part| rewrite_prefetch_limit_expr(part) },
+                width: expr.width
+              )
+            when RHDL::Codegen::CIRCT::IR::Slice
+              RHDL::Codegen::CIRCT::IR::Slice.new(
+                base: rewrite_prefetch_limit_expr(expr.base),
+                range: expr.range,
+                width: expr.width
+              )
+            when RHDL::Codegen::CIRCT::IR::Resize
+              RHDL::Codegen::CIRCT::IR::Resize.new(
+                expr: rewrite_prefetch_limit_expr(expr.expr),
+                width: expr.width
+              )
+            when RHDL::Codegen::CIRCT::IR::Case
+              RHDL::Codegen::CIRCT::IR::Case.new(
+                selector: rewrite_prefetch_limit_expr(expr.selector),
+                cases: expr.cases.transform_values { |value| rewrite_prefetch_limit_expr(value) },
+                default: rewrite_prefetch_limit_expr(expr.default),
+                width: expr.width
+              )
+            else
+              expr
+            end
+          end
+
+          def rewrite_icache_partial_length_literals!(mod)
+            proc = mod.processes.find do |entry|
+              stmt = Array(entry.instance_variable_get(:@statements)).first
+              stmt.is_a?(RHDL::Codegen::CIRCT::IR::SeqAssign) && stmt.target.to_s == 'partial_length'
+            end
+            raise KeyError, "SeqAssign target 'partial_length' not found in module '#{mod.name}'" unless proc
+
+            stmt = proc.instance_variable_get(:@statements).first
+            stmt.instance_variable_set(:@expr, rewrite_length_burst_expr(stmt.expr))
+          end
+
+          def rewrite_length_burst_expr(expr)
+            case expr
+            when RHDL::Codegen::CIRCT::IR::Literal
+              rewrite_length_burst_literal(expr)
+            when RHDL::Codegen::CIRCT::IR::Signal
+              expr
+            when RHDL::Codegen::CIRCT::IR::UnaryOp
+              RHDL::Codegen::CIRCT::IR::UnaryOp.new(
+                op: expr.op,
+                operand: rewrite_length_burst_expr(expr.operand),
+                width: expr.width
+              )
+            when RHDL::Codegen::CIRCT::IR::BinaryOp
+              RHDL::Codegen::CIRCT::IR::BinaryOp.new(
+                op: expr.op,
+                left: rewrite_length_burst_expr(expr.left),
+                right: rewrite_length_burst_expr(expr.right),
+                width: expr.width
+              )
+            when RHDL::Codegen::CIRCT::IR::Mux
+              RHDL::Codegen::CIRCT::IR::Mux.new(
+                condition: rewrite_length_burst_expr(expr.condition),
+                when_true: rewrite_length_burst_expr(expr.when_true),
+                when_false: rewrite_length_burst_expr(expr.when_false),
+                width: expr.width
+              )
+            when RHDL::Codegen::CIRCT::IR::Concat
+              RHDL::Codegen::CIRCT::IR::Concat.new(
+                parts: expr.parts.map { |part| rewrite_length_burst_expr(part) },
+                width: expr.width
+              )
+            when RHDL::Codegen::CIRCT::IR::Slice
+              RHDL::Codegen::CIRCT::IR::Slice.new(
+                base: rewrite_length_burst_expr(expr.base),
+                range: expr.range,
+                width: expr.width
+              )
+            when RHDL::Codegen::CIRCT::IR::Resize
+              RHDL::Codegen::CIRCT::IR::Resize.new(
+                expr: rewrite_length_burst_expr(expr.expr),
+                width: expr.width
+              )
+            when RHDL::Codegen::CIRCT::IR::Case
+              RHDL::Codegen::CIRCT::IR::Case.new(
+                selector: rewrite_length_burst_expr(expr.selector),
+                cases: expr.cases.transform_values { |value| rewrite_length_burst_expr(value) },
+                default: rewrite_length_burst_expr(expr.default),
+                width: expr.width
+              )
+            else
+              expr
+            end
+          end
+
+          def rewrite_length_burst_literal(expr)
+            mapping = {
+              -1759 => -1756, # 12'h921 -> 12'h924
+              -1758 => -1757, # 12'h922 -> 12'h923
+              -1757 => -1758, # 12'h923 -> 12'h922
+              -1756 => -1759  # 12'h924 -> 12'h921
+            }
+            mapped = mapping.fetch(expr.value, expr.value)
+            RHDL::Codegen::CIRCT::IR::Literal.new(value: mapped, width: expr.width)
           end
 
           def output_signal_name!(inst, port_name)
@@ -99,12 +316,6 @@ module RHDL
             end
           end
 
-          def assign_expr!(mod, target)
-            assign = mod.assigns.find { |entry| entry.target.to_s == target.to_s }
-            raise KeyError, "Assign target '#{target}' not found in module '#{mod.name}'" unless assign
-
-            assign.expr
-          end
         end
       end
     end

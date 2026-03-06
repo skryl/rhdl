@@ -677,6 +677,8 @@ module RHDL
 
             artifact_map = {
               'core_mlir_path' => File.join(import_artifacts_dir, "#{top}.core.mlir"),
+              'runtime_json_path' => File.join(import_artifacts_dir, "#{top}.runtime.json"),
+              'firtool_verilog_path' => File.join(import_artifacts_dir, "#{top}.firtool.v"),
               'normalized_verilog_path' => File.join(import_artifacts_dir, "#{top}.normalized.v"),
               'pure_verilog_entry_path' => File.join(import_artifacts_dir, "#{top}.pure_entry.v"),
               'pure_verilog_root' => File.join(import_artifacts_dir, 'pure_verilog')

@@ -19,6 +19,7 @@
 /spec/fixtures/apple2/
 /export/
 /vendor/
+/obj_dir/
 # Native extension build artifacts
 *.so
 *.bundle
@@ -111,3 +112,4 @@ web/build/verilator/*
 
 # Import directories
 # /examples/gameboy/import/
+

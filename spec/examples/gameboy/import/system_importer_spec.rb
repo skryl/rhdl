@@ -170,11 +170,15 @@ RSpec.describe RHDL::Examples::GameBoy::Import::SystemImporter do
           File.write(File.join(out_dir, 'generated_component.rb'), "# generated\n")
 
           core_mlir = File.join(out_dir, '.mixed_import', 'gb.core.mlir')
+          runtime_json = File.join(out_dir, '.mixed_import', 'gb.runtime.json')
+          firtool_verilog = File.join(out_dir, '.mixed_import', 'gb.firtool.v')
           normalized_verilog = File.join(out_dir, '.mixed_import', 'gb.normalized.v')
           pure_entry = File.join(out_dir, '.mixed_import', 'pure_verilog_entry.v')
           pure_root = File.join(out_dir, '.mixed_import', 'pure_verilog')
 
           File.write(core_mlir, "hw.module @gb() {\n  hw.output\n}\n")
+          File.write(runtime_json, '{"circt_json_version":1,"modules":[{"name":"gb","ports":[],"nets":[],"regs":[],"assigns":[],"processes":[],"instances":[],"memories":[],"write_ports":[],"sync_read_ports":[],"parameters":{}}]}')
+          File.write(firtool_verilog, "module gb;\nendmodule\n")
           File.write(normalized_verilog, "module gb;\nendmodule\n")
           File.write(pure_entry, "`include \"#{File.join(pure_root, 'gb.v')}\"\n")
           File.write(File.join(pure_root, 'gb.v'), "module gb;\nendmodule\n")
@@ -189,12 +193,16 @@ RSpec.describe RHDL::Examples::GameBoy::Import::SystemImporter do
               pure_verilog_root: pure_root,
               pure_verilog_entry_path: pure_entry,
               core_mlir_path: core_mlir,
+              runtime_json_path: runtime_json,
+              firtool_verilog_path: firtool_verilog,
               normalized_verilog_path: normalized_verilog
             },
             artifacts: {
               pure_verilog_root: pure_root,
               pure_verilog_entry_path: pure_entry,
               core_mlir_path: core_mlir,
+              runtime_json_path: runtime_json,
+              firtool_verilog_path: firtool_verilog,
               normalized_verilog_path: normalized_verilog
             }
           }
@@ -219,6 +227,8 @@ RSpec.describe RHDL::Examples::GameBoy::Import::SystemImporter do
           report = JSON.parse(File.read(result.report_path))
           artifacts = report.fetch('artifacts')
           expect(File.file?(artifacts.fetch('workspace_core_mlir_path'))).to be(true)
+          expect(File.file?(artifacts.fetch('workspace_runtime_json_path'))).to be(true)
+          expect(File.file?(artifacts.fetch('workspace_firtool_verilog_path'))).to be(true)
           expect(File.file?(artifacts.fetch('workspace_normalized_verilog_path'))).to be(true)
           expect(File.file?(artifacts.fetch('workspace_pure_verilog_entry_path'))).to be(true)
           expect(File.directory?(artifacts.fetch('workspace_pure_verilog_root'))).to be(true)

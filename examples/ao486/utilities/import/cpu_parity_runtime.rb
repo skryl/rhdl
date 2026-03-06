@@ -22,6 +22,9 @@ module RHDL
           attr_reader :sim, :memory
 
           StepEvent = Struct.new(:cycle, :eip, :consumed, :bytes, keyword_init: true)
+          FetchWordEvent = Struct.new(:cycle, :address, :word, keyword_init: true)
+          FetchGroupEvent = Struct.new(:cycle, :address, :bytes, keyword_init: true)
+          FetchPcGroupEvent = Struct.new(:cycle, :pc, :bytes, keyword_init: true)
 
           def self.build_from_cleaned_mlir(mlir_text)
             parity = CpuParityPackage.from_cleaned_mlir(mlir_text)
@@ -37,9 +40,14 @@ module RHDL
           def initialize(sim:)
             @sim = sim
             @memory = Hash.new(0)
-            @burst = nil
+            @read_burst = nil
             @previous_trace_key = nil
+            @last_fetch_word = nil
             apply_default_inputs
+          end
+
+          def clear_memory!
+            @memory.clear
           end
 
           def load_bytes(base, bytes)
@@ -48,9 +56,14 @@ module RHDL
             end
           end
 
+          def read_bytes(base, length)
+            Array.new(length) { |idx| @memory[base + idx] || 0 }
+          end
+
           def reset!
-            @burst = nil
+            @read_burst = nil
             @previous_trace_key = nil
+            @last_fetch_word = nil
             apply_default_inputs
             @sim.poke('clk', 0)
             @sim.poke('rst_n', 0)
@@ -70,6 +83,7 @@ module RHDL
             @sim.poke('rst_n', 1)
             @sim.tick
 
+            commit_write_if_needed
             advance_read_burst
             arm_read_burst_if_needed
 
@@ -89,15 +103,42 @@ module RHDL
           end
 
           def run_fetch_words(max_cycles: DEFAULT_MAX_CYCLES)
+            run_fetch_trace(max_cycles: max_cycles).map(&:word)
+          end
+
+          def run_fetch_trace(max_cycles: DEFAULT_MAX_CYCLES)
             reset!
-            words = []
+            events = []
 
             max_cycles.times do |cycle|
               step(cycle)
-              words << @sim.peek('avm_readdata') if @sim.peek('avm_readdatavalid') == 1
+              event = capture_fetch_word_event(cycle)
+              events << event if event
             end
 
-            words
+            events
+          end
+
+          def run_fetch_groups(max_cycles: DEFAULT_MAX_CYCLES)
+            run_fetch_trace(max_cycles: max_cycles).map do |event|
+              FetchGroupEvent.new(
+                cycle: event.cycle,
+                address: event.address,
+                bytes: word_to_bytes(event.word)
+              )
+            end
+          end
+
+          def run_fetch_pc_groups(max_cycles: DEFAULT_MAX_CYCLES)
+            run_fetch_groups(max_cycles: max_cycles).map do |event|
+              next if event.address < STARTUP_CS_BASE
+
+              FetchPcGroupEvent.new(
+                cycle: event.cycle,
+                pc: event.address - STARTUP_CS_BASE,
+                bytes: event.bytes
+              )
+            end.compact
           end
 
           private
@@ -125,11 +166,13 @@ module RHDL
           end
 
           def drive_read_data_inputs
-            if @burst && @burst[:started]
-              addr = @burst[:base] + (@burst[:beat_index] * 4)
+            if @read_burst && @read_burst[:started]
+              addr = @read_burst[:base] + (@read_burst[:beat_index] * 4)
+              @last_fetch_word = { address: addr, word: little_endian_word(addr) }
               @sim.poke('avm_readdatavalid', 1)
-              @sim.poke('avm_readdata', little_endian_word(addr))
+              @sim.poke('avm_readdata', @last_fetch_word[:word])
             else
+              @last_fetch_word = nil
               @sim.poke('avm_readdatavalid', 0)
               @sim.poke('avm_readdata', 0)
             end
@@ -141,25 +184,35 @@ module RHDL
             end
           end
 
-          def advance_read_burst
-            return unless @burst
+          def commit_write_if_needed
+            return unless @sim.peek('avm_write') == 1
 
-            if @burst[:started]
-              @burst[:beat_index] += 1
-              @burst = nil if @burst[:beat_index] >= @burst[:beats_total]
+            write_word(
+              @sim.peek('avm_address') << 2,
+              @sim.peek('avm_writedata'),
+              @sim.peek('avm_byteenable')
+            )
+          end
+
+          def advance_read_burst
+            return unless @read_burst
+
+            if @read_burst[:started]
+              @read_burst[:beat_index] += 1
+              @read_burst = nil if @read_burst[:beat_index] >= @read_burst[:beats_total]
             else
-              @burst[:started] = true
+              @read_burst[:started] = true
             end
           end
 
           def arm_read_burst_if_needed
-            return unless @burst.nil?
+            return unless @read_burst.nil?
             return unless @sim.peek('avm_read') == 1
 
-            @burst = {
+            @read_burst = {
               base: @sim.peek('avm_address') << 2,
               beat_index: 0,
-              beats_total: DEFAULT_FETCH_BURST_BEATS,
+              beats_total: [@sim.peek('avm_burstcount'), 1].max,
               started: false
             }
           end
@@ -181,8 +234,31 @@ module RHDL
             )
           end
 
+          def capture_fetch_word_event(cycle)
+            return nil unless @sim.peek('avm_readdatavalid') == 1
+            return nil unless @last_fetch_word
+
+            FetchWordEvent.new(
+              cycle: cycle,
+              address: @last_fetch_word[:address],
+              word: @last_fetch_word[:word]
+            )
+          end
+
           def bytes_at(addr, length)
-            Array.new(length) { |idx| @memory[addr + idx] || 0 }
+            read_bytes(addr, length)
+          end
+
+          def word_to_bytes(word)
+            Array.new(4) { |idx| (word >> (idx * 8)) & 0xFF }
+          end
+
+          def write_word(addr, word, byteenable)
+            4.times do |idx|
+              next unless ((byteenable >> idx) & 1) == 1
+
+              @memory[addr + idx] = (word >> (idx * 8)) & 0xFF
+            end
           end
         end
       end

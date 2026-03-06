@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require 'json'
 require 'rhdl/codegen'
 require 'rhdl/sim/native/ir/simulator'
 
@@ -14,12 +15,21 @@ module RHDL
         # This runner is intentionally minimal and geared toward deterministic
         # import parity checks.
         class IrRunner
+          RuntimePort = Struct.new(:name, :direction, :width, keyword_init: true)
+          RuntimeSignal = Struct.new(:name, :width, keyword_init: true)
+          RuntimeModule = Struct.new(:ports, :nets, :regs, keyword_init: true)
+
           attr_reader :cycles, :backend, :top_name
 
-          def initialize(component_class: nil, mlir: nil, top: 'gb', backend: :compile)
+          def initialize(component_class: nil, mlir: nil, runtime_json: nil, top: 'gb', backend: :compile)
             @backend = backend
             @top_name = top.to_s
-            resolved = resolve_nodes(component_class: component_class, mlir: mlir, top: @top_name)
+            resolved = resolve_nodes(
+              component_class: component_class,
+              mlir: mlir,
+              runtime_json: runtime_json,
+              top: @top_name
+            )
             @nodes = resolved.fetch(:top_module)
             @runtime_nodes = resolved.fetch(:runtime_nodes)
 
@@ -28,6 +38,14 @@ module RHDL
             @signal_names = (@nodes.ports.map { |port| port.name.to_s } +
               @nodes.nets.map { |net| net.name.to_s } +
               @nodes.regs.map { |reg| reg.name.to_s }).uniq
+            @port_lookup = (@input_ports + @output_ports).each_with_object({}) do |name, acc|
+              acc[name] = name
+              acc[name.downcase] ||= name
+            end
+            @signal_lookup = @signal_names.each_with_object({}) do |name, acc|
+              acc[name] = name
+              acc[name.downcase] ||= name
+            end
 
             @sim = RHDL::Sim::Native::IR::Simulator.new(
               RHDL::Sim::Native::IR.sim_json(@runtime_nodes, backend: backend),
@@ -46,15 +64,16 @@ module RHDL
 
           def reset
             poke(:reset, 1)
-            run_steps(8)
+            run_cycles(10)
             poke(:reset, 0)
-            run_steps(16)
+            run_cycles(100)
+            poke(%w[joystick], 0xFF)
             @cycles = 0
           end
 
           def run_steps(steps)
             steps.to_i.times do
-              run_cycle
+              run_machine_cycle
               @cycles += 1
             end
           end
@@ -100,9 +119,10 @@ module RHDL
 
           private
 
-          def resolve_nodes(component_class:, mlir:, top:)
-            if component_class && mlir
-              raise ArgumentError, 'Provide either component_class or mlir, not both'
+          def resolve_nodes(component_class:, mlir:, runtime_json:, top:)
+            provided = [component_class, mlir, runtime_json].compact
+            if provided.length > 1
+              raise ArgumentError, 'Provide only one of component_class, mlir, or runtime_json'
             end
 
             if component_class
@@ -121,28 +141,67 @@ module RHDL
               return { top_module: flat, runtime_nodes: flat }
             end
 
-            raise ArgumentError, 'One of component_class or mlir is required'
+            if runtime_json
+              payload = runtime_json.is_a?(String) ? JSON.parse(runtime_json, max_nesting: false) : runtime_json
+              module_payload = Array(payload['modules']).find { |mod| mod['name'].to_s == top } || Array(payload['modules']).first
+              raise ArgumentError, "Runtime JSON missing module '#{top}'" unless module_payload
+
+              return {
+                top_module: runtime_module_from_payload(module_payload),
+                runtime_nodes: runtime_json
+              }
+            end
+
+            raise ArgumentError, 'One of component_class, mlir, or runtime_json is required'
+          end
+
+          def runtime_module_from_payload(payload)
+            RuntimeModule.new(
+              ports: Array(payload['ports']).map do |port|
+                RuntimePort.new(
+                  name: port.fetch('name'),
+                  direction: port.fetch('direction').to_sym,
+                  width: port.fetch('width').to_i
+                )
+              end,
+              nets: Array(payload['nets']).map do |net|
+                RuntimeSignal.new(name: net.fetch('name'), width: net.fetch('width').to_i)
+              end,
+              regs: Array(payload['regs']).map do |reg|
+                RuntimeSignal.new(name: reg.fetch('name'), width: reg.fetch('width').to_i)
+              end
+            )
           end
 
           def initialize_inputs
             @input_ports.each { |name| @sim.poke(name, 0) }
+            poke(%w[clk_sys], 0)
+            poke(%w[ce], 1)
+            poke(%w[ce_n], 1)
+            poke(%w[ce_2x], 1)
             poke(%w[joystick], 0xFF)
             poke(%w[cart_oe], 1)
             @sim.evaluate
           end
 
-          def run_cycle
-            poke(%w[ce], 1)
-            poke(%w[ce_n], 0)
-            poke(%w[ce_2x], 1)
+          def run_machine_cycle
+            4.times { run_clock_cycle }
+          end
+
+          def run_clock_cycle
+            poke(%w[clk_sys], 0)
+            drive_clock_enable_inputs(falling_edge: false)
             @sim.evaluate
             handle_memory_access
 
-            poke(%w[ce], 0)
-            poke(%w[ce_n], 1)
+            drive_clock_enable_inputs(falling_edge: false)
+            poke(%w[clk_sys], 1)
             @sim.tick
           end
 
+          def run_cycles(steps)
+            steps.to_i.times { run_clock_cycle }
+          end
           def handle_memory_access
             cart_rd = peek(%w[cart_rd])
             return unless cart_rd == 1
@@ -175,16 +234,8 @@ module RHDL
           def resolve_port_name(name_or_candidates)
             candidates = Array(name_or_candidates).map(&:to_s)
             candidates.each do |candidate|
-              return candidate if @input_ports.include?(candidate) || @output_ports.include?(candidate)
-            end
-
-            lowered = (@input_ports + @output_ports).map(&:downcase)
-            candidates.each do |candidate|
-              idx = lowered.index(candidate.downcase)
-              next if idx.nil?
-
-              ports = @input_ports + @output_ports
-              return ports[idx]
+              resolved = @port_lookup[candidate] || @port_lookup[candidate.downcase]
+              return resolved if resolved
             end
 
             nil
@@ -193,18 +244,17 @@ module RHDL
           def resolve_signal_name(name_or_candidates)
             candidates = Array(name_or_candidates).map(&:to_s)
             candidates.each do |candidate|
-              return candidate if @signal_names.include?(candidate)
-            end
-
-            lowered = @signal_names.map(&:downcase)
-            candidates.each do |candidate|
-              idx = lowered.index(candidate.downcase)
-              next if idx.nil?
-
-              return @signal_names[idx]
+              resolved = @signal_lookup[candidate] || @signal_lookup[candidate.downcase]
+              return resolved if resolved
             end
 
             nil
+          end
+
+          def drive_clock_enable_inputs(falling_edge:)
+            poke(%w[ce], falling_edge ? 0 : 1)
+            poke(%w[ce_n], falling_edge ? 1 : 0)
+            poke(%w[ce_2x], 1)
           end
         end
       end

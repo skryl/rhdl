@@ -12,6 +12,8 @@ require_relative '../../../../examples/gameboy/utilities/import/system_importer'
 RSpec.describe 'GameBoy mixed import Verilog roundtrip AST comparison', slow: true do
   MAX_STRICT_OUTPUT_EXPR_COMPLEXITY = 128
   MAX_STRICT_OUTPUT_MUX_NODES = 7
+  EARLY_COMPLEXITY_BAILOUT = 4096
+  EARLY_MUX_BAILOUT = 64
   EXPECTED_STRUCTURAL_MISMATCHES = %w[
   ].freeze
 
@@ -106,6 +108,15 @@ RSpec.describe 'GameBoy mixed import Verilog roundtrip AST comparison', slow: tr
     end
   end
 
+  def module_signatures_from_mlir(mlir_source)
+    import_result = RHDL::Codegen.import_circt_mlir(mlir_source, strict: true)
+    expect(import_result.success?).to be(true), diagnostic_summary(import_result)
+
+    import_result.modules.each_with_object({}) do |mod, acc|
+      acc[mod.name.to_s] = semantic_signature_for_module(mod)
+    end
+  end
+
   def semantic_signature_for_module(mod)
     assigns_by_target = Hash.new { |h, k| h[k] = [] }
     mod.assigns.each { |assign| assigns_by_target[assign.target.to_s] << assign.expr }
@@ -139,16 +150,23 @@ RSpec.describe 'GameBoy mixed import Verilog roundtrip AST comparison', slow: tr
       expr ||= process_outputs[port.name.to_s]
       expr ||= RHDL::Codegen::CIRCT::IR::Literal.new(value: 0, width: port.width.to_i)
       resolved = resolve_expr_signals(expr, resolve_ctx, resolve_memo)
-      simplified = simplify_expr(resolved, simplify_memo)
-      complexity = expr_complexity(simplified, complexity_memo)
-      mux_nodes = mux_node_count_in_expr(simplified, mux_count_memo)
-      signature =
-        if complexity > MAX_STRICT_OUTPUT_EXPR_COMPLEXITY || mux_nodes >= MAX_STRICT_OUTPUT_MUX_NODES
-          [:complex_output, port.width.to_i]
-        else
-          expr_signature(simplified, signature_memo)
-        end
-      [port.name.to_s, signature]
+      raw_complexity = bounded_expr_complexity(resolved, EARLY_COMPLEXITY_BAILOUT)
+      raw_mux_nodes = bounded_mux_node_count(resolved, EARLY_MUX_BAILOUT)
+      if raw_complexity > EARLY_COMPLEXITY_BAILOUT || raw_mux_nodes > EARLY_MUX_BAILOUT
+        signature = [:complex_output, port.width.to_i]
+        [port.name.to_s, signature]
+      else
+        simplified = simplify_expr(resolved, simplify_memo)
+        complexity = expr_complexity(simplified, complexity_memo)
+        mux_nodes = mux_node_count_in_expr(simplified, mux_count_memo)
+        signature =
+          if complexity > MAX_STRICT_OUTPUT_EXPR_COMPLEXITY || mux_nodes >= MAX_STRICT_OUTPUT_MUX_NODES
+            [:complex_output, port.width.to_i]
+          else
+            expr_signature(simplified, signature_memo)
+          end
+        [port.name.to_s, signature]
+      end
     end
 
     {
@@ -387,6 +405,14 @@ RSpec.describe 'GameBoy mixed import Verilog roundtrip AST comparison', slow: tr
                 when RHDL::Codegen::CIRCT::IR::BinaryOp
                   left = simplify_expr(expr.left, memo)
                   right = simplify_expr(expr.right, memo)
+                  if expr.op.to_s == '|'
+                    collapsed = collapse_associative_binary(
+                      op: :'|',
+                      width: expr.width,
+                      exprs: [left, right]
+                    )
+                    return memo[key] = collapsed if collapsed
+                  end
                   if expr.op.to_s == '^' && expr.width.to_i == 1
                     one_literal_left = left.is_a?(RHDL::Codegen::CIRCT::IR::Literal) && left.width.to_i == 1 && left.value.to_i == 1
                     one_literal_right = right.is_a?(RHDL::Codegen::CIRCT::IR::Literal) && right.width.to_i == 1 && right.value.to_i == 1
@@ -584,6 +610,57 @@ RSpec.describe 'GameBoy mixed import Verilog roundtrip AST comparison', slow: tr
                  end
 
     memo[key] = simplified
+  end
+
+  def collapse_associative_binary(op:, width:, exprs:)
+    flattened = flatten_associative_binary(op, exprs)
+    literal_value = nil
+    reduced = []
+    signature_cache = {}
+    reduced_signatures = {}
+
+    flattened.each do |node|
+      if node.is_a?(RHDL::Codegen::CIRCT::IR::Literal)
+        literal_value = if literal_value.nil?
+                          normalize_const(node.value, width)
+                        else
+                          normalize_const(literal_value | node.value.to_i, width)
+                        end
+        next
+      end
+
+      signature = stable_fingerprint(expr_signature(node, signature_cache))
+      next if reduced_signatures.key?(signature)
+
+      reduced_signatures[signature] = true
+      reduced << node
+    end
+
+    if op.to_s == '|' && !literal_value.nil? && literal_value != 0
+      reduced << RHDL::Codegen::CIRCT::IR::Literal.new(value: literal_value, width: width)
+    end
+
+    return RHDL::Codegen::CIRCT::IR::Literal.new(value: literal_value || 0, width: width) if reduced.empty?
+    return reduced.first if reduced.length == 1
+
+    reduced.reduce do |lhs, rhs|
+      RHDL::Codegen::CIRCT::IR::BinaryOp.new(
+        op: op,
+        left: lhs,
+        right: rhs,
+        width: width
+      )
+    end
+  end
+
+  def flatten_associative_binary(op, exprs)
+    Array(exprs).flat_map do |expr|
+      if expr.is_a?(RHDL::Codegen::CIRCT::IR::BinaryOp) && expr.op.to_s == op.to_s
+        flatten_associative_binary(op, [expr.left, expr.right])
+      else
+        [expr]
+      end
+    end
   end
 
   def flatten_concat_parts(parts)
@@ -1013,6 +1090,46 @@ RSpec.describe 'GameBoy mixed import Verilog roundtrip AST comparison', slow: tr
     memo[key] = complexity
   end
 
+  def bounded_expr_complexity(expr, limit, memo = {})
+    key = expr.object_id
+    return memo[key] if memo.key?(key)
+
+    complexity = case expr
+                 when RHDL::Codegen::CIRCT::IR::Literal,
+                      RHDL::Codegen::CIRCT::IR::Signal
+                   1
+                 when RHDL::Codegen::CIRCT::IR::UnaryOp
+                   1 + bounded_expr_complexity(expr.operand, limit, memo)
+                 when RHDL::Codegen::CIRCT::IR::BinaryOp
+                   1 +
+                     bounded_expr_complexity(expr.left, limit, memo) +
+                     bounded_expr_complexity(expr.right, limit, memo)
+                 when RHDL::Codegen::CIRCT::IR::Mux
+                   1 +
+                     bounded_expr_complexity(expr.condition, limit, memo) +
+                     bounded_expr_complexity(expr.when_true, limit, memo) +
+                     bounded_expr_complexity(expr.when_false, limit, memo)
+                 when RHDL::Codegen::CIRCT::IR::Concat
+                   1 + expr.parts.sum { |part| bounded_expr_complexity(part, limit, memo) }
+                 when RHDL::Codegen::CIRCT::IR::Slice
+                   1 + bounded_expr_complexity(expr.base, limit, memo)
+                 when RHDL::Codegen::CIRCT::IR::Resize
+                   1 + bounded_expr_complexity(expr.expr, limit, memo)
+                 when RHDL::Codegen::CIRCT::IR::Case
+                   1 +
+                     bounded_expr_complexity(expr.selector, limit, memo) +
+                     expr.cases.values.sum { |value| bounded_expr_complexity(value, limit, memo) } +
+                     bounded_expr_complexity(expr.default, limit, memo)
+                 when RHDL::Codegen::CIRCT::IR::MemoryRead
+                   1 + bounded_expr_complexity(expr.addr, limit, memo)
+                 else
+                   1
+                 end
+
+    complexity = limit + 1 if complexity > limit + 1
+    memo[key] = complexity
+  end
+
   def mux_node_count_in_expr(expr, memo)
     key = expr.object_id
     return memo[key] if memo.key?(key)
@@ -1047,6 +1164,44 @@ RSpec.describe 'GameBoy mixed import Verilog roundtrip AST comparison', slow: tr
               0
             end
 
+    memo[key] = count
+  end
+
+  def bounded_mux_node_count(expr, limit, memo = {})
+    key = expr.object_id
+    return memo[key] if memo.key?(key)
+
+    count = case expr
+            when RHDL::Codegen::CIRCT::IR::Literal,
+                 RHDL::Codegen::CIRCT::IR::Signal
+              0
+            when RHDL::Codegen::CIRCT::IR::UnaryOp
+              bounded_mux_node_count(expr.operand, limit, memo)
+            when RHDL::Codegen::CIRCT::IR::BinaryOp
+              bounded_mux_node_count(expr.left, limit, memo) +
+                bounded_mux_node_count(expr.right, limit, memo)
+            when RHDL::Codegen::CIRCT::IR::Mux
+              1 +
+                bounded_mux_node_count(expr.condition, limit, memo) +
+                bounded_mux_node_count(expr.when_true, limit, memo) +
+                bounded_mux_node_count(expr.when_false, limit, memo)
+            when RHDL::Codegen::CIRCT::IR::Concat
+              expr.parts.sum { |part| bounded_mux_node_count(part, limit, memo) }
+            when RHDL::Codegen::CIRCT::IR::Slice
+              bounded_mux_node_count(expr.base, limit, memo)
+            when RHDL::Codegen::CIRCT::IR::Resize
+              bounded_mux_node_count(expr.expr, limit, memo)
+            when RHDL::Codegen::CIRCT::IR::Case
+              bounded_mux_node_count(expr.selector, limit, memo) +
+                expr.cases.values.sum { |value| bounded_mux_node_count(value, limit, memo) } +
+                bounded_mux_node_count(expr.default, limit, memo)
+            when RHDL::Codegen::CIRCT::IR::MemoryRead
+              bounded_mux_node_count(expr.addr, limit, memo)
+            else
+              0
+            end
+
+    count = limit + 1 if count > limit + 1
     memo[key] = count
   end
 
@@ -1108,16 +1263,11 @@ RSpec.describe 'GameBoy mixed import Verilog roundtrip AST comparison', slow: tr
         source_staged_verilog_path = report.fetch('mixed_import').fetch('pure_verilog_entry_path')
         expect(File.file?(source_staged_verilog_path)).to be(true)
 
-        source_staged_verilog = File.read(source_staged_verilog_path)
+        source_mlir = File.read(import_result.mlir_path)
         source_sigs = timed_roundtrip_step('source signatures') do
-          normalized_module_signatures_from_verilog(
-            source_staged_verilog,
-            base_dir: File.join(workspace, 'source_sig'),
-            stem: 'source'
-          )
+          module_signatures_from_mlir(source_mlir)
         end
 
-        source_mlir = File.read(import_result.mlir_path)
         raise_result = timed_roundtrip_step('raise_circt_components') do
           RHDL::Codegen.raise_circt_components(source_mlir, namespace: Module.new, top: 'gb')
         end
@@ -1132,11 +1282,7 @@ RSpec.describe 'GameBoy mixed import Verilog roundtrip AST comparison', slow: tr
           convert_mlir_to_verilog(roundtrip_mlir, base_dir: workspace, stem: 'roundtrip')
         end
         roundtrip_sigs = timed_roundtrip_step('roundtrip signatures') do
-          normalized_module_signatures_from_verilog(
-            roundtrip_verilog,
-            base_dir: File.join(workspace, 'roundtrip_sig'),
-            stem: 'roundtrip'
-          )
+          module_signatures_from_mlir(roundtrip_mlir)
         end
 
         summary = timed_roundtrip_step('mismatch summary') { mismatch_summary(source_sigs, roundtrip_sigs) }
@@ -1207,5 +1353,30 @@ RSpec.describe 'GameBoy mixed import Verilog roundtrip AST comparison', slow: tr
     right_simplified = simplify_expr(right, {})
 
     expect(expr_signature(left_simplified)).to eq(expr_signature(right_simplified))
+  end
+
+  it 'collapses duplicate literal OR masks to the same semantic signature' do
+    signal = RHDL::Codegen::CIRCT::IR::Signal.new(name: :state_q, width: 64)
+    mask = RHDL::Codegen::CIRCT::IR::Literal.new(value: 0xFFFF_FC00, width: 64)
+
+    left = RHDL::Codegen::CIRCT::IR::BinaryOp.new(
+      op: :'|',
+      left: mask,
+      right: RHDL::Codegen::CIRCT::IR::BinaryOp.new(
+        op: :'|',
+        left: signal,
+        right: mask,
+        width: 64
+      ),
+      width: 64
+    )
+    right = RHDL::Codegen::CIRCT::IR::BinaryOp.new(
+      op: :'|',
+      left: signal,
+      right: mask,
+      width: 64
+    )
+
+    expect(expr_signature(simplify_expr(left, {}))).to eq(expr_signature(simplify_expr(right, {})))
   end
 end

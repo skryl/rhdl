@@ -489,6 +489,82 @@ RSpec.describe RHDL::CLI::Tasks::ImportTask do
     task.run
   end
 
+  it 'overlays generated memory-backed VHDL modules onto canonical normalized Verilog and keeps raw firtool output' do
+    normalized_path = File.join(tmp_dir, 'design.normalized.v')
+    pure_root = File.join(tmp_dir, 'pure_verilog')
+    generated_dir = File.join(pure_root, 'generated_vhdl')
+    firtool_path = File.join(tmp_dir, 'design.firtool.v')
+    FileUtils.mkdir_p(generated_dir)
+
+    File.write(
+      File.join(generated_dir, 'dpram__vhdl_deadbeef.v'),
+      <<~VERILOG
+        module altsyncram_deadbeef(
+          input clock0,
+          input [14:0] address_a,
+          output [7:0] q_a
+        );
+          reg [7:0] q_a_reg;
+          reg [7:0] mem[32767:0] ; // memory
+          assign q_a = q_a_reg;
+          always @(posedge clock0)
+            q_a_reg <= mem[address_a];
+        endmodule
+
+        module dpram__vhdl_deadbeef(
+          input clock0,
+          input [14:0] address_a,
+          output [7:0] q_a
+        );
+          altsyncram_deadbeef altsyncram_component (
+            .clock0(clock0),
+            .address_a(address_a),
+            .q_a(q_a)
+          );
+        endmodule
+      VERILOG
+    )
+
+    File.write(
+      firtool_path,
+      <<~VERILOG
+        module altsyncram_deadbeef(
+          input clock0,
+          input [14:0] address_a,
+          output [7:0] q_a
+        );
+          reg [262143:0] v3_262144;
+          assign q_a = v3_262144[7:0];
+        endmodule
+
+        module dpram__vhdl_deadbeef(
+          input clock0,
+          input [14:0] address_a,
+          output [7:0] q_a
+        );
+          altsyncram_deadbeef altsyncram_component (
+            .clock0(clock0),
+            .address_a(address_a),
+            .q_a(q_a)
+          );
+        endmodule
+      VERILOG
+    )
+    FileUtils.cp(firtool_path, normalized_path)
+
+    task = described_class.new(mode: :mixed, out: tmp_dir)
+    replaced = task.send(
+      :overlay_generated_memory_modules!,
+      normalized_verilog_path: normalized_path,
+      pure_verilog_root: pure_root
+    )
+
+    expect(replaced).to contain_exactly('altsyncram_deadbeef', 'dpram__vhdl_deadbeef')
+    expect(File.read(firtool_path)).to include('reg [262143:0] v3_262144;')
+    expect(File.read(normalized_path)).to include('reg [7:0] mem[32767:0] ; // memory')
+    expect(File.read(normalized_path)).not_to include('reg [262143:0] v3_262144;')
+  end
+
   describe 'mixed mode' do
     it 'requires either --manifest or a top source file --input' do
       task = described_class.new(
@@ -617,12 +693,16 @@ RSpec.describe RHDL::CLI::Tasks::ImportTask do
           stderr: ''
         }
       end
-      allow(RHDL::Codegen::CIRCT::Tooling).to receive(:circt_mlir_to_verilog).and_return(
-        success: true,
-        command: 'firtool mixed_top.core.mlir --verilog',
-        stdout: '',
-        stderr: ''
-      )
+      allow(RHDL::Codegen::CIRCT::Tooling).to receive(:circt_mlir_to_verilog) do |**args|
+        FileUtils.mkdir_p(File.dirname(args.fetch(:out_path)))
+        File.write(args.fetch(:out_path), "module mixed_top(input a, output y); assign y = a; endmodule\n")
+        {
+          success: true,
+          command: 'firtool mixed_top.core.mlir --verilog',
+          stdout: '',
+          stderr: ''
+        }
+      end
 
       expect { task.run }.to output(/Wrote import report/).to_stdout
       expect(File.exist?(File.join(tmp_dir, 'mixed_top.rb'))).to be(true)
@@ -636,11 +716,15 @@ RSpec.describe RHDL::CLI::Tasks::ImportTask do
       expect(mixed.fetch('pure_verilog_root')).to eq(File.join(tmp_dir, '.mixed_import', 'pure_verilog'))
       expect(mixed.fetch('pure_verilog_entry_path')).to eq(File.join(tmp_dir, '.mixed_import', 'pure_verilog_entry.v'))
       expect(mixed.fetch('core_mlir_path')).to eq(File.join(tmp_dir, 'mixed_top.core.mlir'))
+      expect(mixed.fetch('runtime_json_path')).to eq(File.join(tmp_dir, '.mixed_import', 'mixed_top.runtime.json'))
       expect(mixed.fetch('normalized_verilog_path')).to eq(File.join(tmp_dir, '.mixed_import', 'mixed_top.normalized.v'))
+      expect(mixed.fetch('firtool_verilog_path')).to eq(File.join(tmp_dir, '.mixed_import', 'mixed_top.firtool.v'))
       expect(artifacts.fetch('pure_verilog_root')).to eq(mixed.fetch('pure_verilog_root'))
       expect(artifacts.fetch('pure_verilog_entry_path')).to eq(mixed.fetch('pure_verilog_entry_path'))
       expect(artifacts.fetch('core_mlir_path')).to eq(mixed.fetch('core_mlir_path'))
+      expect(artifacts.fetch('runtime_json_path')).to eq(mixed.fetch('runtime_json_path'))
       expect(artifacts.fetch('normalized_verilog_path')).to eq(mixed.fetch('normalized_verilog_path'))
+      expect(artifacts.fetch('firtool_verilog_path')).to eq(mixed.fetch('firtool_verilog_path'))
     end
 
     it 'runs mixed autoscan end-to-end through raise flow and writes report provenance' do
@@ -701,12 +785,16 @@ RSpec.describe RHDL::CLI::Tasks::ImportTask do
           stderr: ''
         }
       end
-      allow(RHDL::Codegen::CIRCT::Tooling).to receive(:circt_mlir_to_verilog).and_return(
-        success: true,
-        command: 'firtool mixed_top.core.mlir --verilog',
-        stdout: '',
-        stderr: ''
-      )
+      allow(RHDL::Codegen::CIRCT::Tooling).to receive(:circt_mlir_to_verilog) do |**args|
+        FileUtils.mkdir_p(File.dirname(args.fetch(:out_path)))
+        File.write(args.fetch(:out_path), "module mixed_top(input a, output y); assign y = a; endmodule\n")
+        {
+          success: true,
+          command: 'firtool mixed_top.core.mlir --verilog',
+          stdout: '',
+          stderr: ''
+        }
+      end
 
       expect { task.run }.to output(/Wrote import report/).to_stdout
       expect(File.exist?(File.join(tmp_dir, 'mixed_top.rb'))).to be(true)
@@ -725,8 +813,12 @@ RSpec.describe RHDL::CLI::Tasks::ImportTask do
       expect(mixed.fetch('pure_verilog_root')).to eq(File.join(tmp_dir, '.mixed_import', 'pure_verilog'))
       expect(mixed.fetch('pure_verilog_entry_path')).to eq(File.join(tmp_dir, '.mixed_import', 'pure_verilog_entry.v'))
       expect(mixed.fetch('core_mlir_path')).to eq(File.join(tmp_dir, 'mixed_top.core.mlir'))
+      expect(mixed.fetch('runtime_json_path')).to eq(File.join(tmp_dir, '.mixed_import', 'mixed_top.runtime.json'))
       expect(mixed.fetch('normalized_verilog_path')).to eq(File.join(tmp_dir, '.mixed_import', 'mixed_top.normalized.v'))
+      expect(mixed.fetch('firtool_verilog_path')).to eq(File.join(tmp_dir, '.mixed_import', 'mixed_top.firtool.v'))
       expect(artifacts.fetch('core_mlir_path')).to eq(mixed.fetch('core_mlir_path'))
+      expect(artifacts.fetch('runtime_json_path')).to eq(mixed.fetch('runtime_json_path'))
+      expect(artifacts.fetch('firtool_verilog_path')).to eq(mixed.fetch('firtool_verilog_path'))
     end
 
     it 'fails fast when VHDL synth fails during mixed import run' do

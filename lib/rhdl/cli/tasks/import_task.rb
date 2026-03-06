@@ -121,16 +121,20 @@ module RHDL
 
           return unless raise_to_dsl?
 
-          normalized_verilog_path = emit_normalized_verilog_from_core_mlir!(
+          verilog_artifacts = emit_normalized_verilog_from_core_mlir!(
             mlir_out: mlir_out,
             out_dir: out_dir,
-            base: base
+            base: base,
+            pure_verilog_root: staging.fetch(:pure_verilog_root)
           )
+          normalized_verilog_path = verilog_artifacts.fetch(:normalized_verilog_path)
           staging[:provenance] = staging.fetch(:provenance).merge(
             pure_verilog_root: staging.fetch(:pure_verilog_root),
             pure_verilog_entry_path: staging.fetch(:pure_verilog_entry_path),
             core_mlir_path: mlir_out,
-            normalized_verilog_path: normalized_verilog_path
+            normalized_verilog_path: normalized_verilog_path,
+            firtool_verilog_path: verilog_artifacts[:firtool_verilog_path],
+            normalized_verilog_overlay_modules: verilog_artifacts[:overlay_modules]
           )
 
           run_raise_flow(
@@ -142,7 +146,8 @@ module RHDL
               pure_verilog_root: staging.fetch(:pure_verilog_root),
               pure_verilog_entry_path: staging.fetch(:pure_verilog_entry_path),
               core_mlir_path: mlir_out,
-              normalized_verilog_path: normalized_verilog_path
+              normalized_verilog_path: normalized_verilog_path,
+              firtool_verilog_path: verilog_artifacts[:firtool_verilog_path]
             }
           )
         end
@@ -166,6 +171,8 @@ module RHDL
           strict = options.fetch(:strict, true)
           extern_modules = Array(options[:extern_modules]).map(&:to_s)
           top_name = top_override || options[:top]
+          artifact_paths = (artifact_paths || {}).dup
+          mixed_provenance = mixed_provenance&.dup
 
           unless import_result
             import_result = with_timed_step('Parse/import CIRCT MLIR') do
@@ -178,6 +185,17 @@ module RHDL
               )
             end
             emit_diagnostics(import_result.diagnostics)
+          end
+
+          runtime_json_path = emit_runtime_json_artifact!(
+            import_result: import_result,
+            out_dir: out_dir,
+            top_name: top_name,
+            mixed_mode: !mixed_provenance.nil?
+          )
+          if runtime_json_path
+            artifact_paths[:runtime_json_path] = runtime_json_path
+            mixed_provenance[:runtime_json_path] = runtime_json_path if mixed_provenance
           end
 
           raise_result = with_timed_step('Raise CIRCT -> RHDL files') do
@@ -763,14 +781,15 @@ module RHDL
           root.empty? ? File::SEPARATOR : root
         end
 
-        def emit_normalized_verilog_from_core_mlir!(mlir_out:, out_dir:, base:)
+        def emit_normalized_verilog_from_core_mlir!(mlir_out:, out_dir:, base:, pure_verilog_root: nil)
           normalized_verilog_path = File.join(out_dir, '.mixed_import', "#{base}.normalized.v")
+          firtool_verilog_path = File.join(out_dir, '.mixed_import', "#{base}.firtool.v")
           result = with_timed_step(
             "Export normalized Verilog (#{RHDL::Codegen::CIRCT::Tooling::DEFAULT_VERILOG_EXPORT_TOOL})"
           ) do
             RHDL::Codegen::CIRCT::Tooling.circt_mlir_to_verilog(
               mlir_path: mlir_out,
-              out_path: normalized_verilog_path,
+              out_path: firtool_verilog_path,
               tool: RHDL::Codegen::CIRCT::Tooling::DEFAULT_VERILOG_EXPORT_TOOL
             )
           end
@@ -779,8 +798,97 @@ module RHDL
                   "CIRCT->Verilog export failed with '#{RHDL::Codegen::CIRCT::Tooling::DEFAULT_VERILOG_EXPORT_TOOL}'.\nCommand: #{result[:command]}\n#{result[:stderr]}"
           end
 
+          FileUtils.cp(firtool_verilog_path, normalized_verilog_path)
+          overlay_modules = overlay_generated_memory_modules!(
+            normalized_verilog_path: normalized_verilog_path,
+            pure_verilog_root: pure_verilog_root
+          )
+          puts "Wrote raw firtool Verilog: #{firtool_verilog_path}"
           puts "Wrote normalized Verilog: #{normalized_verilog_path}"
-          normalized_verilog_path
+          {
+            normalized_verilog_path: normalized_verilog_path,
+            firtool_verilog_path: firtool_verilog_path,
+            overlay_modules: overlay_modules
+          }
+        end
+
+        def emit_runtime_json_artifact!(import_result:, out_dir:, top_name:, mixed_mode:)
+          return nil unless import_result&.success?
+
+          resolved_top = top_name || import_result.modules.first&.name&.to_s
+          return nil if resolved_top.nil? || resolved_top.empty?
+
+          runtime_json_path =
+            if mixed_mode
+              File.join(out_dir, '.mixed_import', "#{resolved_top}.runtime.json")
+            else
+              File.join(out_dir, "#{resolved_top}.runtime.json")
+            end
+
+          with_timed_step('Emit imported runtime JSON artifact') do
+            begin
+              flat = RHDL::Codegen::CIRCT::Flatten.to_flat_module(import_result.modules, top: resolved_top)
+            rescue KeyError => e
+              puts "Import step: Skip runtime JSON artifact (#{e.message})"
+              return nil
+            end
+
+            json = RHDL::Codegen::CIRCT::RuntimeJSON.dump(flat)
+            FileUtils.mkdir_p(File.dirname(runtime_json_path))
+            File.write(runtime_json_path, json)
+          end
+          puts "Wrote runtime JSON: #{runtime_json_path}"
+          runtime_json_path
+        end
+
+        def overlay_generated_memory_modules!(normalized_verilog_path:, pure_verilog_root:)
+          generated_dir = pure_verilog_root && File.join(pure_verilog_root, 'generated_vhdl')
+          return [] unless generated_dir && Dir.exist?(generated_dir)
+
+          overlay_modules = {}
+          Dir.glob(File.join(generated_dir, '**', '*.v')).sort.each do |path|
+            source_text = File.read(path)
+            next unless source_text.match?(/\breg\s+\[[^\]]+\]\s+\w+\s*\[[^\]]+\s*:\s*[^\]]+\]\s*;/)
+
+            verilog_module_blocks(source_text).each do |name, block|
+              overlay_modules[name] = block
+            end
+          end
+
+          return [] if overlay_modules.empty?
+
+          normalized_text = File.read(normalized_verilog_path)
+          replaced = []
+          overlay_modules.each do |name, block|
+            pattern = /\bmodule\s+#{Regexp.escape(name)}\b.*?\bendmodule\b/m
+            next unless normalized_text.match?(pattern)
+
+            normalized_text.sub!(pattern, block)
+            replaced << name
+          end
+
+          unless replaced.empty?
+            File.write(normalized_verilog_path, normalized_text)
+            puts "Patched canonical Verilog memory modules: #{replaced.join(', ')}"
+          end
+
+          replaced
+        end
+
+        def verilog_module_blocks(text)
+          blocks = {}
+          idx = 0
+
+          while (header = text.match(/\bmodule\s+([A-Za-z_][A-Za-z0-9_$]*)\b.*?;/m, idx))
+            body_start = header.end(0)
+            footer = text.match(/\bendmodule\b/m, body_start)
+            break unless footer
+
+            blocks[header[1]] = text[header.begin(0)...footer.end(0)]
+            idx = footer.end(0)
+          end
+
+          blocks
         end
 
         def normalize_llhd_mlir_if_needed!(mlir_out:)
