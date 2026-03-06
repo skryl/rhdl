@@ -297,6 +297,28 @@ RSpec.describe RHDL::Codegen::CIRCT::Import do
       expect(result.modules.first.processes.first.statements.first.expr).to be_a(RHDL::Codegen::CIRCT::IR::Mux)
     end
 
+    it 'imports seq.to_clock plus seq.firreg as sequential state' do
+      mlir = <<~MLIR
+        hw.module @firreg_wrap(in %clk: i1, in %d: i8, out q: i8) {
+          %clock = seq.to_clock %clk
+          %q = seq.firreg %d clock %clock : i8
+          hw.output %q : i8
+        }
+      MLIR
+
+      result = described_class.from_mlir(mlir, strict: true)
+      expect(result.success?).to be(true), result.diagnostics.map(&:message).join("\n")
+
+      mod = result.modules.first
+      expect(mod.regs.map(&:name)).to include('q')
+      process = mod.processes.first
+      expect(process.clocked).to be(true)
+      expect(process.clock).to eq('clk')
+      expect(process.statements.first).to be_a(RHDL::Codegen::CIRCT::IR::SeqAssign)
+      expect(process.statements.first.expr).to be_a(RHDL::Codegen::CIRCT::IR::Signal)
+      expect(process.statements.first.expr.name).to eq('d')
+    end
+
     it 'imports hw.instance lines and maps instance result values to outputs' do
       mlir = <<~MLIR
         hw.module @child(%a: i8) -> (y: i8) {
@@ -763,6 +785,22 @@ RSpec.describe RHDL::Codegen::CIRCT::Import do
       expect(result.diagnostics.any? { |diag| diag.op == 'parser' }).to be(false)
       assign = result.modules.first.assigns.first
       expect(assign.expr).to be_a(RHDL::Codegen::CIRCT::IR::Slice)
+    end
+
+    it 'parses comb.mux bin syntax emitted by circt-verilog' do
+      mlir = <<~MLIR
+        hw.module @bin_mux(%sel: i1, %a: i8, %b: i8) -> (y: i8) {
+          %m = comb.mux bin %sel, %a, %b : i8
+          hw.output %m : i8
+        }
+      MLIR
+
+      result = described_class.from_mlir(mlir, strict: true)
+      expect(result.success?).to be(true), result.diagnostics.map(&:message).join("\n")
+      assign = result.modules.first.assigns.first
+      expect(assign.expr).to be_a(RHDL::Codegen::CIRCT::IR::Mux)
+      expect(assign.expr.condition).to be_a(RHDL::Codegen::CIRCT::IR::Signal)
+      expect(assign.expr.condition.name).to eq('sel')
     end
 
     it 'parses attr-bearing llhd.prb operations' do

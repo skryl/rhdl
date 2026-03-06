@@ -62,8 +62,7 @@ RSpec.describe 'RHDL import path coverage' do
   end
 
   it 'covers Verilog -> CIRCT' do
-    require_tool!('circt-translate')
-    require_tool!('circt-opt')
+    require_tool!('circt-verilog')
 
     Dir.mktmpdir('rhdl_import_path_v2c') do |dir|
       mlir = convert_verilog_to_mlir(verilog_fixture, base_dir: dir, stem: 'import_comb')
@@ -90,8 +89,7 @@ RSpec.describe 'RHDL import path coverage' do
   end
 
   it 'covers Verilog -> CIRCT -> RHDL at highest available DSL level' do
-    require_tool!('circt-translate')
-    require_tool!('circt-opt')
+    require_tool!('circt-verilog')
 
     Dir.mktmpdir('rhdl_import_path_v2c2r') do |dir|
       mlir = convert_verilog_to_mlir(verilog_fixture, base_dir: dir, stem: 'import_comb')
@@ -147,8 +145,7 @@ RSpec.describe 'RHDL import path coverage' do
   end
 
   it 'covers Verilog -> CIRCT -> RHDL -> CIRCT -> Verilog with semantic retention' do
-    require_tool!('circt-translate')
-    require_tool!('circt-opt')
+    require_tool!('circt-verilog')
     require_behavior_tools!
     require_export_tool!
 
@@ -216,34 +213,18 @@ RSpec.describe 'RHDL import path coverage' do
     nil
   end
 
-  def convert_verilog_to_mlir(verilog_source, base_dir:, stem:, lower_to_core: true)
+  def convert_verilog_to_mlir(verilog_source, base_dir:, stem:)
     FileUtils.mkdir_p(base_dir)
     verilog_path = File.join(base_dir, "#{stem}.v")
-    moore_mlir_path = File.join(base_dir, "#{stem}.moore.mlir")
+    core_mlir_path = File.join(base_dir, "#{stem}.core.mlir")
     File.write(verilog_path, verilog_source)
 
     result = RHDL::Codegen::CIRCT::Tooling.verilog_to_circt_mlir(
       verilog_path: verilog_path,
-      out_path: moore_mlir_path,
-      tool: 'circt-translate'
+      out_path: core_mlir_path,
+      tool: 'circt-verilog'
     )
     expect(result[:success]).to be(true), "Verilog->CIRCT failed:\n#{result[:command]}\n#{result[:stderr]}"
-    expect(File.exist?(moore_mlir_path)).to be(true)
-
-    return File.read(moore_mlir_path) unless lower_to_core
-
-    require_tool!('circt-opt')
-    core_mlir_path = File.join(base_dir, "#{stem}.core.mlir")
-    stdout, stderr, status = Open3.capture3(
-      'circt-opt',
-      '--convert-moore-to-core',
-      '--llhd-sig2reg',
-      '--canonicalize',
-      moore_mlir_path,
-      '-o',
-      core_mlir_path
-    )
-    expect(status.success?).to be(true), "circt-opt Moore->core failed:\n#{stdout}\n#{stderr}"
     expect(File.exist?(core_mlir_path)).to be(true)
 
     File.read(core_mlir_path)

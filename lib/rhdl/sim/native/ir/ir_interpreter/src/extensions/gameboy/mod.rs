@@ -5,6 +5,8 @@
 use std::collections::HashMap;
 use crate::core::CoreSimulator;
 
+const INVALID_SIGNAL_IDX: usize = usize::MAX;
+
 /// Result from running Game Boy cycles
 #[repr(C)]
 #[derive(Clone, Copy, Default)]
@@ -109,7 +111,7 @@ impl GameBoyExtension {
                     return idx;
                 }
             }
-            0
+            INVALID_SIGNAL_IDX
         };
 
         Self {
@@ -148,24 +150,64 @@ impl GameBoyExtension {
             ext_bus_addr_idx: find(&["ext_bus_addr"]),
             ext_bus_a15_idx: find(&["ext_bus_a15"]),
 
-            vram_addr_cpu_idx: find(&["gb_core__vram_addr_cpu", "vram_addr_cpu"]),
-            vram_wren_cpu_idx: find(&["gb_core__vram_wren_cpu", "vram_wren_cpu"]),
+            vram_addr_cpu_idx: find(&[
+                "gb_core__vram_addr_cpu",
+                "vram_addr_cpu",
+                "vram0__address_a__bridge",
+            ]),
+            vram_wren_cpu_idx: find(&[
+                "gb_core__vram_wren_cpu",
+                "vram_wren_cpu",
+                "vram0__wren_a__bridge",
+            ]),
             cpu_do_idx: find(&["gb_core__cpu_do", "cpu_do"]),
-            vram0_q_a_idx: find(&["gb_core__vram0__q_a", "gb_core__vram0__q_a_reg", "vram0__q_a"]),
-            vram0_q_b_idx: find(&["gb_core__vram0__q_b", "gb_core__vram0__q_b_reg", "vram0__q_b"]),
-            vram_addr_ppu_idx: find(&["gb_core__vram_addr_ppu", "vram_addr_ppu"]),
+            vram0_q_a_idx: find(&[
+                "gb_core__vram0__q_a",
+                "gb_core__vram0__q_a_reg",
+                "vram0__q_a",
+                "vram0_q_a",
+            ]),
+            vram0_q_b_idx: find(&[
+                "gb_core__vram0__q_b",
+                "gb_core__vram0__q_b_reg",
+                "vram0__q_b",
+                "vram0_q_b",
+            ]),
+            vram_addr_ppu_idx: find(&[
+                "gb_core__vram_addr_ppu",
+                "vram_addr_ppu",
+                "vram0__address_b__bridge",
+            ]),
             vram_do_idx: find(&["gb_core__vram_do", "vram_do"]),
             vram_data_ppu_idx: find(&["gb_core__vram_data_ppu", "vram_data_ppu"]),
             video_unit_vram_data_idx: find(&["gb_core__video_unit__vram_data", "video_unit__vram_data"]),
 
-            sel_boot_rom_idx: find(&["gb_core__sel_boot_rom", "sel_boot_rom"]),
-            boot_rom_addr_idx: find(&["gb_core__boot_rom_addr", "boot_rom_addr"]),
-            boot_do_idx: find(&["boot_rom_do", "gb_core__boot_rom_do"]),
+            sel_boot_rom_idx: find(&[
+                "gb_core__sel_boot_rom",
+                "sel_boot_rom",
+                "boot_rom__enable_a__bridge",
+                "boot_rom__cs_a__bridge",
+            ]),
+            boot_rom_addr_idx: find(&[
+                "gb_core__boot_rom_addr",
+                "boot_rom_addr",
+                "boot_addr",
+                "boot_rom__address_a__bridge",
+            ]),
+            boot_do_idx: find(&["boot_rom_do", "gb_core__boot_rom_do", "boot_rom_q_a"]),
 
-            zpram_addr_idx: find(&["gb_core__zpram_addr", "zpram_addr"]),
-            zpram_wren_idx: find(&["gb_core__zpram_wren", "zpram_wren"]),
+            zpram_addr_idx: find(&[
+                "gb_core__zpram_addr",
+                "zpram_addr",
+                "zpram__address_a__bridge",
+            ]),
+            zpram_wren_idx: find(&[
+                "gb_core__zpram_wren",
+                "zpram_wren",
+                "zpram__wren_a__bridge",
+            ]),
             zpram_do_idx: find(&["gb_core__zpram_do", "zpram_do"]),
-            zpram_q_a_idx: find(&["gb_core__zpram__q_a", "zpram__q_a"]),
+            zpram_q_a_idx: find(&["gb_core__zpram__q_a", "zpram__q_a", "zpram_q_a"]),
 
             lcd_state: GbLcdState::default(),
         }
@@ -241,7 +283,7 @@ impl GameBoyExtension {
     /// Helper to poke a signal by index
     #[inline(always)]
     fn poke(core: &mut CoreSimulator, idx: usize, value: u64) {
-        if idx < core.signals.len() {
+        if idx != INVALID_SIGNAL_IDX && idx < core.signals.len() {
             core.signals[idx] = value;
         }
     }
@@ -249,7 +291,7 @@ impl GameBoyExtension {
     /// Helper to peek a signal by index
     #[inline(always)]
     fn peek(core: &CoreSimulator, idx: usize) -> u64 {
-        if idx < core.signals.len() {
+        if idx != INVALID_SIGNAL_IDX && idx < core.signals.len() {
             core.signals[idx]
         } else {
             0
@@ -262,22 +304,22 @@ impl GameBoyExtension {
 
         for _ in 0..n {
             // Force CE signals for DMG mode
-            if self.ce_idx > 0 {
+            if self.ce_idx != INVALID_SIGNAL_IDX {
                 Self::poke(core, self.ce_idx, 1);
             }
-            if self.speed_ctrl_ce_idx > 0 {
+            if self.speed_ctrl_ce_idx != INVALID_SIGNAL_IDX {
                 Self::poke(core, self.speed_ctrl_ce_idx, 1);
             }
-            if self.gb_core_ce_idx > 0 {
+            if self.gb_core_ce_idx != INVALID_SIGNAL_IDX {
                 Self::poke(core, self.gb_core_ce_idx, 1);
             }
-            if self.video_unit_ce_idx > 0 {
+            if self.video_unit_ce_idx != INVALID_SIGNAL_IDX {
                 Self::poke(core, self.video_unit_ce_idx, 1);
             }
-            if self.cpu_clken_idx > 0 {
+            if self.cpu_clken_idx != INVALID_SIGNAL_IDX {
                 Self::poke(core, self.cpu_clken_idx, 1);
             }
-            if self.sm83_clken_idx > 0 {
+            if self.sm83_clken_idx != INVALID_SIGNAL_IDX {
                 Self::poke(core, self.sm83_clken_idx, 1);
             }
 
@@ -287,22 +329,22 @@ impl GameBoyExtension {
             core.evaluate();
 
             // Force CE signals after evaluate
-            if self.ce_idx > 0 {
+            if self.ce_idx != INVALID_SIGNAL_IDX {
                 Self::poke(core, self.ce_idx, 1);
             }
-            if self.speed_ctrl_ce_idx > 0 {
+            if self.speed_ctrl_ce_idx != INVALID_SIGNAL_IDX {
                 Self::poke(core, self.speed_ctrl_ce_idx, 1);
             }
-            if self.gb_core_ce_idx > 0 {
+            if self.gb_core_ce_idx != INVALID_SIGNAL_IDX {
                 Self::poke(core, self.gb_core_ce_idx, 1);
             }
-            if self.video_unit_ce_idx > 0 {
+            if self.video_unit_ce_idx != INVALID_SIGNAL_IDX {
                 Self::poke(core, self.video_unit_ce_idx, 1);
             }
-            if self.cpu_clken_idx > 0 {
+            if self.cpu_clken_idx != INVALID_SIGNAL_IDX {
                 Self::poke(core, self.cpu_clken_idx, 1);
             }
-            if self.sm83_clken_idx > 0 {
+            if self.sm83_clken_idx != INVALID_SIGNAL_IDX {
                 Self::poke(core, self.sm83_clken_idx, 1);
             }
 

@@ -59,6 +59,7 @@ RSpec.describe 'rhdl examples ao486 command' do
     expect(stdout).to include('--strategy STRATEGY')
     expect(stdout).to include('--[no-]fallback')
     expect(stdout).to include('--[no-]maintain-directory-structure')
+    expect(stdout).to include('--[no-]format')
     expect(stdout).to include('--[no-]clean')
   end
 

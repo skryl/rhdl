@@ -51,6 +51,7 @@ module RHDL
             import_strategy: options[:import_strategy] || importer_class::DEFAULT_IMPORT_STRATEGY,
             fallback_to_stubbed: options.fetch(:fallback_to_stubbed, true),
             maintain_directory_structure: options.fetch(:maintain_directory_structure, true),
+            format_output: options.fetch(:format_output, false),
             strict: options.fetch(:strict, true),
             progress: progress
           )

@@ -150,8 +150,11 @@ module RHDL
 
           mode = options[:mode] || :ruby
           sim = options[:sim] || (mode == :ir ? :compile : :ruby)
-
-          @runner = HeadlessRunner.new(mode: mode, sim: sim)
+          @runner = HeadlessRunner.new(
+            mode: mode,
+            sim: sim,
+            hdl_dir: options[:hdl_dir]
+          )
         end
 
         def initialize_terminal_state

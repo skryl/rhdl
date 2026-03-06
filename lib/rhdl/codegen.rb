@@ -10,8 +10,10 @@ require_relative "codegen/schematic/schematic"
 require_relative "codegen/circt/ir"
 require_relative "codegen/circt/mlir"
 require_relative "codegen/circt/import"
+require_relative "codegen/circt/import_cleanup"
 require_relative "codegen/circt/raise"
 require_relative "codegen/circt/runtime_json"
+require_relative "codegen/circt/arc_prepare"
 require_relative "codegen/circt/tooling"
 require_relative "codegen/circt/firrtl"
 
@@ -168,8 +170,14 @@ module RHDL
       end
 
       # Parse CIRCT MLIR into CIRCT node IR.
-      def import_circt_mlir(text, strict: false, top: nil, extern_modules: [])
-        CIRCT::Import.from_mlir(text, strict: strict, top: top, extern_modules: extern_modules)
+      def import_circt_mlir(text, strict: false, top: nil, extern_modules: [], resolve_forward_refs: true)
+        CIRCT::Import.from_mlir(
+          text,
+          strict: strict,
+          top: top,
+          extern_modules: extern_modules,
+          resolve_forward_refs: resolve_forward_refs
+        )
       end
 
       # Raise CIRCT nodes/MLIR into in-memory Ruby DSL source strings.

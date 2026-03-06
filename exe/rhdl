@@ -202,9 +202,9 @@ def handle_import(args)
     input: nil,
     out: nil,
     mlir_out: nil,
-    tool: 'circt-translate',
     tool_args: [],
     raise_to_dsl: true,
+    format_output: false,
     strict: true,
     extern_modules: [],
     report: nil,
@@ -217,8 +217,8 @@ def handle_import(args)
       Usage: rhdl import [options]
 
       Import paths:
-        1) Verilog -> (external LLVM/CIRCT tools) -> CIRCT MLIR -> RHDL DSL
-        2) Mixed Verilog+VHDL -> (ghdl + external LLVM/CIRCT tools) -> CIRCT MLIR -> RHDL DSL
+        1) Verilog -> (circt-verilog) -> CIRCT MLIR -> RHDL DSL
+        2) Mixed Verilog+VHDL -> (ghdl + circt-verilog) -> CIRCT MLIR -> RHDL DSL
         3) CIRCT MLIR -> RHDL DSL
 
       Examples:
@@ -236,14 +236,14 @@ def handle_import(args)
     opts.on('--manifest FILE', 'Mixed mode: YAML/JSON manifest describing mixed-language import inputs') { |v| options[:manifest] = v }
     opts.on('--out DIR', 'Output directory for generated files') { |v| options[:out] = v }
     opts.on('--mlir-out FILE', 'Verilog mode: write intermediate CIRCT MLIR to this path') { |v| options[:mlir_out] = v }
-    opts.on('--tool CMD', 'Verilog mode: external tool command (default: circt-translate)') { |v| options[:tool] = v }
-    opts.on('--tool-arg ARG', 'Verilog mode: extra argument for external tool (repeatable)') do |v|
+    opts.on('--tool-arg ARG', 'Verilog/mixed mode: extra argument forwarded to circt-verilog (repeatable)') do |v|
       options[:tool_args] << v
     end
     opts.on('--[no-]strict', 'Enable strict no-skip import and strict raise checks (default: true)') { |v| options[:strict] = v }
     opts.on('--extern NAME', 'Declare unresolved external module (repeatable)') { |v| options[:extern_modules] << v }
     opts.on('--report FILE', 'Write import report JSON (default: <out>/import_report.json)') { |v| options[:report] = v }
     opts.on('--[no-]raise', 'Raise CIRCT MLIR into RHDL DSL (default: true)') { |v| options[:raise_to_dsl] = v }
+    opts.on('--[no-]format', 'Format raised RHDL output with RuboCop (default: false)') { |v| options[:format_output] = v }
     opts.on('--top NAME', 'Optional top module name for CIRCT->DSL raise') { |v| options[:top] = v }
     opts.on('-h', '--help', 'Show this help') do
       puts opts

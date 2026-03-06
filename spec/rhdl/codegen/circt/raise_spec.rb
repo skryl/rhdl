@@ -3,6 +3,7 @@
 require 'spec_helper'
 require 'tmpdir'
 require 'fileutils'
+require 'timeout'
 
 RSpec.describe RHDL::Codegen::CIRCT::Raise do
   let(:ir) { RHDL::Codegen::CIRCT::IR }
@@ -300,6 +301,62 @@ RSpec.describe RHDL::Codegen::CIRCT::Raise do
       result = described_class.to_sources(mod, top: 'deep_mux', strict: true)
       expect(result.success?).to be(true), result.diagnostics.map(&:message).join("\n")
       expect(result.sources.fetch('deep_mux')).to include('y <=')
+    end
+
+    it 'collects referenced wires from shared mux DAGs without exponential blowup' do
+      sel = ir::Signal.new(name: :sel, width: 1)
+      shared = ir::Signal.new(name: :a, width: 1)
+      120.times do |idx|
+        shared = ir::Mux.new(
+          condition: idx.even? ? sel : ir::UnaryOp.new(op: :'~', operand: sel, width: 1),
+          when_true: shared,
+          when_false: shared,
+          width: 1
+        )
+      end
+
+      mod = ir::ModuleOp.new(
+        name: 'shared_mux_dag',
+        ports: [
+          ir::Port.new(name: :a, direction: :in, width: 1),
+          ir::Port.new(name: :sel, direction: :in, width: 1),
+          ir::Port.new(name: :y, direction: :out, width: 1)
+        ],
+        nets: [],
+        regs: [],
+        assigns: [ir::Assign.new(target: :y, expr: shared)],
+        processes: [],
+        instances: [],
+        memories: [],
+        write_ports: [],
+        sync_read_ports: [],
+        parameters: {}
+      )
+
+      inferred = nil
+      expect do
+        Timeout.timeout(2) do
+          inferred = described_class.send(:infer_referenced_internal_wires, mod, extra_wires: [])
+        end
+      end.not_to raise_error
+
+      expect(inferred).to eq([])
+    end
+  end
+
+  describe '.format_output_dir' do
+    it 'formats generated ruby files with SyntaxTree' do
+      file = File.join(tmp_dir, 'format_me.rb')
+      File.write(file, "class FormatMe\n  def call;1+2;end\nend\n")
+
+      result = described_class.format_output_dir(tmp_dir)
+      expect(result.success?).to be(true)
+      expect(result.diagnostics).to be_empty
+
+      formatted = File.read(file)
+      expect(formatted).to include('def call')
+      expect(formatted).to include('1 + 2')
+      expect(formatted).not_to include('def call;1+2;end')
     end
   end
 

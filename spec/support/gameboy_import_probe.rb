@@ -27,16 +27,16 @@ module GameboyImportProbe
     reasons = []
 
     ghdl = HdlToolchain.which('ghdl')
-    circt_translate = HdlToolchain.which('circt-translate')
+    circt_verilog = HdlToolchain.which('circt-verilog')
 
     reasons << 'ghdl not available' unless ghdl
-    reasons << 'circt-translate not available' unless circt_translate
+    reasons << 'circt-verilog not available' unless circt_verilog
     return { ready: false, reason: reasons.join('; ') } unless reasons.empty?
 
     ghdl_check = probe_ghdl_syntax(ghdl)
     reasons << ghdl_check unless ghdl_check.nil?
 
-    circt_check = probe_circt_verilog_import(circt_translate)
+    circt_check = probe_circt_verilog_import(circt_verilog)
     reasons << circt_check unless circt_check.nil?
 
     {
@@ -65,23 +65,21 @@ module GameboyImportProbe
     end
   end
 
-  def probe_circt_verilog_import(circt_translate)
+  def probe_circt_verilog_import(circt_verilog)
     verilog = File.expand_path('../../examples/gameboy/reference/rtl/cart.v', __dir__)
     return "missing probe file: #{verilog}" unless File.file?(verilog)
 
     Dir.mktmpdir('gb_circt_probe') do |dir|
-      out = File.join(dir, 'cart.moore.mlir')
+      out = File.join(dir, 'cart.core.mlir')
       _stdout, stderr, status = Open3.capture3(
-        circt_translate,
-        '--import-verilog',
-        verilog,
-        '-o',
-        out
+        circt_verilog,
+        verilog
       )
+      File.write(out, _stdout) if status.success?
       return nil if status.success?
 
       first = stderr.to_s.lines.first&.strip
-      "circt-translate unsupported import for cart.v: #{first || 'unknown error'}"
+      "circt-verilog unsupported import for cart.v: #{first || 'unknown error'}"
     end
   end
 end

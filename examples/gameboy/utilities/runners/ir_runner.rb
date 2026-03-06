@@ -10,7 +10,7 @@
 #   runner.reset
 #   runner.run_steps(100)
 
-require_relative '../../gameboy'
+require_relative '../hdl_loader'
 require_relative '../output/speaker'
 require_relative '../renderers/lcd_renderer'
 
@@ -21,24 +21,24 @@ module RHDL
       module GameBoyIr
       class << self
         # Get the CIRCT node graph for the Gameboy component (shallow module view)
-        def behavior_ir
-          ::RHDL::Examples::GameBoy::Gameboy.to_circt_nodes
+        def behavior_ir(component_class: ::RHDL::Examples::GameBoy::Gameboy)
+          component_class.to_circt_nodes
         end
 
         # Get the flattened Behavior IR (includes all subcomponent logic)
-        def flat_ir
-          ::RHDL::Examples::GameBoy::Gameboy.to_flat_circt_nodes
+        def flat_ir(component_class: ::RHDL::Examples::GameBoy::Gameboy)
+          component_class.to_flat_circt_nodes
         end
 
         # Convert to JSON format for the simulator
-        def ir_json(backend: :interpreter)
-          ir = flat_ir
+        def ir_json(component_class: ::RHDL::Examples::GameBoy::Gameboy, backend: :interpreter)
+          ir = flat_ir(component_class: component_class)
           RHDL::Sim::Native::IR.sim_json(ir, backend: backend)
         end
 
         # Get stats about the IR
-        def stats
-          ir = behavior_ir
+        def stats(component_class: ::RHDL::Examples::GameBoy::Gameboy)
+          ir = behavior_ir(component_class: component_class)
           {
             port_count: ir.ports.length,
             net_count: ir.nets.length,
@@ -85,16 +85,18 @@ module RHDL
 
       # Initialize the Game Boy IR runner
       # @param backend [Symbol] :interpret, :jit, or :compile
-      def initialize(backend: :interpret)
+      # @param hdl_dir [String, nil] Optional HDL directory override.
+      def initialize(backend: :interpret, hdl_dir: nil)
         require 'rhdl/codegen'
         require 'rhdl/sim/native/ir/simulator'
+        @component_class = resolve_component_class(hdl_dir: hdl_dir)
 
         backend_names = { interpret: "Interpreter", jit: "JIT", compile: "Compiler" }
         log "Initializing Game Boy IR simulation [#{backend_names[backend]}]..."
         start_time = Time.now
 
         # Generate IR JSON
-        @ir_json = GameBoyIr.ir_json(backend: backend)
+        @ir_json = GameBoyIr.ir_json(component_class: @component_class, backend: backend)
         @backend = backend
 
         @sim = RHDL::Sim::Native::IR::Simulator.new(
@@ -120,6 +122,10 @@ module RHDL
         @prev_audio = 0
 
         @use_batched = @sim.native? && @sim.runner_mode?
+        if @use_batched && requires_manual_clock_enable_drive? && !@sim.gameboy_mode?
+          @use_batched = false
+          log "  Batched execution: disabled (manual CE drive required for imported top)"
+        end
 
         if @use_batched
           log "  Batched execution: enabled"
@@ -131,7 +137,7 @@ module RHDL
         end
 
         @sim.reset
-        initialize_inputs unless @use_batched
+        initialize_inputs
 
         # Load boot ROM if available
         load_boot_rom if File.exist?(DMG_BOOT_ROM_PATH)
@@ -146,13 +152,21 @@ module RHDL
       end
 
       def initialize_inputs
-        return if @use_batched
-        poke_input('reset', 0)
-        poke_input('clk_sys', 0)
-        poke_input('ce', 0)
-        poke_input('joystick', 0xFF)
-        poke_input('is_gbc', 0)
-        @sim.evaluate
+        poke_if_available('reset', 0)
+        poke_if_available('clk_sys', 0)
+        poke_if_available('ce', 1)
+        poke_if_available('ce_n', 1)
+        poke_if_available('ce_2x', 1)
+        poke_if_available('joystick', 0xFF)
+        poke_if_available('is_gbc', 0)
+        poke_if_available('isGBC', 0)
+        poke_if_available('is_sgb', 0)
+        poke_if_available('isSGB', 0)
+        poke_if_available('cart_oe', 1)
+        poke_if_available('real_cgb_boot', 0)
+        poke_if_available('extra_spr_en', 0)
+        poke_if_available('megaduck', 0)
+        @sim.evaluate unless @use_batched
       end
 
       def poke_input(name, value)
@@ -211,8 +225,9 @@ module RHDL
           log "Loaded #{bytes.length} bytes boot ROM"
           @boot_rom_loaded = true
         else
-          log "Warning: Boot ROM not supported in non-batched mode"
-          @boot_rom_loaded = false
+          @boot_rom = bytes.dup
+          log "Loaded #{bytes.length} bytes boot ROM (software-driven)"
+          @boot_rom_loaded = true
         end
       end
 
@@ -275,13 +290,17 @@ module RHDL
       end
 
       def run_clock_cycle
-        poke_input('ce', 1)
+        poke_if_available('clk_sys', 0)
+        drive_clock_enable_inputs(falling_edge: false)
         @sim.evaluate
 
         # Handle memory access
         handle_memory_access
 
-        poke_input('ce', 0)
+        # Keep CE asserted through the rising edge so imported tops that gate
+        # state updates on CE/CE_N actually advance.
+        drive_clock_enable_inputs(falling_edge: false)
+        poke_if_available('clk_sys', 1)
         @sim.tick
       end
 
@@ -290,6 +309,11 @@ module RHDL
       end
 
       def handle_memory_access
+        if @boot_rom_loaded && @boot_rom && signal_available?('sel_boot_rom') && safe_peek('sel_boot_rom') == 1
+          boot_addr = safe_peek('boot_rom_addr') & 0xFF
+          poke_if_available('boot_rom_do', @boot_rom[boot_addr] || 0)
+        end
+
         addr = safe_peek('ext_bus_addr')
         a15 = safe_peek('ext_bus_a15')
         full_addr = (a15 << 15) | addr
@@ -380,9 +404,61 @@ module RHDL
         0
       end
 
+      def poke_if_available(name, value)
+        poke_input(name, value) if signal_available?(name)
+      rescue StandardError
+        nil
+      end
+
+      def drive_clock_enable_inputs(falling_edge:)
+        poke_if_available('ce', falling_edge ? 0 : 1)
+        poke_if_available('ce_n', falling_edge ? 1 : 0)
+        poke_if_available('ce_2x', 1)
+      end
+
+      def signal_available?(name)
+        @signal_presence ||= {}
+        return @signal_presence[name] if @signal_presence.key?(name)
+
+        @sim.peek(name)
+        @signal_presence[name] = true
+      rescue StandardError
+        @signal_presence[name] = false
+      end
+
+      def requires_manual_clock_enable_drive?
+        return false unless @component_class.respond_to?(:_ports)
+
+        input_names = @component_class._ports
+          .select { |port| port.direction == :in }
+          .map { |port| port.name.to_s }
+        input_names.include?('ce_n') || input_names.include?('ce_2x')
+      rescue StandardError
+        false
+      end
+
       def cpu_state
+        debug_pc =
+          if signal_available?('gb_core__cpu__debug_pc')
+            safe_peek('gb_core__cpu__debug_pc')
+          elsif signal_available?('debug_pc')
+            safe_peek('debug_pc')
+          end
+        bus_pc =
+          if signal_available?('ext_bus_addr')
+            ((safe_peek('ext_bus_a15') & 0x1) << 15) | (safe_peek('ext_bus_addr') & 0x7FFF)
+          end
+        pc =
+          if debug_pc.nil?
+            bus_pc || 0
+          elsif debug_pc.to_i.zero? && bus_pc.to_i.nonzero?
+            bus_pc
+          else
+            debug_pc
+          end
+
         {
-          pc: safe_peek('gb_core__cpu__debug_pc'),
+          pc: pc,
           a: safe_peek('gb_core__cpu__debug_acc'),
           f: safe_peek('gb_core__cpu__debug_f'),
           b: safe_peek('gb_core__cpu__debug_b'),
@@ -416,6 +492,62 @@ module RHDL
 
       def stop_audio
         @speaker.stop
+      end
+
+      private
+
+      def resolve_component_class(hdl_dir:)
+        resolved_hdl_dir = HdlLoader.resolve_hdl_dir(hdl_dir: hdl_dir)
+        if resolved_hdl_dir == HdlLoader::DEFAULT_HDL_DIR
+          HdlLoader.configure!(hdl_dir: resolved_hdl_dir)
+          require_relative '../../gameboy'
+          return ::RHDL::Examples::GameBoy::Gameboy
+        end
+
+        HdlLoader.load_component_tree!(hdl_dir: resolved_hdl_dir)
+        candidates = []
+        if ENV['RHDL_GAMEBOY_IMPORT_TOP']
+          top_name = ENV['RHDL_GAMEBOY_IMPORT_TOP']
+          class_name = camelize_name(top_name.to_s)
+          candidates << Object.const_get(class_name, false) if Object.const_defined?(class_name, false)
+          if defined?(::RHDL::Examples::GameBoy) && ::RHDL::Examples::GameBoy.const_defined?(class_name, false)
+            candidates << ::RHDL::Examples::GameBoy.const_get(class_name, false)
+          end
+        else
+          %w[GB Gb].each do |class_name|
+            candidates << Object.const_get(class_name, false) if Object.const_defined?(class_name, false)
+            if defined?(::RHDL::Examples::GameBoy) && ::RHDL::Examples::GameBoy.const_defined?(class_name, false)
+              candidates << ::RHDL::Examples::GameBoy.const_get(class_name, false)
+            end
+          end
+        end
+
+        component_class = candidates.find do |candidate|
+          candidate.is_a?(Class) && candidate.respond_to?(:to_flat_circt_nodes)
+        end
+
+        return component_class if component_class
+
+        unless ENV['RHDL_GAMEBOY_IMPORT_TOP']
+          require_relative '../../gameboy'
+          return ::RHDL::Examples::GameBoy::Gameboy
+        end
+
+        top_name = ENV['RHDL_GAMEBOY_IMPORT_TOP']
+        class_name = camelize_name(top_name.to_s)
+        raise NameError,
+              "Unable to resolve imported Game Boy top component '#{top_name}' "\
+              "(expected class '#{class_name}') in #{resolved_hdl_dir}"
+      end
+
+      def camelize_name(value)
+        tokens = value.to_s
+                      .gsub(/([A-Z]+)([A-Z][a-z])/, '\1_\2')
+                      .gsub(/([a-z\d])([A-Z])/, '\1_\2')
+                      .tr('-', '_')
+                      .split('_')
+                      .reject(&:empty?)
+        tokens.map(&:capitalize).join
       end
       end
     end

@@ -51,9 +51,15 @@ module RHDL
               !!success
             end
           end
+          FormatResult = Struct.new(:success, :diagnostics, keyword_init: true) do
+            def success?
+              !!success
+            end
+          end
 
           attr_reader :source_path, :output_dir, :top, :keep_workspace, :workspace_dir, :clean_output,
                       :import_strategy, :fallback_to_stubbed, :maintain_directory_structure, :strict,
+                      :format_output,
                       :progress_callback
 
           def initialize(source_path: DEFAULT_SOURCE_PATH,
@@ -65,6 +71,7 @@ module RHDL
                          import_strategy: DEFAULT_IMPORT_STRATEGY,
                          fallback_to_stubbed: true,
                          maintain_directory_structure: true,
+                         format_output: false,
                          strict: true,
                          progress: nil)
             @source_path = File.expand_path(source_path)
@@ -78,6 +85,7 @@ module RHDL
             @import_strategy = normalize_import_strategy(import_strategy)
             @fallback_to_stubbed = fallback_to_stubbed
             @maintain_directory_structure = maintain_directory_structure
+            @format_output = format_output
             @strict = strict
             @progress_callback = progress
           end
@@ -94,7 +102,7 @@ module RHDL
               return failed_result(diagnostics: diagnostics, command_log: command_log)
             end
 
-            %w[circt-translate circt-opt].each do |tool|
+            [RHDL::Codegen::CIRCT::Tooling::DEFAULT_VERILOG_IMPORT_TOOL, 'circt-opt'].each do |tool|
               next if tool_available?(tool)
 
               diagnostics << "Required tool not found: #{tool}"
@@ -163,8 +171,13 @@ module RHDL
               strict: strict,
               format: false
             )
-            emit_progress("format RHDL output directory: #{output_dir}")
-            format_result = RHDL::Codegen.format_raised_dsl(output_dir)
+            format_result = if format_output
+                              emit_progress("format RHDL output directory: #{output_dir}")
+                              RHDL::Codegen.format_raised_dsl(output_dir)
+                            else
+                              emit_progress('skip formatting raised RHDL output')
+                              FormatResult.new(success: true, diagnostics: [])
+                            end
 
             files_written = raise_result.files_written
             if maintain_directory_structure
@@ -353,36 +366,38 @@ module RHDL
           end
 
           def run_import_pipeline(prepared, diagnostics:, command_log:)
-            import_cmd = [
-              'circt-translate',
-              '--import-verilog',
-              prepared[:wrapper_path],
-              '-o',
-              prepared[:moore_mlir_path]
-            ]
-            emit_progress("run circt-translate -> #{File.basename(prepared[:moore_mlir_path])}")
-            import_result = run_command(import_cmd, chdir: prepared[:command_chdir])
+            emit_progress("run #{RHDL::Codegen::CIRCT::Tooling::DEFAULT_VERILOG_IMPORT_TOOL} -> #{File.basename(prepared[:moore_mlir_path])}")
+            import_result = RHDL::Codegen::CIRCT::Tooling.verilog_to_circt_mlir(
+              verilog_path: prepared[:wrapper_path],
+              out_path: prepared[:moore_mlir_path],
+              tool: RHDL::Codegen::CIRCT::Tooling::DEFAULT_VERILOG_IMPORT_TOOL
+            )
             command_log << import_result[:command]
             append_diagnostics(diagnostics, import_result[:stderr], max_lines: 60)
             return { success: false, stage: :import, stderr: import_result[:stderr] } unless import_result[:success]
 
-            lower_cmd = [
-              'circt-opt',
-              '--moore-lower-concatref',
-              '--canonicalize',
-              '--moore-lower-concatref',
-              '--convert-moore-to-core',
-              '--llhd-sig2reg',
-              '--canonicalize',
-              prepared[:moore_mlir_path],
-              '-o',
-              prepared[:core_mlir_path]
-            ]
-            emit_progress("run circt-opt -> #{File.basename(prepared[:core_mlir_path])}")
-            lower_result = run_command(lower_cmd, chdir: prepared[:command_chdir])
-            command_log << lower_result[:command]
-            append_diagnostics(diagnostics, lower_result[:stderr], max_lines: 60)
-            return { success: false, stage: :lower, stderr: lower_result[:stderr] } unless lower_result[:success]
+            imported_text = File.read(prepared[:moore_mlir_path])
+            if imported_text.include?('moore.module')
+              lower_cmd = [
+                'circt-opt',
+                '--moore-lower-concatref',
+                '--canonicalize',
+                '--moore-lower-concatref',
+                '--convert-moore-to-core',
+                '--llhd-sig2reg',
+                '--canonicalize',
+                prepared[:moore_mlir_path],
+                '-o',
+                prepared[:core_mlir_path]
+              ]
+              emit_progress("run circt-opt -> #{File.basename(prepared[:core_mlir_path])}")
+              lower_result = run_command(lower_cmd, chdir: prepared[:command_chdir])
+              command_log << lower_result[:command]
+              append_diagnostics(diagnostics, lower_result[:stderr], max_lines: 60)
+              return { success: false, stage: :lower, stderr: lower_result[:stderr] } unless lower_result[:success]
+            else
+              FileUtils.cp(prepared[:moore_mlir_path], prepared[:core_mlir_path])
+            end
 
             emit_progress('import pipeline complete')
             { success: true, stage: :done }

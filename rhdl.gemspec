@@ -38,6 +38,7 @@ Gem::Specification.new do |spec|
   # Runtime dependencies
   spec.add_dependency "base64"
   spec.add_dependency "fiddle"
+  spec.add_dependency "syntax_tree"
 
   # Development dependencies (for those developing the gem itself)
   spec.add_development_dependency "benchmark"

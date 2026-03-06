@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require_relative '../task'
+require 'digest'
 require 'fileutils'
 require 'json'
 require 'yaml'
@@ -17,6 +18,11 @@ module RHDL
         VERILOG_EXTENSIONS = %w[.v .sv .vh].freeze
         VHDL_EXTENSIONS = %w[.vhd .vhdl].freeze
         SOURCE_EXTENSIONS = (VERILOG_EXTENSIONS + VHDL_EXTENSIONS).freeze
+        FormatResult = Struct.new(:success, :diagnostics, keyword_init: true) do
+          def success?
+            !!success
+          end
+        end
 
         def run
           require 'rhdl'
@@ -42,16 +48,17 @@ module RHDL
           ensure_dir(out_dir)
 
           base = File.basename(input, File.extname(input))
-          mlir_out = options[:mlir_out] || File.join(out_dir, "#{base}.mlir")
-          tool = options[:tool] || RHDL::Codegen::CIRCT::Tooling::DEFAULT_VERILOG_IMPORT_TOOL
+          mlir_out = options[:mlir_out] || File.join(out_dir, "#{base}.core.mlir")
+          tool = RHDL::Codegen::CIRCT::Tooling::DEFAULT_VERILOG_IMPORT_TOOL
 
-          puts "Import step: Verilog -> CIRCT MLIR (#{tool})"
-          result = RHDL::Codegen::CIRCT::Tooling.verilog_to_circt_mlir(
-            verilog_path: input,
-            out_path: mlir_out,
-            tool: tool,
-            extra_args: Array(options[:tool_args])
-          )
+          result = with_timed_step("Verilog -> CIRCT MLIR (#{tool})") do
+            RHDL::Codegen::CIRCT::Tooling.verilog_to_circt_mlir(
+              verilog_path: input,
+              out_path: mlir_out,
+              tool: tool,
+              extra_args: Array(options[:tool_args])
+            )
+          end
 
           unless result[:success]
             raise RuntimeError,
@@ -61,32 +68,44 @@ module RHDL
           puts "Wrote CIRCT MLIR: #{mlir_out}"
           puts "Command: #{result[:command]}"
 
+          cleanup_import_result = cleanup_imported_core_mlir!(
+            mlir_out: mlir_out,
+            top_name: options[:top]
+          )
+
           return unless raise_to_dsl?
 
-          run_raise_flow(mlir_out: mlir_out, out_dir: out_dir)
+          run_raise_flow(
+            mlir_out: mlir_out,
+            out_dir: out_dir,
+            artifact_paths: { core_mlir_path: mlir_out },
+            import_result: cleanup_import_result
+          )
         end
 
         def import_mixed
           out_dir = fetch_out_dir
           ensure_dir(out_dir)
 
-          puts 'Import step: Mixed source staging'
-          staging = build_mixed_import_staging(out_dir: out_dir)
-          staged_verilog_path = staging.fetch(:staged_verilog_path)
+          staging = with_timed_step('Mixed source staging') do
+            build_mixed_import_staging(out_dir: out_dir)
+          end
+          staged_verilog_path = staging.fetch(:pure_verilog_entry_path)
           resolved_top_name = staging[:top_name]
 
           base = resolved_top_name || File.basename(staged_verilog_path, File.extname(staged_verilog_path))
-          mlir_out = options[:mlir_out] || File.join(out_dir, "#{base}.mlir")
-          tool = options[:tool] || RHDL::Codegen::CIRCT::Tooling::DEFAULT_VERILOG_IMPORT_TOOL
+          mlir_out = options[:mlir_out] || File.join(out_dir, "#{base}.core.mlir")
+          tool = RHDL::Codegen::CIRCT::Tooling::DEFAULT_VERILOG_IMPORT_TOOL
           tool_args = Array(options[:tool_args]) + Array(staging[:tool_args])
 
-          puts "Import step: Verilog -> CIRCT MLIR (#{tool})"
-          result = RHDL::Codegen::CIRCT::Tooling.verilog_to_circt_mlir(
-            verilog_path: staged_verilog_path,
-            out_path: mlir_out,
-            tool: tool,
-            extra_args: tool_args
-          )
+          result = with_timed_step("Verilog -> CIRCT MLIR (#{tool})") do
+            RHDL::Codegen::CIRCT::Tooling.verilog_to_circt_mlir(
+              verilog_path: staged_verilog_path,
+              out_path: mlir_out,
+              tool: tool,
+              extra_args: tool_args
+            )
+          end
 
           unless result[:success]
             raise RuntimeError,
@@ -96,14 +115,37 @@ module RHDL
           puts "Wrote CIRCT MLIR: #{mlir_out}"
           puts "Command: #{result[:command]}"
 
+          cleanup_import_result = cleanup_imported_core_mlir!(
+            mlir_out: mlir_out,
+            top_name: resolved_top_name
+          )
+
           return unless raise_to_dsl?
 
-          lower_moore_to_core_mlir_if_needed!(mlir_out: mlir_out)
+          normalized_verilog_path = emit_normalized_verilog_from_core_mlir!(
+            mlir_out: mlir_out,
+            out_dir: out_dir,
+            base: base
+          )
+          staging[:provenance] = staging.fetch(:provenance).merge(
+            pure_verilog_root: staging.fetch(:pure_verilog_root),
+            pure_verilog_entry_path: staging.fetch(:pure_verilog_entry_path),
+            core_mlir_path: mlir_out,
+            normalized_verilog_path: normalized_verilog_path
+          )
+
           run_raise_flow(
             mlir_out: mlir_out,
             out_dir: out_dir,
             top_override: resolved_top_name,
-            mixed_provenance: staging[:provenance]
+            mixed_provenance: staging[:provenance],
+            artifact_paths: {
+              pure_verilog_root: staging.fetch(:pure_verilog_root),
+              pure_verilog_entry_path: staging.fetch(:pure_verilog_entry_path),
+              core_mlir_path: mlir_out,
+              normalized_verilog_path: normalized_verilog_path
+            },
+            import_result: cleanup_import_result
           )
         end
 
@@ -120,52 +162,67 @@ module RHDL
           run_raise_flow(mlir_out: input, out_dir: out_dir)
         end
 
-        def run_raise_flow(mlir_out:, out_dir:, top_override: nil, mixed_provenance: nil)
-          puts 'Import step: Parse/import CIRCT MLIR'
-          mlir = File.read(mlir_out)
+        def run_raise_flow(mlir_out:, out_dir:, top_override: nil, mixed_provenance: nil, artifact_paths: nil,
+                           import_result: nil)
+          normalize_llhd_mlir_if_needed!(mlir_out: mlir_out)
           strict = options.fetch(:strict, true)
           extern_modules = Array(options[:extern_modules]).map(&:to_s)
           top_name = top_override || options[:top]
 
-          import_result = RHDL::Codegen.import_circt_mlir(
-            mlir,
-            strict: strict,
-            top: top_name,
-            extern_modules: extern_modules
-          )
-          emit_diagnostics(import_result.diagnostics)
+          unless import_result
+            import_result = with_timed_step('Parse/import CIRCT MLIR') do
+              mlir = File.read(mlir_out)
+              RHDL::Codegen.import_circt_mlir(
+                mlir,
+                strict: strict,
+                top: top_name,
+                extern_modules: extern_modules
+              )
+            end
+            emit_diagnostics(import_result.diagnostics)
+          end
 
-          puts 'Import step: Raise CIRCT -> RHDL files'
-          raise_result = RHDL::Codegen.raise_circt(
-            import_result.modules,
-            out_dir: out_dir,
-            top: top_name,
-            strict: strict,
-            format: false
-          )
+          raise_result = with_timed_step('Raise CIRCT -> RHDL files') do
+            RHDL::Codegen.raise_circt(
+              import_result.modules,
+              out_dir: out_dir,
+              top: top_name,
+              strict: strict,
+              format: false
+            )
+          end
           emit_diagnostics(raise_result.diagnostics)
 
           puts "Raised #{raise_result.files_written.length} DSL file(s):"
           raise_result.files_written.each { |path| puts "  - #{path}" }
 
-          puts 'Import step: Format RHDL output directory'
-          format_result = RHDL::Codegen.format_raised_dsl(out_dir)
-          emit_diagnostics(format_result.diagnostics)
+          format_result = if format_output?
+                            result = with_timed_step('Format RHDL output directory') do
+                              RHDL::Codegen.format_raised_dsl(out_dir)
+                            end
+                            emit_diagnostics(result.diagnostics)
+                            result
+                          else
+                            puts 'Import step: Skip formatting RHDL output directory'
+                            FormatResult.new(success: true, diagnostics: [])
+                          end
 
-          puts 'Import step: Write import report'
           combined_raise_diagnostics = Array(raise_result.diagnostics) + Array(format_result.diagnostics)
           raise_success = raise_result.success? && format_result.success?
-          report_path = write_report(
-            out_dir: out_dir,
-            strict: strict,
-            extern_modules: extern_modules,
-            top_name: top_name,
-            import_result: import_result,
-            raise_result: raise_result,
-            raise_diagnostics: combined_raise_diagnostics,
-            raise_success: raise_success,
-            mixed_provenance: mixed_provenance
-          )
+          report_path = with_timed_step('Write import report') do
+            write_report(
+              out_dir: out_dir,
+              strict: strict,
+              extern_modules: extern_modules,
+              top_name: top_name,
+              import_result: import_result,
+              raise_result: raise_result,
+              raise_diagnostics: combined_raise_diagnostics,
+              raise_success: raise_success,
+              mixed_provenance: mixed_provenance,
+              artifact_paths: artifact_paths
+            )
+          end
           puts "Wrote import report: #{report_path}"
 
           unless import_result.success? && raise_success
@@ -182,7 +239,7 @@ module RHDL
         end
 
         def write_report(out_dir:, strict:, extern_modules:, top_name:, import_result:, raise_result:, raise_diagnostics: nil,
-                         raise_success: nil, mixed_provenance: nil)
+                         raise_success: nil, mixed_provenance: nil, artifact_paths: nil)
           raise_diagnostics ||= Array(raise_result.diagnostics)
           raise_success = raise_result.success? if raise_success.nil?
           path = options[:report] || File.join(out_dir, 'import_report.json')
@@ -210,6 +267,7 @@ module RHDL
             raise_diagnostics: Array(raise_diagnostics).map { |diag| diagnostic_to_hash(diag) }
           }
           report[:mixed_import] = mixed_provenance if mixed_provenance
+          report[:artifacts] = artifact_paths if artifact_paths
 
           File.write(path, JSON.pretty_generate(report))
           path
@@ -244,15 +302,23 @@ module RHDL
           options.fetch(:raise_to_dsl, true)
         end
 
+        def format_output?
+          options.fetch(:format_output, options.fetch(:format, false))
+        end
+
         def build_mixed_import_staging(out_dir:)
           config = resolve_mixed_import_config(out_dir: out_dir)
           staging_dir = File.join(out_dir, '.mixed_import')
-          generated_dir = File.join(staging_dir, 'generated_vhdl')
+          pure_verilog_root = File.join(staging_dir, 'pure_verilog')
+          generated_dir = File.join(pure_verilog_root, 'generated_vhdl')
+          pure_verilog_entry_path = File.join(staging_dir, 'pure_verilog_entry.v')
+          FileUtils.rm_rf(pure_verilog_root)
           FileUtils.mkdir_p(generated_dir)
 
           analysis_commands = []
           synth_outputs = []
           generated_verilog_files = []
+          generated_entity_outputs = {}
           vhdl_standard = config.fetch(:vhdl_standard, '08')
           vhdl_workdir = config.fetch(:vhdl_workdir)
           vhdl_analyze_args = Array(config[:vhdl_analyze_args])
@@ -260,57 +326,93 @@ module RHDL
           FileUtils.mkdir_p(vhdl_workdir)
 
           unless config[:vhdl_files].empty?
-            puts "Import step: Analyze VHDL sources (#{config[:vhdl_files].length} file(s))"
-            analyze_vhdl_files!(
-              vhdl_files: config[:vhdl_files],
-              workdir: vhdl_workdir,
-              std: vhdl_standard,
-              analyze_args: vhdl_analyze_args,
-              analysis_commands: analysis_commands
-            )
+            with_timed_step("Analyze VHDL sources (#{config[:vhdl_files].length} file(s))") do
+              analyze_vhdl_files!(
+                vhdl_files: config[:vhdl_files],
+                workdir: vhdl_workdir,
+                std: vhdl_standard,
+                analyze_args: vhdl_analyze_args,
+                analysis_commands: analysis_commands
+              )
+            end
 
             synth_targets = Array(config[:vhdl_synth_targets])
             synth_targets = mixed_vhdl_synth_targets(config) if synth_targets.empty?
+            specialization = expand_vhdl_synth_targets_for_specializations(
+              synth_targets: synth_targets,
+              verilog_files: config[:verilog_files],
+              vhdl_files: config[:vhdl_files]
+            )
+            synth_targets = specialization.fetch(:targets)
             unless synth_targets.empty?
-              puts "Import step: Synthesize VHDL sources to Verilog (#{synth_targets.length} target(s))"
-            end
+              with_timed_step("Synthesize VHDL sources to Verilog (#{synth_targets.length} target(s))") do
+                synth_targets.each do |target|
+                  generated_module_name = target[:module_name].to_s.strip
+                  generated_module_name = target.fetch(:entity).to_s if generated_module_name.empty?
+                  out_path = File.join(generated_dir, "#{generated_module_name}.v")
+                  synth = RHDL::Codegen::CIRCT::Tooling.ghdl_synth_to_verilog(
+                    entity: target.fetch(:entity),
+                    out_path: out_path,
+                    workdir: vhdl_workdir,
+                    std: vhdl_standard,
+                    work: effective_work_library(target[:library]),
+                    extra_args: Array(vhdl_synth_args) + Array(target[:extra_args])
+                  )
+                  unless synth[:success]
+                    raise RuntimeError,
+                          "VHDL synth->Verilog failed.\nCommand: #{synth[:command]}\n#{synth[:stderr]}"
+                  end
 
-            synth_targets.each do |target|
-              out_path = File.join(generated_dir, "#{target.fetch(:entity)}.v")
-              synth = RHDL::Codegen::CIRCT::Tooling.ghdl_synth_to_verilog(
-                entity: target.fetch(:entity),
-                out_path: out_path,
-                workdir: vhdl_workdir,
-                std: vhdl_standard,
-                work: effective_work_library(target[:library]),
-                extra_args: vhdl_synth_args
-              )
-              unless synth[:success]
-                raise RuntimeError,
-                      "VHDL synth->Verilog failed.\nCommand: #{synth[:command]}\n#{synth[:stderr]}"
+                  postprocess_generated_vhdl_verilog!(
+                    entity: target.fetch(:entity),
+                    out_path: out_path,
+                    module_name: target[:module_name]
+                  )
+                  generated_verilog_files << out_path
+                  generated_entity_outputs[generated_module_name.downcase] = out_path
+                  synth_outputs << {
+                    entity: target.fetch(:entity),
+                    module_name: generated_module_name,
+                    library: effective_work_library(target[:library]),
+                    extra_args: Array(target[:extra_args]),
+                    output_path: out_path,
+                    command: synth[:command]
+                  }
+                end
               end
-
-              postprocess_generated_vhdl_verilog!(entity: target.fetch(:entity), out_path: out_path)
-              generated_verilog_files << out_path
-              synth_outputs << {
-                entity: target.fetch(:entity),
-                library: effective_work_library(target[:library]),
-                output_path: out_path,
-                command: synth[:command]
-              }
             end
           end
 
-          staged_verilog_path = File.join(staging_dir, 'mixed_staged.v')
           source_files = config[:verilog_files].map { |entry| entry.fetch(:path) } + generated_verilog_files
           if source_files.empty?
             raise ArgumentError, 'Mixed import found no Verilog sources to stage after VHDL conversion'
           end
 
-          write_staged_verilog_entry(staged_verilog_path: staged_verilog_path, source_files: source_files)
+          staged_source_files = stage_mixed_verilog_files!(
+            verilog_files: config[:verilog_files],
+            pure_verilog_root: pure_verilog_root,
+            source_root: config.fetch(:source_root),
+            specialization_rewrites: specialization && specialization.fetch(:rewrite_plan)
+          ) + generated_verilog_files
+
+          write_staged_verilog_entry(staged_verilog_path: pure_verilog_entry_path, source_files: staged_source_files)
+
+          canonical_top_file =
+            if config[:top][:language] == 'verilog'
+              staged_source_files.find do |path|
+                path.end_with?(staged_mixed_source_relative_path(
+                  path: config[:top][:file],
+                  source_root: config.fetch(:source_root)
+                ))
+              end || config[:top][:file]
+            else
+              generated_entity_outputs[config[:top][:name].to_s.downcase] || config[:top][:file]
+            end
 
           {
-            staged_verilog_path: staged_verilog_path,
+            pure_verilog_root: pure_verilog_root,
+            pure_verilog_entry_path: pure_verilog_entry_path,
+            staged_verilog_path: pure_verilog_entry_path,
             top_name: config[:top][:name],
             tool_args: config[:tool_args],
             provenance: {
@@ -318,13 +420,18 @@ module RHDL
               autoscan_root: config[:autoscan_root],
               top_name: config[:top][:name],
               top_language: config[:top][:language],
-              top_file: config[:top][:file],
+              top_file: canonical_top_file,
               source_files: config[:all_files].map do |entry|
                 { path: entry[:path], language: entry[:language], library: entry[:library] }
               end,
+              pure_verilog_root: pure_verilog_root,
+              pure_verilog_entry_path: pure_verilog_entry_path,
+              pure_verilog_files: staged_source_files.sort.map do |path|
+                { path: path, language: 'verilog', generated: path.start_with?("#{generated_dir}/") }
+              end,
               vhdl_analysis_commands: analysis_commands,
               vhdl_synth_outputs: synth_outputs,
-              staging_entry_path: staged_verilog_path
+              staging_entry_path: pure_verilog_entry_path
             }
           }
         end
@@ -401,6 +508,7 @@ module RHDL
               vhdl_analyze_args: Array(vhdl[:analyze_args]),
               vhdl_synth_args: Array(vhdl[:synth_args]),
               vhdl_synth_targets: vhdl_synth_targets,
+              source_root: mixed_source_root(files.map { |entry| entry[:path] }),
               manifest_path: File.expand_path(path),
               autoscan_root: nil
             )
@@ -437,13 +545,14 @@ module RHDL
             vhdl_analyze_args: [],
             vhdl_synth_args: [],
             vhdl_synth_targets: nil,
+            source_root: root,
             manifest_path: nil,
             autoscan_root: root
           )
         end
 
         def normalize_mixed_config(all_files:, top:, include_dirs:, defines:, vhdl_standard:, vhdl_workdir:,
-                                   vhdl_analyze_args:, vhdl_synth_args:, vhdl_synth_targets:, manifest_path:,
+                                   vhdl_analyze_args:, vhdl_synth_args:, vhdl_synth_targets:, source_root:, manifest_path:,
                                    autoscan_root:)
           verilog_files, vhdl_files = all_files.partition { |entry| entry[:language] == 'verilog' }
 
@@ -463,6 +572,7 @@ module RHDL
                 library: normalize_library(target[:library])
               }
             end,
+            source_root: source_root,
             manifest_path: manifest_path,
             autoscan_root: autoscan_root
           }
@@ -590,9 +700,13 @@ module RHDL
             next unless File.file?(entry.fetch(:path))
 
             text = File.read(entry.fetch(:path))
-            text.scan(/^\s*entity\s+([A-Za-z_][A-Za-z0-9_]*)\s+is\b/i).flatten.each do |name|
+            text.scan(/\bentity\s+([A-Za-z_][A-Za-z0-9_]*)\s+is\b(.*?)\bend(?:\s+entity)?(?:\s+\1)?\s*;/im) do |name, body|
               key = name.downcase
-              entities[key] ||= { entity: name, library: entry[:library] }
+              entities[key] ||= {
+                entity: name,
+                library: entry[:library],
+                generic_names: extract_vhdl_generic_names(body.to_s)
+              }
             end
           end
           entities
@@ -609,39 +723,142 @@ module RHDL
           File.write(staged_verilog_path, "#{lines.join("\n")}\n")
         end
 
-        def lower_moore_to_core_mlir_if_needed!(mlir_out:)
+        def stage_mixed_verilog_files!(verilog_files:, pure_verilog_root:, source_root:, specialization_rewrites: {})
+          Array(verilog_files).map do |entry|
+            source_path = File.expand_path(entry.fetch(:path))
+            relative = staged_mixed_source_relative_path(path: source_path, source_root: source_root)
+            staged_path = File.join(pure_verilog_root, relative)
+            ensure_dir(File.dirname(staged_path))
+            source = File.read(source_path)
+            rewritten = rewrite_vhdl_specialized_instantiations(
+              source,
+              rewrite_plan: specialization_rewrites
+            )
+            File.write(staged_path, rewritten)
+            staged_path
+          end
+        end
+
+        def staged_mixed_source_relative_path(path:, source_root:)
+          full_path = File.expand_path(path)
+          root_path = File.expand_path(source_root)
+          relative = Pathname.new(full_path).relative_path_from(Pathname.new(root_path)).to_s
+          return relative unless relative.start_with?('../')
+
+          full_path.delete_prefix('/').gsub(File::SEPARATOR, '/')
+        rescue ArgumentError
+          full_path.delete_prefix('/').gsub(File::SEPARATOR, '/')
+        end
+
+        def mixed_source_root(paths)
+          expanded = Array(paths).map { |path| File.expand_path(path) }
+          raise ArgumentError, 'Mixed import requires at least one source path' if expanded.empty?
+
+          directories = expanded.map { |path| File.dirname(path).split(File::SEPARATOR) }
+          common = directories.shift
+          directories.each do |parts|
+            common = common.zip(parts).take_while { |lhs, rhs| lhs == rhs }.map(&:first)
+          end
+
+          root = common.join(File::SEPARATOR)
+          root = "#{File::SEPARATOR}#{root}" unless root.start_with?(File::SEPARATOR)
+          root.empty? ? File::SEPARATOR : root
+        end
+
+        def emit_normalized_verilog_from_core_mlir!(mlir_out:, out_dir:, base:)
+          normalized_verilog_path = File.join(out_dir, '.mixed_import', "#{base}.normalized.v")
+          result = with_timed_step(
+            "Export normalized Verilog (#{RHDL::Codegen::CIRCT::Tooling::DEFAULT_VERILOG_EXPORT_TOOL})"
+          ) do
+            RHDL::Codegen::CIRCT::Tooling.circt_mlir_to_verilog(
+              mlir_path: mlir_out,
+              out_path: normalized_verilog_path,
+              tool: RHDL::Codegen::CIRCT::Tooling::DEFAULT_VERILOG_EXPORT_TOOL
+            )
+          end
+          unless result[:success]
+            raise RuntimeError,
+                  "CIRCT->Verilog export failed with '#{RHDL::Codegen::CIRCT::Tooling::DEFAULT_VERILOG_EXPORT_TOOL}'.\nCommand: #{result[:command]}\n#{result[:stderr]}"
+          end
+
+          puts "Wrote normalized Verilog: #{normalized_verilog_path}"
+          normalized_verilog_path
+        end
+
+        def normalize_llhd_mlir_if_needed!(mlir_out:)
           return unless File.file?(mlir_out)
 
           text = File.read(mlir_out)
-          return unless text.include?('moore.module')
+          return unless text.include?('llhd.process')
 
-          lowered_path = "#{mlir_out}.core.lowered"
+          lowered_path = "#{mlir_out}.llhd.lowered"
           cmd = [
             'circt-opt',
-            '--moore-lower-concatref',
-            '--canonicalize',
-            '--moore-lower-concatref',
-            '--convert-moore-to-core',
-            '--llhd-sig2reg',
+            '--llhd-lower-processes',
             '--canonicalize',
             mlir_out,
             '-o',
             lowered_path
           ]
-          stdout, stderr, status = Open3.capture3(*cmd)
+          stdout = nil
+          stderr = nil
+          status = nil
+          with_timed_step('Normalize LLHD processes') do
+            stdout, stderr, status = Open3.capture3(*cmd)
+          end
           unless status.success?
             raise RuntimeError,
-                  "Moore->core lowering failed.\nCommand: #{cmd.join(' ')}\n#{stdout}\n#{stderr}"
+                  "LLHD process normalization failed.\nCommand: #{cmd.join(' ')}\n#{stdout}\n#{stderr}"
           end
 
           FileUtils.mv(lowered_path, mlir_out)
-          puts 'Import step: Lower Moore MLIR -> core/llhd'
         end
 
-        def postprocess_generated_vhdl_verilog!(entity:, out_path:)
+        def cleanup_imported_core_mlir!(mlir_out:, top_name:)
+          return nil unless File.file?(mlir_out)
+
+          text = File.read(mlir_out)
+          unless needs_imported_core_cleanup?(text)
+            puts 'Import step: Skip imported CIRCT core cleanup (no cleanup markers found)'
+            return nil
+          end
+
+          cleanup = with_timed_step('Cleanup imported CIRCT core MLIR') do
+            RHDL::Codegen::CIRCT::ImportCleanup.cleanup_imported_core_mlir(
+              text,
+              strict: options.fetch(:strict, true),
+              top: top_name,
+              extern_modules: Array(options[:extern_modules]).map(&:to_s)
+            )
+          end
+          emit_diagnostics(cleanup.import_result.diagnostics)
+          unless cleanup.success?
+            raise RuntimeError, 'Imported CIRCT core cleanup failed'
+          end
+
+          File.write(mlir_out, cleanup.cleaned_text)
+          puts "Wrote cleaned CIRCT MLIR: #{mlir_out}"
+          cleanup.import_result
+        end
+
+        def needs_imported_core_cleanup?(text)
+          text.include?('llhd.') ||
+            text.include?('hw.array_inject') ||
+            text.include?('hw.aggregate_constant') ||
+            text.include?('seq.clock_inv') ||
+            text.match?(/!hw\.array</)
+        end
+
+        def postprocess_generated_vhdl_verilog!(entity:, out_path:, module_name: nil)
           name = entity.to_s.strip
           return if name.empty?
           return unless File.file?(out_path)
+
+          rename_generated_module!(out_path: out_path, from: name, to: module_name)
+          namespace_generated_helper_modules!(
+            out_path: out_path,
+            primary_module_name: module_name.to_s.strip.empty? ? name : module_name.to_s
+          )
 
           case name.downcase
           when 'ereg_savestatev'
@@ -665,6 +882,33 @@ module RHDL
           end
         end
 
+        def rename_generated_module!(out_path:, from:, to:)
+          replacement = to.to_s.strip
+          return if replacement.empty? || replacement == from
+
+          source = File.read(out_path)
+          updated = source.sub(/\bmodule\s+#{Regexp.escape(from)}\b/im, "module #{replacement}")
+          return if updated == source
+
+          File.write(out_path, updated)
+        end
+
+        def namespace_generated_helper_modules!(out_path:, primary_module_name:)
+          source = File.read(out_path)
+          module_names = source.scan(/^\s*module\s+([A-Za-z_][A-Za-z0-9_$]*)\b/).flatten.uniq
+          helper_names = module_names - [primary_module_name.to_s]
+          return if helper_names.empty?
+
+          suffix = "__#{Digest::SHA1.hexdigest(primary_module_name.to_s)[0, 8]}"
+          updated = source.dup
+          helper_names.each do |helper_name|
+            updated.gsub!(/\b#{Regexp.escape(helper_name)}\b/, "#{helper_name}#{suffix}")
+          end
+          return if updated == source
+
+          File.write(out_path, updated)
+        end
+
         def ensure_positional_parameters_for_generated_module!(out_path:, module_name:, parameter_count:)
           source = File.read(out_path)
           return if source.match?(/\bmodule\s+#{Regexp.escape(module_name)}\b\s*#\s*\(/im)
@@ -683,6 +927,277 @@ module RHDL
           return if updated == source
 
           File.write(out_path, updated)
+        end
+
+        def expand_vhdl_synth_targets_for_specializations(synth_targets:, verilog_files:, vhdl_files:)
+          entity_metadata = discover_vhdl_entities(vhdl_files)
+          rewrite_plan = {}
+          expanded_targets = Array(synth_targets).flat_map do |target|
+            entity_name = target.fetch(:entity).to_s
+            metadata = entity_metadata[entity_name.downcase]
+            generic_names = Array(metadata && metadata[:generic_names])
+            instances = discover_parameterized_verilog_instances(
+              verilog_files: verilog_files,
+              module_name: entity_name
+            )
+            specializations = instances.filter_map do |instance|
+              parameter_overrides = verilog_parameter_overrides_for_instance(
+                params: instance.fetch(:params),
+                generic_names: generic_names
+              )
+              next if parameter_overrides.empty?
+
+              {
+                entity: entity_name,
+                library: target[:library],
+                module_name: specialized_vhdl_module_name(
+                  entity_name: entity_name,
+                  parameter_overrides: parameter_overrides
+                ),
+                extra_args: parameter_overrides.map { |name, value| "-g#{name}=#{value}" }
+              }
+            end
+
+            if specializations.empty?
+              [target]
+            else
+              rewrite_plan[entity_name.downcase] = specializations.each_with_object({}) do |specialization, acc|
+                key = specialization_value_key(
+                  Array(specialization[:extra_args]).map do |arg|
+                    _name, value = arg.to_s.sub(/\A-g/, '').split('=', 2)
+                    normalize_vhdl_generic_override_value(value)
+                  end
+                )
+                acc[key] = specialization.fetch(:module_name)
+              end
+              specializations.uniq { |entry| [entry.fetch(:module_name), Array(entry[:extra_args])] }
+            end
+          end
+
+          {
+            targets: expanded_targets.uniq { |entry| [entry.fetch(:entity).to_s.downcase, entry[:module_name].to_s, Array(entry[:extra_args]), entry[:library].to_s] },
+            rewrite_plan: rewrite_plan
+          }
+        end
+
+        def extract_vhdl_generic_names(entity_body)
+          match = entity_body.match(/\bgeneric\s*\((.*?)\)\s*;/im)
+          return [] unless match
+
+          body = match[1].gsub(/--.*$/, '')
+          body.split(';').flat_map do |clause|
+            head = clause.to_s.split(':', 2).first.to_s.strip
+            next [] if head.empty?
+
+            head.split(/\s*,\s*/)
+          end
+        end
+
+        def discover_parameterized_verilog_instances(verilog_files:, module_name:)
+          Array(verilog_files).flat_map do |entry|
+            next [] unless File.file?(entry.fetch(:path))
+
+            source = File.read(entry.fetch(:path))
+            find_parameterized_module_instantiations(source: source, module_name: module_name)
+          end
+        end
+
+        def find_parameterized_module_instantiations(source:, module_name:)
+          pattern = /\b#{Regexp.escape(module_name)}\b/i
+          matches = []
+          cursor = 0
+          while (found = pattern.match(source, cursor))
+            start_index = found.begin(0)
+            scan_index = skip_verilog_spacing(source, found.end(0))
+            unless source[scan_index] == '#'
+              cursor = found.end(0)
+              next
+            end
+
+            scan_index = skip_verilog_spacing(source, scan_index + 1)
+            unless source[scan_index] == '('
+              cursor = found.end(0)
+              next
+            end
+
+            params_text, params_end = extract_verilog_parenthesized(source, scan_index)
+            cursor_after_params = skip_verilog_spacing(source, params_end)
+            instance_match = /\A([A-Za-z_][A-Za-z0-9_$]*)/.match(source[cursor_after_params..])
+            unless instance_match
+              cursor = params_end
+              next
+            end
+
+            instance_name = instance_match[1]
+            cursor_after_instance = skip_verilog_spacing(source, cursor_after_params + instance_name.length)
+            unless source[cursor_after_instance] == '('
+              cursor = params_end
+              next
+            end
+
+            matches << {
+              start: start_index,
+              replace_end: cursor_after_instance,
+              instance_name: instance_name,
+              params: split_verilog_argument_list(params_text)
+            }
+            cursor = cursor_after_instance
+          end
+          matches
+        end
+
+        def rewrite_vhdl_specialized_instantiations(source, rewrite_plan:)
+          updated = source.dup
+          Array(rewrite_plan).each do |entity_name, specializations|
+            next if specializations.nil? || specializations.empty?
+
+            replacements = find_parameterized_module_instantiations(source: updated, module_name: entity_name).reverse_each.map do |instance|
+              key = specialization_key_from_params(instance.fetch(:params))
+              specialized_module = specializations[key]
+              next unless specialized_module
+
+              [instance.fetch(:start), instance.fetch(:replace_end), "#{specialized_module} #{instance.fetch(:instance_name)}"]
+            end.compact
+
+            replacements.each do |start_index, end_index, replacement|
+              updated[start_index...end_index] = replacement
+            end
+          end
+          updated
+        end
+
+        def verilog_parameter_overrides_for_instance(params:, generic_names:)
+          values = Array(params)
+          return [] if values.empty?
+
+          if values.any? { |value| value.start_with?('.') }
+            named = values.each_with_object([]) do |value, acc|
+              match = value.match(/\A\.\s*([A-Za-z_][A-Za-z0-9_]*)\s*\((.*)\)\z/m)
+              next unless match
+
+              acc << [match[1], normalize_vhdl_generic_override_value(match[2])]
+            end
+            return named
+          end
+
+          Array(generic_names).zip(values).filter_map do |generic_name, value|
+            next if generic_name.nil?
+            next if value.nil? || value.to_s.strip.empty?
+
+            [generic_name, normalize_vhdl_generic_override_value(value)]
+          end
+        end
+
+        def normalize_vhdl_generic_override_value(value)
+          stripped = value.to_s.strip
+          case stripped
+          when /\A\d+'h([0-9a-fA-F_]+)\z/i
+            return %(X"#{$1.delete('_')}")
+          when /\A\d+'o([0-7_]+)\z/i
+            return %(O"#{$1.delete('_')}")
+          when /\A\d+'b([01xXzZ_]+)\z/i
+            return %(B"#{$1.delete('_')}")
+          when /\A\d+'d([0-9_]+)\z/i
+            return $1.delete('_')
+          end
+
+          if stripped.start_with?('"') && stripped.end_with?('"') && stripped.length >= 2
+            stripped[1..-2]
+          else
+            stripped
+          end
+        end
+
+        def specialized_vhdl_module_name(entity_name:, parameter_overrides:)
+          digest = Digest::SHA1.hexdigest(
+            Array(parameter_overrides).map { |name, value| "#{name}=#{value}" }.join("\u001f")
+          )[0, 12]
+          "#{entity_name}__vhdl_#{digest}"
+        end
+
+        def specialization_key_from_params(params)
+          specialization_value_key(
+            Array(params).map { |value| normalize_vhdl_generic_override_value(value) }
+          )
+        end
+
+        def specialization_key_from_overrides(parameter_overrides)
+          Array(parameter_overrides).map do |name, value|
+            "#{name}=#{normalize_vhdl_generic_override_value(value)}"
+          end.join("\u001f")
+        end
+
+        def specialization_value_key(values)
+          Array(values).map { |value| normalize_vhdl_generic_override_value(value) }.join("\u001f")
+        end
+
+        def skip_verilog_spacing(source, index)
+          cursor = index
+          cursor += 1 while cursor < source.length && source[cursor].match?(/\s/)
+          cursor
+        end
+
+        def extract_verilog_parenthesized(source, open_index)
+          depth = 0
+          cursor = open_index
+          quote = nil
+          while cursor < source.length
+            char = source[cursor]
+            if quote
+              quote = nil if char == quote && source[cursor - 1] != '\\'
+            elsif char == '"'
+              quote = char
+            elsif char == '('
+              depth += 1
+            elsif char == ')'
+              depth -= 1
+              return [source[(open_index + 1)...cursor], cursor + 1] if depth.zero?
+            end
+            cursor += 1
+          end
+
+          raise ArgumentError, 'Unbalanced Verilog parameter list while specializing mixed import'
+        end
+
+        def split_verilog_argument_list(text)
+          args = []
+          current = +''
+          depth = 0
+          quote = nil
+
+          text.each_char do |char|
+            if quote
+              current << char
+              quote = nil if char == quote && current[-2] != '\\'
+              next
+            end
+
+            case char
+            when '"'
+              quote = char
+              current << char
+            when '(', '[', '{'
+              depth += 1
+              current << char
+            when ')', ']', '}'
+              depth -= 1 if depth.positive?
+              current << char
+            when ','
+              if depth.zero?
+                value = current.strip
+                args << value unless value.empty?
+                current = +''
+              else
+                current << char
+              end
+            else
+              current << char
+            end
+          end
+
+          value = current.strip
+          args << value unless value.empty?
+          args
         end
 
         # Analyze VHDL files with retry passes to tolerate dependency ordering
@@ -734,6 +1249,22 @@ module RHDL
           expanded = Pathname.new(path)
           expanded = Pathname.new(root).join(expanded) unless expanded.absolute?
           expanded.cleanpath.to_s
+        end
+
+        def with_timed_step(label)
+          puts "Import step: #{label}"
+          started_at = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+          result = yield
+          puts "Import step complete: #{label} (#{format_step_duration(Process.clock_gettime(Process::CLOCK_MONOTONIC) - started_at)})"
+          result
+        rescue StandardError
+          elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - started_at
+          puts "Import step failed: #{label} after #{format_step_duration(elapsed)}"
+          raise
+        end
+
+        def format_step_duration(seconds)
+          format('%.2fs', seconds)
         end
       end
     end

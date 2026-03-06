@@ -12,14 +12,16 @@ module RHDL
   module Examples
     module GameBoy
       class HeadlessRunner
-      attr_reader :runner, :mode, :sim_backend
+      attr_reader :runner, :mode, :sim_backend, :hdl_dir
 
       # Create a headless runner with the specified options
       # @param mode [Symbol] Simulation mode: :ruby, :ir, :verilog
       # @param sim [Symbol] Simulator backend for :ir mode: :interpret, :jit, :compile
-      def initialize(mode: :ruby, sim: nil)
+      # @param hdl_dir [String, nil] Optional HDL directory override.
+      def initialize(mode: :ruby, sim: nil, hdl_dir: nil)
         @mode = mode
         @sim_backend = sim || default_backend(mode)
+        @hdl_dir = hdl_dir
 
         # Create runner based on mode and sim backend
         @runner = case mode
@@ -27,10 +29,13 @@ module RHDL
                     RHDL::Examples::GameBoy::RubyRunner.new
                   when :ir
                     require_relative 'ir_runner'
-                    RHDL::Examples::GameBoy::IrRunner.new(backend: normalize_native_backend(@sim_backend))
+                    RHDL::Examples::GameBoy::IrRunner.new(
+                      backend: normalize_native_backend(@sim_backend),
+                      hdl_dir: @hdl_dir
+                    )
                   when :verilog
                     require_relative 'verilator_runner'
-                    RHDL::Examples::GameBoy::VerilogRunner.new
+                    RHDL::Examples::GameBoy::VerilogRunner.new(hdl_dir: @hdl_dir)
                   else
                     raise ArgumentError, "Unknown mode: #{mode}. Valid modes: ruby, ir, verilog"
                   end
@@ -160,8 +165,8 @@ module RHDL
       end
 
       # Create a headless runner with test ROM loaded
-      def self.with_test_rom(mode: :ruby, sim: nil)
-        runner = new(mode: mode, sim: sim)
+      def self.with_test_rom(mode: :ruby, sim: nil, hdl_dir: nil)
+        runner = new(mode: mode, sim: sim, hdl_dir: hdl_dir)
         test_rom = create_test_rom
         runner.load_rom(test_rom)
         runner

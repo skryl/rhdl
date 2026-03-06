@@ -306,8 +306,7 @@ rhdl import [options]
 | `--manifest FILE` | Mixed mode: YAML/JSON manifest describing source files/top/include/defines |
 | `--out DIR` | Output directory |
 | `--mlir-out FILE` | Verilog/mixed mode: write intermediate CIRCT MLIR path |
-| `--tool CMD` | Verilog/mixed mode: external Verilog import tool (default: `circt-translate`) |
-| `--tool-arg ARG` | Verilog/mixed mode: extra tool arg (repeatable) |
+| `--tool-arg ARG` | Verilog/mixed mode: extra `circt-verilog` arg (repeatable) |
 | `--[no-]strict` | Enable strict no-skip import + strict raise checks (default: enabled) |
 | `--extern NAME` | Declare unresolved external module boundary (repeatable) |
 | `--report FILE` | Write import report JSON (default: `<out>/import_report.json`) |
@@ -318,10 +317,10 @@ rhdl import [options]
 ### Examples
 
 ```bash
-# Verilog -> external LLVM/CIRCT tooling -> CIRCT MLIR -> RHDL DSL
+# Verilog -> circt-verilog -> CIRCT MLIR -> RHDL DSL
 rhdl import --mode verilog --input ./cpu.v --out ./generated
 
-# Mixed Verilog+VHDL via manifest -> staged Verilog -> CIRCT MLIR -> RHDL DSL
+# Mixed Verilog+VHDL via manifest -> staged Verilog -> circt-verilog -> CIRCT MLIR -> RHDL DSL
 rhdl import --mode mixed --manifest ./import.yml --out ./generated
 
 # Mixed autoscan fallback (top file required when manifest is omitted)
@@ -336,8 +335,7 @@ rhdl import --mode circt --input ./cpu.mlir --out ./generated
 # Strict top-closure import with explicit extern boundary + report
 rhdl import --mode circt --input ./soc.mlir --out ./generated --top soc_top --extern pll --extern ddr_phy --report ./generated/import_report.json
 
-# Note: firtool does not support direct Verilog import in this flow.
-# Use circt-translate (or another Verilog importer) for --mode verilog.
+# Note: Verilog import uses circt-verilog in this flow.
 # Mixed mode also requires ghdl for VHDL analyze/synth conversion.
 ```
 

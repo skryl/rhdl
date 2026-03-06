@@ -74,10 +74,10 @@ RSpec.describe RHDL::CLI::Tasks::DepsTask do
         expect { task.run }.to output(/firtool/).to_stdout
       end
 
-      it 'shows circt-translate in dependency check' do
+      it 'shows circt-verilog in dependency check' do
         task = described_class.new(check: true)
 
-        expect { task.run }.to output(/circt-translate/).to_stdout
+        expect { task.run }.to output(/circt-verilog/).to_stdout
       end
 
       it 'shows ghdl in dependency check' do
@@ -123,11 +123,13 @@ RSpec.describe RHDL::CLI::Tasks::DepsTask do
         allow(task).to receive(:command_available?).with('dot').and_return(true)
         allow(task).to receive(:command_available?).with('firtool').and_return(true)
         allow(task).to receive(:command_available?).with('arcilator').and_return(true)
+        allow(task).to receive(:command_available?).with('circt-verilog').and_return(true)
         allow(task).to receive(:command_available?).with('circt-translate').and_return(true)
         allow(task).to receive(:command_available?).with('llc').and_return(true)
         allow(task).to receive(:command_healthy?).and_call_original
         allow(task).to receive(:command_healthy?).with('firtool', 'firtool --version').and_return(true)
         allow(task).to receive(:command_healthy?).with('arcilator', 'arcilator --version').and_return(true)
+        allow(task).to receive(:command_healthy?).with('circt-verilog', 'circt-verilog --version').and_return(true)
         allow(task).to receive(:command_healthy?).with('circt-translate', 'circt-translate --version').and_return(true)
         allow(task).to receive(:command_healthy?).with('llc', 'llc --version').and_return(true)
         allow(task).to receive(:command_output_first_line).and_call_original
@@ -161,12 +163,14 @@ RSpec.describe RHDL::CLI::Tasks::DepsTask do
           allow(task).to receive(:command_available?).with('dot').and_return(true)
           allow(task).to receive(:command_available?).with('firtool').and_return(false, true)
           allow(task).to receive(:command_available?).with('arcilator').and_return(false, true)
-          allow(task).to receive(:command_available?).with('circt-translate').and_return(false, true)
+          allow(task).to receive(:command_available?).with('circt-verilog').and_return(false, true)
+          allow(task).to receive(:command_available?).with('circt-translate').and_return(true)
           allow(task).to receive(:command_available?).with('llc').and_return(false, true)
           allow(task).to receive(:command_healthy?).and_call_original
           allow(task).to receive(:command_healthy?).with('firtool', 'firtool --version').and_return(false, true)
           allow(task).to receive(:command_healthy?).with('arcilator', 'arcilator --version').and_return(false, true)
-          allow(task).to receive(:command_healthy?).with('circt-translate', 'circt-translate --version').and_return(false, true)
+          allow(task).to receive(:command_healthy?).with('circt-verilog', 'circt-verilog --version').and_return(false, true)
+          allow(task).to receive(:command_healthy?).with('circt-translate', 'circt-translate --version').and_return(true)
           allow(task).to receive(:command_healthy?).with('llc', 'llc --version').and_return(false, true)
           allow(task).to receive(:command_output_first_line).and_call_original
           allow(task).to receive(:command_output_first_line).with('firtool --version').and_return('firtool-1.62.0')
@@ -244,10 +248,10 @@ RSpec.describe RHDL::CLI::Tasks::DepsTask do
       expect(output).to match(/\[(OK|OPTIONAL)\]/)
     end
 
-    it 'shows circt-translate status' do
+    it 'shows circt-verilog status' do
       output = capture_stdout { task.check_status }
-      expect(output).to match(/circt-translate/)
-      expect(output).to match(/\[(OK|OPTIONAL)\]/)
+      expect(output).to match(/circt-verilog/)
+      expect(output).to match(/\[(OK|MISSING)\]/)
     end
 
     it 'shows ghdl status' do
@@ -307,11 +311,13 @@ RSpec.describe RHDL::CLI::Tasks::DepsTask do
       allow(task).to receive(:command_available?).with('dot').and_return(true)
       allow(task).to receive(:command_available?).with('firtool').and_return(true)
       allow(task).to receive(:command_available?).with('arcilator').and_return(true)
+      allow(task).to receive(:command_available?).with('circt-verilog').and_return(true)
       allow(task).to receive(:command_available?).with('circt-translate').and_return(true)
       allow(task).to receive(:command_available?).with('llc').and_return(true)
       allow(task).to receive(:command_healthy?).and_call_original
       allow(task).to receive(:command_healthy?).with('firtool', 'firtool --version').and_return(true)
       allow(task).to receive(:command_healthy?).with('arcilator', 'arcilator --version').and_return(true)
+      allow(task).to receive(:command_healthy?).with('circt-verilog', 'circt-verilog --version').and_return(true)
       allow(task).to receive(:command_healthy?).with('circt-translate', 'circt-translate --version').and_return(true)
       allow(task).to receive(:command_healthy?).with('llc', 'llc --version').and_return(true)
       allow(task).to receive(:command_output_first_line).and_call_original

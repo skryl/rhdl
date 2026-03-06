@@ -505,11 +505,11 @@ rhdl diagram RHDL::HDL::ALU --format svg # Single component diagram
 # Verilog export
 rhdl export --all                        # Export all components
 rhdl export --lang verilog --out ./out RHDL::HDL::Counter
-rhdl export --lang verilog --tool firtool --out ./out RHDL::HDL::Counter  # requires circt-translate or firtool
+rhdl export --lang verilog --tool firtool --out ./out RHDL::HDL::Counter  # requires firtool or circt-translate
 
 # CIRCT import/raise
-rhdl import --mode verilog --input ./cpu.v --out ./generated   # requires circt-translate (or another Verilog importer)
-rhdl import --mode mixed --manifest ./import.yml --out ./generated # requires ghdl + circt-translate
+rhdl import --mode verilog --input ./cpu.v --out ./generated   # requires circt-verilog
+rhdl import --mode mixed --manifest ./import.yml --out ./generated # requires ghdl + circt-verilog
 rhdl import --mode mixed --input ./rtl/top.sv --top top --out ./generated # mixed autoscan fallback when manifest omitted
 rhdl import --mode circt --input ./cpu.mlir --out ./generated
 rhdl import --mode circt --input ./soc.mlir --out ./generated --top soc_top --extern pll --report ./generated/import_report.json
@@ -653,14 +653,17 @@ See [Performance Guide](docs/performance.md) for detailed benchmarks and optimiz
 # Testing
 bundle exec rake spec                  # Run all tests
 bundle exec rake spec[ao486]          # Run AO486 import/parity specs
+bundle exec rake spec[gameboy]        # Run Game Boy specs (including import specs)
 bundle exec rake spec[riscv]           # Run RISC-V specs
 bundle exec rake pspec                 # Run tests in parallel
 bundle exec rake pspec[ao486]         # Run AO486 specs in parallel
+bundle exec rake pspec[gameboy]       # Run Game Boy specs in parallel
 bundle exec rake pspec[riscv]          # Run RISC-V specs in parallel
 
 # Test and simulation benchmarks
 bundle exec rake spec:bench[riscv,20]  # Benchmark 20 RISC-V spec files
 bundle exec rake spec:bench[ao486,20] # Benchmark 20 AO486 spec files
+bundle exec rake spec:bench[gameboy,20] # Benchmark 20 Game Boy spec files
 bundle exec rake bench:native[ir,5000000]      # Benchmark IR runners
 bundle exec rake bench:native[gates]           # Benchmark gate-level simulation
 bundle exec rake bench:native[cpu8bit,5000000] # Benchmark 8-bit CPU compiler vs arcilator_gpu

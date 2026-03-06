@@ -14,43 +14,10 @@
 require_relative '../../lib/rhdl'
 require_relative '../../lib/rhdl/dsl/behavior'
 require_relative '../../lib/rhdl/dsl/sequential'
+require_relative 'utilities/hdl_loader'
 
-# Load all subcomponents (order matters for dependencies)
-
-# CPU components (load dependencies first)
-require_relative 'hdl/cpu/alu'
-require_relative 'hdl/cpu/registers'
-require_relative 'hdl/cpu/mcode'
-require_relative 'hdl/cpu/sm83'
-
-# PPU components
-require_relative 'hdl/ppu/sprites'
-require_relative 'hdl/ppu/lcd'
-require_relative 'hdl/ppu/video'
-
-# APU components (load channels before sound)
-require_relative 'hdl/apu/channel_square'
-require_relative 'hdl/apu/channel_wave'
-require_relative 'hdl/apu/channel_noise'
-require_relative 'hdl/apu/sound'
-
-# Memory and DMA
-require_relative 'hdl/memory/dpram'
-require_relative 'hdl/memory/spram'
-require_relative 'hdl/dma/hdma'
-
-# Mappers
-require_relative 'hdl/mappers/mappers'
-
-# Timer and Link
-require_relative 'hdl/timer'
-require_relative 'hdl/link'
-
-# Clock generator
-require_relative 'hdl/speedcontrol'
-
-# Top-level Game Boy module (requires all above)
-require_relative 'hdl/gb'
+# Load Game Boy HDL component files from the selected source directory.
+RHDL::Examples::GameBoy::HdlLoader.load_component_tree!
 
 module RHDL
   module Examples

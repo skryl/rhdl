@@ -5,6 +5,7 @@ require 'tmpdir'
 require 'yaml'
 require 'json'
 require 'set'
+require 'pathname'
 
 module RHDL
   module Examples
@@ -20,9 +21,7 @@ module RHDL
           DEFAULT_TOP_FILE = File.join(DEFAULT_REFERENCE_ROOT, 'rtl', 'gb.v')
           DEFAULT_OUTPUT_DIR = File.expand_path('../../import', __dir__)
           DEFAULT_IMPORT_STRATEGY = :mixed
-          VALID_IMPORT_STRATEGIES = %i[mixed compat].freeze
-
-          MAX_COMPAT_RETRIES = 20
+          VALID_IMPORT_STRATEGIES = %i[mixed].freeze
           DEFAULT_VHDL_STANDARD = '08'
           DEFAULT_VHDL_ANALYZE_ARGS = %w[-fsynopsys].freeze
           DEFAULT_VHDL_SYNTH_ARGS = %w[-fsynopsys].freeze
@@ -32,6 +31,9 @@ module RHDL
             gb_savestates
             gb_statemanager
             eReg_SavestateV
+            spram
+            dpram
+            dpram_dif
           ].freeze
 
           SOURCE_ASSIGNMENT_LANGUAGE = {
@@ -62,7 +64,6 @@ module RHDL
             :fallback_used,
             :attempted_strategies,
             :source_verilog_path,
-            :compatibility_metadata,
             keyword_init: true
           ) do
             def success?
@@ -72,7 +73,7 @@ module RHDL
 
           attr_reader :reference_root, :qip_path, :top, :top_file, :output_dir, :workspace_dir,
                       :keep_workspace, :clean_output, :strict, :progress_callback, :import_task_class,
-                      :import_strategy, :fallback_to_compat
+                      :import_strategy
 
           def initialize(reference_root: DEFAULT_REFERENCE_ROOT,
                          qip_path: DEFAULT_QIP_PATH,
@@ -85,8 +86,7 @@ module RHDL
                          strict: true,
                          progress: nil,
                          import_task_class: nil,
-                         import_strategy: DEFAULT_IMPORT_STRATEGY,
-                         fallback_to_compat: true)
+                         import_strategy: DEFAULT_IMPORT_STRATEGY)
             @reference_root = File.expand_path(reference_root)
             @qip_path = File.expand_path(qip_path)
             @top = top.to_s
@@ -99,7 +99,6 @@ module RHDL
             @progress_callback = progress
             @import_task_class = import_task_class
             @import_strategy = normalize_strategy(import_strategy)
-            @fallback_to_compat = fallback_to_compat
           end
 
           def run
@@ -118,61 +117,47 @@ module RHDL
             manifest_path = write_manifest(workspace: workspace, resolved: resolved)
             report_path = File.join(output_dir, 'import_report.json')
 
-            attempts = strategy_attempts
-            attempts.each do |strategy|
-              emit_progress("run import strategy: #{strategy}")
+            emit_progress('run import strategy: mixed')
+            requested_mlir_path = File.join(output_dir, '.mixed_import', "#{top}.core.mlir")
+            import_result = run_import_task(
+              mode: :mixed,
+              manifest_path: manifest_path,
+              mlir_path: requested_mlir_path,
+              report_path: report_path
+            )
 
-              if strategy == :mixed
-                source_verilog_path = nil
-                mlir_path = File.join(workspace, "#{top}.mlir")
-                import_result = run_import_task(
-                  mode: :mixed,
-                  manifest_path: manifest_path,
-                  mlir_path: mlir_path,
-                  report_path: report_path
-                )
-                compatibility_metadata = nil
-              else
-                compat = build_compat_wrapper(workspace: workspace, resolved: resolved)
-                source_verilog_path = compat.fetch(:wrapper_path)
-                mlir_path = File.join(workspace, "#{top}.compat.core.mlir")
-                import_result = run_compat_import_task(
-                  wrapper_path: source_verilog_path,
-                  core_mlir_path: mlir_path,
-                  report_path: report_path
-                )
-                compatibility_metadata = compat.reject { |k, _| k == :wrapper_path }
-              end
+            diagnostics.concat(Array(import_result[:diagnostics]))
+            raise_diagnostics.concat(Array(import_result[:raise_diagnostics]))
 
-              attempt_diags = Array(import_result[:diagnostics])
-              diagnostics.concat(attempt_diags)
-              raise_diagnostics.concat(Array(import_result[:raise_diagnostics]))
-
-              next unless import_result[:success]
-
-              augment_report_for_compat(
+            if import_result[:success]
+              report = read_report(report_path)
+              workspace_artifacts = stage_workspace_artifacts(
+                workspace: workspace,
+                artifacts: report.fetch('artifacts', {}),
+                report_path: report_path
+              )
+              report = merge_workspace_artifacts_into_report(
                 report_path: report_path,
-                resolved: resolved,
-                source_verilog_path: source_verilog_path,
-                compatibility_metadata: compatibility_metadata
-              ) if strategy == :compat
-
+                workspace_artifacts: workspace_artifacts
+              )
+              artifacts = report.fetch('artifacts', {})
               return Result.new(
                 success: true,
                 output_dir: output_dir,
                 workspace: workspace,
                 files_written: import_result[:files_written],
                 manifest_path: manifest_path,
-                mlir_path: mlir_path,
+                mlir_path: artifacts['core_mlir_path'] || requested_mlir_path,
                 report_path: report_path,
                 diagnostics: diagnostics,
                 raise_diagnostics: raise_diagnostics,
                 strategy_requested: import_strategy,
-                strategy_used: strategy,
-                fallback_used: strategy != import_strategy,
-                attempted_strategies: attempts,
-                source_verilog_path: source_verilog_path,
-                compatibility_metadata: compatibility_metadata
+                strategy_used: :mixed,
+                fallback_used: false,
+                attempted_strategies: [:mixed],
+                source_verilog_path: artifacts['workspace_normalized_verilog_path'] ||
+                  artifacts['pure_verilog_entry_path'] ||
+                  artifacts['normalized_verilog_path']
               )
             end
 
@@ -189,9 +174,8 @@ module RHDL
               strategy_requested: import_strategy,
               strategy_used: nil,
               fallback_used: false,
-              attempted_strategies: attempts,
-              source_verilog_path: nil,
-              compatibility_metadata: nil
+              attempted_strategies: [:mixed],
+              source_verilog_path: nil
             )
           rescue StandardError, SystemStackError => e
             diagnostics << e.message
@@ -208,9 +192,8 @@ module RHDL
               strategy_requested: import_strategy,
               strategy_used: nil,
               fallback_used: false,
-              attempted_strategies: strategy_attempts,
-              source_verilog_path: nil,
-              compatibility_metadata: nil
+              attempted_strategies: [:mixed],
+              source_verilog_path: nil
             )
           ensure
             FileUtils.rm_rf(temp_workspace) if defined?(temp_workspace) && temp_workspace && !keep_workspace
@@ -284,6 +267,17 @@ module RHDL
             manifest_path
           end
 
+          def rewrite_video_spr_extra_tile_array_text(text)
+            updated = text.dup
+            updated.gsub!(
+              /\bwire\s+\[7:0\]\s+spr_extra_tile\s*\[0:1\]\s*;/,
+              "wire [7:0] spr_extra_tile0;\nwire [7:0] spr_extra_tile1;"
+            )
+            updated.gsub!(/\bspr_extra_tile\[0\]/, 'spr_extra_tile0')
+            updated.gsub!(/\bspr_extra_tile\[1\]/, 'spr_extra_tile1')
+            updated
+          end
+
           private
 
           def normalize_strategy(value)
@@ -292,12 +286,6 @@ module RHDL
 
             raise ArgumentError,
                   "Unknown import_strategy #{value.inspect}. Expected one of: #{VALID_IMPORT_STRATEGIES.join(', ')}"
-          end
-
-          def strategy_attempts
-            attempts = [import_strategy]
-            attempts << :compat if import_strategy == :mixed && fallback_to_compat
-            attempts.uniq
           end
 
           def emit_progress(message)
@@ -325,7 +313,7 @@ module RHDL
             FileUtils.mkdir_p(staged_root)
             selected_verilog_paths = selected_verilog_source_paths_for_mixed(resolved: resolved)
 
-            resolved.fetch(:files).flat_map do |entry|
+            prepared = resolved.fetch(:files).flat_map do |entry|
               source_path = File.expand_path(entry.fetch(:path))
 
               if entry.fetch(:language) == 'verilog'
@@ -337,30 +325,17 @@ module RHDL
                   library: nil
                 }]
               elsif entry.fetch(:language) == 'vhdl'
-                case File.basename(source_path).downcase
-                when 'spram.vhd'
-                  [{
-                    path: write_spram_verilog_replacement(staged_root),
-                    language: 'verilog',
-                    library: nil
-                  }]
-                when 'dpram.vhd'
-                  [{
-                    path: write_dpram_verilog_replacement(staged_root),
-                    language: 'verilog',
-                    library: nil
-                  }]
-                else
-                  [{
-                    path: stage_vhdl_source(path: source_path, staged_root: staged_root),
-                    language: 'vhdl',
-                    library: entry[:library]
-                  }]
-                end
+                [{
+                  path: stage_vhdl_source(path: source_path, staged_root: staged_root),
+                  language: 'vhdl',
+                  library: entry[:library]
+                }]
               else
                 []
               end
             end
+            prepared.unshift(*vendor_vhdl_shim_entries(staged_root: staged_root))
+            prepared
           end
 
           def selected_verilog_source_paths_for_mixed(resolved:)
@@ -391,6 +366,8 @@ module RHDL
             text = text.gsub(/\boutput\b(?!\s+(?:reg|logic)\b)/, 'output logic')
 
             case File.basename(source_path).downcase
+            when 'video.v'
+              text = rewrite_video_spr_extra_tile_array_text(text)
             when 'cheatcodes.sv'
               text = text.sub(
                 /module\s+CODES\s*\((.*?)\);\s*parameter\s+ADDR_WIDTH\s*=\s*16\s*;.*?parameter\s+DATA_WIDTH\s*=\s*8\s*;.*?parameter\s+MAX_CODES\s*=\s*32\s*;/m,
@@ -434,153 +411,200 @@ module RHDL
             text
           end
 
-          def write_spram_verilog_replacement(staged_root)
-            path = File.join(staged_root, 'spram_compat.v')
+          def vendor_vhdl_shim_entries(staged_root:)
+            [
+              {
+                path: write_altera_mf_components_package(staged_root),
+                language: 'vhdl',
+                library: 'altera_mf'
+              },
+              {
+                path: write_altera_mf_altsyncram_entity(staged_root),
+                language: 'vhdl',
+                library: 'altera_mf'
+              }
+            ]
+          end
+
+          def write_altera_mf_components_package(staged_root)
+            path = File.join(staged_root, 'altera_mf', 'altera_mf_components.vhd')
             return path if File.file?(path)
 
-            text = <<~VERILOG
-              // Auto-generated fallback replacement for spram.vhd (altera_mf).
-              module spram
-              #(
-                parameter addr_width = 8,
-                parameter data_width = 8
-              )
-              (
-                input clock,
-                input clken,
-                input [addr_width-1:0] address,
-                input [data_width-1:0] data,
-                input wren,
-                output reg [data_width-1:0] q
-              );
-                localparam DEPTH = (1 << addr_width);
-                reg [data_width-1:0] mem [0:DEPTH-1];
+            FileUtils.mkdir_p(File.dirname(path))
+            File.write(path, <<~VHDL)
+              library ieee;
+              use ieee.std_logic_1164.all;
 
-                always @(posedge clock) begin
-                  if (clken) begin
-                    if (wren) begin
-                      mem[address] <= data;
-                      q <= data;
-                    end else begin
-                      q <= mem[address];
-                    end
-                  end
-                end
-              endmodule
-            VERILOG
-            File.write(path, text)
+              package altera_mf_components is
+                component altsyncram is
+                  generic (
+                    address_reg_b : string := "CLOCK1";
+                    clock_enable_input_a : string := "NORMAL";
+                    clock_enable_input_b : string := "NORMAL";
+                    clock_enable_output_a : string := "BYPASS";
+                    clock_enable_output_b : string := "BYPASS";
+                    indata_reg_b : string := "CLOCK1";
+                    init_file : string := " ";
+                    intended_device_family : string := "Cyclone V";
+                    lpm_hint : string := "ENABLE_RUNTIME_MOD=NO";
+                    lpm_type : string := "altsyncram";
+                    numwords_a : integer := 256;
+                    numwords_b : integer := 256;
+                    operation_mode : string := "SINGLE_PORT";
+                    outdata_aclr_a : string := "NONE";
+                    outdata_aclr_b : string := "NONE";
+                    outdata_reg_a : string := "UNREGISTERED";
+                    outdata_reg_b : string := "UNREGISTERED";
+                    power_up_uninitialized : string := "FALSE";
+                    read_during_write_mode_port_a : string := "NEW_DATA_NO_NBE_READ";
+                    read_during_write_mode_port_b : string := "NEW_DATA_NO_NBE_READ";
+                    widthad_a : integer := 8;
+                    widthad_b : integer := 8;
+                    width_a : integer := 8;
+                    width_b : integer := 8;
+                    width_byteena_a : integer := 1;
+                    width_byteena_b : integer := 1;
+                    wrcontrol_wraddress_reg_b : string := "CLOCK1"
+                  );
+                  port (
+                    address_a : in std_logic_vector(widthad_a - 1 downto 0);
+                    address_b : in std_logic_vector(widthad_b - 1 downto 0) := (others => '0');
+                    clock0 : in std_logic;
+                    clock1 : in std_logic := '0';
+                    clocken0 : in std_logic := '1';
+                    clocken1 : in std_logic := '1';
+                    data_a : in std_logic_vector(width_a - 1 downto 0) := (others => '0');
+                    data_b : in std_logic_vector(width_b - 1 downto 0) := (others => '0');
+                    wren_a : in std_logic := '0';
+                    wren_b : in std_logic := '0';
+                    q_a : out std_logic_vector(width_a - 1 downto 0);
+                    q_b : out std_logic_vector(width_b - 1 downto 0)
+                  );
+                end component;
+              end package;
+
+              package body altera_mf_components is
+              end package body;
+            VHDL
             path
           end
 
-          def write_dpram_verilog_replacement(staged_root)
-            path = File.join(staged_root, 'dpram_compat.v')
+          def write_altera_mf_altsyncram_entity(staged_root)
+            path = File.join(staged_root, 'altera_mf', 'altsyncram.vhd')
             return path if File.file?(path)
 
-            text = <<~VERILOG
-              // Auto-generated fallback replacement for dpram.vhd (altera_mf).
-              module dpram
-              #(
-                parameter addr_width = 8,
-                parameter data_width = 8
-              )
-              (
-                input clock_a,
-                input clken_a,
-                input [addr_width-1:0] address_a,
-                input [data_width-1:0] data_a,
-                input wren_a,
-                output reg [data_width-1:0] q_a,
-                input clock_b,
-                input clken_b,
-                input [addr_width-1:0] address_b,
-                input [data_width-1:0] data_b,
-                input wren_b,
-                output reg [data_width-1:0] q_b
-              );
-                localparam DEPTH = (1 << addr_width);
-                reg [data_width-1:0] mem [0:DEPTH-1];
+            FileUtils.mkdir_p(File.dirname(path))
+            File.write(path, <<~VHDL)
+              library ieee;
+              use ieee.std_logic_1164.all;
+              use ieee.numeric_std.all;
 
-                always @(posedge clock_a) begin
-                  if (clken_a) begin
-                    if (wren_a) begin
-                      mem[address_a] <= data_a;
-                      q_a <= data_a;
-                    end else begin
-                      q_a <= mem[address_a];
-                    end
-                  end
-                end
+              entity altsyncram is
+                generic (
+                  address_reg_b : string := "CLOCK1";
+                  clock_enable_input_a : string := "NORMAL";
+                  clock_enable_input_b : string := "NORMAL";
+                  clock_enable_output_a : string := "BYPASS";
+                  clock_enable_output_b : string := "BYPASS";
+                  indata_reg_b : string := "CLOCK1";
+                  init_file : string := " ";
+                  intended_device_family : string := "Cyclone V";
+                  lpm_hint : string := "ENABLE_RUNTIME_MOD=NO";
+                  lpm_type : string := "altsyncram";
+                  numwords_a : integer := 256;
+                  numwords_b : integer := 256;
+                  operation_mode : string := "SINGLE_PORT";
+                  outdata_aclr_a : string := "NONE";
+                  outdata_aclr_b : string := "NONE";
+                  outdata_reg_a : string := "UNREGISTERED";
+                  outdata_reg_b : string := "UNREGISTERED";
+                  power_up_uninitialized : string := "FALSE";
+                  read_during_write_mode_port_a : string := "NEW_DATA_NO_NBE_READ";
+                  read_during_write_mode_port_b : string := "NEW_DATA_NO_NBE_READ";
+                  widthad_a : integer := 8;
+                  widthad_b : integer := 8;
+                  width_a : integer := 8;
+                  width_b : integer := 8;
+                  width_byteena_a : integer := 1;
+                  width_byteena_b : integer := 1;
+                  wrcontrol_wraddress_reg_b : string := "CLOCK1"
+                );
+                port (
+                  address_a : in std_logic_vector(widthad_a - 1 downto 0);
+                  address_b : in std_logic_vector(widthad_b - 1 downto 0) := (others => '0');
+                  clock0 : in std_logic;
+                  clock1 : in std_logic := '0';
+                  clocken0 : in std_logic := '1';
+                  clocken1 : in std_logic := '1';
+                  data_a : in std_logic_vector(width_a - 1 downto 0) := (others => '0');
+                  data_b : in std_logic_vector(width_b - 1 downto 0) := (others => '0');
+                  wren_a : in std_logic := '0';
+                  wren_b : in std_logic := '0';
+                  q_a : out std_logic_vector(width_a - 1 downto 0);
+                  q_b : out std_logic_vector(width_b - 1 downto 0)
+                );
+              end entity;
 
-                always @(posedge clock_b) begin
-                  if (clken_b) begin
-                    if (wren_b) begin
-                      mem[address_b] <= data_b;
-                      q_b <= data_b;
-                    end else begin
-                      q_b <= mem[address_b];
-                    end
-                  end
-                end
-              endmodule
+              architecture synth of altsyncram is
+                function max_int(lhs : integer; rhs : integer) return integer is
+                begin
+                  if lhs > rhs then
+                    return lhs;
+                  end if;
+                  return rhs;
+                end function;
 
-              module dpram_dif
-              #(
-                parameter addr_width_a = 8,
-                parameter data_width_a = 8,
-                parameter addr_width_b = 8,
-                parameter data_width_b = 8,
-                parameter mem_init_file = " "
-              )
-              (
-                input clock,
-                input [addr_width_a-1:0] address_a,
-                input [data_width_a-1:0] data_a,
-                input enable_a,
-                input wren_a,
-                output [data_width_a-1:0] q_a,
-                input cs_a,
-                input [addr_width_b-1:0] address_b,
-                input [data_width_b-1:0] data_b,
-                input enable_b,
-                input wren_b,
-                output [data_width_b-1:0] q_b,
-                input cs_b
-              );
-                localparam MAX_DATA_WIDTH = (data_width_a > data_width_b) ? data_width_a : data_width_b;
-                localparam MAX_ADDR_WIDTH = (addr_width_a > addr_width_b) ? addr_width_a : addr_width_b;
-                localparam DEPTH = (1 << MAX_ADDR_WIDTH);
+                constant MEM_WIDTH : integer := max_int(width_a, width_b);
+                constant MEM_DEPTH : integer := max_int(numwords_a, numwords_b);
 
-                reg [MAX_DATA_WIDTH-1:0] mem [0:DEPTH-1];
-                reg [data_width_a-1:0] q0;
-                reg [data_width_b-1:0] q1;
-                wire wren_a_comb = wren_a & cs_a;
-                wire wren_b_comb = wren_b & cs_b;
+                type mem_t is array (0 to MEM_DEPTH - 1) of std_logic_vector(MEM_WIDTH - 1 downto 0);
+                signal mem : mem_t := (others => (others => '0'));
+                signal q_a_reg : std_logic_vector(width_a - 1 downto 0) := (others => '0');
+                signal q_b_reg : std_logic_vector(width_b - 1 downto 0) := (others => '0');
+              begin
+                process (clock0, clock1)
+                  variable idx_a : integer;
+                  variable idx_b : integer;
+                  variable word_a : std_logic_vector(MEM_WIDTH - 1 downto 0);
+                  variable word_b : std_logic_vector(MEM_WIDTH - 1 downto 0);
+                begin
+                  if rising_edge(clock0) then
+                    if clocken0 = '1' then
+                      idx_a := to_integer(unsigned(address_a));
+                      if idx_a >= 0 and idx_a < MEM_DEPTH then
+                        word_a := mem(idx_a);
+                        if wren_a = '1' then
+                          word_a(width_a - 1 downto 0) := data_a;
+                          mem(idx_a) <= word_a;
+                        end if;
+                        q_a_reg <= word_a(width_a - 1 downto 0);
+                      else
+                        q_a_reg <= (others => '0');
+                      end if;
+                    end if;
+                  end if;
 
-                always @(posedge clock) begin
-                  if (enable_a) begin
-                    if (wren_a_comb) begin
-                      mem[address_a][data_width_a-1:0] <= data_a;
-                      q0 <= data_a;
-                    end else begin
-                      q0 <= mem[address_a][data_width_a-1:0];
-                    end
-                  end
+                  if rising_edge(clock1) then
+                    if clocken1 = '1' then
+                      idx_b := to_integer(unsigned(address_b));
+                      if idx_b >= 0 and idx_b < MEM_DEPTH then
+                        word_b := mem(idx_b);
+                        if wren_b = '1' then
+                          word_b(width_b - 1 downto 0) := data_b;
+                          mem(idx_b) <= word_b;
+                        end if;
+                        q_b_reg <= word_b(width_b - 1 downto 0);
+                      else
+                        q_b_reg <= (others => '0');
+                      end if;
+                    end if;
+                  end if;
+                end process;
 
-                  if (enable_b) begin
-                    if (wren_b_comb) begin
-                      mem[address_b][data_width_b-1:0] <= data_b;
-                      q1 <= data_b;
-                    end else begin
-                      q1 <= mem[address_b][data_width_b-1:0];
-                    end
-                  end
-                end
-
-                assign q_a = cs_a ? q0 : {data_width_a{1'b1}};
-                assign q_b = cs_b ? q1 : {data_width_b{1'b1}};
-              endmodule
-            VERILOG
-            File.write(path, text)
+                q_a <= q_a_reg;
+                q_b <= q_b_reg;
+              end architecture;
+            VHDL
             path
           end
 
@@ -599,7 +623,8 @@ module RHDL
               report: report_path,
               top: top,
               strict: strict,
-              raise_to_dsl: true
+              raise_to_dsl: true,
+              format_output: false
             }
             options[:manifest] = manifest_path if manifest_path
             options[:input] = input_path if input_path
@@ -624,82 +649,6 @@ module RHDL
             }
           end
 
-          def run_compat_import_task(wrapper_path:, core_mlir_path:, report_path:)
-            require 'rhdl/codegen'
-            require 'open3'
-
-            moore_mlir_path = core_mlir_path.sub(/\.core\.mlir\z/, '.moore.mlir')
-            import = RHDL::Codegen::CIRCT::Tooling.verilog_to_circt_mlir(
-              verilog_path: wrapper_path,
-              out_path: moore_mlir_path,
-              tool: RHDL::Codegen::CIRCT::Tooling::DEFAULT_VERILOG_IMPORT_TOOL
-            )
-            unless import[:success]
-              return {
-                success: false,
-                diagnostics: [
-                  "Compatibility Verilog->Moore import failed.\nCommand: #{import[:command]}\n#{import[:stderr]}"
-                ],
-                raise_diagnostics: [],
-                files_written: []
-              }
-            end
-
-            lower_cmd = [
-              'circt-opt',
-              '--moore-lower-concatref',
-              '--canonicalize',
-              '--moore-lower-concatref',
-              '--convert-moore-to-core',
-              '--llhd-sig2reg',
-              '--canonicalize',
-              moore_mlir_path,
-              '-o',
-              core_mlir_path
-            ]
-            lower_stdout, lower_stderr, lower_status = Open3.capture3(*lower_cmd)
-            unless lower_status.success?
-              return {
-                success: false,
-                diagnostics: [
-                  "Compatibility Moore->core lowering failed.\nCommand: #{lower_cmd.join(' ')}\n#{lower_stdout}\n#{lower_stderr}"
-                ],
-                raise_diagnostics: [],
-                files_written: []
-              }
-            end
-
-            run_import_task(
-              mode: :circt,
-              input_path: core_mlir_path,
-              mlir_path: core_mlir_path,
-              report_path: report_path
-            )
-          end
-
-          def augment_report_for_compat(report_path:, resolved:, source_verilog_path:, compatibility_metadata:)
-            return unless File.file?(report_path)
-
-            report = JSON.parse(File.read(report_path))
-            report['mixed_import'] ||= {
-              'top_name' => resolved.fetch(:top).fetch(:name),
-              'top_language' => resolved.fetch(:top).fetch(:language),
-              'top_file' => resolved.fetch(:top).fetch(:file),
-              'source_files' => resolved.fetch(:files).map do |entry|
-                {
-                  'path' => entry.fetch(:path),
-                  'language' => entry.fetch(:language),
-                  'library' => entry[:library]
-                }
-              end,
-              'staging_entry_path' => source_verilog_path,
-              'compatibility' => compatibility_metadata
-            }
-            File.write(report_path, JSON.pretty_generate(report))
-          rescue JSON::ParserError
-            # Keep original report if JSON is malformed.
-          end
-
           def diagnostics_from_report(report_path)
             return [[], []] unless File.file?(report_path)
 
@@ -711,223 +660,63 @@ module RHDL
             [[], []]
           end
 
-          def build_compat_wrapper(workspace:, resolved:)
-            require 'rhdl/codegen'
+          def read_report(report_path)
+            return {} unless File.file?(report_path)
 
-            compat_root = File.join(workspace, 'compat')
-            FileUtils.mkdir_p(compat_root)
-
-            verilog_files = resolved.fetch(:files)
-              .select { |entry| entry[:language] == 'verilog' }
-              .map { |entry| File.expand_path(entry.fetch(:path)) }
-
-            module_to_file = module_index(verilog_files)
-            module_refs = module_reference_graph(verilog_files)
-            closure_modules = module_closure(top, module_refs)
-            selected_files = closure_modules.filter_map { |name| module_to_file[name] }.uniq
-            missing_modules = closure_modules - module_to_file.keys
-
-            stub_profiles = missing_modules.each_with_object({}) { |name, acc| acc[name] = empty_stub_profile }
-            excluded_files = []
-            promoted_output_logic = []
-
-            wrapper_path = File.join(compat_root, 'compat_wrapper.sv')
-            stub_path = File.join(compat_root, 'compat_stubs.sv')
-            dryrun_mlir = File.join(compat_root, 'compat_dryrun.mlir')
-
-            MAX_COMPAT_RETRIES.times do |attempt|
-              staged_map = stage_compat_sources(
-                compat_root: compat_root,
-                selected_files: selected_files,
-                excluded_files: excluded_files,
-                attempt: attempt
-              )
-              staged_reverse = {}
-              staged_map.each do |original, staged|
-                staged_reverse[staged] = original
-                staged_reverse[canonical_path(staged)] = original
-              end
-
-              write_stub_file(stub_path, stub_profiles)
-              write_wrapper_file(wrapper_path, staged_paths: staged_map.values, stub_path: stub_path)
-
-              dryrun = RHDL::Codegen::CIRCT::Tooling.verilog_to_circt_mlir(
-                verilog_path: wrapper_path,
-                out_path: dryrun_mlir,
-                tool: RHDL::Codegen::CIRCT::Tooling::DEFAULT_VERILOG_IMPORT_TOOL
-              )
-              if dryrun[:success]
-                return {
-                  wrapper_path: wrapper_path,
-                  excluded_files: excluded_files.sort,
-                  promoted_output_logic: promoted_output_logic.sort,
-                  stub_modules: stub_profiles.keys.sort,
-                  closure_modules: closure_modules.sort
-                }
-              end
-
-              changed = apply_compat_diagnostics!(
-                stderr: dryrun[:stderr],
-                stub_profiles: stub_profiles,
-                excluded_files: excluded_files,
-                promoted_output_logic: promoted_output_logic,
-                top_file: File.expand_path(top_file),
-                staged_reverse: staged_reverse,
-                module_to_file: module_to_file
-              )
-
-              next if changed
-
-              excerpt = dryrun[:stderr].to_s.lines.first(40).join
-              raise RuntimeError,
-                    "Compatibility import staging failed to converge.\nCommand: #{dryrun[:command]}\n#{excerpt}"
-            end
-
-            raise RuntimeError, "Compatibility import exceeded retry limit (#{MAX_COMPAT_RETRIES})"
+            JSON.parse(File.read(report_path))
+          rescue JSON::ParserError
+            {}
           end
 
-          def stage_compat_sources(compat_root:, selected_files:, excluded_files:, attempt:)
-            stage_dir = File.join(compat_root, "stage_#{attempt}")
-            FileUtils.rm_rf(stage_dir)
-            FileUtils.mkdir_p(stage_dir)
+          def stage_workspace_artifacts(workspace:, artifacts:, report_path:)
+            return {} if workspace.nil? || workspace.to_s.empty?
 
-            selected_files.each_with_object({}) do |path, acc|
-              next if excluded_files.include?(path)
+            staged = {}
+            import_artifacts_dir = File.join(workspace, 'import_artifacts')
+            FileUtils.mkdir_p(import_artifacts_dir)
 
-              rel = path.sub(%r{\A/}, '').gsub('/', '__')
-              staged = File.join(stage_dir, rel)
-              text = File.read(path)
-              File.write(staged, normalize_verilog_for_circt(text))
-              acc[path] = staged
-            end
-          end
-
-          def apply_compat_diagnostics!(stderr:, stub_profiles:, excluded_files:, promoted_output_logic:, top_file:, staged_reverse:, module_to_file:)
-            changed = false
-            text = stderr.to_s
-            canonical_top = canonical_path(top_file)
-
-            text.scan(/unknown module '([A-Za-z_][A-Za-z0-9_$]*)'/).flatten.each do |mod|
-              next if stub_profiles.key?(mod)
-
-              stub_profiles[mod] = empty_stub_profile
-              changed = true
-            end
-
-            text.scan(/port '([A-Za-z_][A-Za-z0-9_$]*)' does not exist in '([A-Za-z_][A-Za-z0-9_$]*)'/).each do |port, mod|
-              profile = stub_profiles[mod] ||= empty_stub_profile
-              next if profile[:named_ports].include?(port)
-
-              profile[:named_ports] << port
-              changed = true
-            end
-
-            text.scan(/too many parameter assignments given for '([A-Za-z_][A-Za-z0-9_$]*)' \((\d+) given/).each do |mod, count|
-              profile = stub_profiles[mod] ||= empty_stub_profile
-              n = count.to_i
-              next unless profile[:positional_params] < n
-
-              profile[:positional_params] = n
-              changed = true
-            end
-
-            text.scan(/too many port connections given to instantiation of '([A-Za-z_][A-Za-z0-9_$]*)' \((\d+) given/).each do |mod, count|
-              profile = stub_profiles[mod] ||= empty_stub_profile
-              n = count.to_i
-              next unless profile[:positional_ports] < n
-
-              profile[:positional_ports] = n
-              changed = true
-            end
-
-            problematic_errors = text.scan(%r{^([^:\n]+\.(?:v|sv)):\d+:\d+:\s+error:\s+(.+)$})
-            problematic_errors.each do |path, message|
-              next unless message.match?(/cannot assign to a net within a procedural context|identifier '.*?' used before its declaration/)
-
-              expanded_path = File.expand_path(path, Dir.pwd)
-              canonical_pathname = canonical_path(expanded_path)
-              original = staged_reverse[path] || staged_reverse[expanded_path] || staged_reverse[canonical_pathname] || expanded_path
-
-              if message.include?('cannot assign to a net within a procedural context')
-                staged_file = [path, expanded_path, canonical_pathname].find { |candidate| candidate && File.file?(candidate) }
-                if staged_file && !promoted_output_logic.include?(staged_file)
-                  if promote_output_nets_to_logic!(staged_file)
-                    promoted_output_logic << staged_file
-                    changed = true
-                    next
-                  end
-                end
-              end
-
-              next if canonical_path(original) == canonical_top
-              next if excluded_files.include?(original)
-
-              excluded_files << original
-              changed = true
-              module_names_for_file(original, module_to_file).each do |mod|
-                stub_profiles[mod] ||= empty_stub_profile
-              end
-            end
-
-            changed
-          end
-
-          def empty_stub_profile
-            {
-              named_ports: [],
-              positional_ports: 0,
-              named_params: [],
-              positional_params: 0
+            artifact_map = {
+              'core_mlir_path' => File.join(import_artifacts_dir, "#{top}.core.mlir"),
+              'normalized_verilog_path' => File.join(import_artifacts_dir, "#{top}.normalized.v"),
+              'pure_verilog_entry_path' => File.join(import_artifacts_dir, "#{top}.pure_entry.v"),
+              'pure_verilog_root' => File.join(import_artifacts_dir, 'pure_verilog')
             }
-          end
 
-          def module_names_for_file(path, module_to_file)
-            module_to_file.each_with_object([]) do |(name, file), acc|
-              acc << name if file == path
-            end
-          end
+            artifact_map.each do |source_key, destination|
+              source = artifacts[source_key]
+              next if source.nil? || source.to_s.empty?
+              next unless File.exist?(source)
 
-          def write_stub_file(path, stub_profiles)
-            lines = []
-            lines << '// Auto-generated compatibility stubs for unsupported modules'
-            lines << ''
-
-            stub_profiles.keys.sort.each do |module_name|
-              profile = stub_profiles.fetch(module_name)
-              params = profile[:named_params].map { |name| "parameter #{name}=0" }
-              if profile[:positional_params] > params.length
-                (params.length...profile[:positional_params]).each { |idx| params << "parameter P#{idx}=0" }
-              end
-
-              ports = profile[:named_ports].dup
-              if profile[:positional_ports] > ports.length
-                (ports.length...profile[:positional_ports]).each { |idx| ports << "p#{idx}" }
-              end
-
-              header = "module #{module_name}"
-              header += " #(#{params.join(', ')})" if params.any?
-              if ports.any?
-                lines << "#{header} (#{ports.map { |name| "input #{name}" }.join(', ')});"
+              if File.directory?(source)
+                FileUtils.rm_rf(destination)
+                FileUtils.cp_r(source, destination)
               else
-                lines << "#{header};"
+                FileUtils.mkdir_p(File.dirname(destination))
+                FileUtils.cp(source, destination)
               end
-              lines << 'endmodule'
-              lines << ''
+              staged["workspace_#{source_key}"] = destination
             end
 
-            File.write(path, "#{lines.join("\n")}\n")
+            if File.file?(report_path)
+              workspace_report_path = File.join(import_artifacts_dir, 'import_report.json')
+              FileUtils.cp(report_path, workspace_report_path)
+              staged['workspace_report_path'] = workspace_report_path
+            end
+
+            staged
           end
 
-          def write_wrapper_file(path, staged_paths:, stub_path:)
-            lines = []
-            lines << '// Auto-generated compatibility wrapper'
-            staged_paths.each do |source_path|
-              escaped = source_path.gsub('\\', '/').gsub('"', '\\"')
-              lines << "`include \"#{escaped}\""
+          def merge_workspace_artifacts_into_report(report_path:, workspace_artifacts:)
+            report = read_report(report_path)
+            return report if report.empty? || workspace_artifacts.empty?
+
+            report['artifacts'] ||= {}
+            workspace_artifacts.each do |key, value|
+              report['artifacts'][key] = value
+              report['mixed_import'][key] = value if report['mixed_import'].is_a?(Hash)
             end
-            escaped_stub = stub_path.gsub('\\', '/').gsub('"', '\\"')
-            lines << "`include \"#{escaped_stub}\""
-            File.write(path, "#{lines.join("\n")}\n")
+            File.write(report_path, JSON.pretty_generate(report))
+            report
           end
 
           def module_index(files)
@@ -970,27 +759,6 @@ module RHDL
             text
               .gsub(%r{//.*$}, '')
               .gsub(%r{/\*.*?\*/}m, '')
-          end
-
-          def promote_output_nets_to_logic!(path)
-            return false unless File.file?(path)
-
-            source = File.read(path)
-            updated = source.dup
-            updated.gsub!(/\boutput\s+wire\b/, 'output logic')
-            updated.gsub!(/\boutput\b(?!\s+(?:reg|logic)\b)/, 'output logic')
-            return false if updated == source
-
-            File.write(path, updated)
-            true
-          end
-
-          def canonical_path(path)
-            return nil if path.nil? || path.empty?
-
-            File.realpath(path)
-          rescue StandardError
-            File.expand_path(path)
           end
 
           def normalize_verilog_for_circt(text)

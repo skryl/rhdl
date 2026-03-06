@@ -71,6 +71,7 @@ module RHDL
             import_strategy: :stubbed,
             fallback_to_stubbed: true,
             maintain_directory_structure: true,
+            format_output: false,
             keep_workspace: false,
             clean_output: true,
             help: false
@@ -103,6 +104,10 @@ module RHDL
             opts.on('--[no-]maintain-directory-structure',
                     'Mirror source Verilog directories in output DSL paths (default: true)') do |v|
               options[:maintain_directory_structure] = v
+            end
+            opts.on('--[no-]format',
+                    'Format raised RHDL output with RuboCop after import (default: false)') do |v|
+              options[:format_output] = v
             end
             opts.on('--keep-workspace', 'Keep workspace artifacts after run') { options[:keep_workspace] = true }
             opts.on('--[no-]clean', '--[no-]clean-output',

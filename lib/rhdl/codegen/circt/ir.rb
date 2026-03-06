@@ -258,12 +258,13 @@ module RHDL
         end
 
         class PortConnection
-          attr_reader :port_name, :signal, :direction
+          attr_reader :port_name, :signal, :direction, :width
 
-          def initialize(port_name:, signal:, direction: :in)
+          def initialize(port_name:, signal:, direction: :in, width: nil)
             @port_name = port_name
             @signal = signal
             @direction = direction
+            @width = width
           end
         end
       end

@@ -1,15 +1,20 @@
 [submodule "examples/apple2/reference"]
 	path = examples/apple2/reference
 	url = https://github.com/zf3/neoapple2
+	ignore = dirty
 [submodule "examples/gameboy/reference"]
 	path = examples/gameboy/reference
 	url = https://github.com/MiSTer-devel/Gameboy_MiSTer.git
+	ignore = dirty
 [submodule "examples/riscv/software/xv6"]
 	path = examples/riscv/software/xv6
 	url = https://github.com/michaelengel/xv6-rv32.git
+	ignore = dirty
 [submodule "examples/riscv/software/linux"]
 	path = examples/riscv/software/linux
 	url = https://github.com/torvalds/linux.git
+	ignore = dirty
 [submodule "examples/ao486/reference"]
 	path = examples/ao486/reference
 	url = https://github.com/MiSTer-devel/ao486_MiSTer
+	ignore = dirty

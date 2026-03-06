@@ -52,6 +52,8 @@ module RHDL
             @memory_by_name = {}
             @used_memories = Set.new
             @resolving = Set.new
+            @expr_values = {}
+            @active_exprs = Set.new
           end
 
           def emit
@@ -462,6 +464,7 @@ module RHDL
           def connection_width(conn)
             signal = conn.signal
             return signal.width if signal.respond_to?(:width)
+            return conn.width if conn.respond_to?(:width) && conn.width
             return find_width(signal.to_s) if signal
 
             1
@@ -544,15 +547,24 @@ module RHDL
           end
 
           def emit_expr(expr)
+            expr_key = expr.object_id
+            return @expr_values[expr_key] if @expr_values.key?(expr_key)
+
+            if @active_exprs.include?(expr_key)
+              return emit_zero(expr.respond_to?(:width) ? expr.width : 1)
+            end
+
+            @active_exprs << expr_key
+
             case expr
             when IR::Literal
-              emit_const(expr.value, expr.width)
+              emitted = emit_const(expr.value, expr.width)
             when IR::Signal
-              resolve_signal(expr.name.to_s, expr.width)
+              emitted = resolve_signal(expr.name.to_s, expr.width)
             when IR::BinaryOp
-              emit_binary(expr)
+              emitted = emit_binary(expr)
             when IR::UnaryOp
-              emit_unary(expr)
+              emitted = emit_unary(expr)
             when IR::Mux
               cond_raw = emit_expr(expr.condition)
               cond_width = expr.condition.respond_to?(:width) ? expr.condition.width : find_value_width(cond_raw)
@@ -568,7 +580,7 @@ module RHDL
 
               out = fresh(expr.width)
               @lines << "  #{out} = comb.mux #{cond}, #{tval}, #{fval} : #{iwidth(expr.width)}"
-              out
+              emitted = out
             when IR::Slice
               base = emit_expr(expr.base)
               range_begin = expr.range.begin.to_i
@@ -577,24 +589,31 @@ module RHDL
               low = [range_begin, range_end].min
               base_width = [expr.base&.width.to_i, find_value_width(base), 1].max
               target_width = [expr.width.to_i, 1].max
-              return emit_zero(target_width) if low >= base_width
-
-              available_width = base_width - low
-              extract_width = [available_width, target_width].min
-              extracted = fresh(extract_width)
-              @lines << "  #{extracted} = comb.extract #{base} from #{low} : (#{iwidth(base_width)}) -> #{iwidth(extract_width)}"
-              resize_value(extracted, extract_width, target_width)
+              emitted = if low >= base_width
+                          emit_zero(target_width)
+                        else
+                          available_width = base_width - low
+                          extract_width = [available_width, target_width].min
+                          extracted = fresh(extract_width)
+                          @lines << "  #{extracted} = comb.extract #{base} from #{low} : (#{iwidth(base_width)}) -> #{iwidth(extract_width)}"
+                          resize_value(extracted, extract_width, target_width)
+                        end
             when IR::Concat
-              emit_concat(expr)
+              emitted = emit_concat(expr)
             when IR::Resize
-              emit_resize(expr)
+              emitted = emit_resize(expr)
             when IR::Case
-              emit_case(expr)
+              emitted = emit_case(expr)
             when IR::MemoryRead
-              emit_memory_read(expr)
+              emitted = emit_memory_read(expr)
             else
-              emit_zero(expr.respond_to?(:width) ? expr.width : 1)
+              emitted = emit_zero(expr.respond_to?(:width) ? expr.width : 1)
             end
+
+            @expr_values[expr_key] = emitted
+            emitted
+          ensure
+            @active_exprs.delete(expr_key) if expr_key
           end
 
           def emit_binary(expr)

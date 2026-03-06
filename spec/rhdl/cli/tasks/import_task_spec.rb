@@ -20,20 +20,101 @@ RSpec.describe RHDL::CLI::Tasks::ImportTask do
       mode: :verilog,
       input: input,
       out: tmp_dir,
-      raise_to_dsl: false,
-      tool: 'circt-translate'
+      raise_to_dsl: false
     )
 
     allow(RHDL::Codegen::CIRCT::Tooling).to receive(:verilog_to_circt_mlir).and_return(
       {
         success: true,
-        command: 'circt-translate --import-verilog design.v -o design.mlir',
+        command: 'circt-verilog design.v',
         stdout: '',
         stderr: ''
       }
     )
 
     expect { task.run }.to output(/Wrote CIRCT MLIR/).to_stdout
+  end
+
+  it 'cleans imported core MLIR after circt-verilog import' do
+    input = File.join(tmp_dir, 'design.v')
+    core_mlir = File.join(tmp_dir, 'design.core.mlir')
+    File.write(input, 'module design(input logic clk, input logic d, output logic q); always_ff @(posedge clk) q <= d; endmodule')
+
+    task = described_class.new(
+      mode: :verilog,
+      input: input,
+      out: tmp_dir,
+      top: 'eReg_SavestateV__vhdl_c2a6c3cbd0d4',
+      raise_to_dsl: false
+    )
+
+    allow(RHDL::Codegen::CIRCT::Tooling).to receive(:verilog_to_circt_mlir) do |**args|
+      File.write(args.fetch(:out_path), <<~MLIR)
+        hw.module private @eReg_SavestateV__vhdl_c2a6c3cbd0d4(in %clk : i1, in %BUS_Din : i64, in %BUS_Adr : i10, in %BUS_wren : i1, in %BUS_rst : i1, in %Din : i61, out BUS_Dout : i64, out Dout : i61) {
+          %c0_i3 = hw.constant 0 : i3
+          %0 = llhd.constant_time <0ns, 0d, 1e>
+          %c9_i10 = hw.constant 9 : i10
+          %c0_i61 = hw.constant 0 : i61
+          %dout_buffer = llhd.sig %c0_i61 : i61
+          %n324 = llhd.sig %c0_i61 : i61
+          %1 = llhd.prb %dout_buffer : i61
+          %2 = llhd.prb %n324 : i61
+          llhd.drv %dout_buffer, %2 after %0 : i61
+          llhd.drv %dout_buffer, %c0_i61 after %0 : i61
+          %3 = comb.icmp eq %BUS_Adr, %c9_i10 : i10
+          %4 = comb.and %BUS_wren, %3 : i1
+          %5 = comb.extract %BUS_Din from 0 : (i64) -> i61
+          %6 = comb.mux %4, %5, %1 : i61
+          %7 = comb.mux %BUS_rst, %c0_i61, %6 : i61
+          %8 = seq.to_clock %clk
+          %n324_0 = seq.firreg %7 clock %8 : i61
+          llhd.drv %n324, %n324_0 after %0 : i61
+          llhd.drv %n324, %c0_i61 after %0 : i61
+          %9 = comb.concat %c0_i3, %1 : i3, i61
+          hw.output %9, %1 : i64, i61
+        }
+      MLIR
+      {
+        success: true,
+        command: 'circt-verilog --ir-hw design.v',
+        stdout: '',
+        stderr: ''
+      }
+    end
+
+    expect { task.run }.to output(/Cleanup imported CIRCT core MLIR/).to_stdout
+    expect(File.read(core_mlir)).not_to include('llhd.')
+    expect(File.read(core_mlir)).to include('seq.compreg')
+  end
+
+  it 'skips imported core cleanup when circt-verilog already emitted pure core MLIR' do
+    input = File.join(tmp_dir, 'simple.v')
+    core_mlir = File.join(tmp_dir, 'simple.core.mlir')
+    File.write(input, 'module simple(input logic a, output logic y); assign y = a; endmodule')
+
+    task = described_class.new(
+      mode: :verilog,
+      input: input,
+      out: tmp_dir,
+      raise_to_dsl: false
+    )
+
+    allow(RHDL::Codegen::CIRCT::Tooling).to receive(:verilog_to_circt_mlir) do |**args|
+      File.write(args.fetch(:out_path), <<~MLIR)
+        hw.module @simple(%a: i1) -> (y: i1) {
+          hw.output %a : i1
+        }
+      MLIR
+      {
+        success: true,
+        command: 'circt-verilog --ir-hw simple.v',
+        stdout: '',
+        stderr: ''
+      }
+    end
+
+    expect { task.run }.to output(/Skip imported CIRCT core cleanup \(no cleanup markers found\)/).to_stdout
+    expect(File.read(core_mlir)).not_to include('llhd.')
   end
 
   it 'raises a descriptive error when verilog tooling fails' do
@@ -44,14 +125,13 @@ RSpec.describe RHDL::CLI::Tasks::ImportTask do
       mode: :verilog,
       input: input,
       out: tmp_dir,
-      raise_to_dsl: false,
-      tool: 'circt-translate'
+      raise_to_dsl: false
     )
 
     allow(RHDL::Codegen::CIRCT::Tooling).to receive(:verilog_to_circt_mlir).and_return(
       {
         success: false,
-        command: 'circt-translate --import-verilog broken.v -o broken.mlir',
+        command: 'circt-verilog broken.v',
         stdout: '',
         stderr: 'parse failed'
       }
@@ -97,11 +177,11 @@ RSpec.describe RHDL::CLI::Tasks::ImportTask do
     expect do
       task.run
     end.to output(
-      /Import step: Parse\/import CIRCT MLIR.*Import step: Raise CIRCT -> RHDL files.*Import step: Format RHDL output directory.*Import step: Write import report/m
+      /Import step: Parse\/import CIRCT MLIR.*Import step: Raise CIRCT -> RHDL files.*Import step: Skip formatting RHDL output directory.*Import step: Write import report/m
     ).to_stdout
   end
 
-  it 'requests formatted raised output during import raise flow' do
+  it 'skips formatted raised output during import raise flow by default' do
     mlir_file = File.join(tmp_dir, 'simple.mlir')
     File.write(mlir_file, <<~MLIR)
       hw.module @simple(%a: i1) -> (y: i1) {
@@ -123,9 +203,30 @@ RSpec.describe RHDL::CLI::Tasks::ImportTask do
       strict: true,
       format: false
     ).and_call_original
-    expect(RHDL::Codegen).to receive(:format_raised_dsl).with(tmp_dir).and_call_original
+    expect(RHDL::Codegen).not_to receive(:format_raised_dsl)
 
     task.run
+  end
+
+  it 'formats raised output when format_output is true' do
+    mlir_file = File.join(tmp_dir, 'simple.mlir')
+    File.write(mlir_file, <<~MLIR)
+      hw.module @simple(%a: i1) -> (y: i1) {
+        hw.output %a : i1
+      }
+    MLIR
+
+    task = described_class.new(
+      mode: :circt,
+      input: mlir_file,
+      out: tmp_dir,
+      top: 'simple',
+      format_output: true
+    )
+
+    expect(RHDL::Codegen).to receive(:format_raised_dsl).with(tmp_dir).and_call_original
+
+    expect { task.run }.to output(/Import step: Format RHDL output directory/).to_stdout
   end
 
   it 'skips raise flow in circt mode when raise_to_dsl is false' do
@@ -173,6 +274,7 @@ RSpec.describe RHDL::CLI::Tasks::ImportTask do
     expect(report.fetch('strict')).to be(true)
     expect(report.fetch('module_count')).to eq(1)
     expect(report.fetch('modules').first.fetch('name')).to eq('simple')
+    expect(report).not_to have_key('arc_remove_llhd')
   end
 
   it 'fails when top is missing but still writes partial output files' do
@@ -267,34 +369,124 @@ RSpec.describe RHDL::CLI::Tasks::ImportTask do
     expect(text).not_to match(/\bdo\b/)
   end
 
-  it 'lowers Moore MLIR to core before raise when mixed import emits moore.module' do
-    mlir_path = File.join(tmp_dir, 'mixed.moore.mlir')
-    File.write(mlir_path, "moore.module @top() {\n}\n")
-    lowered_path = "#{mlir_path}.core.lowered"
+  it 'renames synthesized VHDL modules when a specialized module name is requested' do
+    out_path = File.join(tmp_dir, 'dpram.v')
+    File.write(out_path, "module dpram (\n  input clk\n);\nendmodule\n")
     task = described_class.new(mode: :mixed, out: tmp_dir)
-    status = instance_double(Process::Status, success?: true)
 
-    expect(Open3).to receive(:capture3).with(
-      'circt-opt',
-      '--moore-lower-concatref',
-      '--canonicalize',
-      '--moore-lower-concatref',
-      '--convert-moore-to-core',
-      '--llhd-sig2reg',
-      '--canonicalize',
-      mlir_path,
-      '-o',
-      lowered_path
-    ) do
-      File.write(lowered_path, "hw.module @top() {\n  hw.output\n}\n")
-      ['', '', status]
-    end
+    task.send(
+      :postprocess_generated_vhdl_verilog!,
+      entity: 'dpram',
+      out_path: out_path,
+      module_name: 'dpram__vhdl_deadbeef'
+    )
 
-    expect do
-      task.send(:lower_moore_to_core_mlir_if_needed!, mlir_out: mlir_path)
-    end.to output(/Lower Moore MLIR -> core\/llhd/).to_stdout
+    text = File.read(out_path)
+    expect(text).to include('module dpram__vhdl_deadbeef')
+    expect(text).not_to include('module dpram (')
+  end
 
-    expect(File.read(mlir_path)).to include('hw.module @top')
+  it 'namespaces generated helper modules to avoid duplicate definitions across specialized files' do
+    out_path = File.join(tmp_dir, 'dpram.v')
+    File.write(out_path, <<~VERILOG)
+      module altsyncram_hash(input clk);
+      endmodule
+
+      module dpram(input clk);
+        altsyncram_hash ram(.clk(clk));
+      endmodule
+    VERILOG
+    task = described_class.new(mode: :mixed, out: tmp_dir)
+
+    task.send(
+      :postprocess_generated_vhdl_verilog!,
+      entity: 'dpram',
+      out_path: out_path,
+      module_name: 'dpram__vhdl_deadbeef'
+    )
+
+    text = File.read(out_path)
+    expect(text).to include('module dpram__vhdl_deadbeef')
+    expect(text).to include('module altsyncram_hash__')
+    expect(text).to include('altsyncram_hash__')
+    expect(text).not_to include("module altsyncram_hash\n")
+  end
+
+  it 'expands VHDL synth targets for parameterized Verilog callsites and rewrites them' do
+    vhdl_path = File.join(tmp_dir, 'dpram.vhd')
+    File.write(vhdl_path, <<~VHDL)
+      entity dpram is
+        generic (
+          addr_width : integer := 8;
+          data_width : integer := 8
+        );
+        port (
+          clock_a : in bit
+        );
+      end dpram;
+    VHDL
+
+    verilog_path = File.join(tmp_dir, 'top.v')
+    File.write(verilog_path, <<~VERILOG)
+      module top;
+        dpram #(13, 8) vram0 (.clock_a(clk));
+        dpram #(7, 8) zpram (.clock_a(clk));
+      endmodule
+    VERILOG
+
+    task = described_class.new(mode: :mixed, out: tmp_dir)
+    expansion = task.send(
+      :expand_vhdl_synth_targets_for_specializations,
+      synth_targets: [{ entity: 'dpram', library: nil }],
+      verilog_files: [{ path: verilog_path, language: 'verilog', library: nil }],
+      vhdl_files: [{ path: vhdl_path, language: 'vhdl', library: nil }]
+    )
+
+    targets = expansion.fetch(:targets)
+    expect(targets.length).to eq(2)
+    expect(targets.map { |target| target.fetch(:module_name) }.uniq.length).to eq(2)
+    expect(targets.map { |target| target.fetch(:extra_args) }).to contain_exactly(
+      ['-gaddr_width=13', '-gdata_width=8'],
+      ['-gaddr_width=7', '-gdata_width=8']
+    )
+
+    rewritten = task.send(
+      :rewrite_vhdl_specialized_instantiations,
+      File.read(verilog_path),
+      rewrite_plan: expansion.fetch(:rewrite_plan)
+    )
+    expect(rewritten).not_to include('dpram #(')
+    expect(rewritten.scan(/dpram__vhdl_[0-9a-f]{12}\s+vram0/).length).to eq(1)
+    expect(rewritten.scan(/dpram__vhdl_[0-9a-f]{12}\s+zpram/).length).to eq(1)
+  end
+
+  it 'normalizes Verilog based literals for VHDL generic overrides' do
+    task = described_class.new(mode: :mixed, out: tmp_dir)
+
+    expect(task.send(:normalize_vhdl_generic_override_value, "64'h0000E00001FFFFF0")).to eq('X"0000E00001FFFFF0"')
+    expect(task.send(:normalize_vhdl_generic_override_value, "8'd42")).to eq('42')
+    expect(task.send(:normalize_vhdl_generic_override_value, '"BootROMs/cgb_boot.mif"')).to eq('BootROMs/cgb_boot.mif')
+  end
+
+  it 'uses circt-verilog as the fixed verilog import frontend' do
+    input = File.join(tmp_dir, 'design.v')
+    File.write(input, 'module design(input logic a, output logic y); assign y = a; endmodule')
+
+    task = described_class.new(mode: :verilog, input: input, out: tmp_dir, raise_to_dsl: false, tool: 'circt-translate')
+
+    expect(RHDL::Codegen::CIRCT::Tooling).to receive(:verilog_to_circt_mlir).with(
+      verilog_path: input,
+      out_path: File.join(tmp_dir, 'design.core.mlir'),
+      tool: 'circt-verilog',
+      extra_args: []
+    ).and_return(
+      success: true,
+      command: 'circt-verilog design.v',
+      stdout: '',
+      stderr: ''
+    )
+
+    task.run
   end
 
   describe 'mixed mode' do
@@ -342,20 +534,21 @@ RSpec.describe RHDL::CLI::Tasks::ImportTask do
         mode: :mixed,
         manifest: manifest_path,
         out: tmp_dir,
-        raise_to_dsl: false,
-        tool: 'circt-translate'
+        raise_to_dsl: false
       )
 
       allow(task).to receive(:build_mixed_import_staging).and_return(
         {
           staged_verilog_path: staged_verilog,
+          pure_verilog_root: File.join(tmp_dir, '.mixed_import', 'pure_verilog'),
+          pure_verilog_entry_path: staged_verilog,
           provenance: { source_files: [] }
         }
       )
       allow(RHDL::Codegen::CIRCT::Tooling).to receive(:verilog_to_circt_mlir).and_return(
         {
           success: true,
-          command: 'circt-translate --import-verilog staged.v -o mixed_top.mlir',
+          command: 'circt-verilog staged.v',
           stdout: '',
           stderr: ''
         }
@@ -390,13 +583,14 @@ RSpec.describe RHDL::CLI::Tasks::ImportTask do
         manifest: manifest_path,
         out: tmp_dir,
         strict: true,
-        report: report_path,
-        tool: 'circt-translate'
+        report: report_path
       )
 
       allow(task).to receive(:build_mixed_import_staging).and_return(
         {
           staged_verilog_path: staged_verilog,
+          pure_verilog_root: File.join(tmp_dir, '.mixed_import', 'pure_verilog'),
+          pure_verilog_entry_path: File.join(tmp_dir, '.mixed_import', 'pure_verilog_entry.v'),
           top_name: 'mixed_top',
           tool_args: [],
           provenance: {
@@ -418,19 +612,35 @@ RSpec.describe RHDL::CLI::Tasks::ImportTask do
         )
         {
           success: true,
-          command: 'circt-translate --import-verilog staged.v -o mixed_top.mlir',
+          command: 'circt-verilog staged.v',
           stdout: '',
           stderr: ''
         }
       end
+      allow(RHDL::Codegen::CIRCT::Tooling).to receive(:circt_mlir_to_verilog).and_return(
+        success: true,
+        command: 'firtool mixed_top.core.mlir --verilog',
+        stdout: '',
+        stderr: ''
+      )
 
       expect { task.run }.to output(/Wrote import report/).to_stdout
       expect(File.exist?(File.join(tmp_dir, 'mixed_top.rb'))).to be(true)
       report = JSON.parse(File.read(report_path))
       expect(report.fetch('success')).to be(true)
       expect(report.fetch('top')).to eq('mixed_top')
-      expect(report.fetch('mixed_import').fetch('top_name')).to eq('mixed_top')
-      expect(report.fetch('mixed_import').fetch('source_files').first.fetch('language')).to eq('verilog')
+      mixed = report.fetch('mixed_import')
+      artifacts = report.fetch('artifacts')
+      expect(mixed.fetch('top_name')).to eq('mixed_top')
+      expect(mixed.fetch('source_files').first.fetch('language')).to eq('verilog')
+      expect(mixed.fetch('pure_verilog_root')).to eq(File.join(tmp_dir, '.mixed_import', 'pure_verilog'))
+      expect(mixed.fetch('pure_verilog_entry_path')).to eq(File.join(tmp_dir, '.mixed_import', 'pure_verilog_entry.v'))
+      expect(mixed.fetch('core_mlir_path')).to eq(File.join(tmp_dir, 'mixed_top.core.mlir'))
+      expect(mixed.fetch('normalized_verilog_path')).to eq(File.join(tmp_dir, '.mixed_import', 'mixed_top.normalized.v'))
+      expect(artifacts.fetch('pure_verilog_root')).to eq(mixed.fetch('pure_verilog_root'))
+      expect(artifacts.fetch('pure_verilog_entry_path')).to eq(mixed.fetch('pure_verilog_entry_path'))
+      expect(artifacts.fetch('core_mlir_path')).to eq(mixed.fetch('core_mlir_path'))
+      expect(artifacts.fetch('normalized_verilog_path')).to eq(mixed.fetch('normalized_verilog_path'))
     end
 
     it 'runs mixed autoscan end-to-end through raise flow and writes report provenance' do
@@ -454,8 +664,7 @@ RSpec.describe RHDL::CLI::Tasks::ImportTask do
         out: tmp_dir,
         top: 'mixed_top',
         strict: true,
-        report: report_path,
-        tool: 'circt-translate'
+        report: report_path
       )
 
       allow(RHDL::Codegen::CIRCT::Tooling).to receive(:ghdl_analyze).and_return(
@@ -487,11 +696,17 @@ RSpec.describe RHDL::CLI::Tasks::ImportTask do
         )
         {
           success: true,
-          command: 'circt-translate --import-verilog mixed_staged.v -o mixed_top.mlir',
+          command: 'circt-verilog mixed_staged.v',
           stdout: '',
           stderr: ''
         }
       end
+      allow(RHDL::Codegen::CIRCT::Tooling).to receive(:circt_mlir_to_verilog).and_return(
+        success: true,
+        command: 'firtool mixed_top.core.mlir --verilog',
+        stdout: '',
+        stderr: ''
+      )
 
       expect { task.run }.to output(/Wrote import report/).to_stdout
       expect(File.exist?(File.join(tmp_dir, 'mixed_top.rb'))).to be(true)
@@ -501,12 +716,17 @@ RSpec.describe RHDL::CLI::Tasks::ImportTask do
       expect(report.fetch('success')).to be(true)
       expect(report.fetch('top')).to eq('mixed_top')
       mixed = report.fetch('mixed_import')
+      artifacts = report.fetch('artifacts')
       expect(mixed.fetch('autoscan_root')).to eq(File.expand_path(rtl_dir))
-      expect(mixed.fetch('top_file')).to eq(File.expand_path(top_path))
+      expect(mixed.fetch('top_file')).to eq(File.join(tmp_dir, '.mixed_import', 'pure_verilog', 'mixed_top.sv'))
       expect(mixed.fetch('top_language')).to eq('verilog')
       expect(mixed.fetch('vhdl_analysis_commands')).not_to be_empty
       expect(mixed.fetch('vhdl_synth_outputs')).not_to be_empty
-      expect(mixed.fetch('staging_entry_path')).to include('.mixed_import/mixed_staged.v')
+      expect(mixed.fetch('pure_verilog_root')).to eq(File.join(tmp_dir, '.mixed_import', 'pure_verilog'))
+      expect(mixed.fetch('pure_verilog_entry_path')).to eq(File.join(tmp_dir, '.mixed_import', 'pure_verilog_entry.v'))
+      expect(mixed.fetch('core_mlir_path')).to eq(File.join(tmp_dir, 'mixed_top.core.mlir'))
+      expect(mixed.fetch('normalized_verilog_path')).to eq(File.join(tmp_dir, '.mixed_import', 'mixed_top.normalized.v'))
+      expect(artifacts.fetch('core_mlir_path')).to eq(mixed.fetch('core_mlir_path'))
     end
 
     it 'fails fast when VHDL synth fails during mixed import run' do
@@ -521,8 +741,7 @@ RSpec.describe RHDL::CLI::Tasks::ImportTask do
         mode: :mixed,
         input: top_path,
         out: tmp_dir,
-        strict: true,
-        tool: 'circt-translate'
+        strict: true
       )
 
       allow(RHDL::Codegen::CIRCT::Tooling).to receive(:ghdl_analyze).and_return(

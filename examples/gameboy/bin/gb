@@ -6,7 +6,9 @@
 
 require 'optparse'
 
-$LOAD_PATH.unshift File.expand_path('../../..', __dir__)
+project_root = File.expand_path('../../..', __dir__)
+$LOAD_PATH.unshift File.expand_path('../../../lib', __dir__)
+$LOAD_PATH.unshift project_root
 $LOAD_PATH.unshift File.expand_path('../utilities/tasks', __dir__)
 
 require 'rhdl'
@@ -22,6 +24,7 @@ options = {
   audio: false,
   mode: :ruby,
   sim: nil,
+  hdl_dir: nil,
   renderer: :color,
   headless: false
 }
@@ -38,6 +41,10 @@ parser = OptionParser.new do |opts|
 
   opts.on("--sim TYPE", [:ruby, :interpret, :jit, :compile], "Simulator backend: ruby (default), interpret, jit, compile") do |v|
     options[:sim] = v
+  end
+
+  opts.on("--hdl-dir DIR", "Game Boy HDL directory override (default: examples/gameboy/hdl)") do |v|
+    options[:hdl_dir] = File.expand_path(v)
   end
 
   opts.on("--color", "Use color renderer (default)") do
@@ -91,6 +98,11 @@ parser = OptionParser.new do |opts|
 end
 
 parser.parse!(ARGV)
+
+if options[:hdl_dir] && !Dir.exist?(options[:hdl_dir])
+  puts "Error: HDL directory not found: #{options[:hdl_dir]}"
+  exit 1
+end
 
 # Default backend by selected mode when --sim is not provided.
 if options[:sim].nil?

@@ -180,7 +180,20 @@ module RHDL
           name = top_name || verilog_module_name
           resolved_params = resolve_codegen_parameters(parameters)
 
-          ports = _port_defs.map do |p|
+          # Imported/generated DSL can occasionally contain duplicated port
+          # declarations with identical name/direction pairs. Keep the first
+          # declaration to produce valid CIRCT module signatures.
+          deduped_port_defs = []
+          seen_port_keys = {}
+          _port_defs.each do |p|
+            key = [p[:name].to_s, p[:direction].to_s]
+            next if seen_port_keys[key]
+
+            seen_port_keys[key] = true
+            deduped_port_defs << p
+          end
+
+          ports = deduped_port_defs.map do |p|
             raw_width = p[:width]
             resolved_width = raw_width.is_a?(Symbol) ? (resolved_params[raw_width] || 1) : raw_width
             RHDL::Codegen::CIRCT::IR::Port.new(

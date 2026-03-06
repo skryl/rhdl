@@ -7,6 +7,11 @@ require 'fileutils'
 require_relative '../../../../examples/ao486/utilities/import/system_importer'
 
 RSpec.describe RHDL::Examples::AO486::Import::SystemImporter do
+  def require_import_tool!
+    tool = RHDL::Codegen::CIRCT::Tooling::DEFAULT_VERILOG_IMPORT_TOOL
+    skip "#{tool} not available" unless HdlToolchain.which(tool)
+  end
+
   def diagnostic_summary(result)
     lines = []
     diagnostics = result.respond_to?(:diagnostics) ? Array(result.diagnostics) : []
@@ -59,7 +64,7 @@ RSpec.describe RHDL::Examples::AO486::Import::SystemImporter do
   end
 
   it 'imports system.v through CIRCT and raises DSL files', timeout: 120 do
-    skip 'circt-translate not available' unless HdlToolchain.which('circt-translate')
+    require_import_tool!
     skip 'circt-opt not available' unless HdlToolchain.which('circt-opt')
 
     Dir.mktmpdir('ao486_import_out') do |out_dir|
@@ -74,7 +79,7 @@ RSpec.describe RHDL::Examples::AO486::Import::SystemImporter do
 
         system_rb = File.join(out_dir, 'system.rb')
         expect(File.exist?(system_rb)).to be(true)
-        expect(File.read(system_rb)).to include('class System < RHDL::Sim::Component')
+        expect(File.read(system_rb)).to include('class System < RHDL::Sim::SequentialComponent')
         expect(File.exist?(File.join(out_dir, 'ao486', 'ao486.rb'))).to be(true)
 
         normalized_mlir = result.normalized_core_mlir_path
@@ -86,7 +91,7 @@ RSpec.describe RHDL::Examples::AO486::Import::SystemImporter do
   end
 
   it 'produces core CIRCT artifacts from Verilog system.v import', timeout: 120 do
-    skip 'circt-translate not available' unless HdlToolchain.which('circt-translate')
+    require_import_tool!
     skip 'circt-opt not available' unless HdlToolchain.which('circt-opt')
 
     Dir.mktmpdir('ao486_import_out') do |out_dir|
@@ -102,14 +107,16 @@ RSpec.describe RHDL::Examples::AO486::Import::SystemImporter do
         expect(normalized).to include('hw.module @system')
         expect(normalized).not_to include('hw.module private @')
 
-        expect(result.command_log.any? { |cmd| cmd.start_with?('circt-translate ') }).to be(true)
-        expect(result.command_log.any? { |cmd| cmd.start_with?('circt-opt ') }).to be(true)
+        expect(result.command_log.any? do |cmd|
+          cmd.start_with?("#{RHDL::Codegen::CIRCT::Tooling::DEFAULT_VERILOG_IMPORT_TOOL} ")
+        end).to be(true)
+        expect(result.command_log.none? { |cmd| cmd.start_with?('circt-translate ') }).to be(true)
       end
     end
   end
 
   it 'round-trips raised AO486 system back to CIRCT MLIR', timeout: 120 do
-    skip 'circt-translate not available' unless HdlToolchain.which('circt-translate')
+    require_import_tool!
     skip 'circt-opt not available' unless HdlToolchain.which('circt-opt')
 
     Dir.mktmpdir('ao486_import_out') do |out_dir|
@@ -135,7 +142,7 @@ RSpec.describe RHDL::Examples::AO486::Import::SystemImporter do
   end
 
   it 'attempts tree strategy and falls back to stubbed when needed', timeout: 240 do
-    skip 'circt-translate not available' unless HdlToolchain.which('circt-translate')
+    require_import_tool!
     skip 'circt-opt not available' unless HdlToolchain.which('circt-opt')
 
     Dir.mktmpdir('ao486_import_out') do |out_dir|
@@ -162,7 +169,7 @@ RSpec.describe RHDL::Examples::AO486::Import::SystemImporter do
   end
 
   it 'does not fallback when tree strategy is requested with fallback disabled', timeout: 240 do
-    skip 'circt-translate not available' unless HdlToolchain.which('circt-translate')
+    require_import_tool!
     skip 'circt-opt not available' unless HdlToolchain.which('circt-opt')
 
     Dir.mktmpdir('ao486_import_out') do |out_dir|
@@ -186,7 +193,7 @@ RSpec.describe RHDL::Examples::AO486::Import::SystemImporter do
   end
 
   it 'can disable directory mirroring for tree strategy output', timeout: 240 do
-    skip 'circt-translate not available' unless HdlToolchain.which('circt-translate')
+    require_import_tool!
     skip 'circt-opt not available' unless HdlToolchain.which('circt-opt')
 
     Dir.mktmpdir('ao486_import_out') do |out_dir|
@@ -209,7 +216,7 @@ RSpec.describe RHDL::Examples::AO486::Import::SystemImporter do
   end
 
   it 'can disable directory mirroring for stubbed strategy output', timeout: 120 do
-    skip 'circt-translate not available' unless HdlToolchain.which('circt-translate')
+    require_import_tool!
     skip 'circt-opt not available' unless HdlToolchain.which('circt-opt')
 
     Dir.mktmpdir('ao486_import_out') do |out_dir|

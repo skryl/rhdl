@@ -102,7 +102,7 @@ module RHDL
                 diagnostic = command_output_first_line(arcilator_health_checks.fetch(tool))
                 puts "  #{tool}: #{diagnostic}" if diagnostic && !diagnostic.empty?
               end
-              puts "  Install CIRCT tools (firtool, arcilator, circt-translate, llc) from https://github.com/llvm/circt"
+              puts "  Install CIRCT tools (firtool, arcilator, circt-verilog, llc) from https://github.com/llvm/circt"
             end
           end
 
@@ -211,9 +211,10 @@ module RHDL
             'verilator' => { cmd: 'verilator --version', optional: true, desc: 'Verilator (for high-performance Verilog simulation)' },
             'firtool' => { cmd: 'firtool --version', optional: true, desc: 'CIRCT firtool (for Arcilator HDL simulation)' },
             'arcilator' => { cmd: 'arcilator --version', optional: true, desc: 'CIRCT Arcilator (cycle-based HDL simulator)' },
+            'circt-verilog' => { cmd: 'circt-verilog --version', optional: false, desc: 'CIRCT Verilog frontend (core-dialect import)' },
             'mlir-opt' => { cmd: 'mlir-opt --version', optional: true, desc: 'MLIR optimizer (GPU/SPIR-V lowering passes)' },
             'spirv-cross' => { cmd: 'spirv-cross --version', optional: true, desc: 'SPIR-V to Metal shader cross-compiler' },
-            'circt-translate' => { cmd: 'circt-translate --version', optional: true, desc: 'CIRCT translate utility (MLIR/Verilog translation)' },
+            'circt-translate' => { cmd: 'circt-translate --version', optional: true, desc: 'CIRCT translate utility (legacy/alternate translation paths)' },
             'ghdl' => { cmd: 'ghdl --version', optional: true, desc: 'GHDL (VHDL synth frontend for mixed-language import)' },
             'dot' => { cmd: 'dot -V', optional: true, desc: 'Graphviz (for diagram rendering)' },
             'bun' => { cmd: 'bun --version', optional: true, desc: 'Bun (for web and desktop tooling)' },
@@ -302,7 +303,7 @@ module RHDL
           {
             'firtool' => 'firtool --version',
             'arcilator' => 'arcilator --version',
-            'circt-translate' => 'circt-translate --version',
+            'circt-verilog' => 'circt-verilog --version',
             'llc' => 'llc --version'
           }
         end
@@ -496,7 +497,7 @@ module RHDL
           when :windows
             puts "On Windows, please install CIRCT tools manually:"
             puts "  1. Download prebuilt CIRCT release from: https://github.com/llvm/circt/releases"
-            puts "  2. Add firtool/arcilator/llc to PATH"
+            puts "  2. Add firtool/arcilator/circt-verilog/llc to PATH"
           else
             puts "Unknown platform. Attempting GitHub prebuilt CIRCT install..."
             install_arcilator_from_release(platform: platform, missing_tools: missing_tools)

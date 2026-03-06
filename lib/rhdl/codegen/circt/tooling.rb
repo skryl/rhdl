@@ -2,6 +2,7 @@
 
 require 'open3'
 require 'shellwords'
+require 'fileutils'
 
 module RHDL
   module Codegen
@@ -9,9 +10,10 @@ module RHDL
       module Tooling
         module_function
 
-        DEFAULT_VERILOG_IMPORT_TOOL = 'circt-translate'
+        DEFAULT_VERILOG_IMPORT_TOOL = 'circt-verilog'
+        DEFAULT_CIRCT_VERILOG_IMPORT_MODE = '--ir-hw'
         DEFAULT_VERILOG_EXPORT_TOOL = 'firtool'
-        DEFAULT_FIRTOOL_LOWERING_OPTIONS = 'disallowPackedArrays,disallowMuxInlining,disallowPortDeclSharing,disallowLocalVariables,locationInfoStyle=none,omitVersionComment'
+        DEFAULT_FIRTOOL_LOWERING_OPTIONS = 'disallowMuxInlining,disallowPortDeclSharing,disallowLocalVariables,locationInfoStyle=none,omitVersionComment'
         DEFAULT_VHDL_IMPORT_TOOL = 'ghdl'
 
         def verilog_to_circt_mlir(verilog_path:, out_path:, tool: DEFAULT_VERILOG_IMPORT_TOOL, extra_args: [])
@@ -24,6 +26,10 @@ module RHDL
           return failed_result(tool: tool, out_path: out_path, cmd: cmd, stderr: preflight_error) if preflight_error
 
           stdout, stderr, status = Open3.capture3(*cmd)
+          if status.success?
+            FileUtils.mkdir_p(File.dirname(out_path.to_s))
+            File.write(out_path, stdout)
+          end
 
           {
             success: status.success?,
@@ -35,6 +41,111 @@ module RHDL
           }
         rescue Errno::ENOENT
           failed_result(tool: tool, out_path: out_path, cmd: cmd, stderr: "Tool not found: #{tool}")
+        end
+
+        def prepare_arc_mlir_from_verilog(verilog_path:, work_dir:, tool: DEFAULT_VERILOG_IMPORT_TOOL)
+          FileUtils.mkdir_p(work_dir)
+
+          moore_mlir_path = File.join(work_dir, 'import.core.mlir')
+          normalized_llhd_mlir_path = File.join(work_dir, 'import.normalized.llhd.mlir')
+          hwseq_mlir_path = File.join(work_dir, 'import.hwseq.mlir')
+          arc_mlir_path = File.join(work_dir, 'import.arc.mlir')
+
+          import = verilog_to_circt_mlir(
+            verilog_path: verilog_path,
+            out_path: moore_mlir_path,
+            tool: tool
+          )
+          return prepare_arc_failure(import: import, work_dir: work_dir) unless import[:success]
+
+          strip_dbg_ops!(moore_mlir_path)
+          imported_text = File.read(moore_mlir_path)
+
+          unless imported_text.include?('moore.module')
+            FileUtils.cp(moore_mlir_path, hwseq_mlir_path)
+            arc = run_external_command(
+              tool: 'circt-opt',
+              cmd: ['circt-opt', '--canonicalize', '--convert-to-arcs', '--canonicalize', hwseq_mlir_path, '-o', arc_mlir_path],
+              out_path: arc_mlir_path
+            )
+
+            return {
+              success: arc[:success],
+              import: import,
+              normalize: nil,
+              transform: {
+                success: true,
+                output_text: imported_text,
+                transformed_modules: module_names_from_core_mlir(imported_text),
+                unsupported_modules: []
+              },
+              arc: arc,
+              moore_mlir_path: moore_mlir_path,
+              normalized_llhd_mlir_path: nil,
+              hwseq_mlir_path: hwseq_mlir_path,
+              arc_mlir_path: arc[:success] ? arc_mlir_path : nil,
+              transformed_modules: module_names_from_core_mlir(imported_text),
+              unsupported_modules: []
+            }
+          end
+
+          normalize_cmd = [
+            'circt-opt',
+            '--moore-lower-concatref',
+            '--canonicalize',
+            '--moore-lower-concatref',
+            '--convert-moore-to-core',
+            '--llhd-sig2reg',
+            '--canonicalize',
+            '--llhd-lower-processes',
+            '--llhd-wrap-procedural-ops',
+            '--llhd-inline-calls',
+            '--llhd-hoist-signals',
+            '--llhd-remove-control-flow',
+            '--llhd-mem2reg',
+            '--llhd-deseq',
+            '--llhd-sig2reg',
+            '--canonicalize',
+            moore_mlir_path,
+            '-o',
+            normalized_llhd_mlir_path
+          ]
+          normalize = run_external_command(tool: 'circt-opt', cmd: normalize_cmd, out_path: normalized_llhd_mlir_path)
+          return prepare_arc_failure(import: import, normalize: normalize, work_dir: work_dir) unless normalize[:success]
+
+          strip_dbg_ops!(normalized_llhd_mlir_path)
+
+          transform = ArcPrepare.transform_normalized_llhd(File.read(normalized_llhd_mlir_path))
+          File.write(hwseq_mlir_path, transform.fetch(:output_text))
+
+          arc = if transform.fetch(:unsupported_modules).empty?
+                  run_external_command(
+                    tool: 'circt-opt',
+                    cmd: ['circt-opt', '--convert-to-arcs', hwseq_mlir_path, '-o', arc_mlir_path],
+                    out_path: arc_mlir_path
+                  )
+                else
+                  failed_result(
+                    tool: 'circt-opt',
+                    out_path: arc_mlir_path,
+                    cmd: ['circt-opt', '--convert-to-arcs', hwseq_mlir_path, '-o', arc_mlir_path],
+                    stderr: format_unsupported_modules(transform.fetch(:unsupported_modules))
+                  )
+                end
+
+          {
+            success: arc[:success],
+            import: import,
+            normalize: normalize,
+            transform: transform,
+            arc: arc,
+            moore_mlir_path: moore_mlir_path,
+            normalized_llhd_mlir_path: normalized_llhd_mlir_path,
+            hwseq_mlir_path: hwseq_mlir_path,
+            arc_mlir_path: arc[:success] ? arc_mlir_path : nil,
+            transformed_modules: transform.fetch(:transformed_modules),
+            unsupported_modules: transform.fetch(:unsupported_modules)
+          }
         end
 
         def circt_mlir_to_verilog(mlir_path:, out_path:, tool: DEFAULT_VERILOG_EXPORT_TOOL, extra_args: [], input_format: nil)
@@ -60,12 +171,26 @@ module RHDL
         end
 
         def ghdl_analyze(vhdl_path:, workdir:, std: '08', work: 'work', tool: DEFAULT_VHDL_IMPORT_TOOL, extra_args: [])
-          cmd = [tool, '-a', "--std=#{std}", "--workdir=#{workdir}", "--work=#{work}"] + Array(extra_args) + [vhdl_path.to_s]
+          cmd = [
+            tool,
+            '-a',
+            "--std=#{std}",
+            "--workdir=#{workdir}",
+            "--work=#{work}",
+            "-P#{workdir}"
+          ] + Array(extra_args) + [vhdl_path.to_s]
           run_external_command(tool: tool, cmd: cmd, out_path: vhdl_path.to_s)
         end
 
         def ghdl_synth_to_verilog(entity:, out_path:, workdir:, std: '08', work: 'work', tool: DEFAULT_VHDL_IMPORT_TOOL, extra_args: [])
-          cmd = [tool, '--synth', "--std=#{std}", "--workdir=#{workdir}", "--work=#{work}"] + Array(extra_args) + ['--out=verilog', entity.to_s]
+          cmd = [
+            tool,
+            '--synth',
+            "--std=#{std}",
+            "--workdir=#{workdir}",
+            "--work=#{work}",
+            "-P#{workdir}"
+          ] + Array(extra_args) + ['--out=verilog', entity.to_s]
           stdout, stderr, status = Open3.capture3(*cmd)
           File.write(out_path, stdout) if status.success?
           {
@@ -82,11 +207,15 @@ module RHDL
 
         def verilog_import_command(tool:, verilog_path:, out_path:, extra_args:)
           case tool_basename(tool)
-          when 'firtool'
-            cmd = [tool] + Array(extra_args)
-            [cmd, "Tool '#{tool}' does not support direct Verilog import in this flow. Use circt-translate (or another importer) for Verilog -> CIRCT MLIR."]
+          when 'circt-verilog'
+            args = Array(extra_args).dup
+            unless args.any? { |arg| arg.to_s.start_with?('--ir-') }
+              args.unshift(DEFAULT_CIRCT_VERILOG_IMPORT_MODE)
+            end
+            [[tool] + args + [verilog_path.to_s], nil]
           else
-            [[tool, '--import-verilog', verilog_path.to_s, '-o', out_path.to_s] + Array(extra_args), nil]
+            cmd = [tool] + Array(extra_args) + [verilog_path.to_s]
+            [cmd, "Tool '#{tool}' is not supported for Verilog import in this flow. Verilog import requires circt-verilog."]
           end
         end
 
@@ -108,6 +237,49 @@ module RHDL
 
         def tool_basename(tool)
           File.basename(tool.to_s.strip)
+        end
+
+        def strip_dbg_ops!(path)
+          return unless File.file?(path)
+
+          text = File.read(path)
+          stripped = text.each_line.reject { |line| line.strip.start_with?('dbg.') }.join
+          File.write(path, stripped) unless stripped == text
+        end
+
+        def prepare_arc_failure(import: nil, normalize: nil, work_dir:)
+          {
+            success: false,
+            import: import,
+            normalize: normalize,
+            transform: {
+              success: false,
+              output_text: nil,
+              transformed_modules: [],
+              unsupported_modules: []
+            },
+            arc: nil,
+            moore_mlir_path: import && import[:output_path],
+            normalized_llhd_mlir_path: normalize && normalize[:output_path],
+            hwseq_mlir_path: File.join(work_dir, 'import.hwseq.mlir'),
+            arc_mlir_path: nil,
+            transformed_modules: [],
+            unsupported_modules: []
+          }
+        end
+
+        def format_unsupported_modules(entries)
+          return 'Unsupported ARC preparation patterns' if entries.nil? || entries.empty?
+
+          details = entries.first(12).map do |entry|
+            "#{entry.fetch('module')}: #{entry.fetch('reason')}"
+          end
+          extra = entries.length > 12 ? "\n... #{entries.length - 12} more module(s)" : ''
+          "Unsupported ARC preparation patterns:\n#{details.join("\n")}#{extra}"
+        end
+
+        def module_names_from_core_mlir(text)
+          text.to_s.scan(/^\s*(?:hw|sv)\.module\s+@([A-Za-z_$][A-Za-z0-9_$.]*)/).flatten.uniq
         end
 
         def run_external_command(tool:, cmd:, out_path:)

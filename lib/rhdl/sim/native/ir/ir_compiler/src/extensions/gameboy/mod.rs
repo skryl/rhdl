@@ -5,6 +5,8 @@
 use std::collections::HashMap;
 use crate::core::CoreSimulator;
 
+const INVALID_SIGNAL_IDX: usize = usize::MAX;
+
 /// Result from running Game Boy cycles
 #[repr(C)]
 #[derive(Clone, Copy, Default)]
@@ -117,7 +119,7 @@ impl GameBoyExtension {
                     return idx;
                 }
             }
-            0
+            INVALID_SIGNAL_IDX
         };
 
         Self {
@@ -157,30 +159,78 @@ impl GameBoyExtension {
             ext_bus_addr_idx: find(&["ext_bus_addr"]),
             ext_bus_a15_idx: find(&["ext_bus_a15"]),
 
-            vram_addr_cpu_idx: find(&["gb_core__vram_addr_cpu", "vram_addr_cpu"]),
-            vram_wren_cpu_idx: find(&["gb_core__vram_wren_cpu", "vram_wren_cpu"]),
+            vram_addr_cpu_idx: find(&[
+                "gb_core__vram_addr_cpu",
+                "vram_addr_cpu",
+                "vram0__address_a__bridge",
+            ]),
+            vram_wren_cpu_idx: find(&[
+                "gb_core__vram_wren_cpu",
+                "vram_wren_cpu",
+                "vram0__wren_a__bridge",
+            ]),
             cpu_do_idx: find(&["gb_core__cpu_do", "cpu_do"]),
-            vram0_q_a_idx: find(&["gb_core__vram0__q_a", "gb_core__vram0__q_a_reg", "vram0__q_a"]),
-            vram0_q_b_idx: find(&["gb_core__vram0__q_b", "gb_core__vram0__q_b_reg", "vram0__q_b"]),
-            vram_addr_ppu_idx: find(&["gb_core__vram_addr_ppu", "vram_addr_ppu"]),
+            vram0_q_a_idx: find(&[
+                "gb_core__vram0__q_a",
+                "gb_core__vram0__q_a_reg",
+                "vram0__q_a",
+                "vram0_q_a",
+            ]),
+            vram0_q_b_idx: find(&[
+                "gb_core__vram0__q_b",
+                "gb_core__vram0__q_b_reg",
+                "vram0__q_b",
+                "vram0_q_b",
+            ]),
+            vram_addr_ppu_idx: find(&[
+                "gb_core__vram_addr_ppu",
+                "vram_addr_ppu",
+                "vram0__address_b__bridge",
+            ]),
             vram_do_idx: find(&["gb_core__vram_do", "vram_do"]),
             vram_data_ppu_idx: find(&["gb_core__vram_data_ppu", "vram_data_ppu"]),
             video_unit_vram_data_idx: find(&["gb_core__video_unit__vram_data", "video_unit__vram_data"]),
 
-            sel_boot_rom_idx: find(&["gb_core__sel_boot_rom", "sel_boot_rom"]),
-            boot_rom_addr_idx: find(&["gb_core__boot_rom_addr", "boot_rom_addr"]),
-            // IMPORTANT: Write to top-level INPUT port, not internal net (which gets overwritten by evaluate)
-            boot_do_idx: find(&["boot_rom_do", "gb_core__boot_rom_do"]),
+            sel_boot_rom_idx: find(&[
+                "gb_core__sel_boot_rom",
+                "sel_boot_rom",
+                "boot_rom__enable_a__bridge",
+                "boot_rom__cs_a__bridge",
+            ]),
+            boot_rom_addr_idx: find(&[
+                "gb_core__boot_rom_addr",
+                "boot_rom_addr",
+                "boot_addr",
+                "boot_rom__address_a__bridge",
+            ]),
+            // IMPORTANT: Prefer the driven input port; only fall back to internal nets if needed.
+            boot_do_idx: find(&["boot_rom_do", "gb_core__boot_rom_do", "boot_rom_q_a"]),
 
-            zpram_addr_idx: find(&["gb_core__zpram_addr", "zpram_addr"]),
-            zpram_wren_idx: find(&["gb_core__zpram_wren", "zpram_wren"]),
+            zpram_addr_idx: find(&[
+                "gb_core__zpram_addr",
+                "zpram_addr",
+                "zpram__address_a__bridge",
+            ]),
+            zpram_wren_idx: find(&[
+                "gb_core__zpram_wren",
+                "zpram_wren",
+                "zpram__wren_a__bridge",
+            ]),
             zpram_do_idx: find(&["gb_core__zpram_do", "zpram_do"]),
-            zpram_q_a_idx: find(&["gb_core__zpram__q_a", "zpram__q_a"]),
+            zpram_q_a_idx: find(&["gb_core__zpram__q_a", "zpram__q_a", "zpram_q_a"]),
 
-            wram_addr_idx: find(&["gb_core__wram_addr", "wram_addr"]),
-            wram_wren_idx: find(&["gb_core__wram_wren", "wram_wren"]),
+            wram_addr_idx: find(&[
+                "gb_core__wram_addr",
+                "wram_addr",
+                "wram__address_a__bridge",
+            ]),
+            wram_wren_idx: find(&[
+                "gb_core__wram_wren",
+                "wram_wren",
+                "wram__wren_a__bridge",
+            ]),
             wram_do_idx: find(&["gb_core__wram_do", "wram_do"]),
-            wram_q_a_idx: find(&["gb_core__wram__q_a", "wram__q_a"]),
+            wram_q_a_idx: find(&["gb_core__wram__q_a", "wram__q_a", "wram_q_a"]),
 
             lcd_state: GbLcdState::default(),
         }
@@ -364,7 +414,7 @@ impl GameBoyExtension {
                     return idx;
                 }
             }
-            0
+            INVALID_SIGNAL_IDX
         };
 
         // Get signal indices
@@ -385,26 +435,74 @@ impl GameBoyExtension {
         let ext_bus_addr_idx = find(&["ext_bus_addr"]);
         let ext_bus_a15_idx = find(&["ext_bus_a15"]);
 
-        let vram_addr_cpu_idx = find(&["gb_core__vram_addr_cpu", "vram_addr_cpu"]);
-        let vram_wren_cpu_idx = find(&["gb_core__vram_wren_cpu", "vram_wren_cpu"]);
+        let vram_addr_cpu_idx = find(&[
+            "gb_core__vram_addr_cpu",
+            "vram_addr_cpu",
+            "vram0__address_a__bridge",
+        ]);
+        let vram_wren_cpu_idx = find(&[
+            "gb_core__vram_wren_cpu",
+            "vram_wren_cpu",
+            "vram0__wren_a__bridge",
+        ]);
         let cpu_do_idx = find(&["gb_core__cpu_do", "cpu_do"]);
-        let vram0_q_a_idx = find(&["gb_core__vram0__q_a", "gb_core__vram0__q_a_reg", "vram0__q_a"]);
-        let vram0_q_b_idx = find(&["gb_core__vram0__q_b", "gb_core__vram0__q_b_reg", "vram0__q_b"]);
-        let vram_addr_ppu_idx = find(&["gb_core__vram_addr_ppu", "vram_addr_ppu"]);
+        let vram0_q_a_idx = find(&[
+            "gb_core__vram0__q_a",
+            "gb_core__vram0__q_a_reg",
+            "vram0__q_a",
+            "vram0_q_a",
+        ]);
+        let vram0_q_b_idx = find(&[
+            "gb_core__vram0__q_b",
+            "gb_core__vram0__q_b_reg",
+            "vram0__q_b",
+            "vram0_q_b",
+        ]);
+        let vram_addr_ppu_idx = find(&[
+            "gb_core__vram_addr_ppu",
+            "vram_addr_ppu",
+            "vram0__address_b__bridge",
+        ]);
         let video_unit_vram_data_idx = find(&["gb_core__video_unit__vram_data", "video_unit__vram_data"]);
 
-        let sel_boot_rom_idx = find(&["gb_core__sel_boot_rom", "sel_boot_rom"]);
-        let boot_rom_addr_idx = find(&["gb_core__boot_rom_addr", "boot_rom_addr"]);
-        // IMPORTANT: Write to top-level INPUT port, not internal net (which gets overwritten by evaluate)
-        let boot_do_idx = find(&["boot_rom_do", "gb_core__boot_rom_do"]);
+        let sel_boot_rom_idx = find(&[
+            "gb_core__sel_boot_rom",
+            "sel_boot_rom",
+            "boot_rom__enable_a__bridge",
+            "boot_rom__cs_a__bridge",
+        ]);
+        let boot_rom_addr_idx = find(&[
+            "gb_core__boot_rom_addr",
+            "boot_rom_addr",
+            "boot_addr",
+            "boot_rom__address_a__bridge",
+        ]);
+        // IMPORTANT: Prefer the driven input port; only fall back to internal nets if needed.
+        let boot_do_idx = find(&["boot_rom_do", "gb_core__boot_rom_do", "boot_rom_q_a"]);
 
-        let zpram_addr_idx = find(&["gb_core__zpram_addr", "zpram_addr"]);
-        let zpram_wren_idx = find(&["gb_core__zpram_wren", "zpram_wren"]);
-        let zpram_q_a_idx = find(&["gb_core__zpram__q_a", "zpram__q_a"]);
+        let zpram_addr_idx = find(&[
+            "gb_core__zpram_addr",
+            "zpram_addr",
+            "zpram__address_a__bridge",
+        ]);
+        let zpram_wren_idx = find(&[
+            "gb_core__zpram_wren",
+            "zpram_wren",
+            "zpram__wren_a__bridge",
+        ]);
+        let zpram_q_a_idx = find(&["gb_core__zpram__q_a", "zpram__q_a", "zpram_q_a"]);
 
-        let wram_addr_idx = find(&["gb_core__wram_addr", "wram_addr"]);
-        let wram_wren_idx = find(&["gb_core__wram_wren", "wram_wren"]);
-        let wram_q_a_idx = find(&["gb_core__wram__q_a", "wram__q_a"]);
+        let wram_addr_idx = find(&[
+            "gb_core__wram_addr",
+            "wram_addr",
+            "wram__address_a__bridge",
+        ]);
+        let wram_wren_idx = find(&[
+            "gb_core__wram_wren",
+            "wram_wren",
+            "wram__wren_a__bridge",
+        ]);
+        let wram_q_a_idx = find(&["gb_core__wram__q_a", "wram__q_a", "wram_q_a"]);
 
         let clock_indices: Vec<usize> = core.clock_indices.clone();
         let num_clocks = clock_indices.len().max(1);
@@ -475,135 +573,231 @@ impl GameBoyExtension {
         code.push_str("    for _ in 0..n {\n");
 
         // Force CE and cpu_clken high for DMG mode
-        if ce_idx > 0 {
+        if ce_idx != INVALID_SIGNAL_IDX {
             code.push_str(&format!("        signals[{}] = 1; // ce\n", ce_idx));
         }
-        if speed_ctrl_ce_idx > 0 {
+        if speed_ctrl_ce_idx != INVALID_SIGNAL_IDX {
             code.push_str(&format!("        signals[{}] = 1; // speed_ctrl__ce\n", speed_ctrl_ce_idx));
         }
-        if gb_core_ce_idx > 0 {
+        if gb_core_ce_idx != INVALID_SIGNAL_IDX {
             code.push_str(&format!("        signals[{}] = 1; // gb_core__ce\n", gb_core_ce_idx));
         }
-        if video_unit_ce_idx > 0 {
+        if video_unit_ce_idx != INVALID_SIGNAL_IDX {
             code.push_str(&format!("        signals[{}] = 1; // video_unit__ce\n", video_unit_ce_idx));
         }
-        if cpu_clken_idx > 0 {
+        if cpu_clken_idx != INVALID_SIGNAL_IDX {
             code.push_str(&format!("        signals[{}] = 1; // cpu_clken\n", cpu_clken_idx));
         }
-        if sm83_clken_idx > 0 {
+        if sm83_clken_idx != INVALID_SIGNAL_IDX {
             code.push_str(&format!("        signals[{}] = 1; // sm83_clken\n", sm83_clken_idx));
         }
         code.push_str("\n");
 
         // Clock falling edge
-        code.push_str(&format!("        signals[{}] = 0; // clk_sys low\n", clk_sys_idx));
+        if clk_sys_idx != INVALID_SIGNAL_IDX {
+            code.push_str(&format!("        signals[{}] = 0; // clk_sys low\n", clk_sys_idx));
+        }
         code.push_str("        evaluate_inline(signals);\n\n");
 
         // Force CE signals AFTER evaluate to override speed_ctrl clock divider
         // (speed_ctrl__ce is computed based on a counter, but we want ce=1 every cycle)
-        if ce_idx > 0 {
+        if ce_idx != INVALID_SIGNAL_IDX {
             code.push_str(&format!("        signals[{}] = 1; // ce (force after eval)\n", ce_idx));
         }
-        if speed_ctrl_ce_idx > 0 {
+        if speed_ctrl_ce_idx != INVALID_SIGNAL_IDX {
             code.push_str(&format!("        signals[{}] = 1; // speed_ctrl__ce (force after eval)\n", speed_ctrl_ce_idx));
         }
-        if gb_core_ce_idx > 0 {
+        if gb_core_ce_idx != INVALID_SIGNAL_IDX {
             code.push_str(&format!("        signals[{}] = 1; // gb_core__ce (force after eval)\n", gb_core_ce_idx));
         }
-        if video_unit_ce_idx > 0 {
+        if video_unit_ce_idx != INVALID_SIGNAL_IDX {
             code.push_str(&format!("        signals[{}] = 1; // video_unit__ce (force after eval)\n", video_unit_ce_idx));
         }
-        if cpu_clken_idx > 0 {
+        if cpu_clken_idx != INVALID_SIGNAL_IDX {
             code.push_str(&format!("        signals[{}] = 1; // cpu_clken (force after eval)\n", cpu_clken_idx));
         }
-        if sm83_clken_idx > 0 {
+        if sm83_clken_idx != INVALID_SIGNAL_IDX {
             code.push_str(&format!("        signals[{}] = 1; // sm83_clken (force after eval)\n", sm83_clken_idx));
         }
         code.push_str("\n");
 
         // ROM read handling
-        code.push_str(&format!("        let cart_rd = signals[{}];\n", cart_rd_idx));
-        code.push_str(&format!("        let ext_addr = signals[{}] as usize;\n", ext_bus_addr_idx));
-        code.push_str(&format!("        let a15 = signals[{}];\n", ext_bus_a15_idx));
+        if cart_rd_idx != INVALID_SIGNAL_IDX {
+            code.push_str(&format!("        let cart_rd = signals[{}];\n", cart_rd_idx));
+        } else {
+            code.push_str("        let cart_rd = 0u64;\n");
+        }
+        if ext_bus_addr_idx != INVALID_SIGNAL_IDX {
+            code.push_str(&format!("        let ext_addr = signals[{}] as usize;\n", ext_bus_addr_idx));
+        } else {
+            code.push_str("        let ext_addr = 0usize;\n");
+        }
+        if ext_bus_a15_idx != INVALID_SIGNAL_IDX {
+            code.push_str(&format!("        let a15 = signals[{}];\n", ext_bus_a15_idx));
+        } else {
+            code.push_str("        let a15 = 0u64;\n");
+        }
         code.push_str("        if cart_rd != 0 {\n");
         code.push_str("            let full_addr = ext_addr | ((a15 as usize) << 15);\n");
         code.push_str("            if full_addr < rom_len {\n");
-        code.push_str(&format!("                signals[{}] = rom[full_addr] as u64;\n", cart_do_idx));
+        if cart_do_idx != INVALID_SIGNAL_IDX {
+            code.push_str(&format!("                signals[{}] = rom[full_addr] as u64;\n", cart_do_idx));
+        }
         code.push_str("            }\n");
         code.push_str("        }\n\n");
 
         // Boot ROM handling
-        code.push_str(&format!("        let sel_boot_rom = signals[{}];\n", sel_boot_rom_idx));
+        if sel_boot_rom_idx != INVALID_SIGNAL_IDX {
+            code.push_str(&format!("        let sel_boot_rom = signals[{}];\n", sel_boot_rom_idx));
+        } else {
+            code.push_str("        let sel_boot_rom = 0u64;\n");
+        }
         code.push_str("        if sel_boot_rom != 0 {\n");
-        code.push_str(&format!("            let boot_addr = (signals[{}] as usize) & 0xFF;\n", boot_rom_addr_idx));
+        if boot_rom_addr_idx != INVALID_SIGNAL_IDX {
+            code.push_str(&format!("            let boot_addr = (signals[{}] as usize) & 0xFF;\n", boot_rom_addr_idx));
+        } else {
+            code.push_str("            let boot_addr = 0usize;\n");
+        }
         code.push_str("            if boot_addr < boot_rom_len {\n");
-        code.push_str(&format!("                signals[{}] = boot_rom[boot_addr] as u64;\n", boot_do_idx));
+        if boot_do_idx != INVALID_SIGNAL_IDX {
+            code.push_str(&format!("                signals[{}] = boot_rom[boot_addr] as u64;\n", boot_do_idx));
+        }
         code.push_str("            }\n");
         code.push_str("        }\n\n");
 
         // VRAM CPU read (inject into DPRAM output)
-        code.push_str(&format!("        let vram_addr_cpu = (signals[{}] as usize) & 0x1FFF;\n", vram_addr_cpu_idx));
+        if vram_addr_cpu_idx != INVALID_SIGNAL_IDX {
+            code.push_str(&format!("        let vram_addr_cpu = (signals[{}] as usize) & 0x1FFF;\n", vram_addr_cpu_idx));
+        } else {
+            code.push_str("        let vram_addr_cpu = 0usize;\n");
+        }
         code.push_str("        if vram_addr_cpu < vram_len {\n");
-        code.push_str(&format!("            signals[{}] = vram[vram_addr_cpu] as u64;\n", vram0_q_a_idx));
+        if vram0_q_a_idx != INVALID_SIGNAL_IDX {
+            code.push_str(&format!("            signals[{}] = vram[vram_addr_cpu] as u64;\n", vram0_q_a_idx));
+        }
         code.push_str("        }\n\n");
 
         // VRAM PPU read
-        code.push_str(&format!("        let vram_addr_ppu = (signals[{}] as usize) & 0x1FFF;\n", vram_addr_ppu_idx));
+        if vram_addr_ppu_idx != INVALID_SIGNAL_IDX {
+            code.push_str(&format!("        let vram_addr_ppu = (signals[{}] as usize) & 0x1FFF;\n", vram_addr_ppu_idx));
+        } else {
+            code.push_str("        let vram_addr_ppu = 0usize;\n");
+        }
         code.push_str("        if vram_addr_ppu < vram_len {\n");
-        code.push_str(&format!("            signals[{}] = vram[vram_addr_ppu] as u64;\n", vram0_q_b_idx));
-        code.push_str(&format!("            signals[{}] = vram[vram_addr_ppu] as u64;\n", video_unit_vram_data_idx));
+        if vram0_q_b_idx != INVALID_SIGNAL_IDX {
+            code.push_str(&format!("            signals[{}] = vram[vram_addr_ppu] as u64;\n", vram0_q_b_idx));
+        }
+        if video_unit_vram_data_idx != INVALID_SIGNAL_IDX {
+            code.push_str(&format!("            signals[{}] = vram[vram_addr_ppu] as u64;\n", video_unit_vram_data_idx));
+        }
         code.push_str("        }\n\n");
 
         // ZPRAM read
-        code.push_str(&format!("        let zpram_addr = (signals[{}] as usize) & 0x7F;\n", zpram_addr_idx));
+        if zpram_addr_idx != INVALID_SIGNAL_IDX {
+            code.push_str(&format!("        let zpram_addr = (signals[{}] as usize) & 0x7F;\n", zpram_addr_idx));
+        } else {
+            code.push_str("        let zpram_addr = 0usize;\n");
+        }
         code.push_str("        if zpram_addr < zpram_len {\n");
-        code.push_str(&format!("            signals[{}] = zpram[zpram_addr] as u64;\n", zpram_q_a_idx));
+        if zpram_q_a_idx != INVALID_SIGNAL_IDX {
+            code.push_str(&format!("            signals[{}] = zpram[zpram_addr] as u64;\n", zpram_q_a_idx));
+        }
         code.push_str("        }\n\n");
 
         // WRAM read (inject into DPRAM output)
-        code.push_str(&format!("        let wram_addr = (signals[{}] as usize) & 0x7FFF;\n", wram_addr_idx));
+        if wram_addr_idx != INVALID_SIGNAL_IDX {
+            code.push_str(&format!("        let wram_addr = (signals[{}] as usize) & 0x7FFF;\n", wram_addr_idx));
+        } else {
+            code.push_str("        let wram_addr = 0usize;\n");
+        }
         code.push_str("        if wram_addr < wram_len {\n");
-        code.push_str(&format!("            signals[{}] = wram[wram_addr] as u64;\n", wram_q_a_idx));
+        if wram_q_a_idx != INVALID_SIGNAL_IDX {
+            code.push_str(&format!("            signals[{}] = wram[wram_addr] as u64;\n", wram_q_a_idx));
+        }
         code.push_str("        }\n\n");
 
         // Clock rising edge
         for (i, &clk) in clock_indices.iter().enumerate() {
             code.push_str(&format!("        old_clocks[{}] = signals[{}];\n", i, clk));
         }
-        code.push_str(&format!("        signals[{}] = 1; // clk_sys high\n", clk_sys_idx));
+        if clk_sys_idx != INVALID_SIGNAL_IDX {
+            code.push_str(&format!("        signals[{}] = 1; // clk_sys high\n", clk_sys_idx));
+        }
         code.push_str("        tick_inline(signals, &mut old_clocks, &mut next_regs);\n\n");
 
         // VRAM write
-        code.push_str(&format!("        let vram_wren = signals[{}];\n", vram_wren_cpu_idx));
+        if vram_wren_cpu_idx != INVALID_SIGNAL_IDX {
+            code.push_str(&format!("        let vram_wren = signals[{}];\n", vram_wren_cpu_idx));
+        } else {
+            code.push_str("        let vram_wren = 0u64;\n");
+        }
         code.push_str("        if vram_wren != 0 {\n");
-        code.push_str(&format!("            let addr = (signals[{}] as usize) & 0x1FFF;\n", vram_addr_cpu_idx));
+        if vram_addr_cpu_idx != INVALID_SIGNAL_IDX {
+            code.push_str(&format!("            let addr = (signals[{}] as usize) & 0x1FFF;\n", vram_addr_cpu_idx));
+        } else {
+            code.push_str("            let addr = 0usize;\n");
+        }
         code.push_str("            if addr < vram_len {\n");
-        code.push_str(&format!("                vram[addr] = (signals[{}] & 0xFF) as u8;\n", cpu_do_idx));
+        if cpu_do_idx != INVALID_SIGNAL_IDX {
+            code.push_str(&format!("                vram[addr] = (signals[{}] & 0xFF) as u8;\n", cpu_do_idx));
+        }
         code.push_str("            }\n");
         code.push_str("        }\n\n");
 
         // ZPRAM write
-        code.push_str(&format!("        let zpram_wren = signals[{}];\n", zpram_wren_idx));
+        if zpram_wren_idx != INVALID_SIGNAL_IDX {
+            code.push_str(&format!("        let zpram_wren = signals[{}];\n", zpram_wren_idx));
+        } else {
+            code.push_str("        let zpram_wren = 0u64;\n");
+        }
         code.push_str("        if zpram_wren != 0 {\n");
-        code.push_str(&format!("            let addr = (signals[{}] as usize) & 0x7F;\n", zpram_addr_idx));
+        if zpram_addr_idx != INVALID_SIGNAL_IDX {
+            code.push_str(&format!("            let addr = (signals[{}] as usize) & 0x7F;\n", zpram_addr_idx));
+        } else {
+            code.push_str("            let addr = 0usize;\n");
+        }
         code.push_str("            if addr < zpram_len {\n");
-        code.push_str(&format!("                zpram[addr] = (signals[{}] & 0xFF) as u8;\n", cpu_do_idx));
+        if cpu_do_idx != INVALID_SIGNAL_IDX {
+            code.push_str(&format!("                zpram[addr] = (signals[{}] & 0xFF) as u8;\n", cpu_do_idx));
+        }
         code.push_str("            }\n");
         code.push_str("        }\n\n");
 
         // WRAM write
-        code.push_str(&format!("        let wram_wren = signals[{}];\n", wram_wren_idx));
+        if wram_wren_idx != INVALID_SIGNAL_IDX {
+            code.push_str(&format!("        let wram_wren = signals[{}];\n", wram_wren_idx));
+        } else {
+            code.push_str("        let wram_wren = 0u64;\n");
+        }
         code.push_str("        if wram_wren != 0 {\n");
-        code.push_str(&format!("            let addr = (signals[{}] as usize) & 0x7FFF;\n", wram_addr_idx));
+        if wram_addr_idx != INVALID_SIGNAL_IDX {
+            code.push_str(&format!("            let addr = (signals[{}] as usize) & 0x7FFF;\n", wram_addr_idx));
+        } else {
+            code.push_str("            let addr = 0usize;\n");
+        }
         code.push_str("            if addr < wram_len {\n");
-        code.push_str(&format!("                wram[addr] = (signals[{}] & 0xFF) as u8;\n", cpu_do_idx));
+        if cpu_do_idx != INVALID_SIGNAL_IDX {
+            code.push_str(&format!("                wram[addr] = (signals[{}] & 0xFF) as u8;\n", cpu_do_idx));
+        }
         code.push_str("            }\n");
         code.push_str("        }\n\n");
 
         // LCD capture
-        code.push_str(&format!("        let lcd_clkena = signals[{}];\n", lcd_clkena_idx));
-        code.push_str(&format!("        let lcd_vsync = signals[{}];\n", lcd_vsync_idx));
-        code.push_str(&format!("        let lcd_data = (signals[{}] & 0x3) as u8;\n", lcd_data_gb_idx));
+        if lcd_clkena_idx != INVALID_SIGNAL_IDX {
+            code.push_str(&format!("        let lcd_clkena = signals[{}];\n", lcd_clkena_idx));
+        } else {
+            code.push_str("        let lcd_clkena = 0u64;\n");
+        }
+        if lcd_vsync_idx != INVALID_SIGNAL_IDX {
+            code.push_str(&format!("        let lcd_vsync = signals[{}];\n", lcd_vsync_idx));
+        } else {
+            code.push_str("        let lcd_vsync = 0u64;\n");
+        }
+        if lcd_data_gb_idx != INVALID_SIGNAL_IDX {
+            code.push_str(&format!("        let lcd_data = (signals[{}] & 0x3) as u8;\n", lcd_data_gb_idx));
+        } else {
+            code.push_str("        let lcd_data = 0u8;\n");
+        }
         code.push_str("\n");
         code.push_str("        // Rising edge of lcd_clkena: capture pixel\n");
         code.push_str("        if lcd_clkena != 0 && lcd.prev_clkena == 0 {\n");

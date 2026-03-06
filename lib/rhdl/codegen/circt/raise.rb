@@ -2,7 +2,6 @@
 
 require 'fileutils'
 require 'set'
-require 'timeout'
 
 module RHDL
   module Codegen
@@ -232,6 +231,7 @@ module RHDL
           lines << '# frozen_string_literal: true'
           lines << ''
           lines << "class #{class_name} < #{base}"
+          lines << '  include RHDL::DSL::Sequential' if sequential
           lines << '  def self.verilog_module_name'
           lines << "    #{mod.name.to_s.inspect}"
           lines << '  end'
@@ -320,6 +320,7 @@ module RHDL
           Array(extra_wires).each { |wire| declared << sanitize_name(wire[:name]) }
 
           referenced = {}
+          seen_exprs = Set.new
 
           mod.assigns.each do |assign|
             target = sanitize_name(assign.target)
@@ -333,12 +334,14 @@ module RHDL
             referenced[target] = [referenced[target].to_i, width].max
           end
 
-          mod.assigns.each { |assign| collect_signals_from_expr(assign.expr, referenced) }
-          mod.processes.each { |process| collect_signals_from_statements(Array(process.statements), referenced) }
+          mod.assigns.each { |assign| collect_signals_from_expr(assign.expr, referenced, seen_exprs: seen_exprs) }
+          mod.processes.each do |process|
+            collect_signals_from_statements(Array(process.statements), referenced, seen_exprs: seen_exprs)
+          end
 
           Array(mod.instances).each do |inst|
             Array(inst.connections).each do |conn|
-              collect_signals_from_connection(conn.signal, referenced)
+              collect_signals_from_connection(conn.signal, referenced, seen_exprs: seen_exprs)
             end
           end
 
@@ -349,20 +352,20 @@ module RHDL
           end
         end
 
-        def collect_signals_from_statements(statements, referenced)
+        def collect_signals_from_statements(statements, referenced, seen_exprs: Set.new)
           Array(statements).each do |stmt|
             case stmt
             when IR::SeqAssign
-              collect_signals_from_expr(stmt.expr, referenced)
+              collect_signals_from_expr(stmt.expr, referenced, seen_exprs: seen_exprs)
             when IR::If
-              collect_signals_from_expr(stmt.condition, referenced)
-              collect_signals_from_statements(stmt.then_statements, referenced)
-              collect_signals_from_statements(stmt.else_statements, referenced)
+              collect_signals_from_expr(stmt.condition, referenced, seen_exprs: seen_exprs)
+              collect_signals_from_statements(stmt.then_statements, referenced, seen_exprs: seen_exprs)
+              collect_signals_from_statements(stmt.else_statements, referenced, seen_exprs: seen_exprs)
             end
           end
         end
 
-        def collect_signals_from_connection(signal, referenced)
+        def collect_signals_from_connection(signal, referenced, seen_exprs: Set.new)
           case signal
           when String, Symbol
             name = sanitize_name(signal)
@@ -371,36 +374,45 @@ module RHDL
             name = sanitize_name(signal.name)
             referenced[name] = [referenced[name].to_i, signal.width.to_i].max
           when IR::Expr
-            collect_signals_from_expr(signal, referenced)
+            collect_signals_from_expr(signal, referenced, seen_exprs: seen_exprs)
           end
         end
 
-        def collect_signals_from_expr(expr, referenced)
+        def collect_signals_from_expr(expr, referenced, seen_exprs: Set.new)
+          return if expr.nil?
+
+          expr_id = expr.object_id
+          return if seen_exprs.include?(expr_id)
+
+          seen_exprs << expr_id
+
           case expr
           when IR::Signal
             name = sanitize_name(expr.name)
             referenced[name] = [referenced[name].to_i, expr.width.to_i].max
           when IR::UnaryOp
-            collect_signals_from_expr(expr.operand, referenced)
+            collect_signals_from_expr(expr.operand, referenced, seen_exprs: seen_exprs)
           when IR::BinaryOp
-            collect_signals_from_expr(expr.left, referenced)
-            collect_signals_from_expr(expr.right, referenced)
+            collect_signals_from_expr(expr.left, referenced, seen_exprs: seen_exprs)
+            collect_signals_from_expr(expr.right, referenced, seen_exprs: seen_exprs)
           when IR::Mux
-            collect_signals_from_expr(expr.condition, referenced)
-            collect_signals_from_expr(expr.when_true, referenced)
-            collect_signals_from_expr(expr.when_false, referenced)
+            collect_signals_from_expr(expr.condition, referenced, seen_exprs: seen_exprs)
+            collect_signals_from_expr(expr.when_true, referenced, seen_exprs: seen_exprs)
+            collect_signals_from_expr(expr.when_false, referenced, seen_exprs: seen_exprs)
           when IR::Concat
-            Array(expr.parts).each { |part| collect_signals_from_expr(part, referenced) }
+            Array(expr.parts).each { |part| collect_signals_from_expr(part, referenced, seen_exprs: seen_exprs) }
           when IR::Slice
-            collect_signals_from_expr(expr.base, referenced)
+            collect_signals_from_expr(expr.base, referenced, seen_exprs: seen_exprs)
           when IR::Resize
-            collect_signals_from_expr(expr.expr, referenced)
+            collect_signals_from_expr(expr.expr, referenced, seen_exprs: seen_exprs)
           when IR::Case
-            collect_signals_from_expr(expr.selector, referenced)
-            expr.cases.each_value { |value| collect_signals_from_expr(value, referenced) }
-            collect_signals_from_expr(expr.default, referenced)
+            collect_signals_from_expr(expr.selector, referenced, seen_exprs: seen_exprs)
+            expr.cases.each_value do |value|
+              collect_signals_from_expr(value, referenced, seen_exprs: seen_exprs)
+            end
+            collect_signals_from_expr(expr.default, referenced, seen_exprs: seen_exprs)
           when IR::MemoryRead
-            collect_signals_from_expr(expr.addr, referenced)
+            collect_signals_from_expr(expr.addr, referenced, seen_exprs: seen_exprs)
           end
         end
 
@@ -521,20 +533,24 @@ module RHDL
 
             seq_state = {}
             target_order = []
-            lower_seq_statements(
+            lower_seq_statements_to_mux(
               Array(process.statements),
               seq_state: seq_state,
               target_order: target_order,
               mod: mod,
-              diagnostics: diagnostics
+              diagnostics: diagnostics,
+              strict: strict,
+              mod_name: mod.name
             )
 
             target_order.each do |target|
-              next unless seq_state.key?(target)
+              expr = seq_state[target.to_s]
+              next unless expr
+
               emit_assignment(
                 lines,
                 target: signal_ref(target),
-                expr: seq_state[target],
+                expr: expr,
                 diagnostics: diagnostics,
                 strict: strict,
                 indent: 4
@@ -546,44 +562,60 @@ module RHDL
           lines << ''
         end
 
-        def lower_seq_statements(statements, seq_state:, target_order:, mod:, diagnostics:)
+        def lower_seq_statements_to_mux(statements, seq_state:, target_order:, mod:, diagnostics:, strict:, mod_name:)
           touched = Set.new
 
           Array(statements).each do |stmt|
             case stmt
             when IR::SeqAssign
-              target = stmt.target.to_s
+              target = sanitize_name(stmt.target)
               seq_state[target] = stmt.expr
               target_order << target unless target_order.include?(target)
               touched << target
             when IR::If
+              condition = stmt.condition
+              if condition.nil?
+                diagnostics << Diagnostic.new(
+                  severity: strict ? :error : :warning,
+                  message: "Unsupported sequential if condition in #{mod_name}",
+                  line: nil,
+                  column: nil,
+                  op: 'raise.sequential'
+                )
+                next
+              end
+
               then_state = seq_state.dup
               else_state = seq_state.dup
 
-              then_touched = lower_seq_statements(
-                stmt.then_statements,
+              then_touched = lower_seq_statements_to_mux(
+                Array(stmt.then_statements),
                 seq_state: then_state,
                 target_order: target_order,
                 mod: mod,
-                diagnostics: diagnostics
+                diagnostics: diagnostics,
+                strict: strict,
+                mod_name: mod_name
               )
-              else_touched = lower_seq_statements(
-                stmt.else_statements,
+              else_touched = lower_seq_statements_to_mux(
+                Array(stmt.else_statements),
                 seq_state: else_state,
                 target_order: target_order,
                 mod: mod,
-                diagnostics: diagnostics
+                diagnostics: diagnostics,
+                strict: strict,
+                mod_name: mod_name
               )
 
               branch_targets = (then_touched + else_touched).uniq
               branch_targets.each do |target|
-                width = find_target_width(mod, target)
+                width = seq_target_width(mod, target, then_state[target], else_state[target], seq_state[target])
                 prior = seq_state[target] || IR::Signal.new(name: target, width: width)
-                when_true = then_state[target] || prior
-                when_false = else_state[target] || prior
+                when_true = ensure_expr_width(then_state[target] || prior, width)
+                when_false = ensure_expr_width(else_state[target] || prior, width)
 
                 seq_state[target] = IR::Mux.new(
-                  condition: stmt.condition,
+                  condition: condition,
                   when_true: when_true,
                   when_false: when_false,
                   width: width
@@ -593,8 +625,8 @@ module RHDL
               end
             else
               diagnostics << Diagnostic.new(
-                severity: :warning,
-                message: "Unsupported sequential statement #{stmt.class} in #{mod.name}",
+                severity: strict ? :error : :warning,
+                message: "Unsupported sequential statement #{stmt.class} in #{mod_name}",
                 line: nil,
                 column: nil,
                 op: 'raise.sequential'
@@ -605,18 +637,84 @@ module RHDL
           touched.to_a
         end
 
-        def find_target_width(mod, target_name)
-          name = target_name.to_s
-          port = mod.ports.find { |p| p.name.to_s == name }
-          return port.width if port
+        def seq_target_width(mod, target, *exprs)
+          widths = Array(exprs).compact.map { |expr| expr.respond_to?(:width) ? expr.width.to_i : 0 }
 
-          reg = mod.regs.find { |r| r.name.to_s == name }
-          return reg.width if reg
+          port = mod.ports.find { |p| sanitize_name(p.name) == target.to_s }
+          widths << port.width.to_i if port
 
-          net = mod.nets.find { |n| n.name.to_s == name }
-          return net.width if net
+          reg = mod.regs.find { |r| sanitize_name(r.name) == target.to_s }
+          widths << reg.width.to_i if reg
 
-          1
+          net = mod.nets.find { |n| sanitize_name(n.name) == target.to_s }
+          widths << net.width.to_i if net
+
+          [widths.max.to_i, 1].max
+        end
+
+        def ensure_expr_width(expr, width)
+          return IR::Literal.new(value: 0, width: width) if expr.nil?
+          return expr if !expr.respond_to?(:width) || expr.width.to_i == width
+
+          IR::Resize.new(expr: expr, width: width)
+        end
+
+        def emit_seq_statements(lines, statements, diagnostics:, strict:, indent:, mod_name:)
+          Array(statements).each do |stmt|
+            case stmt
+            when IR::SeqAssign
+              emit_assignment(
+                lines,
+                target: signal_ref(stmt.target),
+                expr: stmt.expr,
+                diagnostics: diagnostics,
+                strict: strict,
+                indent: indent
+              )
+            when IR::If
+              condition = expr_to_ruby(stmt.condition, diagnostics, strict: strict)
+              if condition.nil?
+                diagnostics << Diagnostic.new(
+                  severity: :warning,
+                  message: "Unsupported sequential if condition in #{mod_name}",
+                  line: nil,
+                  column: nil,
+                  op: 'raise.sequential'
+                )
+                next
+              end
+
+              lines << "#{' ' * indent}if #{condition}"
+              emit_seq_statements(
+                lines,
+                Array(stmt.then_statements),
+                diagnostics: diagnostics,
+                strict: strict,
+                indent: indent + 2,
+                mod_name: mod_name
+              )
+              unless Array(stmt.else_statements).empty?
+                lines << "#{' ' * indent}else"
+                emit_seq_statements(
+                  lines,
+                  Array(stmt.else_statements),
+                  diagnostics: diagnostics,
+                  strict: strict,
+                  indent: indent + 2,
+                  mod_name: mod_name
+                )
+              end
+              lines << "#{' ' * indent}end"
+            else
+              diagnostics << Diagnostic.new(
+                severity: :warning,
+                message: "Unsupported sequential statement #{stmt.class} in #{mod_name}",
+                line: nil,
+                column: nil,
+                op: 'raise.sequential'
+              )
+            end
+          end
         end
 
         def emit_behavior(lines, mod, diagnostics, strict: false, bridge_assignments: [], structural_output_targets: [])
@@ -773,10 +871,12 @@ module RHDL
         end
 
         def expr_to_ruby_cached(expr, diagnostics, strict:, cache:)
+          return nil if expr.nil?
+
           key = [expr.object_id, strict]
           return cache[key] if cache.key?(key)
 
-          cache[key] = expr_to_ruby(expr, diagnostics, strict: strict)
+          cache[key] = expr_to_ruby(expr, diagnostics, strict: strict, cache: cache)
         end
 
         def pretty_breakable_expr?(expr)
@@ -813,15 +913,17 @@ module RHDL
           false
         end
 
-        def expr_to_ruby(expr, diagnostics, strict: false)
+        def expr_to_ruby(expr, diagnostics, strict: false, cache: nil)
+          cache ||= {}
+
           case expr
           when IR::Literal
             "lit(#{expr.value.inspect}, width: #{expr.width.to_i})"
           when IR::Signal
             signal_ref(expr.name)
           when IR::BinaryOp
-            left = expr_to_ruby(expr.left, diagnostics, strict: strict)
-            right = expr_to_ruby(expr.right, diagnostics, strict: strict)
+            left = expr_to_ruby_cached(expr.left, diagnostics, strict: strict, cache: cache)
+            right = expr_to_ruby_cached(expr.right, diagnostics, strict: strict, cache: cache)
             return nil if left.nil? || right.nil?
 
             if comparison_op_conflicts_with_assignment?(expr.op)
@@ -837,32 +939,32 @@ module RHDL
               "(#{left} #{expr.op} #{right})"
             end
           when IR::UnaryOp
-            operand = expr_to_ruby(expr.operand, diagnostics, strict: strict)
+            operand = expr_to_ruby_cached(expr.operand, diagnostics, strict: strict, cache: cache)
             return nil if operand.nil?
 
             "(#{expr.op}#{operand})"
           when IR::Mux
-            expr_to_ruby_mux(expr, diagnostics, strict: strict)
+            expr_to_ruby_mux(expr, diagnostics, strict: strict, cache: cache)
           when IR::Slice
             range = expr.range
             if range.begin == range.end
-              base = expr_to_ruby(expr.base, diagnostics, strict: strict)
+              base = expr_to_ruby_cached(expr.base, diagnostics, strict: strict, cache: cache)
               return nil if base.nil?
 
               "#{base}[#{range.begin}]"
             else
-              base = expr_to_ruby(expr.base, diagnostics, strict: strict)
+              base = expr_to_ruby_cached(expr.base, diagnostics, strict: strict, cache: cache)
               return nil if base.nil?
 
               "#{base}[#{range.end}..#{range.begin}]"
             end
           when IR::Concat
-            parts = expr.parts.map { |p| expr_to_ruby(p, diagnostics, strict: strict) }
+            parts = expr.parts.map { |p| expr_to_ruby_cached(p, diagnostics, strict: strict, cache: cache) }
             return nil if parts.any?(&:nil?)
 
             "cat(#{parts.join(', ')})"
           when IR::Resize
-            expr_to_ruby(expr.expr, diagnostics, strict: strict)
+            expr_to_ruby_cached(expr.expr, diagnostics, strict: strict, cache: cache)
           when IR::Case
             if strict
               diagnostics << Diagnostic.new(
@@ -881,7 +983,7 @@ module RHDL
                 column: nil,
                 op: 'raise.case'
               )
-              expr.default ? expr_to_ruby(expr.default, diagnostics, strict: strict) : '0'
+              expr.default ? expr_to_ruby_cached(expr.default, diagnostics, strict: strict, cache: cache) : '0'
             end
           when IR::MemoryRead
             if strict
@@ -926,7 +1028,7 @@ module RHDL
           end
         end
 
-        def expr_to_ruby_mux(expr, diagnostics, strict:)
+        def expr_to_ruby_mux(expr, diagnostics, strict:, cache:)
           chain = []
           seen = Set.new
           current = expr
@@ -950,13 +1052,13 @@ module RHDL
             current = current.when_false
           end
 
-          tail = expr_to_ruby(current, diagnostics, strict: strict)
+          tail = expr_to_ruby_cached(current, diagnostics, strict: strict, cache: cache)
           return nil if tail.nil?
 
           rendered_pairs = []
           chain.each do |condition_expr, true_expr|
-            condition = expr_to_ruby(condition_expr, diagnostics, strict: strict)
-            when_true = expr_to_ruby(true_expr, diagnostics, strict: strict)
+            condition = expr_to_ruby_cached(condition_expr, diagnostics, strict: strict, cache: cache)
+            when_true = expr_to_ruby_cached(true_expr, diagnostics, strict: strict, cache: cache)
             return nil if condition.nil? || when_true.nil?
 
             rendered_pairs << [condition, when_true]
@@ -980,114 +1082,59 @@ module RHDL
         def format_generated_output_dir(out_dir, diagnostics)
           return unless out_dir && Dir.exist?(out_dir)
 
-          cmd = rubocop_format_command(out_dir: out_dir)
-          status, timed_out = run_command_with_timeout(cmd, timeout_seconds: rubocop_timeout_seconds)
-          if timed_out
+          return unless syntax_tree_available?(diagnostics)
+
+          ruby_files = Dir.glob(File.join(out_dir, '**', '*.rb')).sort
+          ruby_files.each do |path|
+            format_ruby_file_with_syntax_tree(path, diagnostics)
+          end
+        rescue StandardError => e
+          diagnostics << Diagnostic.new(
+            severity: :warning,
+            message: "SyntaxTree formatting failed: #{e.class}: #{e.message}",
+            line: nil,
+            column: nil,
+            op: 'raise.format'
+          )
+        end
+
+        def syntax_tree_available?(diagnostics)
+          return @syntax_tree_loaded if defined?(@syntax_tree_loaded)
+
+          begin
+            require 'syntax_tree'
+            @syntax_tree_loaded = true
+          rescue LoadError
             diagnostics << Diagnostic.new(
               severity: :warning,
-              message: "RuboCop formatting timed out after #{rubocop_timeout_seconds}s for output directory #{out_dir}",
+              message: 'SyntaxTree gem not available; generated files were not auto-formatted',
               line: nil,
               column: nil,
               op: 'raise.format'
             )
-            return
+            @syntax_tree_loaded = false
           end
+          @syntax_tree_loaded
+        end
 
-          return if status&.success?
+        def format_ruby_file_with_syntax_tree(path, diagnostics)
+          source = File.read(path)
+          formatted = if SyntaxTree.respond_to?(:format)
+                        SyntaxTree.format(source)
+                      else
+                        SyntaxTree::Formatter.format(source)
+                      end
+          return if formatted == source
 
-          exit_code = status&.exitstatus
-          severity = exit_code == 1 ? :warning : :error
-          diagnostics << Diagnostic.new(
-            severity: severity,
-            message: "RuboCop formatting reported status=#{exit_code.inspect} for output directory #{out_dir}",
-            line: nil,
-            column: nil,
-            op: 'raise.format'
-          )
-        rescue Errno::ENOENT
-          diagnostics << Diagnostic.new(
-            severity: :warning,
-            message: 'RuboCop executable not found; generated files were not auto-formatted',
-            line: nil,
-            column: nil,
-            op: 'raise.format'
-          )
+          File.write(path, formatted)
         rescue StandardError => e
           diagnostics << Diagnostic.new(
             severity: :warning,
-            message: "RuboCop formatting failed: #{e.class}: #{e.message}",
+            message: "SyntaxTree formatting failed for #{path}: #{e.class}: #{e.message}",
             line: nil,
             column: nil,
             op: 'raise.format'
           )
-        end
-
-        def run_command_with_timeout(cmd, timeout_seconds:)
-          pid = Process.spawn(*cmd, out: File::NULL, err: File::NULL, pgroup: true)
-          _pid, status = Timeout.timeout(timeout_seconds) { Process.wait2(pid) }
-          [status, false]
-        rescue Timeout::Error
-          terminate_process_group(pid)
-          [nil, true]
-        end
-
-        def terminate_process_group(pid)
-          return unless pid
-
-          begin
-            Process.kill('TERM', -pid)
-          rescue Errno::ESRCH
-            nil
-          end
-
-          begin
-            Timeout.timeout(2) { Process.wait(pid) }
-          rescue Timeout::Error
-            begin
-              Process.kill('KILL', -pid)
-            rescue Errno::ESRCH
-              nil
-            end
-            Process.wait(pid)
-          rescue Errno::ECHILD
-            nil
-          end
-        end
-
-        def rubocop_timeout_seconds
-          raw = ENV.fetch('RHDL_RUBOCOP_TIMEOUT_SECONDS', '300')
-          value = raw.to_i
-          value.positive? ? value : 300
-        rescue StandardError
-          300
-        end
-
-        def rubocop_format_command(out_dir:)
-          exe = begin
-            Gem.bin_path('rubocop', 'rubocop')
-          rescue StandardError
-            'rubocop'
-          end
-
-          cmd = [
-            exe,
-            '--autocorrect',
-            '--format', 'quiet',
-            '--force-exclusion',
-            '--parallel',
-            '--only', 'Layout',
-            '--except', 'Layout/LineLength'
-          ]
-          config_path = rubocop_config_path
-          cmd.concat(['--config', config_path]) if config_path
-          cmd << out_dir
-          cmd
-        end
-
-        def rubocop_config_path
-          root = File.expand_path('../../../../', __dir__)
-          path = File.join(root, '.rubocop.yml')
-          File.exist?(path) ? path : nil
         end
 
         def underscore(name)

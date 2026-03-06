@@ -320,7 +320,7 @@ RSpec.describe 'AO486 import parity (stubbed system baseline)' do
 
   it 'matches source Verilog (Verilator) and raised RHDL across available IR backends on bounded stub-safe signals',
      timeout: 600 do
-    skip 'circt-translate not available' unless HdlToolchain.which('circt-translate')
+    skip 'circt-verilog not available' unless HdlToolchain.which('circt-verilog')
     skip 'circt-opt not available' unless HdlToolchain.which('circt-opt')
     skip 'verilator not available' unless HdlToolchain.verilator_available?
     skip 'no IR backend available' if available_ir_backends.empty?

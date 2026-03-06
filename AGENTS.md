@@ -126,6 +126,8 @@ Common tasks:
 - `bundle exec rake spec`
 - `bundle exec rake spec:lib`
 - `bundle exec rake spec:hdl`
+- `bundle exec rake spec:ao486`
+- `bundle exec rake spec:gameboy`
 - `bundle exec rake spec:mos6502`
 - `bundle exec rake spec:apple2`
 - `bundle exec rake spec:riscv`
@@ -134,12 +136,15 @@ Parallel:
 - `bundle exec rake pspec`
 - `bundle exec rake pspec:lib`
 - `bundle exec rake pspec:hdl`
+- `bundle exec rake pspec:ao486`
+- `bundle exec rake pspec:gameboy`
 - `bundle exec rake pspec:mos6502`
 - `bundle exec rake pspec:apple2`
 - `bundle exec rake pspec:riscv`
 
 Spec benchmarks:
 - `bundle exec rake spec:bench[all,20]`
+- `bundle exec rake spec:bench[gameboy,20]`
 - `bundle exec rake spec:bench[riscv,20]`
 
 Simulation benchmarks:

@@ -79,6 +79,7 @@ RSpec.describe RHDL::CLI::Tasks::AO486Task do
     expect(FakeImporter.last_init_kwargs[:import_strategy]).to eq(:stubbed)
     expect(FakeImporter.last_init_kwargs[:fallback_to_stubbed]).to eq(true)
     expect(FakeImporter.last_init_kwargs[:maintain_directory_structure]).to eq(true)
+    expect(FakeImporter.last_init_kwargs[:format_output]).to eq(false)
     expect(FakeImporter.last_init_kwargs[:strict]).to eq(true)
     expect(FakeImporter.last_init_kwargs[:progress]).to respond_to(:call)
   end

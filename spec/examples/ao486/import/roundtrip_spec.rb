@@ -294,7 +294,7 @@ RSpec.describe 'AO486 import AST roundtrip (full tree baseline)', slow: true do
   end
 
   it 'preserves normalized per-module AST signatures across CIRCT -> RHDL -> CIRCT for full import', timeout: 1800 do
-    skip 'circt-translate not available' unless HdlToolchain.which('circt-translate')
+    skip 'circt-verilog not available' unless HdlToolchain.which('circt-verilog')
     skip 'circt-opt not available' unless HdlToolchain.which('circt-opt')
 
     Dir.mktmpdir('ao486_roundtrip_out') do |out_dir|

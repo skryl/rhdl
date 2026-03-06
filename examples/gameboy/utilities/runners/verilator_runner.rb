@@ -12,11 +12,13 @@
 #   runner.reset
 #   runner.run_steps(100)
 
-require_relative '../../gameboy'
+require_relative '../hdl_loader'
 require_relative '../output/speaker'
 require_relative '../renderers/lcd_renderer'
 require 'rhdl/codegen'
 require 'fileutils'
+require 'set'
+require 'json'
 require 'fiddle'
 require 'fiddle/import'
 
@@ -61,7 +63,29 @@ module RHDL
       end
 
       # Initialize the Game Boy Verilator runner
-      def initialize
+      # @param hdl_dir [String, nil] Optional HDL directory override.
+      def initialize(hdl_dir: nil)
+        @component_class = resolve_component_class(hdl_dir: hdl_dir)
+        @component_input_ports = Set.new
+        @component_output_ports = Set.new
+        @component_port_widths = {}
+        if @component_class.respond_to?(:_ports)
+          @component_class._ports.each do |port|
+            name = port.name.to_s
+            @component_port_widths[name] = port.width.to_i
+            if port.direction == :in
+              @component_input_ports << name
+            else
+              @component_output_ports << name
+            end
+          end
+        end
+        @component_ports = (@component_input_ports + @component_output_ports).to_set
+        @top_module_name = resolve_top_module_name(@component_class)
+        @verilator_prefix = "V#{@top_module_name}"
+        @input_port_aliases = build_input_port_aliases
+        @output_port_aliases = build_output_port_aliases
+
         check_verilator_available!
 
         log "Initializing Game Boy Verilator simulation..."
@@ -197,6 +221,7 @@ module RHDL
       def run_clock_cycle
         # Falling edge
         verilator_poke('clk_sys', 0)
+        drive_clock_enable_inputs(falling_edge: true)
         verilator_eval
 
         # Handle ROM read
@@ -211,6 +236,7 @@ module RHDL
 
         # Rising edge
         verilator_poke('clk_sys', 1)
+        drive_clock_enable_inputs(falling_edge: false)
         verilator_eval
 
         # Capture LCD output
@@ -295,8 +321,16 @@ module RHDL
       end
 
       def cpu_state
+        debug_pc = verilator_peek('debug_pc')
+        bus_pc = ((verilator_peek('ext_bus_a15') & 0x1) << 15) | (verilator_peek('ext_bus_addr') & 0x7FFF)
+        pc = if debug_port_available?('debug_pc')
+               debug_pc.to_i.zero? && !bus_pc.to_i.zero? ? bus_pc : debug_pc
+             else
+               bus_pc
+             end
+
         {
-          pc: verilator_peek('debug_pc') || 0,
+          pc: pc || 0,
           a: verilator_peek('debug_acc') || 0,
           f: verilator_peek('debug_f') || 0,
           b: verilator_peek('debug_b') || 0,
@@ -367,13 +401,243 @@ module RHDL
 
       private
 
+      def resolve_component_class(hdl_dir:)
+        resolved_hdl_dir = HdlLoader.resolve_hdl_dir(hdl_dir: hdl_dir)
+        @resolved_hdl_dir = resolved_hdl_dir
+        if resolved_hdl_dir == HdlLoader::DEFAULT_HDL_DIR
+          HdlLoader.configure!(hdl_dir: resolved_hdl_dir)
+          require_relative '../../gameboy'
+          return ::RHDL::Examples::GameBoy::Gameboy
+        end
+
+        HdlLoader.load_component_tree!(hdl_dir: resolved_hdl_dir)
+        unless ENV['RHDL_GAMEBOY_IMPORT_TOP']
+          require_relative '../../gameboy'
+          return ::RHDL::Examples::GameBoy::Gameboy
+        end
+
+        top_name = ENV['RHDL_GAMEBOY_IMPORT_TOP']
+        class_name = camelize_name(top_name.to_s)
+
+        candidates = []
+        candidates << Object.const_get(class_name, false) if Object.const_defined?(class_name, false)
+        if defined?(::RHDL::Examples::GameBoy) && ::RHDL::Examples::GameBoy.const_defined?(class_name, false)
+          candidates << ::RHDL::Examples::GameBoy.const_get(class_name, false)
+        end
+
+        component_class = candidates.find do |candidate|
+          candidate.is_a?(Class) && candidate.respond_to?(:to_verilog)
+        end
+        return component_class if component_class
+
+        raise NameError,
+              "Unable to resolve imported Game Boy top component '#{top_name}' "\
+              "(expected class '#{class_name}') in #{resolved_hdl_dir}"
+      end
+
+      def resolve_top_module_name(component_class)
+        if component_class.respond_to?(:verilog_module_name)
+          raw = component_class.verilog_module_name.to_s
+          return raw unless raw.empty?
+        end
+
+        underscore_name(component_class.name.to_s)
+      end
+
+      def build_input_port_aliases
+        aliases = {}
+        @component_input_ports.each do |name|
+          aliases[name] = name if port_width_for(name) <= 32
+        end
+        aliases['clk_sys'] = resolve_port_name('clk_sys')
+        aliases['reset'] = resolve_port_name('reset')
+        aliases['joystick'] = resolve_port_name('joystick')
+        aliases['is_gbc'] = resolve_port_name('is_gbc', 'isGBC')
+        aliases['is_sgb'] = resolve_port_name('is_sgb', 'isSGB')
+        aliases['cart_do'] = resolve_port_name('cart_do')
+        aliases.compact
+      end
+
+      def build_output_port_aliases
+        aliases = {}
+        @component_output_ports.each do |name|
+          aliases[name] = name if port_width_for(name) <= 32
+        end
+
+        aliases.merge!(
+          {
+          'ext_bus_addr' => resolve_port_name('ext_bus_addr'),
+          'ext_bus_a15' => resolve_port_name('ext_bus_a15'),
+          'cart_rd' => resolve_port_name('cart_rd'),
+          'cart_wr' => resolve_port_name('cart_wr'),
+          'cart_di' => resolve_port_name('cart_di'),
+          'lcd_clkena' => resolve_port_name('lcd_clkena'),
+          'lcd_data_gb' => resolve_port_name('lcd_data_gb'),
+          'lcd_vsync' => resolve_port_name('lcd_vsync'),
+          'lcd_on' => resolve_port_name('lcd_on'),
+          'joystick' => resolve_port_name('joystick'),
+          'debug_pc' => resolve_port_name('debug_pc', 'debug_cpu_pc'),
+          'debug_acc' => resolve_port_name('debug_acc', 'debug_cpu_acc'),
+          'debug_f' => resolve_port_name('debug_f'),
+          'debug_b' => resolve_port_name('debug_b'),
+          'debug_c' => resolve_port_name('debug_c'),
+          'debug_d' => resolve_port_name('debug_d'),
+          'debug_e' => resolve_port_name('debug_e'),
+          'debug_h' => resolve_port_name('debug_h'),
+          'debug_l' => resolve_port_name('debug_l'),
+          'debug_sp' => resolve_port_name('debug_sp'),
+          'debug_ir' => resolve_port_name('debug_ir'),
+          'debug_save_alu' => resolve_port_name('debug_save_alu'),
+          'debug_t_state' => resolve_port_name('debug_t_state'),
+          'debug_m_cycle' => resolve_port_name('debug_m_cycle'),
+          'debug_alu_flags' => resolve_port_name('debug_alu_flags'),
+          'debug_clken' => resolve_port_name('debug_clken'),
+          'debug_alu_op' => resolve_port_name('debug_alu_op'),
+          'debug_bus_a' => resolve_port_name('debug_bus_a'),
+          'debug_bus_b' => resolve_port_name('debug_bus_b'),
+          'debug_alu_result' => resolve_port_name('debug_alu_result'),
+          'debug_z_flag' => resolve_port_name('debug_z_flag'),
+          'debug_bus_a_zero' => resolve_port_name('debug_bus_a_zero'),
+          'debug_const_one' => resolve_port_name('debug_const_one')
+        }
+        )
+        aliases.compact
+      end
+
+      def c_poke_dispatch_lines
+        lines = []
+        @input_port_aliases.each_with_index do |(api_name, port_name), idx|
+          keyword = idx.zero? ? 'if' : 'else if'
+          lines << "#{keyword} (strcmp(name, \"#{api_name}\") == 0) ctx->dut->#{port_name} = value;"
+        end
+        lines << '(void)name; (void)value;' if lines.empty?
+        lines.map { |line| "      #{line}" }.join("\n")
+      end
+
+      def c_peek_dispatch_lines
+        lines = []
+        @output_port_aliases.each_with_index do |(api_name, port_name), idx|
+          keyword = idx.zero? ? 'if' : 'else if'
+          lines << "#{keyword} (strcmp(name, \"#{api_name}\") == 0) return ctx->dut->#{port_name};"
+        end
+        lines.map { |line| "      #{line}" }.join("\n")
+      end
+
+      def c_boot_rom_feed_lines(indent:)
+        boot_addr_port = resolve_port_name('boot_rom_addr')
+        boot_data_port = resolve_port_name('boot_rom_do')
+        return '' unless boot_addr_port && boot_data_port
+
+        [
+          "#{indent}unsigned int boot_addr = ctx->dut->#{boot_addr_port} & 0xFF;",
+          "#{indent}ctx->dut->#{boot_data_port} = ctx->boot_rom[boot_addr];"
+        ].join("\n")
+      end
+
+      def c_cart_feed_lines(indent:)
+        cart_rd_port = resolve_port_name('cart_rd')
+        cart_addr_port = resolve_port_name('ext_bus_addr')
+        cart_a15_port = resolve_port_name('ext_bus_a15')
+        cart_do_port = resolve_port_name('cart_do')
+        return '' unless cart_rd_port && cart_addr_port && cart_a15_port && cart_do_port
+
+        [
+          "#{indent}if (ctx->dut->#{cart_rd_port}) {",
+          "#{indent}    unsigned int addr = ctx->dut->#{cart_addr_port};",
+          "#{indent}    unsigned int a15 = ctx->dut->#{cart_a15_port};",
+          "#{indent}    unsigned int full_addr = (a15 << 15) | addr;",
+          "#{indent}    if (full_addr < sizeof(ctx->rom)) {",
+          "#{indent}        ctx->dut->#{cart_do_port} = ctx->rom[full_addr];",
+          "#{indent}    }",
+          "#{indent}}"
+        ].join("\n")
+      end
+
+      def c_ce_drive_lines(indent:, ce:, ce_n:, ce_2x:)
+        ce_port = resolve_port_name('ce')
+        ce_n_port = resolve_port_name('ce_n')
+        ce_2x_port = resolve_port_name('ce_2x')
+        return '' unless ce_port || ce_n_port || ce_2x_port
+
+        lines = []
+        lines << "#{indent}ctx->dut->#{ce_port} = #{ce};" if ce_port
+        lines << "#{indent}ctx->dut->#{ce_n_port} = #{ce_n};" if ce_n_port
+        lines << "#{indent}ctx->dut->#{ce_2x_port} = #{ce_2x};" if ce_2x_port
+        lines.join("\n")
+      end
+
+      def resolve_port_name(*candidates)
+        candidates.map(&:to_s).find { |name| @component_ports.include?(name) }
+      end
+
+      def port_width_for(name)
+        @component_port_widths.fetch(name.to_s, 1)
+      end
+
+      def sanitize_identifier(value)
+        value.to_s.gsub(/[^A-Za-z0-9_]/, '_')
+      end
+
+      def runtime_staged_verilog_entry
+        return nil unless @resolved_hdl_dir
+        return nil unless ENV['RHDL_GAMEBOY_USE_STAGED_VERILOG'] == '1'
+
+        report_path = File.expand_path(File.join(@resolved_hdl_dir, 'import_report.json'))
+        if File.file?(report_path)
+          begin
+            report = JSON.parse(File.read(report_path))
+            artifacts = report['artifacts']
+            mixed = report['mixed_import']
+            if mixed.is_a?(Hash) || artifacts.is_a?(Hash)
+              candidates = [
+                artifacts.is_a?(Hash) ? artifacts['normalized_verilog_path'] : nil,
+                mixed.is_a?(Hash) ? mixed['normalized_verilog_path'] : nil,
+                artifacts.is_a?(Hash) ? artifacts['pure_verilog_entry_path'] : nil,
+                mixed.is_a?(Hash) ? mixed['pure_verilog_entry_path'] : nil
+              ].compact
+              candidate = candidates.find { |path| File.file?(path) }
+              return File.expand_path(candidate) if candidate
+            end
+          rescue JSON::ParserError
+            # Fall back to static path probes below.
+          end
+        end
+
+        runtime_candidate = File.expand_path(File.join(@resolved_hdl_dir, '.mixed_import', 'gb.normalized.v'))
+        return runtime_candidate if File.file?(runtime_candidate)
+
+        staged_candidate = File.expand_path(File.join(@resolved_hdl_dir, '.mixed_import', 'pure_verilog_entry.v'))
+        return staged_candidate if File.file?(staged_candidate)
+
+        nil
+      end
+
+      def camelize_name(value)
+        tokens = value.to_s
+                      .gsub(/([A-Z]+)([A-Z][a-z])/, '\1_\2')
+                      .gsub(/([a-z\d])([A-Z])/, '\1_\2')
+                      .tr('-', '_')
+                      .split('_')
+                      .reject(&:empty?)
+        tokens.map(&:capitalize).join
+      end
+
+      def underscore_name(name)
+        name
+          .to_s
+          .gsub('::', '_')
+          .gsub(/([A-Z]+)([A-Z][a-z])/, '\1_\2')
+          .gsub(/([a-z\d])([A-Z])/, '\1_\2')
+          .downcase
+      end
+
       def verilog_simulator
         @verilog_simulator ||= RHDL::Codegen::Verilog::VerilogSimulator.new(
           backend: :verilator,
           build_dir: BUILD_DIR,
-          library_basename: 'gameboy_sim',
-          top_module: 'game_boy_gameboy',
-          verilator_prefix: 'Vgame_boy_gameboy',
+          library_basename: "gameboy_sim_#{sanitize_identifier(@top_module_name)}",
+          top_module: @top_module_name,
+          verilator_prefix: @verilator_prefix,
           x_assign: 'fast',
           x_initial: 'fast'
         )
@@ -386,22 +650,27 @@ module RHDL
       def build_verilator_simulation
         verilog_simulator.prepare_build_dirs!
 
-        # Export Gameboy to Verilog
-        verilog_file = File.join(VERILOG_DIR, 'gameboy.v')
-        verilog_codegen = File.expand_path('../../../../lib/rhdl/dsl/codegen.rb', __dir__)
-        circt_codegen = File.expand_path('../../../../lib/rhdl/codegen/circt/tooling.rb', __dir__)
-        export_deps = [__FILE__, verilog_codegen, circt_codegen].select { |p| File.exist?(p) }
-        needs_export = !File.exist?(verilog_file) ||
-                       export_deps.any? { |p| File.mtime(p) > File.mtime(verilog_file) }
+        stem = sanitize_identifier(@top_module_name)
+        verilog_file = runtime_staged_verilog_entry
+        if verilog_file
+          log "  Using staged mixed-source Verilog: #{verilog_file}"
+        else
+          verilog_file = File.join(VERILOG_DIR, "gameboy_#{stem}.v")
+          verilog_codegen = File.expand_path('../../../../lib/rhdl/dsl/codegen.rb', __dir__)
+          circt_codegen = File.expand_path('../../../../lib/rhdl/codegen/circt/tooling.rb', __dir__)
+          export_deps = [__FILE__, verilog_codegen, circt_codegen].select { |p| File.exist?(p) }
+          needs_export = !File.exist?(verilog_file) ||
+                         export_deps.any? { |p| File.mtime(p) > File.mtime(verilog_file) }
 
-        if needs_export
-          log "  Exporting Gameboy to Verilog..."
-          export_verilog(verilog_file)
+          if needs_export
+            log "  Exporting #{@component_class} to Verilog..."
+            export_verilog(verilog_file)
+          end
         end
 
         # Create C++ wrapper
-        wrapper_file = File.join(VERILOG_DIR, 'sim_wrapper.cpp')
-        header_file = File.join(VERILOG_DIR, 'sim_wrapper.h')
+        wrapper_file = File.join(VERILOG_DIR, "sim_wrapper_#{stem}.cpp")
+        header_file = File.join(VERILOG_DIR, "sim_wrapper_#{stem}.h")
         create_cpp_wrapper(wrapper_file, header_file)
 
         # Check if we need to rebuild
@@ -421,39 +690,8 @@ module RHDL
       end
 
       def export_verilog(output_file)
-        # Use the existing Verilog export infrastructure
-        verilog_code = RHDL::Examples::GameBoy::Gameboy.to_verilog
-
-        # Also export all subcomponents
-        subcomponent_verilog = []
-        [
-          RHDL::Examples::GameBoy::SpeedControl,
-          RHDL::Examples::GameBoy::GB,
-          RHDL::Examples::GameBoy::SM83,
-          RHDL::Examples::GameBoy::SM83_ALU,
-          RHDL::Examples::GameBoy::SM83_Registers,
-          RHDL::Examples::GameBoy::SM83_MCode,
-          RHDL::Examples::GameBoy::Timer,
-          RHDL::Examples::GameBoy::Video,
-          RHDL::Examples::GameBoy::Sprites,
-          RHDL::Examples::GameBoy::LCD,
-          RHDL::Examples::GameBoy::Sound,
-          RHDL::Examples::GameBoy::ChannelSquare,
-          RHDL::Examples::GameBoy::ChannelWave,
-          RHDL::Examples::GameBoy::ChannelNoise,
-          RHDL::Examples::GameBoy::HDMA,
-          RHDL::Examples::GameBoy::Link,
-          RHDL::Examples::GameBoy::DPRAM,
-          RHDL::Examples::GameBoy::SPRAM
-        ].each do |component_class|
-          begin
-            subcomponent_verilog << component_class.to_verilog
-          rescue StandardError => e
-            log "    Warning: Could not export #{component_class}: #{e.message}"
-          end
-        end
-
-        all_verilog = [verilog_code, *subcomponent_verilog].join("\n\n")
+        # Export selected top via CIRCT-backed DSL codegen.
+        all_verilog = @component_class.to_verilog
 
         # Post-process for Verilator compatibility
         all_verilog = make_verilator_compatible(all_verilog)
@@ -560,9 +798,16 @@ module RHDL
           #endif // SIM_WRAPPER_H
         HEADER
 
+        poke_dispatch = c_poke_dispatch_lines
+        peek_dispatch = c_peek_dispatch_lines
+        boot_feed = c_boot_rom_feed_lines(indent: '        ')
+        cart_feed = c_cart_feed_lines(indent: '        ')
+        ce_feed_low = c_ce_drive_lines(indent: '        ', ce: 1, ce_n: 0, ce_2x: 1)
+        ce_feed_high = c_ce_drive_lines(indent: '        ', ce: 0, ce_n: 1, ce_2x: 0)
+
         cpp_content = <<~CPP
-          #include "Vgame_boy_gameboy.h"
-          #include "Vgame_boy_gameboy___024root.h"  // For internal signal access
+          #include "#{@verilator_prefix}.h"
+          #include "#{@verilator_prefix}___024root.h"  // For internal signal access
           #include "verilated.h"
           #include "sim_wrapper.h"
           #include <cstring>
@@ -572,7 +817,7 @@ module RHDL
           double sc_time_stamp() { return 0; }
 
           struct SimContext {
-              Vgame_boy_gameboy* dut;
+              #{@verilator_prefix}* dut;
               unsigned char rom[1048576];     // 1MB ROM
               unsigned char boot_rom[256];    // 256 byte DMG boot ROM
               unsigned char vram[8192];       // 8KB VRAM
@@ -591,7 +836,7 @@ module RHDL
               const char* empty_args[] = {""};
               Verilated::commandArgs(1, empty_args);
               SimContext* ctx = new SimContext();
-              ctx->dut = new Vgame_boy_gameboy();
+              ctx->dut = new #{@verilator_prefix}();
               memset(ctx->rom, 0, sizeof(ctx->rom));
               memset(ctx->boot_rom, 0, sizeof(ctx->boot_rom));
               memset(ctx->vram, 0, sizeof(ctx->vram));
@@ -617,32 +862,23 @@ module RHDL
               ctx->dut->reset = 1;
               for (int i = 0; i < 10; i++) {
                   ctx->dut->clk_sys = 0;
+          #{ce_feed_low}
                   ctx->dut->eval();
                   ctx->dut->clk_sys = 1;
+          #{ce_feed_high}
                   ctx->dut->eval();
               }
               // Release reset and clock to let the system initialize
-              // IMPORTANT: Must provide boot ROM data during these cycles!
               ctx->dut->reset = 0;
               for (int i = 0; i < 100; i++) {
                   ctx->dut->clk_sys = 0;
+          #{ce_feed_low}
                   ctx->dut->eval();
-
-                  // Provide boot ROM data (same as in sim_run_cycles)
-                  unsigned int boot_addr = ctx->dut->boot_rom_addr & 0xFF;
-                  ctx->dut->boot_rom_do = ctx->boot_rom[boot_addr];
-
-                  // Handle ROM read if needed
-                  if (ctx->dut->cart_rd) {
-                      unsigned int addr = ctx->dut->ext_bus_addr;
-                      unsigned int a15 = ctx->dut->ext_bus_a15;
-                      unsigned int full_addr = (a15 << 15) | addr;
-                      if (full_addr < sizeof(ctx->rom)) {
-                          ctx->dut->cart_do = ctx->rom[full_addr];
-                      }
-                  }
+          #{boot_feed}
+          #{cart_feed}
 
                   ctx->dut->clk_sys = 1;
+          #{ce_feed_high}
                   ctx->dut->eval();
               }
 
@@ -660,49 +896,12 @@ module RHDL
 
           void sim_poke(void* sim, const char* name, unsigned int value) {
               SimContext* ctx = static_cast<SimContext*>(sim);
-              if (strcmp(name, "clk_sys") == 0) ctx->dut->clk_sys = value;
-              else if (strcmp(name, "reset") == 0) ctx->dut->reset = value;
-              else if (strcmp(name, "joystick") == 0) ctx->dut->joystick = value;
-              else if (strcmp(name, "is_gbc") == 0) ctx->dut->is_gbc = value;
-              else if (strcmp(name, "is_sgb") == 0) ctx->dut->is_sgb = value;
-              else if (strcmp(name, "cart_do") == 0) ctx->dut->cart_do = value;
+          #{poke_dispatch}
           }
 
           unsigned int sim_peek(void* sim, const char* name) {
               SimContext* ctx = static_cast<SimContext*>(sim);
-              if (strcmp(name, "ext_bus_addr") == 0) return ctx->dut->ext_bus_addr;
-              else if (strcmp(name, "ext_bus_a15") == 0) return ctx->dut->ext_bus_a15;
-              else if (strcmp(name, "cart_rd") == 0) return ctx->dut->cart_rd;
-              else if (strcmp(name, "cart_wr") == 0) return ctx->dut->cart_wr;
-              else if (strcmp(name, "cart_di") == 0) return ctx->dut->cart_di;
-              else if (strcmp(name, "lcd_clkena") == 0) return ctx->dut->lcd_clkena;
-              else if (strcmp(name, "lcd_data_gb") == 0) return ctx->dut->lcd_data_gb;
-              else if (strcmp(name, "lcd_vsync") == 0) return ctx->dut->lcd_vsync;
-              else if (strcmp(name, "lcd_on") == 0) return ctx->dut->lcd_on;
-              else if (strcmp(name, "joystick") == 0) return ctx->dut->joystick;
-              else if (strcmp(name, "debug_pc") == 0) return ctx->dut->debug_pc;
-              else if (strcmp(name, "debug_acc") == 0) return ctx->dut->debug_acc;
-              else if (strcmp(name, "debug_f") == 0) return ctx->dut->debug_f;
-              else if (strcmp(name, "debug_b") == 0) return ctx->dut->debug_b;
-              else if (strcmp(name, "debug_c") == 0) return ctx->dut->debug_c;
-              else if (strcmp(name, "debug_d") == 0) return ctx->dut->debug_d;
-              else if (strcmp(name, "debug_e") == 0) return ctx->dut->debug_e;
-              else if (strcmp(name, "debug_h") == 0) return ctx->dut->debug_h;
-              else if (strcmp(name, "debug_l") == 0) return ctx->dut->debug_l;
-              else if (strcmp(name, "debug_sp") == 0) return ctx->dut->debug_sp;
-              else if (strcmp(name, "debug_ir") == 0) return ctx->dut->debug_ir;
-              else if (strcmp(name, "debug_save_alu") == 0) return ctx->dut->debug_save_alu;
-              else if (strcmp(name, "debug_t_state") == 0) return ctx->dut->debug_t_state;
-              else if (strcmp(name, "debug_m_cycle") == 0) return ctx->dut->debug_m_cycle;
-              else if (strcmp(name, "debug_alu_flags") == 0) return ctx->dut->debug_alu_flags;
-              else if (strcmp(name, "debug_clken") == 0) return ctx->dut->debug_clken;
-              else if (strcmp(name, "debug_alu_op") == 0) return ctx->dut->debug_alu_op;
-              else if (strcmp(name, "debug_bus_a") == 0) return ctx->dut->debug_bus_a;
-              else if (strcmp(name, "debug_bus_b") == 0) return ctx->dut->debug_bus_b;
-              else if (strcmp(name, "debug_alu_result") == 0) return ctx->dut->debug_alu_result;
-              else if (strcmp(name, "debug_z_flag") == 0) return ctx->dut->debug_z_flag;
-              else if (strcmp(name, "debug_bus_a_zero") == 0) return ctx->dut->debug_bus_a_zero;
-              else if (strcmp(name, "debug_const_one") == 0) return ctx->dut->debug_const_one;
+          #{peek_dispatch}
               // Internal signals not accessible - return estimated values
               else if (strcmp(name, "_clkdiv") == 0) return ctx->clk_counter & 7;  // Estimate clkdiv
               // Other internal signals not accessible
@@ -759,29 +958,18 @@ module RHDL
               while (result->cycles_run < n_cycles) {
                   // Falling edge
                   ctx->dut->clk_sys = 0;
+          #{ce_feed_low}
                   ctx->dut->eval();
-
-                  // Provide boot ROM data based on boot_rom_addr
-                  unsigned int boot_addr = ctx->dut->boot_rom_addr & 0xFF;
-                  ctx->dut->boot_rom_do = ctx->boot_rom[boot_addr];
-
-                  // Handle ROM read
-                  if (ctx->dut->cart_rd) {
-                      unsigned int addr = ctx->dut->ext_bus_addr;
-                      unsigned int a15 = ctx->dut->ext_bus_a15;
-                      unsigned int full_addr = (a15 << 15) | addr;
-                      if (full_addr < sizeof(ctx->rom)) {
-                          ctx->dut->cart_do = ctx->rom[full_addr];
-                      }
-                  }
+          #{boot_feed}
+          #{cart_feed}
                   ctx->dut->eval();
 
                   // Rising edge
                   ctx->dut->clk_sys = 1;
+          #{ce_feed_high}
                   ctx->dut->eval();
 
                   // Count every system clock as a CPU cycle
-                  // SpeedControl outputs ce=1 always (no division), so CPU executes every clock
                   ctx->clk_counter++;
                   result->cycles_run++;
 
@@ -925,6 +1113,7 @@ module RHDL
       end
 
       def reset_simulation
+        initialize_inputs
         @sim_reset&.call(@sim_ctx) if @sim_ctx
         initialize_inputs
       end
@@ -934,11 +1123,61 @@ module RHDL
 
         verilator_poke('clk_sys', 0)
         verilator_poke('reset', 0)
-        verilator_poke('joystick', 0xFF)  # All buttons released
-        verilator_poke('is_gbc', 0)       # DMG mode
-        verilator_poke('is_sgb', 0)       # Not SGB
-        verilator_poke('cart_do', 0)
+        drive_clock_enable_inputs(falling_edge: false)
+        poke_if_available('joystick', 0xFF)  # All buttons released
+        poke_if_available('joy_din', 0xF)
+        poke_if_available('is_gbc', 0)       # DMG mode
+        poke_if_available('is_sgb', 0)       # Not SGB
+        poke_if_available('cart_do', 0)
+        poke_if_available('cart_oe', 1)
+
+        # Tie-offs used by imported gb top.
+        poke_if_available('real_cgb_boot', 0)
+        poke_if_available('cgb_boot_download', 0)
+        poke_if_available('dmg_boot_download', 0)
+        poke_if_available('sgb_boot_download', 0)
+        poke_if_available('ioctl_wr', 0)
+        poke_if_available('ioctl_addr', 0)
+        poke_if_available('ioctl_dout', 0)
+        poke_if_available('boot_gba_en', 0)
+        fast_boot_default = @component_input_ports.include?('boot_rom_do') ? 0 : 1
+        poke_if_available('fast_boot_en', fast_boot_default)
+        poke_if_available('audio_no_pops', 0)
+        poke_if_available('megaduck', 0)
+        poke_if_available('gg_reset', 0)
+        poke_if_available('gg_en', 0)
+        poke_if_available('gg_code', 0)
+        poke_if_available('serial_clk_in', 0)
+        poke_if_available('serial_data_in', 1)
+        poke_if_available('increaseSSHeaderCount', 0)
+        poke_if_available('cart_ram_size', 0)
+        poke_if_available('save_state', 0)
+        poke_if_available('load_state', 0)
+        poke_if_available('savestate_number', 0)
+        poke_if_available('SaveStateExt_Dout', 0)
+        poke_if_available('Savestate_CRAMReadData', 0)
+        poke_if_available('SAVE_out_Dout', 0)
+        poke_if_available('SAVE_out_done', 1)
+        poke_if_available('rewind_on', 0)
+        poke_if_available('rewind_active', 0)
         verilator_eval
+      end
+
+      def drive_clock_enable_inputs(falling_edge:)
+        poke_if_available('ce', falling_edge ? 1 : 0)
+        poke_if_available('ce_n', falling_edge ? 0 : 1)
+        poke_if_available('ce_2x', falling_edge ? 1 : 0)
+      end
+
+      def poke_if_available(name, value)
+        port_name = @input_port_aliases[name.to_s]
+        return if port_name.nil?
+
+        verilator_poke(port_name, value)
+      end
+
+      def debug_port_available?(name)
+        @output_port_aliases.key?(name.to_s)
       end
 
       def verilator_poke(name, value)

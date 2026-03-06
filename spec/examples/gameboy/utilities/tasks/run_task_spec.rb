@@ -64,6 +64,11 @@ RSpec.describe RHDL::Examples::GameBoy::Tasks::RunTask do
       task = described_class.new
       expect(task.options).to eq({})
     end
+
+    it 'accepts an hdl_dir override path' do
+      task = described_class.new(mode: :ir, sim: :compile, hdl_dir: '/tmp/gameboy_import')
+      expect(task.options[:hdl_dir]).to eq('/tmp/gameboy_import')
+    end
   end
 
   describe '#run with headless mode' do
@@ -161,6 +166,19 @@ RSpec.describe RHDL::Examples::GameBoy::Tasks::RunTask do
     it 'provides access to CPU state' do
       state = task.runner.cpu_state
       expect(state).to include(:pc, :a, :f)
+    end
+
+    it 'passes hdl_dir override to HeadlessRunner' do
+      custom = described_class.new(
+        headless: true,
+        demo: true,
+        mode: :ruby,
+        sim: :ruby,
+        cycles: 1,
+        hdl_dir: '/tmp/gameboy_import'
+      )
+      custom.run
+      expect(custom.runner.hdl_dir).to eq('/tmp/gameboy_import')
     end
   end
 
