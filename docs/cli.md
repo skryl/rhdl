@@ -367,6 +367,46 @@ Raised DSL output from import flows is auto-formatted with RuboCop when availabl
 
 ---
 
+## Examples GameBoy Command
+
+Run the Game Boy emulator or regenerate the raised Game Boy import tree from the reference HDL.
+
+### Usage
+
+```bash
+rhdl examples gameboy [options] [rom.gb]
+rhdl examples gameboy import [options]
+```
+
+### Examples
+
+```bash
+# Run the built-in demo
+rhdl examples gameboy --demo
+
+# Import the reference design into examples/gameboy/import
+rhdl examples gameboy import
+
+# Keep the mixed-import workspace for debugging
+rhdl examples gameboy import --workspace tmp/gameboy_ws --keep-workspace
+```
+
+### `import` options
+
+| Option | Description |
+|--------|-------------|
+| `--out DIR` | Output directory for raised DSL (default: `examples/gameboy/import`) |
+| `--workspace DIR` | Workspace directory for intermediate artifacts |
+| `--reference-root DIR` | Override the Game Boy reference tree root |
+| `--qip FILE` | Override the Quartus QIP manifest path |
+| `--top NAME` | Top module name override (default: `gb`) |
+| `--top-file FILE` | Override the top source file (default: `examples/gameboy/reference/rtl/gb.v`) |
+| `--keep-workspace` | Keep workspace artifacts after import |
+| `--[no-]clean` | Clean existing output directory contents before writing (default: enabled) |
+| `--[no-]strict` | Treat import issues as failures (default: enabled) |
+
+---
+
 ## Examples AO486 Command
 
 Run AO486-specific CIRCT import and bounded parity workflows.

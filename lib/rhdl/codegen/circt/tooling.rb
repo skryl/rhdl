@@ -302,11 +302,7 @@ module RHDL
         end
 
         def cleanup_imported_core_mlir_text(text, top:, strict:, extern_modules:)
-          needs_cleanup = text.include?('llhd.') ||
-                          text.include?('hw.array_inject') ||
-                          text.include?('hw.aggregate_constant') ||
-                          text.include?('seq.clock_inv') ||
-                          text.match?(/!hw\.array</)
+          needs_cleanup = text.include?('llhd.')
           return text unless needs_cleanup
 
           cleanup = RHDL::Codegen::CIRCT::ImportCleanup.cleanup_imported_core_mlir(

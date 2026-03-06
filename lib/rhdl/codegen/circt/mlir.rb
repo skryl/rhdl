@@ -41,6 +41,8 @@ module RHDL
             @lines = []
             @temp_idx = 0
             @values = {}
+            @sanitized_cache = {}
+            @value_widths = {}
             @instance_output_tokens = build_instance_output_tokens
             @clock_values = {}
             @assigns_by_target = Hash.new { |h, k| h[k] = [] }
@@ -54,6 +56,7 @@ module RHDL
             @resolving = Set.new
             @expr_values = {}
             @active_exprs = Set.new
+            seed_known_widths
           end
 
           def emit
@@ -114,14 +117,60 @@ module RHDL
             @lines << "hw.module @#{sanitize(@mod.name)}#{module_params}(#{ports.join(', ')}) {"
           end
 
+          def seed_known_widths
+            @mod.ports.each do |port|
+              @value_widths[sanitize(port.name.to_s)] = port.width.to_i
+            end
+            @mod.regs.each do |reg|
+              @value_widths[sanitize(reg.name.to_s)] = reg.width.to_i
+            end
+            @mod.nets.each do |net|
+              @value_widths[sanitize(net.name.to_s)] = net.width.to_i
+            end
+          end
+
           def emit_reg_processes
+            shared_reg_tokens = preseed_clocked_reg_tokens
             @mod.processes.each do |process|
               next unless process.clocked
 
               clock_name = process.clock ? process.clock.to_s : 'clk'
               clock_value = resolve_clock(clock_name)
-              emit_seq_statements(process.statements, clock_value)
+              emit_seq_statements(process.statements, clock_value, shared_reg_tokens: shared_reg_tokens)
             end
+          end
+
+          def preseed_clocked_reg_tokens
+            reg_tokens = {}
+
+            @mod.processes.each do |process|
+              next unless process.clocked
+
+              collect_seq_targets(Array(process.statements)).each do |target|
+                next if reg_tokens.key?(target)
+
+                width = find_width(target)
+                reg_tokens[target] = fresh(width)
+                @values[target.to_s] = reg_tokens[target]
+              end
+            end
+
+            reg_tokens
+          end
+
+          def collect_seq_targets(statements, acc = [])
+            Array(statements).each do |stmt|
+              case stmt
+              when IR::SeqAssign
+                target = stmt.target.to_s
+                acc << target unless acc.include?(target)
+              when IR::If
+                collect_seq_targets(stmt.then_statements, acc)
+                collect_seq_targets(stmt.else_statements, acc)
+              end
+            end
+
+            acc
           end
 
           def emit_instances
@@ -282,7 +331,7 @@ module RHDL
             token
           end
 
-          def emit_seq_statements(statements, clock_value)
+          def emit_seq_statements(statements, clock_value, shared_reg_tokens: nil)
             seq_state = {}
             target_order = []
             lower_seq_statements(
@@ -296,7 +345,7 @@ module RHDL
               next unless seq_state.key?(target)
               expr = seq_state[target]
               width = expr.respond_to?(:width) ? expr.width : find_width(target)
-              reg_tokens[target] = fresh(width)
+              reg_tokens[target] = shared_reg_tokens&.fetch(target, nil) || fresh(width)
               # Make current-cycle register values available while emitting next-state logic.
               @values[target.to_s] = reg_tokens[target]
             end
@@ -535,7 +584,7 @@ module RHDL
 
             assigned_exprs = @assigns_by_target[key]
             if assigned_exprs && !assigned_exprs.empty?
-              assigned = assigned_exprs.last
+              assigned = preferred_assigned_expr(key, assigned_exprs)
               @resolving << key
               @values[key] = emit_expr(assigned)
               @resolving.delete(key)
@@ -809,23 +858,29 @@ module RHDL
 
           def find_value_width(value_name)
             key = value_name.to_s.sub(/^%/, '')
+            return @value_widths[key] if @value_widths.key?(key)
+
             if (port = @mod.ports.find { |p| sanitize(p.name.to_s) == key })
-              return port.width
+              @value_widths[key] = port.width.to_i
+              return @value_widths[key]
             end
 
             if (reg = @mod.regs.find { |r| sanitize(r.name.to_s) == key })
-              return reg.width
+              @value_widths[key] = reg.width.to_i
+              return @value_widths[key]
             end
 
             if (net = @mod.nets.find { |n| sanitize(n.name.to_s) == key })
-              return net.width
+              @value_widths[key] = net.width.to_i
+              return @value_widths[key]
             end
 
             if (m = key.match(/_(\d+)\z/))
-              return [m[1].to_i, 1].max
+              @value_widths[key] = [m[1].to_i, 1].max
+              return @value_widths[key]
             end
 
-            1
+            @value_widths[key] = 1
           end
 
           def find_width(signal_name)
@@ -953,9 +1008,55 @@ module RHDL
             end
           end
 
+          def preferred_assigned_expr(target_name, exprs)
+            candidates = Array(exprs).compact
+            return IR::Literal.new(value: 0, width: 1) if candidates.empty?
+
+            non_self = candidates.reject { |expr| signal_expr_references_target?(expr, target_name) }
+            candidates = non_self unless non_self.empty?
+
+            non_default = candidates.reject { |expr| zero_literal?(expr) }
+            candidates = non_default unless non_default.empty?
+
+            if candidates.length > 1
+              width = find_width(target_name)
+              return combine_assigned_exprs(candidates, width)
+            end
+
+            candidates.max_by { |expr| [assign_expr_priority(expr), expr.object_id] }
+          end
+
+          def combine_assigned_exprs(exprs, width)
+            Array(exprs).compact.reduce do |lhs, rhs|
+              IR::BinaryOp.new(
+                op: :'|',
+                left: lhs,
+                right: rhs,
+                width: width
+              )
+            end
+          end
+
+          def assign_expr_priority(expr)
+            case expr
+            when IR::Literal
+              zero_literal?(expr) ? 0 : 1
+            when IR::Signal
+              2
+            else
+              3
+            end
+          end
+
+          def zero_literal?(expr)
+            expr.is_a?(IR::Literal) && expr.value.to_i.zero?
+          end
+
           def fresh(width)
             @temp_idx += 1
-            "%v#{@temp_idx}_#{width}"
+            token = "%v#{@temp_idx}_#{width}"
+            @value_widths[token.sub(/^%/, '')] = [width.to_i, 1].max
+            token
           end
 
           def iwidth(width)
@@ -963,7 +1064,8 @@ module RHDL
           end
 
           def sanitize(name)
-            name.to_s.gsub(/[^A-Za-z0-9_]/, '_')
+            raw = name.to_s
+            @sanitized_cache[raw] ||= raw.gsub(/[^A-Za-z0-9_]/, '_')
           end
         end
       end

@@ -34,6 +34,9 @@ The behavioral check is instruction-oriented:
 1. New importer helper:
    - `RHDL::Examples::AO486::Import::CpuImporter`
    - path: `examples/ao486/utilities/import/cpu_importer.rb`
+2. New imported-package trace helper:
+   - `RHDL::Examples::AO486::Import::CpuTracePackage`
+   - path: `examples/ao486/utilities/import/cpu_trace_package.rb`
 2. New CIRCT tooling helper:
    - `RHDL::Codegen::CIRCT::Tooling.prepare_arc_mlir_from_circt_mlir(mlir_path:, work_dir:)`
 3. New AO486 CPU runtime parity spec:
@@ -169,12 +172,93 @@ Completed in this iteration:
    - returns shared `hwseq` output path plus attempted `arc` output path
 5. Added tooling coverage for the new helper:
    - `spec/rhdl/codegen/circt/tooling_spec.rb`
+6. Added a traced-top post-import IR transform:
+   - `examples/ao486/utilities/import/cpu_trace_package.rb`
+   - exposes `trace_retired`, `trace_wr_eip`, `trace_wr_consumed`, `trace_cs_cache`, and `trace_cs_cache_valid` on the imported `ao486` CPU top
+   - carries the retire interface up from `write` -> `pipeline` -> `ao486` entirely within canonical CIRCT IR
+   - final retire pulse is now recomputed in `pipeline` from imported `write` outputs (`wr_finished`, `wr_ready`, `wr_hlt_in_progress`) so `firtool` does not constant-fold it away
+7. Added focused coverage for the traced package:
+   - `spec/examples/ao486/import/cpu_trace_package_spec.rb`
+   - validates re-import of traced MLIR and `firtool` export from the traced top
+8. Added a focused runtime guardrail for hierarchical CIRCT IR:
+   - `spec/rhdl/sim/native/ir/circt_hierarchy_flatten_runtime_spec.rb`
+   - demonstrates that hierarchical CIRCT packages evaluate correctly on JIT once flattened for runtime
+9. Fixed native IR clocking/runtime correctness needed for AO486 JIT:
+   - `lib/rhdl/sim/native/ir/ir_interpreter/src/core.rs`
+   - `lib/rhdl/sim/native/ir/ir_jit/src/core.rs`
+   - `spec/rhdl/sim/native/ir/ir_simulator_input_format_spec.rb`
+   - direct CIRCT sequential stepping now matches the expected low-phase `evaluate` / high-phase `tick` contract
+   - JIT now uses the runtime sequential sampler for imported sequential expressions and tracks combinational assignment dependencies the same way as the interpreter for multi-writer targets
+10. Strengthened AO486 CPU importer runtime coverage:
+   - `spec/examples/ao486/import/cpu_importer_spec.rb`
+   - now checks that one legal `rst_n=0` clock cycle on the flattened imported CPU JIT runtime produces the expected reset state:
+     - `pipeline_inst__decode_inst__eip == 0xFFF0`
+     - `memory_inst__prefetch_inst__prefetch_address == 0xFFFF0`
+     - `memory_inst__prefetch_inst__prefetch_length == 16`
+11. Fixed cleaned-MLIR sequential feedback across multiple clocked processes:
+   - `lib/rhdl/codegen/circt/mlir.rb`
+   - the structural MLIR emitter now pre-seeds current-cycle register tokens across the whole module before emitting per-process `seq.compreg` logic
+   - this closes the cleanup regression where cross-process register reads in imported modules were being zeroed during re-emission
+12. AO486 startup probe result after the cleaned-MLIR fix:
+   - the imported CPU now reaches correct reset state, but the earlier post-reset `avm_read` pulse was traced to a runtime-json hoisting bug rather than a real reset-vector fetch
+13. Fixed CIRCT runtime-json hoisting collisions that were corrupting imported startup behavior:
+   - `lib/rhdl/codegen/circt/runtime_json.rb`
+   - hoisted shared-expression temp names now use one monotonic counter per normalized expression instead of recursive local offsets
+   - this closes the duplicate `_rt_tmp_*` assign-target collision that was causing the imported AO486 TLB state machine to commit impossible next-state values at runtime
+14. Strengthened AO486 CPU importer runtime coverage around the real startup sequence:
+   - `spec/examples/ao486/import/cpu_importer_spec.rb`
+   - now asserts that runtime normalization emits no duplicate assign targets
+   - now checks the corrected imported startup path:
+     - TLB enters `STATE_CODE_CHECK`
+     - `tlbcode_do` asserts
+     - `prefetch_control.icacheread_do` asserts
+15. Resulting startup classification after the runtime-json fix:
+   - the earlier bogus `STATE_READ_CHECK` transition in imported TLB startup is fixed
+   - `tlbcoderequest_do -> tlbcode_do -> icacheread_do` now behaves correctly on the flattened imported CPU JIT runtime
+   - the remaining startup failure moved downstream into imported cache logic: `l1_icache` still never raises `MEM_REQ`, so `readcode_do` / `avm_read` do not yet form a usable reset-vector fetch
+16. Added a parity-oriented imported-package transform for cache-disabled CPU-top execution:
+   - `examples/ao486/utilities/import/cpu_parity_package.rb`
+   - builds on the traced imported package and replaces imported `l1_icache` behavior inside `icache` with a direct-fetch model intended only for parity mode with `cache_disable=1`
+   - this keeps the imported CPU top and imported memory/pipeline structure, while bypassing the still-broken imported cache controller
+17. Added focused coverage for the parity package:
+   - `spec/examples/ao486/import/cpu_parity_package_spec.rb`
+   - validates that the parity package issues the reset-vector code fetch under JIT with `cache_disable=1`
+18. Runtime result with the parity package:
+   - flattened imported AO486 CPU JIT now asserts `memory_inst__icache_inst__readcode_do`, `memory_inst__avalon_mem_inst__readcode_do`, and top-level `avm_read`
+   - the first fetch targets the expected reset-vector line (`readcode_address = 0xFFFF0`, `avm_address = 0x3FFFC`)
+   - this closes the “no instruction fetch at all” blocker for parity mode
+19. Remaining runtime gap after the parity-package fetch fix:
+   - the direct-fetch parity path still does not yet produce a clean retired reset-vector far jump trace
+   - ad hoc JIT probing now shows repeated `trace_retired` assertions and advancing `trace_wr_eip`, which means parity-mode execution is moving, but event qualification and/or the direct-fetch cache-bypass semantics still need refinement before exact `EIP + bytes` parity can be compared
+20. Added a reusable parity runtime helper:
+   - `examples/ao486/utilities/import/cpu_parity_runtime.rb`
+   - wraps the parity package on IR JIT with a deterministic no-wait Avalon code-burst scheduler
+   - current supported guarantee is fetch-side determinism, not retired-instruction correctness
+21. Added focused runtime coverage for the helper:
+   - `spec/examples/ao486/import/cpu_parity_runtime_spec.rb`
+   - validates the first reset-vector fetch words for a tiny reset-vector program placed directly at `0xFFFF0`
+22. Current execution classification after the helper:
+   - the corrected burst scheduler now returns the expected reset-vector fetch words on JIT
+   - prefetch-side byte flow is observable and stable enough for harness reuse
+   - write-stage trace remains unreliable for exact parity: `trace_wr_eip` / `trace_wr_consumed` do not yet correspond to a clean retired-instruction stream on the parity path
 
 Validation run:
 1. `bundle exec rspec spec/examples/ao486/import/cpu_importer_spec.rb --format documentation`
-   - result: `2 examples, 0 failures`
+   - result: `3 examples, 0 failures`
 2. `bundle exec rspec spec/rhdl/codegen/circt/tooling_spec.rb --format documentation`
-   - result: `10 examples, 0 failures`
+   - result: `11 examples, 0 failures`
+3. `bundle exec rspec spec/examples/ao486/import/cpu_trace_package_spec.rb --format documentation`
+   - result: `2 examples, 0 failures`
+4. `bundle exec rspec spec/rhdl/sim/native/ir/circt_hierarchy_flatten_runtime_spec.rb --format documentation`
+   - result: `1 example, 0 failures`
+5. `bundle exec rspec spec/rhdl/codegen/circt/runtime_json_spec.rb spec/rhdl/sim/native/ir/ir_simulator_input_format_spec.rb spec/rhdl/sim/native/ir/circt_hierarchy_flatten_runtime_spec.rb --format documentation`
+   - result: `15 examples, 0 failures`
+6. `bundle exec rspec spec/examples/ao486/import/cpu_parity_package_spec.rb --format documentation`
+   - result: `1 example, 0 failures`
+7. `bundle exec rspec spec/examples/ao486/import/cpu_importer_spec.rb spec/examples/ao486/import/cpu_trace_package_spec.rb --format documentation`
+   - result: `5 examples, 0 failures`
+8. `bundle exec rspec spec/examples/ao486/import/cpu_parity_runtime_spec.rb --format documentation`
+   - result: `1 example, 0 failures`
 
 Current blocker for Phase 3:
 1. Ported the shared imported-core cleanup used by Game Boy/ImportTask into the AO486 CPU path:
@@ -183,12 +267,24 @@ Current blocker for Phase 3:
 2. Result:
    - canonical AO486 CPU `hwseq` MLIR no longer contains `llhd.`
    - `firtool` now accepts the real cleaned AO486 CPU artifact and emits Verilog with the expected trace wires (`_pipeline_inst_wr_eip`, `_pipeline_inst_wr_consumed`, `_pipeline_inst_cs_cache`)
-3. Remaining native/runtime blockers:
+3. JIT/runtime update:
+   - the generic native IR sequential stepping bug is fixed
+   - flattened imported AO486 CPU JIT now reaches the correct reset state on legal top-level inputs:
+     - `decode_eip = 0xFFF0`
+     - `prefetch_address = 0xFFFF0`
+     - `prefetch_length = 16`
+   - the earlier JIT-only `prefetch_length = 0` failure was traced to native IR backend issues and is now closed
+4. Remaining native/runtime blockers:
    - Arcilator now gets past remnant LLHD cleanup but still fails later on the cleaned AO486 CPU artifact with a loop-splitting error in `write_commands_inst`
-   - the JIT runtime branch is not yet behaviorally usable from the imported AO486 CPU artifact:
-   - a local probe with the embedded reset-vector program did not advance fetch/decode state, indicating additional imported-runtime lowering/runtime gaps beyond importer setup.
+   - direct hierarchical CIRCT packages are not a trustworthy JIT runtime shape for imported hierarchies; flattening is required first, and the AO486 importer spec was updated to reflect that supported runtime shape
+   - the TLB-side startup corruption was traced to `RuntimeJSON` temp-name collisions and is now fixed
+   - the next remaining imported-artifact failure is still in cache logic, but parity mode now has a practical fetch workaround:
+     - the cleaned imported CPU produces a correct `tlbcoderequest_do -> tlbcode_do -> icacheread_do` handoff
+     - imported `l1_icache` still collapses `MEM_REQ` / `MEM_ADDR` to constants during cleanup re-import
+     - the parity package bypasses that controller for `cache_disable=1` and restores reset-vector fetch traffic
+   - the traced CPU-top Verilator export still has live retire-trace ports, but the parity path still needs correct event qualification and program execution semantics before exact `EIP + bytes` comparison is ready
 
 Next execution step:
-1. Build the Verilator runtime branch on top of the cleaned canonical `hwseq` MLIR path.
-2. Investigate the cleaned-Arcilator loop-splitting failure in `write_commands_inst`.
-3. Investigate why the imported AO486 JIT runtime path remains inert under the CPU bus/reset harness.
+1. Mirror the parity runtime helper on the `firtool -> Verilator` branch and compare the first reset-vector fetch words / byte groups across JIT and Verilator on the same parity package artifact.
+2. Either repair the write-stage event surface or formally switch the runtime parity contract to a fetch-side `PC + byte-group` trace if that proves to be the stable imported-code boundary.
+3. Once the parity package has a stable mixed-backend trace contract on JIT and Verilator, wire it into the slow mixed-backend spec and revisit the Arcilator branch separately if `write_commands_inst` loop-splitting is still blocking.

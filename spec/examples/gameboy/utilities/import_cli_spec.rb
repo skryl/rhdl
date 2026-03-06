@@ -1,0 +1,156 @@
+# frozen_string_literal: true
+
+require 'spec_helper'
+require 'stringio'
+
+require_relative '../../../../examples/gameboy/utilities/cli'
+
+RSpec.describe RHDL::Examples::GameBoy::CLI do
+  let(:stdout) { StringIO.new }
+  let(:stderr) { StringIO.new }
+
+  describe '.run' do
+    it 'shows import-specific help' do
+      status = described_class.run(%w[import --help], out: stdout, err: stderr)
+
+      expect(status).to eq(0)
+      expect(stderr.string).to eq('')
+      expect(stdout.string).to include('Usage: bin/gb import [options]')
+      expect(stdout.string).to include('--out DIR')
+      expect(stdout.string).to include('--workspace DIR')
+      expect(stdout.string).to include('--keep-workspace')
+      expect(stdout.string).to include('--[no-]clean')
+      expect(stdout.string).to include('--[no-]strict')
+    end
+
+    it 'runs import with the canonical output dir by default' do
+      result_class = Struct.new(:success, :diagnostics, :output_dir, :files_written, :report_path, keyword_init: true) do
+        def success?
+          !!success
+        end
+      end
+
+      fake_importer_class = Class.new do
+        class << self
+          attr_accessor :last_kwargs
+        end
+
+        def initialize(**kwargs)
+          self.class.last_kwargs = kwargs
+        end
+
+        def run
+          self.class.const_get(:RESULT_CLASS).new(
+            success: true,
+            diagnostics: [],
+            output_dir: '/tmp/gameboy_import',
+            files_written: ['/tmp/gameboy_import/gb.rb'],
+            report_path: '/tmp/gameboy_import/import_report.json'
+          )
+        end
+      end
+      fake_importer_class.const_set(:RESULT_CLASS, result_class)
+
+      status = described_class.run(['import'], out: stdout, err: stderr, importer_class: fake_importer_class)
+
+      expect(status).to eq(0)
+      expect(stderr.string).to eq('')
+      expect(fake_importer_class.last_kwargs[:output_dir]).to eq(
+        RHDL::Examples::GameBoy::Import::SystemImporter::DEFAULT_OUTPUT_DIR
+      )
+      expect(fake_importer_class.last_kwargs[:clean_output]).to eq(true)
+      expect(fake_importer_class.last_kwargs[:keep_workspace]).to eq(false)
+      expect(fake_importer_class.last_kwargs[:strict]).to eq(true)
+      expect(stdout.string).to include('Imported Game Boy reference design')
+      expect(stdout.string).to include('/tmp/gameboy_import')
+    end
+
+    it 'passes import options through to the importer' do
+      result_class = Struct.new(:success, :diagnostics, :output_dir, :files_written, :report_path, keyword_init: true) do
+        def success?
+          !!success
+        end
+      end
+
+      fake_importer_class = Class.new do
+        class << self
+          attr_accessor :last_kwargs
+        end
+
+        def initialize(**kwargs)
+          self.class.last_kwargs = kwargs
+        end
+
+        def run
+          self.class.const_get(:RESULT_CLASS).new(
+            success: true,
+            diagnostics: [],
+            output_dir: '/tmp/custom_gameboy_import',
+            files_written: [],
+            report_path: '/tmp/custom_gameboy_import/import_report.json'
+          )
+        end
+      end
+      fake_importer_class.const_set(:RESULT_CLASS, result_class)
+
+      status = described_class.run(
+        [
+          'import',
+          '--out', 'tmp/gameboy_out',
+          '--workspace', 'tmp/gameboy_ws',
+          '--no-clean',
+          '--no-strict',
+          '--qip', 'examples/gameboy/reference/files.qip',
+          '--top-file', 'examples/gameboy/reference/rtl/gb.v',
+          '--top', 'gb_top',
+          '--reference-root', 'examples/gameboy/reference',
+          '--keep-workspace'
+        ],
+        out: stdout,
+        err: stderr,
+        importer_class: fake_importer_class
+      )
+
+      expect(status).to eq(0)
+      expect(stderr.string).to eq('')
+      expect(fake_importer_class.last_kwargs[:output_dir]).to eq(File.expand_path('tmp/gameboy_out', Dir.pwd))
+      expect(fake_importer_class.last_kwargs[:workspace_dir]).to eq(File.expand_path('tmp/gameboy_ws', Dir.pwd))
+      expect(fake_importer_class.last_kwargs[:clean_output]).to eq(false)
+      expect(fake_importer_class.last_kwargs[:strict]).to eq(false)
+      expect(fake_importer_class.last_kwargs[:qip_path]).to eq(File.expand_path('examples/gameboy/reference/files.qip', Dir.pwd))
+      expect(fake_importer_class.last_kwargs[:top_file]).to eq(File.expand_path('examples/gameboy/reference/rtl/gb.v', Dir.pwd))
+      expect(fake_importer_class.last_kwargs[:top]).to eq('gb_top')
+      expect(fake_importer_class.last_kwargs[:reference_root]).to eq(File.expand_path('examples/gameboy/reference', Dir.pwd))
+      expect(fake_importer_class.last_kwargs[:keep_workspace]).to eq(true)
+    end
+
+    it 'prints diagnostics and exits non-zero when import fails' do
+      result_class = Struct.new(:success, :diagnostics, :output_dir, :files_written, :report_path, keyword_init: true) do
+        def success?
+          !!success
+        end
+      end
+
+      fake_importer_class = Class.new do
+        def initialize(**_kwargs); end
+
+        def run
+          self.class.const_get(:RESULT_CLASS).new(
+            success: false,
+            diagnostics: ['missing ghdl', 'missing circt-verilog'],
+            output_dir: '/tmp/gameboy_import',
+            files_written: [],
+            report_path: nil
+          )
+        end
+      end
+      fake_importer_class.const_set(:RESULT_CLASS, result_class)
+
+      status = described_class.run(['import'], out: stdout, err: stderr, importer_class: fake_importer_class)
+
+      expect(status).to eq(1)
+      expect(stderr.string).to include('missing ghdl')
+      expect(stderr.string).to include('missing circt-verilog')
+    end
+  end
+end

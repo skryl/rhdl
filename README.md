@@ -358,6 +358,7 @@ rhdl examples gameboy cpu_instrs.gb            # Run test ROM
 rhdl examples gameboy --demo                   # Run demo display
 rhdl examples gameboy --pop                    # Load Prince of Persia ROM
 rhdl examples gameboy game.gb --audio          # Enable audio
+rhdl examples gameboy import                   # Regenerate examples/gameboy/import from the reference HDL
 ```
 
 ### RISC-V RV32I
@@ -521,6 +522,7 @@ rhdl gates --stats                       # Show synthesis statistics
 # Example emulators
 rhdl examples apple2 --demo              # Run Apple II demo mode
 rhdl examples gameboy --demo             # Run Game Boy demo mode
+rhdl examples gameboy import             # Regenerate Game Boy imported HDL tree
 rhdl examples riscv --xv6 -d             # Run RISC-V xv6 with debug panel
 ```
 
@@ -686,6 +688,10 @@ bundle exec rhdl examples ao486 import --out examples/ao486/hdl --strategy tree 
 bundle exec rhdl examples ao486 import --out examples/ao486/hdl --no-maintain-directory-structure # Keep flat output layout
 bundle exec rhdl examples ao486 parity # Run bounded Verilog (Verilator) vs raised RHDL (IR) parity harness
 bundle exec rhdl examples ao486 verify # Run AO486 importer + parity + import-path verification specs
+
+# Game Boy import workflow
+bundle exec rhdl examples gameboy import # Import the Game Boy reference HDL and regenerate examples/gameboy/import
+bundle exec ruby examples/gameboy/bin/gb import --workspace tmp/gameboy_ws --keep-workspace # Keep import artifacts for debugging
 
 # AO486 import/parity workflow
 bundle exec rake "ao486:import[examples/ao486/hdl]" # Import rtl/system.v via CIRCT and regenerate examples/ao486/hdl

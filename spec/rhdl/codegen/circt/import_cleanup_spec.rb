@@ -47,6 +47,11 @@ RSpec.describe RHDL::Codegen::CIRCT::ImportCleanup do
     expect(result).to be_success
     expect(result.cleaned_text).not_to include('llhd.')
     expect(result.cleaned_text).to include('seq.compreg')
+    output_match = result.cleaned_text.match(/hw\.output [^,\n]+, (?<dout>%[A-Za-z0-9_]+) : i64, i61/)
+    reg_match = result.cleaned_text.match(/(?<reg>%[A-Za-z0-9_]+) = seq\.compreg .* : i61/)
+    expect(output_match).not_to be_nil
+    expect(reg_match).not_to be_nil
+    expect(output_match[:dout]).to eq(reg_match[:reg])
 
     firtool_result = firtool_accepts?(result.cleaned_text)
     expect(firtool_result).not_to eq(false)
@@ -160,5 +165,58 @@ RSpec.describe RHDL::Codegen::CIRCT::ImportCleanup do
 
     firtool_result = firtool_accepts?(result.cleaned_text)
     expect(firtool_result).not_to eq(false)
+  end
+
+  it 'only reparses dirty modules when cleaning a wrapped multi-module package' do
+    mlir = <<~MLIR
+      module {
+        hw.module @clean(in %a : i1, out y : i1) {
+          hw.output %a : i1
+        }
+
+        hw.module @dirty(in %clk : i1, in %d : i8, out q : i8) {
+          %c0_i8 = hw.constant 0 : i8
+          %t0 = llhd.constant_time <0ns, 0d, 1e>
+          %state = llhd.sig %c0_i8 : i8
+          %state_q = llhd.prb %state : i8
+          %clock = seq.to_clock %clk
+          %next = seq.firreg %d clock %clock : i8
+          llhd.drv %state, %next after %t0 : i8
+          hw.output %state_q : i8
+        }
+      }
+    MLIR
+
+    parsed_chunks = []
+    allow(described_class).to receive(:parse_imported_core_mlir).and_wrap_original do |method, *args, **kwargs|
+      parsed_chunks << args.first
+      method.call(*args, **kwargs)
+    end
+
+    result = described_class.cleanup_imported_core_mlir(mlir, strict: true, top: 'dirty')
+
+    expect(result).to be_success
+    expect(result.cleaned_text).to include('hw.module @clean')
+    expect(result.cleaned_text).not_to include('llhd.')
+    expect(parsed_chunks.length).to eq(1)
+    expect(parsed_chunks.first).to include('hw.module @dirty')
+    expect(parsed_chunks.first).not_to include('hw.module @clean')
+  end
+
+  it 'leaves aggregate-only core modules untouched when no LLHD overlay is present' do
+    mlir = <<~MLIR
+      hw.module @codes_like(in %idx : i2, out y : i8) {
+        %init = hw.aggregate_constant [1 : i8, 2 : i8, 3 : i8, 4 : i8] : !hw.array<4xi8>
+        %selected = hw.array_get %init[%idx] : !hw.array<4xi8>, i2
+        hw.output %selected : i8
+      }
+    MLIR
+
+    expect(described_class).not_to receive(:parse_imported_core_mlir)
+
+    result = described_class.cleanup_imported_core_mlir(mlir, strict: true, top: 'codes_like')
+
+    expect(result).to be_success
+    expect(result.cleaned_text).to eq(mlir)
   end
 end

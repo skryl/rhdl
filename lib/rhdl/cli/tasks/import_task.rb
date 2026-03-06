@@ -68,7 +68,7 @@ module RHDL
           puts "Wrote CIRCT MLIR: #{mlir_out}"
           puts "Command: #{result[:command]}"
 
-          cleanup_import_result = cleanup_imported_core_mlir!(
+          cleanup_imported_core_mlir!(
             mlir_out: mlir_out,
             top_name: options[:top]
           )
@@ -78,8 +78,7 @@ module RHDL
           run_raise_flow(
             mlir_out: mlir_out,
             out_dir: out_dir,
-            artifact_paths: { core_mlir_path: mlir_out },
-            import_result: cleanup_import_result
+            artifact_paths: { core_mlir_path: mlir_out }
           )
         end
 
@@ -115,7 +114,7 @@ module RHDL
           puts "Wrote CIRCT MLIR: #{mlir_out}"
           puts "Command: #{result[:command]}"
 
-          cleanup_import_result = cleanup_imported_core_mlir!(
+          cleanup_imported_core_mlir!(
             mlir_out: mlir_out,
             top_name: resolved_top_name
           )
@@ -144,8 +143,7 @@ module RHDL
               pure_verilog_entry_path: staging.fetch(:pure_verilog_entry_path),
               core_mlir_path: mlir_out,
               normalized_verilog_path: normalized_verilog_path
-            },
-            import_result: cleanup_import_result
+            }
           )
         end
 
@@ -842,11 +840,7 @@ module RHDL
         end
 
         def needs_imported_core_cleanup?(text)
-          text.include?('llhd.') ||
-            text.include?('hw.array_inject') ||
-            text.include?('hw.aggregate_constant') ||
-            text.include?('seq.clock_inv') ||
-            text.match?(/!hw\.array</)
+          text.include?('llhd.')
         end
 
         def postprocess_generated_vhdl_verilog!(entity:, out_path:, module_name: nil)

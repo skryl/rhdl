@@ -1,5 +1,5 @@
 ## Status
-Completed (2026-03-05)
+In Progress (regression reopened 2026-03-05)
 
 ## Context
 Game Boy mixed HDL import coverage does not yet have the same end-to-end validation shape as AO486:
@@ -518,6 +518,90 @@ Completed in this iteration:
 3. Validated runtime entrypoints using imported HDL directory directly:
    - `./examples/gameboy/bin/gb --mode ir --sim compile --hdl-dir examples/gameboy/import --demo --headless --cycles 1000`
    - `./examples/gameboy/bin/gb --mode verilog --hdl-dir examples/gameboy/import --demo --headless --cycles 1000`
+
+## Execution Notes (2026-03-05, Update 9)
+Completed in this iteration:
+1. Fixed the raised-component re-export hot path:
+   - raised/imported components now retain their imported CIRCT module and reuse it for `to_ir` / `to_circt_nodes` when no parameter rewrite is requested.
+   - this reduced the GameBoy roundtrip `components.to_ir` phase from an apparent hang to about `1.9s`.
+2. Removed the roundtrip spec’s `firtool --disable-opt` override:
+   - optimized canonical Verilog export dropped the roundtrip artifact from about `10.0 MB / 200k lines` to about `1.27 MB / 11.7k lines`,
+   - `circt-verilog --ir-hw` on that canonical Verilog dropped to about `0.5s`.
+3. Fixed a real cleanup-path semantic regression in cleaned CIRCT core MLIR:
+   - `lib/rhdl/codegen/circt/mlir.rb` now prefers non-default internal drivers over trailing zero initializer assigns when resolving internal signal values,
+   - this restores save-state/register-wrapper outputs that had collapsed to literal zero after cleanup/re-emission.
+4. Strengthened cleanup regression coverage:
+   - `spec/rhdl/codegen/circt/import_cleanup_spec.rb` now asserts the cleaned save-state wrapper drives `dout` from the recovered `seq.compreg` result rather than the initializer constant.
+
+Validation run:
+1. `bundle exec rspec spec/rhdl/codegen/circt/mlir_spec.rb`
+   - `12 examples, 0 failures`.
+2. `bundle exec rspec spec/rhdl/codegen/circt/import_cleanup_spec.rb`
+   - `4 examples, 0 failures`.
+3. Targeted real-module validation:
+   - cleaned `ereg_savestatev_0_1_63_0_cf0b42666ef5e37edea0ab8e173e42c196d03814__5a58f40d` now emits `hw.output %v137_64, %v1_64 : i64, i64` instead of driving `dout` from the zero initializer.
+
+Current remaining blocker:
+1. The long full-design mismatch recompute is still being rerun after this cleanup fix, but earlier interrupted background runs have made the local environment noisy.
+2. The main regression class is no longer the cleanup zero-collapse bug; the next recompute should isolate the residual structural/normalization mismatches that remain after this fix.
+
+## Execution Notes (2026-03-05, Update 10)
+Completed in this iteration:
+1. Fixed another cleanup/re-emission semantic loss case in `lib/rhdl/codegen/circt/mlir.rb`:
+   - when an imported internal net has multiple live assigns, the emitter now OR-combines those drivers instead of arbitrarily selecting one surviving assign,
+   - this is the real pattern used by modules like `sprites_extra`, where several store instances drive the same signal and inactive drivers resolve to zero.
+2. Added emitter regression coverage:
+   - `spec/rhdl/codegen/circt/mlir_spec.rb`
+   - new cases cover:
+     - non-default driver preference over trailing zero initializers,
+     - OR-combining multiple live internal drivers.
+3. Reduced false-positive roundtrip structural sensitivity:
+   - `spec/examples/gameboy/import/roundtrip_spec.rb`
+   - nested `concat` regrouping is now flattened before semantic signature generation.
+4. Made source-vs-roundtrip comparison symmetric:
+   - the roundtrip signature helper now runs `ImportCleanup.cleanup_imported_core_mlir` on source Verilog imports before building semantic signatures,
+   - this aligns source-side signatures with the same cleaned-core semantics used by the roundtrip path.
+
+Validation run:
+1. `bundle exec rspec spec/rhdl/codegen/circt/mlir_spec.rb`
+   - `13 examples, 0 failures`.
+2. `INCLUDE_SLOW_TESTS=1 bundle exec rspec spec/examples/gameboy/import/roundtrip_spec.rb:1147`
+   - fast helper regression for nested concat normalization passed.
+
+Current state:
+1. The zero-collapse save-state class is fixed.
+2. The multi-driver internal-net class is fixed in the emitter.
+3. The roundtrip comparator now normalizes both source and roundtrip imports through the same cleanup path.
+4. A clean full GameBoy mismatch recount is still pending once the local environment is no longer contending with earlier interrupted long-running recomputes.
+
+## Execution Notes (2026-03-05, Update 11)
+Completed in this iteration:
+1. Added targeted module-parity closure probes using dependency-complete raw MLIR slices from the saved GameBoy import artifact.
+2. Verified these modules are now green under targeted parity:
+   - `ereg_savestatev_0_1_63_0_cf0b42666ef5e37edea0ab8e173e42c196d03814__5a58f40d`
+   - `sprites_extra`
+   - `sprites`
+   - `gb_savestates`
+3. Narrowed the remaining unresolved target to `video` (and by extension any full-design `gb` mismatch still depending on it).
+4. Confirmed `video` source-only self-roundtrip through canonical Verilog is green, which means the residual red is more specific than a general `firtool` export/import problem.
+
+Validation run:
+1. Targeted parity probes over saved raw GameBoy core MLIR:
+   - `ereg_savestatev_...` => `true`
+   - `sprites_extra` => `true`
+   - `sprites` => `true`
+   - `gb_savestates` => `true`
+2. `video` targeted source-only self-roundtrip => `true`
+3. `video` targeted full `CIRCT -> RHDL -> CIRCT -> Verilog -> CIRCT` probe still reports specific output drift:
+   - `lcd_on`
+   - `oam_cpu_allow`
+   - `vram_addr`
+   - `vram_cpu_allow`
+   - `vram_rd`
+
+Current remaining blocker:
+1. Finish isolating the `video`-specific drift in the `CIRCT -> RHDL -> CIRCT` path.
+2. Re-run the full GameBoy roundtrip mismatch recount once the `video` path is closed.
    - both complete successfully and advance CPU state.
 
 Acceptance closure:

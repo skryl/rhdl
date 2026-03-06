@@ -15,6 +15,18 @@ RSpec.describe 'GameBoy mixed import Verilog roundtrip AST comparison', slow: tr
   EXPECTED_STRUCTURAL_MISMATCHES = %w[
   ].freeze
 
+  def roundtrip_trace?
+    ENV['RHDL_GAMEBOY_ROUNDTRIP_TRACE'] == '1'
+  end
+
+  def timed_roundtrip_step(label)
+    start = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+    result = yield
+    elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - start
+    puts "[gameboy roundtrip] #{label}: #{format('%.2fs', elapsed)}" if roundtrip_trace?
+    result
+  end
+
 
   def require_reference_tree!
     skip 'GameBoy reference tree not available' unless Dir.exist?(RHDL::Examples::GameBoy::Import::SystemImporter::DEFAULT_REFERENCE_ROOT)
@@ -68,13 +80,11 @@ RSpec.describe 'GameBoy mixed import Verilog roundtrip AST comparison', slow: tr
     verilog_path = File.join(base_dir, "#{stem}.v")
     File.write(mlir_path, mlir_source)
     tool = export_tool
-    extra_args = tool == 'firtool' ? ['--disable-opt'] : []
 
     result = RHDL::Codegen::CIRCT::Tooling.circt_mlir_to_verilog(
       mlir_path: mlir_path,
       out_path: verilog_path,
-      tool: tool,
-      extra_args: extra_args
+      tool: tool
     )
     expect(result[:success]).to be(true), "CIRCT->Verilog failed:\n#{result[:command]}\n#{result[:stderr]}"
     File.read(verilog_path)
@@ -82,7 +92,13 @@ RSpec.describe 'GameBoy mixed import Verilog roundtrip AST comparison', slow: tr
 
   def normalized_module_signatures_from_verilog(verilog_source, base_dir:, stem:)
     mlir = convert_verilog_to_mlir(verilog_source, base_dir: base_dir, stem: stem)
-    import_result = RHDL::Codegen.import_circt_mlir(mlir)
+    cleanup = RHDL::Codegen::CIRCT::ImportCleanup.cleanup_imported_core_mlir(
+      mlir,
+      strict: true
+    )
+    expect(cleanup.success?).to be(true), diagnostic_summary(cleanup.import_result)
+
+    import_result = RHDL::Codegen.import_circt_mlir(cleanup.cleaned_text)
     expect(import_result.success?).to be(true), diagnostic_summary(import_result)
 
     import_result.modules.each_with_object({}) do |mod, acc|
@@ -112,20 +128,25 @@ RSpec.describe 'GameBoy mixed import Verilog roundtrip AST comparison', slow: tr
       resolving: Set.new,
       signal_cache: {}
     }
+    resolve_memo = {}
+    simplify_memo = {}
+    signature_memo = {}
+    complexity_memo = {}
+    mux_count_memo = {}
 
     output_signatures = outputs.map do |port|
       expr = select_driver_expr(assigns_by_target[port.name.to_s], port.name.to_s)
       expr ||= process_outputs[port.name.to_s]
       expr ||= RHDL::Codegen::CIRCT::IR::Literal.new(value: 0, width: port.width.to_i)
-      resolved = resolve_expr_signals(expr, resolve_ctx, {})
-      simplified = simplify_expr(resolved, {})
-      complexity = expr_complexity(simplified, {})
-      mux_nodes = mux_node_count_in_expr(simplified, {})
+      resolved = resolve_expr_signals(expr, resolve_ctx, resolve_memo)
+      simplified = simplify_expr(resolved, simplify_memo)
+      complexity = expr_complexity(simplified, complexity_memo)
+      mux_nodes = mux_node_count_in_expr(simplified, mux_count_memo)
       signature =
-        if complexity > MAX_STRICT_OUTPUT_EXPR_COMPLEXITY || mux_nodes > MAX_STRICT_OUTPUT_MUX_NODES
+        if complexity > MAX_STRICT_OUTPUT_EXPR_COMPLEXITY || mux_nodes >= MAX_STRICT_OUTPUT_MUX_NODES
           [:complex_output, port.width.to_i]
         else
-          expr_signature(simplified)
+          expr_signature(simplified, signature_memo)
         end
       [port.name.to_s, signature]
     end
@@ -133,7 +154,7 @@ RSpec.describe 'GameBoy mixed import Verilog roundtrip AST comparison', slow: tr
     {
       parameter_values: stable_sort((mod.parameters || {}).values.map(&:to_s)),
       ports: stable_sort(mod.ports.map { |port| [port.direction.to_s, port.width.to_i] }),
-      outputs: stable_sort(output_signatures)
+      outputs: output_signatures.sort_by(&:first)
     }
   end
 
@@ -476,13 +497,15 @@ RSpec.describe 'GameBoy mixed import Verilog roundtrip AST comparison', slow: tr
                      canonicalize_small_selector_mux(mux_expr) || mux_expr
                    end
                  when RHDL::Codegen::CIRCT::IR::Concat
-                   parts = expr.parts.map { |part| simplify_expr(part, memo) }
+                   parts = flatten_concat_parts(expr.parts.map { |part| simplify_expr(part, memo) })
                    if parts.all? { |part| part.is_a?(RHDL::Codegen::CIRCT::IR::Literal) }
                      acc = 0
                      parts.each do |part|
                        acc = (acc << part.width.to_i) | (part.value.to_i % (1 << part.width.to_i))
                      end
                      RHDL::Codegen::CIRCT::IR::Literal.new(value: normalize_const(acc, expr.width), width: expr.width)
+                   elsif parts.length == 1 && parts.first.width.to_i == expr.width.to_i
+                     parts.first
                    else
                      RHDL::Codegen::CIRCT::IR::Concat.new(parts: parts, width: expr.width)
                    end
@@ -561,6 +584,16 @@ RSpec.describe 'GameBoy mixed import Verilog roundtrip AST comparison', slow: tr
                  end
 
     memo[key] = simplified
+  end
+
+  def flatten_concat_parts(parts)
+    Array(parts).each_with_object([]) do |part, acc|
+      if part.is_a?(RHDL::Codegen::CIRCT::IR::Concat)
+        acc.concat(flatten_concat_parts(part.parts))
+      else
+        acc << part
+      end
+    end
   end
 
   def expr_structural_key(expr)
@@ -873,40 +906,53 @@ RSpec.describe 'GameBoy mixed import Verilog roundtrip AST comparison', slow: tr
     }
   end
 
-  def expr_signature(expr)
-    case expr
-    when RHDL::Codegen::CIRCT::IR::Signal
-      [:signal, expr.width.to_i]
-    when RHDL::Codegen::CIRCT::IR::Literal
-      [:literal, expr.width.to_i, expr.value]
-    when RHDL::Codegen::CIRCT::IR::UnaryOp
-      [:unary, expr.op.to_s, expr.width.to_i, expr_signature(expr.operand)]
-    when RHDL::Codegen::CIRCT::IR::BinaryOp
-      left = expr_signature(expr.left)
-      right = expr_signature(expr.right)
-      left, right = stable_sort([left, right]) if commutative_binop?(expr.op)
-      [:binary, expr.op.to_s, expr.width.to_i, left, right]
-    when RHDL::Codegen::CIRCT::IR::Mux
-      [:mux, expr.width.to_i, expr_signature(expr.condition), expr_signature(expr.when_true), expr_signature(expr.when_false)]
-    when RHDL::Codegen::CIRCT::IR::Concat
-      if concat_extension_of_signal_signature?(expr)
-        [:signal, expr.width.to_i]
-      else
-        [:concat, expr.width.to_i, expr.parts.map { |part| expr_signature(part) }]
-      end
-    when RHDL::Codegen::CIRCT::IR::Slice
-      [:slice, expr.width.to_i, expr_signature(expr.base), expr.range.min, expr.range.max]
-    when RHDL::Codegen::CIRCT::IR::Resize
-      [:resize, expr.width.to_i, expr_signature(expr.expr)]
-    when RHDL::Codegen::CIRCT::IR::Case
-      cases = stable_sort(expr.cases.map { |key, value| [key, expr_signature(value)] })
-      [:case, expr.width.to_i, expr_signature(expr.selector), cases, expr_signature(expr.default)]
-    when RHDL::Codegen::CIRCT::IR::MemoryRead
-      [:memory_read, expr.width.to_i, expr_signature(expr.addr)]
-    else
-      width = expr.respond_to?(:width) ? expr.width.to_i : nil
-      [:expr, expr.class.name, width]
-    end
+  def expr_signature(expr, memo = {})
+    return nil if expr.nil?
+
+    key = expr.object_id
+    return memo[key] if memo.key?(key)
+
+    memo[key] = case expr
+                when RHDL::Codegen::CIRCT::IR::Signal
+                  [:signal, expr.width.to_i]
+                when RHDL::Codegen::CIRCT::IR::Literal
+                  [:literal, expr.width.to_i, expr.value]
+                when RHDL::Codegen::CIRCT::IR::UnaryOp
+                  [:unary, expr.op.to_s, expr.width.to_i, expr_signature(expr.operand, memo)]
+                when RHDL::Codegen::CIRCT::IR::BinaryOp
+                  left = expr_signature(expr.left, memo)
+                  right = expr_signature(expr.right, memo)
+                  left, right = stable_sort([left, right]) if commutative_binop?(expr.op)
+                  [:binary, expr.op.to_s, expr.width.to_i, left, right]
+                when RHDL::Codegen::CIRCT::IR::Mux
+                  [
+                    :mux,
+                    expr.width.to_i,
+                    expr_signature(expr.condition, memo),
+                    expr_signature(expr.when_true, memo),
+                    expr_signature(expr.when_false, memo)
+                  ]
+                when RHDL::Codegen::CIRCT::IR::Concat
+                  if concat_extension_of_signal_signature?(expr)
+                    [:signal, expr.width.to_i]
+                  else
+                    flat_parts = flatten_concat_parts(expr.parts)
+                    [:concat, expr.width.to_i, flat_parts.map { |part| expr_signature(part, memo) }]
+                  end
+                when RHDL::Codegen::CIRCT::IR::Slice
+                  [:slice, expr.width.to_i, expr_signature(expr.base, memo), expr.range.min, expr.range.max]
+                when RHDL::Codegen::CIRCT::IR::Resize
+                  [:resize, expr.width.to_i, expr_signature(expr.expr, memo)]
+                when RHDL::Codegen::CIRCT::IR::Case
+                  cases = expr.cases.sort_by { |sig_key, _value| sig_key.inspect }
+                    .map { |sig_key, value| [sig_key, expr_signature(value, memo)] }
+                  [:case, expr.width.to_i, expr_signature(expr.selector, memo), cases, expr_signature(expr.default, memo)]
+                when RHDL::Codegen::CIRCT::IR::MemoryRead
+                  [:memory_read, expr.width.to_i, expr_signature(expr.addr, memo)]
+                else
+                  width = expr.respond_to?(:width) ? expr.width.to_i : nil
+                  [:expr, expr.class.name, width]
+                end
   end
 
   def concat_extension_of_signal_signature?(expr)
@@ -1055,7 +1101,7 @@ RSpec.describe 'GameBoy mixed import Verilog roundtrip AST comparison', slow: tr
           strict: true,
           progress: ->(_msg) {}
         )
-        import_result = importer.run
+        import_result = timed_roundtrip_step('importer.run') { importer.run }
         expect(import_result.success?).to be(true), Array(import_result.diagnostics).join("\n")
 
         report = JSON.parse(File.read(import_result.report_path))
@@ -1063,27 +1109,37 @@ RSpec.describe 'GameBoy mixed import Verilog roundtrip AST comparison', slow: tr
         expect(File.file?(source_staged_verilog_path)).to be(true)
 
         source_staged_verilog = File.read(source_staged_verilog_path)
-        source_sigs = normalized_module_signatures_from_verilog(
-          source_staged_verilog,
-          base_dir: File.join(workspace, 'source_sig'),
-          stem: 'source'
-        )
+        source_sigs = timed_roundtrip_step('source signatures') do
+          normalized_module_signatures_from_verilog(
+            source_staged_verilog,
+            base_dir: File.join(workspace, 'source_sig'),
+            stem: 'source'
+          )
+        end
 
         source_mlir = File.read(import_result.mlir_path)
-        raise_result = RHDL::Codegen.raise_circt_components(source_mlir, namespace: Module.new, top: 'gb')
+        raise_result = timed_roundtrip_step('raise_circt_components') do
+          RHDL::Codegen.raise_circt_components(source_mlir, namespace: Module.new, top: 'gb')
+        end
         expect(raise_result.success?).to be(true), diagnostic_summary(raise_result)
 
-        roundtrip_mlir = raise_result.components.keys.sort.map do |module_name|
-          raise_result.components.fetch(module_name).to_ir(top_name: module_name)
-        end.join("\n\n")
-        roundtrip_verilog = convert_mlir_to_verilog(roundtrip_mlir, base_dir: workspace, stem: 'roundtrip')
-        roundtrip_sigs = normalized_module_signatures_from_verilog(
-          roundtrip_verilog,
-          base_dir: File.join(workspace, 'roundtrip_sig'),
-          stem: 'roundtrip'
-        )
+        roundtrip_mlir = timed_roundtrip_step('components.to_ir') do
+          raise_result.components.keys.sort.map do |module_name|
+            raise_result.components.fetch(module_name).to_ir(top_name: module_name)
+          end.join("\n\n")
+        end
+        roundtrip_verilog = timed_roundtrip_step('mlir_to_verilog') do
+          convert_mlir_to_verilog(roundtrip_mlir, base_dir: workspace, stem: 'roundtrip')
+        end
+        roundtrip_sigs = timed_roundtrip_step('roundtrip signatures') do
+          normalized_module_signatures_from_verilog(
+            roundtrip_verilog,
+            base_dir: File.join(workspace, 'roundtrip_sig'),
+            stem: 'roundtrip'
+          )
+        end
 
-        summary = mismatch_summary(source_sigs, roundtrip_sigs)
+        summary = timed_roundtrip_step('mismatch summary') { mismatch_summary(source_sigs, roundtrip_sigs) }
         expect(source_sigs.keys - roundtrip_sigs.keys).to be_empty, summary
         expect(roundtrip_sigs.keys - source_sigs.keys).to be_empty, summary
         common = source_sigs.keys & roundtrip_sigs.keys
@@ -1092,5 +1148,64 @@ RSpec.describe 'GameBoy mixed import Verilog roundtrip AST comparison', slow: tr
         expect(unexpected).to be_empty, summary
       end
     end
+  end
+
+  it 'normalizes nested concats with equivalent flat packing the same way' do
+    left = RHDL::Codegen::CIRCT::IR::Concat.new(
+      parts: [
+        RHDL::Codegen::CIRCT::IR::Concat.new(
+          parts: [
+            RHDL::Codegen::CIRCT::IR::BinaryOp.new(
+              op: :'==',
+              left: RHDL::Codegen::CIRCT::IR::Signal.new(name: :a, width: 8),
+              right: RHDL::Codegen::CIRCT::IR::Signal.new(name: :b, width: 8),
+              width: 1
+            ),
+            RHDL::Codegen::CIRCT::IR::BinaryOp.new(
+              op: :'==',
+              left: RHDL::Codegen::CIRCT::IR::Signal.new(name: :a, width: 8),
+              right: RHDL::Codegen::CIRCT::IR::Signal.new(name: :c, width: 8),
+              width: 1
+            )
+          ],
+          width: 2
+        ),
+        RHDL::Codegen::CIRCT::IR::BinaryOp.new(
+          op: :'==',
+          left: RHDL::Codegen::CIRCT::IR::Signal.new(name: :a, width: 8),
+          right: RHDL::Codegen::CIRCT::IR::Signal.new(name: :d, width: 8),
+          width: 1
+        )
+      ],
+      width: 3
+    )
+    right = RHDL::Codegen::CIRCT::IR::Concat.new(
+      parts: [
+        RHDL::Codegen::CIRCT::IR::BinaryOp.new(
+          op: :'==',
+          left: RHDL::Codegen::CIRCT::IR::Signal.new(name: :a, width: 8),
+          right: RHDL::Codegen::CIRCT::IR::Signal.new(name: :b, width: 8),
+          width: 1
+        ),
+        RHDL::Codegen::CIRCT::IR::BinaryOp.new(
+          op: :'==',
+          left: RHDL::Codegen::CIRCT::IR::Signal.new(name: :a, width: 8),
+          right: RHDL::Codegen::CIRCT::IR::Signal.new(name: :c, width: 8),
+          width: 1
+        ),
+        RHDL::Codegen::CIRCT::IR::BinaryOp.new(
+          op: :'==',
+          left: RHDL::Codegen::CIRCT::IR::Signal.new(name: :a, width: 8),
+          right: RHDL::Codegen::CIRCT::IR::Signal.new(name: :d, width: 8),
+          width: 1
+        )
+      ],
+      width: 3
+    )
+
+    left_simplified = simplify_expr(left, {})
+    right_simplified = simplify_expr(right, {})
+
+    expect(expr_signature(left_simplified)).to eq(expr_signature(right_simplified))
   end
 end

@@ -1111,10 +1111,10 @@ impl JitCompiler {
     fn compute_assignment_levels(&self, assigns: &[AssignDef]) -> Vec<Vec<usize>> {
         let n = assigns.len();
 
-        let mut target_to_assign: HashMap<usize, usize> = HashMap::new();
+        let mut target_to_assigns: HashMap<usize, Vec<usize>> = HashMap::new();
         for (i, assign) in assigns.iter().enumerate() {
             if let Some(&idx) = self.name_to_idx.get(&assign.target) {
-                target_to_assign.insert(idx, i);
+                target_to_assigns.entry(idx).or_insert_with(Vec::new).push(i);
             }
         }
 
@@ -1123,8 +1123,10 @@ impl JitCompiler {
             let signal_deps = self.expr_dependencies(&assign.expr);
             let mut deps = HashSet::new();
             for sig_idx in signal_deps {
-                if let Some(&assign_idx) = target_to_assign.get(&sig_idx) {
-                    deps.insert(assign_idx);
+                if let Some(assign_indices) = target_to_assigns.get(&sig_idx) {
+                    for &assign_idx in assign_indices {
+                        deps.insert(assign_idx);
+                    }
                 }
             }
             assign_deps.push(deps);
@@ -1324,6 +1326,8 @@ pub struct CoreSimulator {
     pub next_regs: Vec<u64>,
     /// Sequential assignment target indices
     pub seq_targets: Vec<usize>,
+    /// Original sequential assignment expressions for runtime sampling
+    seq_exprs: Vec<ExprDef>,
     /// Clock signal index for each sequential assignment
     pub seq_clocks: Vec<usize>,
     /// Unique clock signal indices
@@ -1424,6 +1428,7 @@ impl CoreSimulator {
         clock_indices.sort();
         let prev_clock_values = vec![0u64; clock_indices.len()];
 
+        let seq_exprs: Vec<ExprDef> = seq_assigns.iter().map(|(_, expr)| expr.clone()).collect();
         let next_regs = vec![0u64; seq_targets.len()];
 
         // Build memory arrays
@@ -1506,6 +1511,7 @@ impl CoreSimulator {
             reg_count,
             next_regs,
             seq_targets,
+            seq_exprs,
             seq_clocks,
             clock_indices,
             prev_clock_values,
@@ -1522,6 +1528,16 @@ impl CoreSimulator {
 
     fn compute_mask(width: usize) -> u64 {
         if width >= 64 { u64::MAX } else { (1u64 << width) - 1 }
+    }
+
+    fn sample_next_regs(&mut self) {
+        // Keep the JIT-compiled combinational evaluator, but use the proven
+        // runtime evaluator for next-state sampling. Imported CIRCT packages can
+        // generate very large nested mux trees that the compiled seq-sample path
+        // does not yet handle reliably.
+        for (idx, expr) in self.seq_exprs.iter().enumerate() {
+            self.next_regs[idx] = self.eval_expr_runtime(expr);
+        }
     }
 
     fn runtime_expr_width(expr: &ExprDef, widths: &[usize], name_to_idx: &HashMap<String, usize>) -> usize {
@@ -1733,7 +1749,7 @@ impl CoreSimulator {
     }
 
     #[inline(always)]
-    pub fn evaluate(&mut self) {
+    fn evaluate_no_clock_capture(&mut self) {
         let mem_ptrs: Vec<*const u64> = self.memory_arrays.iter()
             .map(|arr| arr.as_ptr())
             .collect();
@@ -1746,29 +1762,25 @@ impl CoreSimulator {
     }
 
     #[inline(always)]
-    pub fn tick(&mut self) {
-        // Save current clock values BEFORE evaluate so we can detect edges correctly
-        // At this point, the user has poked clk=1 but not evaluated yet, so derived
-        // clocks are still at their previous (low) values from the falling edge.
+    pub fn evaluate(&mut self) {
+        self.evaluate_no_clock_capture();
+
+        // Mirror compiler semantics so direct low-phase evaluate() calls record
+        // the current clock levels for the next tick() edge check.
         for (i, &clk_idx) in self.clock_indices.iter().enumerate() {
             self.prev_clock_values[i] = self.signals[clk_idx];
         }
+    }
 
-        // Evaluate to propagate any external input changes (including clock)
-        self.evaluate();
+    #[inline(always)]
+    pub fn tick(&mut self) {
+        // Use prev_clock_values captured by the previous evaluate()/tick() call
+        // as the "before" side of edge detection.
+        self.evaluate_no_clock_capture();
         self.apply_write_ports_level();
 
         // Sample ALL register input expressions ONCE
-        let mem_ptrs: Vec<*const u64> = self.memory_arrays.iter()
-            .map(|arr| arr.as_ptr())
-            .collect();
-        unsafe {
-            (self.seq_sample_fn)(
-                self.signals.as_mut_ptr(),
-                self.next_regs.as_mut_ptr(),
-                mem_ptrs.as_ptr()
-            );
-        }
+        self.sample_next_regs();
 
         let mut updated: Vec<bool> = vec![false; self.seq_targets.len()];
         let max_iterations = 10;
@@ -1799,7 +1811,7 @@ impl CoreSimulator {
                 clock_before.push(self.signals[clk_idx]);
             }
 
-            self.evaluate();
+            self.evaluate_no_clock_capture();
 
             let mut rising_clocks: Vec<bool> = vec![false; self.signals.len()];
             let mut any_rising = false;
@@ -1825,11 +1837,12 @@ impl CoreSimulator {
             }
         }
 
-        // prev_clock_values is saved at the start of tick(), not here
-        // This ensures we capture the clock values BEFORE evaluate propagates them
-
         self.apply_sync_read_ports_level();
-        self.evaluate();
+        self.evaluate_no_clock_capture();
+
+        for (i, &clk_idx) in self.clock_indices.iter().enumerate() {
+            self.prev_clock_values[i] = self.signals[clk_idx];
+        }
     }
 
     /// Tick with forced edge detection using prev_clock_values
@@ -1841,20 +1854,11 @@ impl CoreSimulator {
         // instead of sampling from signals
 
         // Evaluate to propagate external input changes
-        self.evaluate();
+        self.evaluate_no_clock_capture();
         self.apply_write_ports_level();
 
         // Sample ALL register input expressions ONCE
-        let mem_ptrs: Vec<*const u64> = self.memory_arrays.iter()
-            .map(|arr| arr.as_ptr())
-            .collect();
-        unsafe {
-            (self.seq_sample_fn)(
-                self.signals.as_mut_ptr(),
-                self.next_regs.as_mut_ptr(),
-                mem_ptrs.as_ptr()
-            );
-        }
+        self.sample_next_regs();
 
         let mut updated: Vec<bool> = vec![false; self.seq_targets.len()];
         let max_iterations = 10;
@@ -1885,7 +1889,7 @@ impl CoreSimulator {
                 clock_before.push(self.signals[clk_idx]);
             }
 
-            self.evaluate();
+            self.evaluate_no_clock_capture();
 
             let mut rising_clocks: Vec<bool> = vec![false; self.signals.len()];
             let mut any_rising = false;
@@ -1911,13 +1915,13 @@ impl CoreSimulator {
             }
         }
 
+        self.apply_sync_read_ports_level();
+        self.evaluate_no_clock_capture();
+
         // Update prev_clock_values to current values for next cycle
         for (i, &clk_idx) in self.clock_indices.iter().enumerate() {
             self.prev_clock_values[i] = self.signals[clk_idx];
         }
-
-        self.apply_sync_read_ports_level();
-        self.evaluate();
     }
 
     pub fn reset(&mut self) {

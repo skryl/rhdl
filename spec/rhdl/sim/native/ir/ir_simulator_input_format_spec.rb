@@ -6,18 +6,17 @@ require 'rhdl/codegen'
 
 module RHDL
   module SpecFixtures
-    class IrInputFormatCounter < RHDL::Sim::Component
+    class IrInputFormatCounter < RHDL::HDL::SequentialComponent
+      include RHDL::DSL::Behavior
+      include RHDL::DSL::Sequential
+
       input :clk
       input :rst
       input :en
       output :q, width: 4
 
-      behavior do
-        if rst
-          q <= 0
-        elsif en
-          q <= q + 1
-        end
+      sequential clock: :clk, reset: :rst, reset_values: { q: 0 } do
+        q <= mux(en, q + 1, q)
       end
     end
   end
@@ -102,7 +101,7 @@ RSpec.describe 'IR simulator input formats' do
         { rst: false, en: false },
         { rst: false, en: true }
       ]
-      expected_q = [0, 0, 0, 0, 0]
+      expected_q = [0, 1, 2, 2, 3]
 
       [
         [:interpreter, RHDL::Sim::Native::IR::INTERPRETER_AVAILABLE],
@@ -117,6 +116,7 @@ RSpec.describe 'IR simulator input formats' do
           backend: backend,
           input_format: :circt
         )
+        sim.reset
 
         expect(sim.input_format).to eq(:circt)
         expect(sim.effective_input_format).to eq(:circt)

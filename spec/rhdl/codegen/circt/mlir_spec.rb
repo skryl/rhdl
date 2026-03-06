@@ -458,6 +458,61 @@ RSpec.describe RHDL::Codegen::CIRCT::MLIR do
       expect(prod_line).to include('%prod__y_8 = hw.instance "prod" @child_buf(')
     end
 
+    it 'prefers non-default internal drivers over trailing zero initializers' do
+      mod = ir::ModuleOp.new(
+        name: 'internal_driver_preference',
+        ports: [
+          ir::Port.new(name: :a, direction: :in, width: 8),
+          ir::Port.new(name: :y, direction: :out, width: 8)
+        ],
+        nets: [ir::Net.new(name: :w, width: 8)],
+        regs: [],
+        assigns: [
+          ir::Assign.new(target: :w, expr: ir::Signal.new(name: :a, width: 8)),
+          ir::Assign.new(target: :w, expr: ir::Literal.new(value: 0, width: 8)),
+          ir::Assign.new(target: :y, expr: ir::Signal.new(name: :w, width: 8))
+        ],
+        processes: [],
+        instances: [],
+        memories: [],
+        write_ports: [],
+        sync_read_ports: [],
+        parameters: {}
+      )
+
+      mlir = described_class.generate(mod)
+      expect(mlir).to include('hw.output %a : i8')
+    end
+
+    it 'or-combines multiple live internal drivers for the same net' do
+      mod = ir::ModuleOp.new(
+        name: 'internal_driver_merge',
+        ports: [
+          ir::Port.new(name: :a, direction: :in, width: 8),
+          ir::Port.new(name: :b, direction: :in, width: 8),
+          ir::Port.new(name: :y, direction: :out, width: 8)
+        ],
+        nets: [ir::Net.new(name: :w, width: 8)],
+        regs: [],
+        assigns: [
+          ir::Assign.new(target: :w, expr: ir::Signal.new(name: :a, width: 8)),
+          ir::Assign.new(target: :w, expr: ir::Signal.new(name: :b, width: 8)),
+          ir::Assign.new(target: :w, expr: ir::Literal.new(value: 0, width: 8)),
+          ir::Assign.new(target: :y, expr: ir::Signal.new(name: :w, width: 8))
+        ],
+        processes: [],
+        instances: [],
+        memories: [],
+        write_ports: [],
+        sync_read_ports: [],
+        parameters: {}
+      )
+
+      mlir = described_class.generate(mod)
+      expect(mlir).to include('comb.or %a, %b : i8')
+      expect(mlir).to include('hw.output %')
+    end
+
     it 'emits hw.instance parameter lists for integer and boolean params' do
       mod = ir::ModuleOp.new(
         name: 'top_with_param_instance',

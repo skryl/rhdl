@@ -27,6 +27,7 @@ module RHDL
         MAX_ARRAY_SELECT_ELEMENTS = 512
 
         SSA_TOKEN_PATTERN = '%[A-Za-z0-9_$.\\-]+'
+        LLHD_VALUE_TOKEN_PATTERN = '%[A-Za-z0-9_$.\\-]+(?:#\\d+)?'
         ARRAY_TYPE_PATTERN = /!hw\.array<(?<len>\d+)xi(?<width>\d+)>/
         LLHD_ARRAY_TYPE_PATTERN = /<\s*!hw\.array<(?<len>\d+)xi(?<width>\d+)>\s*>/
 
@@ -105,7 +106,39 @@ module RHDL
                 end
               end
 
-              if body.match?(/\Allhd\.process\s*\{\z/)
+              if (resultful_process = parse_resultful_llhd_process_header(body))
+                process_lines, consumed = collect_braced_block(lines, idx)
+                drive_lines, drive_consumed = collect_resultful_llhd_drive_lines(
+                  lines,
+                  start_idx: idx + consumed,
+                  process_token: resultful_process[:token]
+                )
+                handled = parse_resultful_llhd_process_block(
+                  process_token: resultful_process[:token],
+                  process_lines: process_lines,
+                  drive_lines: drive_lines,
+                  value_map: value_map,
+                  array_meta: array_meta,
+                  array_element_refs: array_element_refs,
+                  assigns: assigns,
+                  regs: regs,
+                  nets: nets,
+                  processes: processes,
+                  input_ports: input_ports,
+                  output_ports: output_ports,
+                  diagnostics: diagnostics,
+                  line_no: idx + 1,
+                  strict: strict
+                )
+
+                if handled
+                  body_depth += brace_delta(lines, idx, consumed + drive_consumed)
+                  idx += consumed + drive_consumed
+                  next
+                end
+              end
+
+              if llhd_process_opener?(body)
                 process_lines, consumed = collect_braced_block(lines, idx)
                 handled = parse_llhd_process_block(
                   process_lines,
@@ -615,6 +648,39 @@ module RHDL
           [collected, [idx - start_idx, 1].max]
         end
 
+        def llhd_process_opener?(line)
+          line.to_s.strip.match?(/\A(?:#{SSA_TOKEN_PATTERN}(?::\d+)?\s*=\s*)?llhd\.(?:process|combinational)(?:\s*->\s*.+)?\s*\{\z/)
+        end
+
+        def parse_resultful_llhd_process_header(line)
+          match = line.to_s.strip.match(/\A(#{SSA_TOKEN_PATTERN})(?::\d+)?\s*=\s*llhd\.process\s*->\s*.+\{\z/)
+          return nil unless match
+
+          { token: match[1] }
+        end
+
+        def collect_resultful_llhd_drive_lines(lines, start_idx:, process_token:)
+          collected = []
+          idx = start_idx
+
+          while idx < lines.length
+            line = normalize_body_line(lines[idx].to_s)
+            if line.empty?
+              idx += 1
+              next
+            end
+
+            parsed = parse_llhd_drive(line)
+            break unless parsed
+            break unless parsed[:process_token] == process_token
+
+            collected << line
+            idx += 1
+          end
+
+          [collected, idx - start_idx]
+        end
+
         def parse_llhd_process_block(process_lines, value_map:, array_meta:, array_element_refs:, assigns:, regs:, nets:,
                                      processes:, input_ports:,
                                      output_ports:, diagnostics:, line_no:, strict:)
@@ -695,6 +761,284 @@ module RHDL
           false
         end
 
+        def parse_resultful_llhd_process_block(process_token:, process_lines:, drive_lines:, value_map:, array_meta:,
+                                               array_element_refs:, assigns:, regs:, nets:, processes:, input_ports:,
+                                               output_ports:, diagnostics:, line_no:, strict:)
+          return false if Array(drive_lines).empty?
+
+          blocks, entry_target = parse_llhd_blocks(process_lines)
+          return false if blocks.empty? || entry_target.nil?
+
+          wait_block = blocks[entry_target]
+          return false unless wait_block
+
+          wait_term = parse_llhd_wait(wait_block[:terminator])
+          return false unless wait_term
+
+          check_block = blocks[wait_term[:target]]
+          return false unless check_block
+
+          edge_term = parse_cf_cond_br(check_block[:terminator])
+          return false unless edge_term
+          return false unless edge_term[:false_target] == entry_target
+
+          clock_name = infer_llhd_clock_signal(
+            wait_term: wait_term,
+            wait_block: wait_block,
+            check_block: check_block,
+            value_map: value_map
+          )
+          return false unless clock_name
+
+          stop_env = resolve_llhd_stop_env(
+            blocks: blocks,
+            current_label: edge_term[:true_target],
+            stop_label: entry_target,
+            stop_block: wait_block,
+            value_map: value_map.dup,
+            array_meta: array_meta,
+            array_element_refs: array_element_refs,
+            diagnostics: diagnostics,
+            line_no: line_no,
+            strict: strict,
+            stack: []
+          )
+          return false if stop_env.empty?
+
+          seq_statements = build_resultful_llhd_drive_statements(
+            process_token: process_token,
+            drive_lines: drive_lines,
+            stop_block: wait_block,
+            stop_env: stop_env,
+            value_map: value_map,
+            diagnostics: diagnostics,
+            line_no: line_no,
+            strict: strict
+          )
+          return false if seq_statements.empty?
+
+          target_widths = {}
+          collect_seq_targets(seq_statements).each do |target_name, expr|
+            width = process_signal_width(
+              target: target_name,
+              expr: expr,
+              input_ports: input_ports,
+              output_ports: output_ports,
+              nets: nets,
+              regs: regs
+            )
+            target_widths[target_name] = [target_widths[target_name].to_i, width].max
+          end
+
+          target_widths.each do |target, width|
+            next if process_target_declared?(target, input_ports: input_ports, output_ports: output_ports, regs: regs)
+
+            regs << IR::Reg.new(name: target, width: width)
+          end
+
+          processes << IR::Process.new(
+            name: :"llhd_proc_#{processes.length}",
+            statements: seq_statements,
+            clocked: true,
+            clock: clock_name,
+            sensitivity_list: []
+          )
+          true
+        rescue StandardError => e
+          diagnostics << Diagnostic.new(
+            severity: strict ? :error : :warning,
+            message: "Failed parsing llhd.process results at line #{line_no}: #{e.class}: #{e.message}",
+            line: line_no,
+            column: 1,
+            op: 'llhd.process'
+          )
+          false
+        end
+
+        def resolve_llhd_stop_env(blocks:, current_label:, stop_label:, stop_block:, value_map:, array_meta:,
+                                  array_element_refs:, diagnostics:, line_no:, strict:, stack:)
+          block = blocks[current_label]
+          return {} unless block
+          return {} if stack.include?(current_label)
+
+          local_map = value_map.dup
+          next_stack = stack + [current_label]
+
+          Array(block[:instructions]).each do |instruction|
+            parse_non_drive_process_instruction(
+              instruction,
+              value_map: local_map,
+              array_meta: array_meta,
+              array_element_refs: array_element_refs,
+              diagnostics: diagnostics,
+              line_no: line_no,
+              strict: strict
+            )
+          end
+
+          terminator = block[:terminator].to_s.strip
+          return {} if terminator == 'llhd.yield' || terminator == 'llhd.halt'
+
+          if (cond_br = parse_cf_cond_br(terminator))
+            cond_expr = lookup_value(local_map, cond_br[:cond_token], width: 1)
+            true_env = resolve_llhd_branch_stop_env(
+              blocks: blocks,
+              target_label: cond_br[:true_target],
+              branch_args: cond_br[:true_args],
+              stop_label: stop_label,
+              stop_block: stop_block,
+              local_map: local_map,
+              array_meta: array_meta,
+              array_element_refs: array_element_refs,
+              diagnostics: diagnostics,
+              line_no: line_no,
+              strict: strict,
+              stack: next_stack
+            )
+            false_env = resolve_llhd_branch_stop_env(
+              blocks: blocks,
+              target_label: cond_br[:false_target],
+              branch_args: cond_br[:false_args],
+              stop_label: stop_label,
+              stop_block: stop_block,
+              local_map: local_map,
+              array_meta: array_meta,
+              array_element_refs: array_element_refs,
+              diagnostics: diagnostics,
+              line_no: line_no,
+              strict: strict,
+              stack: next_stack
+            )
+            return merge_expr_envs(cond_expr, true_env, false_env)
+          end
+
+          if (br = parse_cf_br(terminator))
+            return resolve_llhd_branch_stop_env(
+              blocks: blocks,
+              target_label: br[:target],
+              branch_args: br[:args],
+              stop_label: stop_label,
+              stop_block: stop_block,
+              local_map: local_map,
+              array_meta: array_meta,
+              array_element_refs: array_element_refs,
+              diagnostics: diagnostics,
+              line_no: line_no,
+              strict: strict,
+              stack: next_stack
+            )
+          end
+
+          {}
+        end
+
+        def resolve_llhd_branch_stop_env(blocks:, target_label:, branch_args:, stop_label:, stop_block:, local_map:,
+                                         array_meta:, array_element_refs:, diagnostics:, line_no:, strict:, stack:)
+          if target_label == stop_label
+            return stop_env_from_branch_args(
+              value_map: local_map,
+              stop_block: stop_block,
+              branch_args: branch_args
+            )
+          end
+
+          next_map = apply_llhd_block_args(
+            value_map: local_map,
+            target_block: blocks[target_label],
+            branch_args: branch_args
+          )
+          resolve_llhd_stop_env(
+            blocks: blocks,
+            current_label: target_label,
+            stop_label: stop_label,
+            stop_block: stop_block,
+            value_map: next_map,
+            array_meta: array_meta,
+            array_element_refs: array_element_refs,
+            diagnostics: diagnostics,
+            line_no: line_no,
+            strict: strict,
+            stack: stack
+          )
+        end
+
+        def stop_env_from_branch_args(value_map:, stop_block:, branch_args:)
+          mapped = apply_llhd_block_args(
+            value_map: value_map,
+            target_block: stop_block,
+            branch_args: branch_args
+          )
+
+          Array(stop_block[:args]).drop(1).each_with_object({}) do |arg_spec, env|
+            env[arg_spec[:name]] = mapped[arg_spec[:name]]
+          end
+        end
+
+        def merge_expr_envs(condition, true_env, false_env)
+          keys = (Array(true_env).map(&:first) + Array(false_env).map(&:first)).uniq
+          keys.each_with_object({}) do |key, merged|
+            lhs = true_env[key]
+            rhs = false_env[key]
+            if expr_equivalent?(lhs, rhs)
+              merged[key] = lhs || rhs
+              next
+            end
+
+            next if lhs.nil? && rhs.nil?
+
+            width = [lhs&.width.to_i, rhs&.width.to_i, 1].max
+            merged[key] = IR::Mux.new(
+              condition: condition,
+              when_true: ensure_expr_with_width(lhs, width: width),
+              when_false: ensure_expr_with_width(rhs, width: width),
+              width: width
+            )
+          end
+        end
+
+        def build_resultful_llhd_drive_statements(process_token:, drive_lines:, stop_block:, stop_env:, value_map:,
+                                                  diagnostics:, line_no:, strict:)
+          result_args = Array(stop_block[:args]).drop(1)
+          result_token_map = result_args.each_with_index.each_with_object({}) do |(arg_spec, idx), map|
+            map["#{process_token}##{idx}"] = arg_spec[:name]
+          end
+
+          Array(drive_lines).flat_map do |line|
+            parsed_drive = parse_llhd_drive(line)
+            next [] unless parsed_drive
+
+            value_name = result_token_map[parsed_drive[:value_token]]
+            enable_name = parsed_drive[:enable_token] ? result_token_map[parsed_drive[:enable_token]] : nil
+            next [] unless value_name
+
+            value_expr = stop_env[value_name]
+            next [] if value_expr.nil?
+
+            enable_expr =
+              if enable_name
+                stop_env[enable_name] || IR::Literal.new(value: 0, width: 1)
+              else
+                IR::Literal.new(value: 1, width: 1)
+              end
+
+            build_llhd_drive_statements(
+              parsed_drive: parsed_drive,
+              value_map: value_map,
+              value_expr: pack_array_value(value_expr),
+              enable_expr: enable_expr
+            )
+          rescue StandardError => e
+            diagnostics << Diagnostic.new(
+              severity: strict ? :error : :warning,
+              message: "Failed lowering llhd.drv result at line #{line_no}: #{e.class}: #{e.message}",
+              line: line_no,
+              column: 1,
+              op: 'llhd.drv'
+            )
+            []
+          end
+        end
+
         def parse_llhd_combinational_block(process_lines, value_map:, array_meta:, array_element_refs:, assigns:, regs:,
                                            nets:, input_ports:, output_ports:,
                                            diagnostics:, line_no:, strict:)
@@ -753,7 +1097,7 @@ module RHDL
         def parse_llhd_blocks(process_lines)
           lines = Array(process_lines).map { |line| normalize_body_line(line) }
           return [{}, nil] if lines.empty?
-          return [{}, nil] unless lines.first.match?(/\Allhd\.(?:process|combinational)\s*\{\z/)
+          return [{}, nil] unless llhd_process_opener?(lines.first)
 
           blocks = {}
           current_label = nil
@@ -831,6 +1175,25 @@ module RHDL
         end
 
         def parse_llhd_wait(line)
+          yielded = line.to_s.strip.match(/\Allhd\.wait\s+yield\s+\((.+)\)\s*,\s*\((.+)\)\s*,\s*(\^bb\d+(?:\([^)]*\))?)\z/)
+          if yielded
+            target = parse_cf_target(yielded[3])
+            return nil unless target
+
+            value_tokens = split_top_level_csv(yielded[2].split(':', 2).first.to_s)
+                             .map { |token| normalize_value_token(token) }
+                             .reject(&:empty?)
+            yield_tokens = split_top_level_csv(yielded[1].split(':', 2).first.to_s)
+                             .map { |token| normalize_value_token(token) }
+                             .reject(&:empty?)
+            return {
+              value_tokens: value_tokens,
+              yield_tokens: yield_tokens,
+              target: target[:label],
+              target_args: target[:args]
+            }
+          end
+
           m = line.to_s.strip.match(/\Allhd\.wait\s+\((.+)\)\s*,\s*(\^bb\d+)\z/)
           return nil unless m
 
@@ -839,7 +1202,9 @@ module RHDL
                            .reject(&:empty?)
           {
             value_tokens: value_tokens,
-            target: m[2]
+            yield_tokens: [],
+            target: m[2],
+            target_args: []
           }
         end
 
@@ -893,27 +1258,12 @@ module RHDL
           Array(block[:instructions]).each do |instruction|
             parsed_drive = parse_llhd_drive(instruction)
             if parsed_drive
-              if (element_ref = array_element_refs[parsed_drive[:target_token]])
-                update_array_from_element_drive!(
+              statements.concat(
+                build_llhd_drive_statements(
+                  parsed_drive: parsed_drive,
                   value_map: local_map,
-                  target_ref: element_ref,
-                  value_token: parsed_drive[:value_token],
-                  statements: statements
+                  array_element_refs: array_element_refs
                 )
-                next
-              end
-
-              target_expr = lookup_value(local_map, parsed_drive[:target_token], width: parsed_drive[:width])
-              target_name = if target_expr.is_a?(IR::Signal)
-                              target_expr.name.to_s
-                            else
-                              parsed_drive[:target_token].to_s.delete_prefix('%')
-                            end
-              next if target_name.nil? || target_name.empty?
-
-              statements << IR::SeqAssign.new(
-                target: target_name,
-                expr: lookup_value(local_map, parsed_drive[:value_token], width: parsed_drive[:width])
               )
               next
             end
@@ -1055,7 +1405,7 @@ module RHDL
         def one_shot_llhd_init_process?(process_lines)
           lines = Array(process_lines).map { |line| line.to_s.strip }.reject(&:empty?)
           return false if lines.empty?
-          return false unless lines.first.match?(/\Allhd\.process\s*\{\z/)
+          return false unless llhd_process_opener?(lines.first)
           return false unless lines.last == '}'
           body = lines[1...-1]
           return false if body.nil? || body.empty?
@@ -1191,16 +1541,57 @@ module RHDL
           )
         end
 
+        def build_llhd_drive_statements(parsed_drive:, value_map:, array_element_refs: {}, value_expr: nil, enable_expr: nil)
+          target_expr = lookup_value(value_map, parsed_drive[:target_token], width: parsed_drive[:width])
+          target_name = if target_expr.is_a?(IR::Signal)
+                          target_expr.name.to_s
+                        else
+                          parsed_drive[:target_token].to_s.delete_prefix('%')
+                        end
+          return [] if target_name.nil? || target_name.empty?
+
+          drive_expr = value_expr || lookup_value(value_map, parsed_drive[:value_token], width: parsed_drive[:width])
+          drive_expr = pack_array_value(drive_expr)
+          base_statements = [
+            IR::SeqAssign.new(
+              target: target_name,
+              expr: ensure_expr_with_width(drive_expr, width: parsed_drive[:width])
+            )
+          ]
+
+          condition = enable_expr
+          if condition.nil? && parsed_drive[:enable_token]
+            condition = lookup_value(value_map, parsed_drive[:enable_token], width: 1)
+          end
+          return base_statements if condition.nil?
+
+          condition = ensure_expr_with_width(condition, width: 1)
+          return [] if condition.is_a?(IR::Literal) && condition.value.to_i.zero?
+          return base_statements if condition.is_a?(IR::Literal) && condition.value.to_i != 0
+
+          [
+            IR::If.new(
+              condition: condition,
+              then_statements: base_statements,
+              else_statements: []
+            )
+          ]
+        end
+
         def parse_llhd_drive(line)
-          m = line.to_s.strip.match(/\Allhd\.drv\s+(#{SSA_TOKEN_PATTERN})\s*,\s*(.+)\s+after\s+#{SSA_TOKEN_PATTERN}\s*:\s*(.+)\z/)
+          m = line.to_s.strip.match(
+            /\Allhd\.drv\s+(#{SSA_TOKEN_PATTERN})\s*,\s*(#{LLHD_VALUE_TOKEN_PATTERN})\s+after\s+#{SSA_TOKEN_PATTERN}(?:\s+if\s+(#{LLHD_VALUE_TOKEN_PATTERN}))?\s*:\s*(.+)\z/
+          )
           return nil unless m
-          width = mlir_type_width(m[3])
+          width = mlir_type_width(m[4])
           return nil unless width
 
           {
             target_token: m[1],
             value_token: normalize_value_token(m[2]),
-            width: width
+            enable_token: m[3] ? normalize_value_token(m[3]) : nil,
+            width: width,
+            process_token: m[2][/^%[^#]+/]
           }
         end
 
@@ -1516,8 +1907,7 @@ module RHDL
           return if body.match?(/\A\^bb\d+(?:\([^)]*\))?:/)
           return if body == '{' || body == '}'
           return if body.start_with?('cf.br ') || body.start_with?('cf.cond_br ')
-          return if body.match?(/\Allhd\.process\s*\{\z/)
-          return if body.match?(/\Allhd\.combinational\s*\{\z/)
+          return if llhd_process_opener?(body)
           return if body.start_with?('llhd.wait ')
           return if body == 'llhd.halt'
           return if body == 'llhd.yield'
@@ -2047,7 +2437,7 @@ module RHDL
           end
 
           if body.match?(/\A#{SSA_TOKEN_PATTERN}\s*=\s*seq\.to_clock\b/)
-            return if parse_seq_to_clock_line(body, value_map: value_map)
+            return if parse_seq_to_clock_line(body, value_map: value_map, nets: nets, assigns: assigns)
 
             diagnostics << Diagnostic.new(
               severity: strict ? :error : :warning,
@@ -2121,6 +2511,9 @@ module RHDL
             return if parse_hw_instance_line(
               body,
               value_map: value_map,
+              nets: nets,
+              regs: regs,
+              output_ports: output_ports,
               instances: instances,
               diagnostics: diagnostics,
               line_no: line_no
@@ -2451,7 +2844,7 @@ module RHDL
           nil
         end
 
-        def parse_hw_instance_line(body, value_map:, instances:, diagnostics:, line_no:)
+        def parse_hw_instance_line(body, value_map:, nets:, regs:, output_ports:, instances:, diagnostics:, line_no:)
           m = body.match(
             /\A(?:(?<lhs>#{SSA_TOKEN_PATTERN}(?:\s*,\s*#{SSA_TOKEN_PATTERN})*)\s*=\s*)?hw\.instance\s+"(?<inst_name>[^"]+)"\s+(?:sym\s+@[A-Za-z0-9_$.]+\s+)?@(?<module>[A-Za-z0-9_$.]+)(?:<(?<params>[^>]*)>)?\((?<inputs>.*)\)\s*->\s*\((?<outputs>.*)\)(?:\s*\{.*\})?\s*\z/
           )
@@ -2465,7 +2858,16 @@ module RHDL
 
           output_conns.each_with_index do |conn, idx|
             token = out_tokens[idx]
-            value_map[token] = IR::Signal.new(name: conn.signal.to_s, width: infer_width_from_connection(conn, m[:outputs], idx))
+            width = infer_width_from_connection(conn, m[:outputs], idx)
+            signal_name = conn.signal.to_s
+            value_map[token] = IR::Signal.new(name: signal_name, width: width)
+            declare_instance_result_net!(
+              nets: nets,
+              regs: regs,
+              output_ports: output_ports,
+              name: signal_name,
+              width: width
+            )
           end
 
           instances << IR::Instance.new(
@@ -2609,6 +3011,16 @@ module RHDL
           end
 
           [conns, lhs_tokens]
+        end
+
+        def declare_instance_result_net!(nets:, regs:, output_ports:, name:, width:)
+          target = name.to_s
+          return if target.empty?
+          return if Array(output_ports).any? { |port| port.name.to_s == target }
+          return if Array(nets).any? { |net| net.name.to_s == target }
+          return if Array(regs).any? { |reg| reg.name.to_s == target }
+
+          nets << IR::Net.new(name: target, width: width.to_i)
         end
 
         def infer_width_from_connection(conn, raw_outputs, idx)
@@ -2763,11 +3175,22 @@ module RHDL
           false
         end
 
-        def parse_seq_to_clock_line(body, value_map:)
+        def parse_seq_to_clock_line(body, value_map:, nets:, assigns:)
           m = body.match(/\A(#{SSA_TOKEN_PATTERN})\s*=\s*seq\.to_clock\s+(#{SSA_TOKEN_PATTERN})\z/)
           return false unless m
 
-          clock_name = clock_name_for_token(value_map, m[2])
+          clock_expr = lookup_value(value_map, m[2], width: 1)
+          if clock_expr.is_a?(IR::Signal)
+            value_map[m[1]] = IR::Signal.new(name: clock_expr.name.to_s, width: 1)
+            return true
+          end
+
+          clock_name = m[1].sub('%', '')
+          nets << IR::Net.new(name: clock_name, width: 1) unless nets.any? { |net| net.name.to_s == clock_name }
+          assigns << IR::Assign.new(
+            target: clock_name,
+            expr: ensure_expr_with_width(clock_expr, width: 1)
+          )
           value_map[m[1]] = IR::Signal.new(name: clock_name, width: 1)
           true
         end

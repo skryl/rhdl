@@ -91,4 +91,91 @@ RSpec.describe RHDL::Examples::AO486::Import::CpuImporter do
       end
     end
   end
+
+  it 'builds a flattened JIT runtime from the cleaned imported CPU modules', timeout: 240 do
+    require_import_tool!
+    skip 'circt-opt not available' unless HdlToolchain.which('circt-opt')
+    skip 'IR JIT backend unavailable' unless RHDL::Sim::Native::IR::JIT_AVAILABLE
+
+    Dir.mktmpdir('ao486_cpu_import_out') do |out_dir|
+      Dir.mktmpdir('ao486_cpu_import_ws') do |workspace|
+        result = run_importer(
+          out_dir: out_dir,
+          workspace: workspace,
+          maintain_directory_structure: false
+        )
+
+        cleaned = File.read(result.normalized_core_mlir_path)
+        imported = RHDL::Codegen.import_circt_mlir(cleaned, strict: false, top: 'ao486')
+        expect(imported.success?).to be(true), diagnostic_summary(imported)
+
+        flat = RHDL::Codegen::CIRCT::Flatten.to_flat_module(imported.modules, top: 'ao486')
+        runtime_mod = RHDL::Codegen::CIRCT::RuntimeJSON.normalize_modules_for_runtime([flat]).first
+        duplicate_runtime_assigns = runtime_mod.assigns.group_by { |assign| assign.target.to_s }
+                                              .select { |_target, assigns| assigns.length > 1 }
+        expect(duplicate_runtime_assigns).to be_empty,
+          "duplicate runtime assign targets: #{duplicate_runtime_assigns.keys.first(10).join(', ')}"
+
+        ir_json = RHDL::Sim::Native::IR.sim_json(flat, backend: :jit)
+        sim = RHDL::Sim::Native::IR::Simulator.new(ir_json, backend: :jit)
+
+        expect(sim.has_signal?('clk')).to be(true)
+        expect(sim.has_signal?('rst_n')).to be(true)
+        expect(sim.has_signal?('avm_read')).to be(true)
+        expect(sim.has_signal?('avm_address')).to be(true)
+        expect(sim.has_signal?('io_read_do')).to be(true)
+        expect(sim.has_signal?('io_write_do')).to be(true)
+
+        {
+          'a20_enable' => 1,
+          'cache_disable' => 0,
+          'interrupt_do' => 0,
+          'interrupt_vector' => 0,
+          'avm_waitrequest' => 0,
+          'avm_readdatavalid' => 0,
+          'avm_readdata' => 0,
+          'dma_address' => 0,
+          'dma_16bit' => 0,
+          'dma_write' => 0,
+          'dma_writedata' => 0,
+          'dma_read' => 0,
+          'io_read_data' => 0,
+          'io_read_done' => 0,
+          'io_write_done' => 0
+        }.each { |name, value| sim.poke(name, value) }
+
+        sim.poke('clk', 0)
+        sim.poke('rst_n', 0)
+        sim.evaluate
+        sim.poke('clk', 1)
+        sim.tick
+
+        expect(sim.peek('pipeline_inst__decode_inst__eip')).to eq(0xFFF0)
+        expect(sim.peek('memory_inst__prefetch_inst__prefetch_address')).to eq(0xFFFF0)
+        expect(sim.peek('memory_inst__prefetch_inst__prefetch_length')).to eq(16)
+
+        sim.poke('clk', 0)
+        sim.poke('rst_n', 1)
+        sim.evaluate
+        sim.poke('clk', 1)
+        sim.poke('rst_n', 1)
+        sim.tick
+        expect(sim.peek('memory_inst__tlb_inst__v11_5')).to eq(1)
+        expect(sim.peek('memory_inst__tlb_inst__v9_2')).to eq(0)
+        expect(sim.peek('memory_inst__tlb_inst__tlbcode_do')).to eq(1)
+        expect(sim.peek('memory_inst__prefetch_control_inst__tlbcode_do')).to eq(1)
+        expect(sim.peek('memory_inst__prefetch_control_inst__icacheread_do')).to eq(1)
+
+        sim.poke('clk', 0)
+        sim.poke('rst_n', 1)
+        sim.evaluate
+        sim.poke('clk', 1)
+        sim.poke('rst_n', 1)
+        sim.tick
+
+        expect(sim.peek('memory_inst__tlb_inst__v11_5')).to eq(0)
+        expect(sim.peek('memory_inst__prefetch_control_inst__icacheread_do')).to eq(1)
+      end
+    end
+  end
 end

@@ -319,6 +319,32 @@ RSpec.describe RHDL::Codegen::CIRCT::Import do
       expect(process.statements.first.expr.name).to eq('d')
     end
 
+    it 'preserves expression-based seq.to_clock values as real clock nets' do
+      mlir = <<~MLIR
+        hw.module @inv_clock_wrap(in %clk: i1, in %d: i8, out q: i8) {
+          %one = hw.constant 1 : i1
+          %nclk = comb.xor %clk, %one : i1
+          %clock = seq.to_clock %nclk
+          %q = seq.firreg %d clock %clock : i8
+          hw.output %q : i8
+        }
+      MLIR
+
+      result = described_class.from_mlir(mlir, strict: true)
+      expect(result.success?).to be(true), result.diagnostics.map(&:message).join("\n")
+
+      mod = result.modules.first
+      expect(mod.nets.map(&:name)).to include('clock')
+      clock_assign = mod.assigns.find { |assign| assign.target.to_s == 'clock' }
+      expect(clock_assign).not_to be_nil
+      expect(clock_assign.expr).to be_a(RHDL::Codegen::CIRCT::IR::BinaryOp)
+      expect(clock_assign.expr.op).to eq(:^)
+
+      process = mod.processes.first
+      expect(process.clocked).to be(true)
+      expect(process.clock).to eq('clock')
+    end
+
     it 'imports hw.instance lines and maps instance result values to outputs' do
       mlir = <<~MLIR
         hw.module @child(%a: i8) -> (y: i8) {

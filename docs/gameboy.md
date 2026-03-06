@@ -28,7 +28,22 @@ rhdl examples gameboy --demo
 rhdl examples gameboy --rom game.gb --audio
 ```
 
-### Command Line Options
+### Importing the Reference Design
+
+```bash
+# Regenerate the canonical import tree
+bundle exec rhdl examples gameboy import
+
+# Same import via the local bin wrapper
+bundle exec ruby examples/gameboy/bin/gb import
+
+# Keep the import workspace for debugging
+bundle exec ruby examples/gameboy/bin/gb import --workspace tmp/gameboy_ws --keep-workspace
+```
+
+The import command regenerates `examples/gameboy/import` by default and writes an import report to `examples/gameboy/import/import_report.json`.
+
+### Emulator Command Line Options
 
 ```
 Usage: rhdl examples gameboy [options] [rom.gb]
@@ -43,6 +58,8 @@ Options:
   --sim BACKEND         Simulation backend: ruby, jit, compile
   --dry-run             Initialize but don't run
 ```
+
+For importer options, run `rhdl examples gameboy import --help` or `bin/gb import --help`.
 
 ## Architecture
 

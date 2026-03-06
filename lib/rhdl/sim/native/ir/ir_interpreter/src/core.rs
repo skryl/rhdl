@@ -1974,7 +1974,7 @@ impl CoreSimulator {
     }
 
     #[inline(always)]
-    pub fn evaluate(&mut self) {
+    fn evaluate_no_clock_capture(&mut self) {
         let signals = &mut self.signals;
         let temps = &mut self.temps;
         let memories = &self.memory_arrays;
@@ -2078,18 +2078,25 @@ impl CoreSimulator {
                     _ => Self::execute_flat_op(signals, temps, memories, op),
                 }
         }
+
+    }
+
+    #[inline(always)]
+    pub fn evaluate(&mut self) {
+        self.evaluate_no_clock_capture();
+
+        // Mirror compiler semantics so direct low-phase evaluate() calls record
+        // the current clock levels for the next tick() edge check.
+        for (i, &clk_idx) in self.clock_indices.iter().enumerate() {
+            self.prev_clock_values[i] = self.signals[clk_idx];
+        }
     }
 
     #[inline(always)]
     pub fn tick(&mut self) {
-        // Save current clock values BEFORE evaluate so we can detect edges correctly
-        // At this point, the user has poked clk=1 but not evaluated yet, so derived
-        // clocks are still at their previous (low) values from the falling edge.
-        for (i, &clk_idx) in self.clock_indices.iter().enumerate() {
-            self.prev_clock_values[i] = self.signals[clk_idx];
-        }
-
-        self.evaluate();
+        // Use prev_clock_values captured by the previous evaluate()/tick() call
+        // as the "before" side of edge detection.
+        self.evaluate_no_clock_capture();
         self.apply_write_ports_level();
 
         for (i, fast_path) in self.seq_fast_paths.iter().enumerate() {
@@ -2131,13 +2138,15 @@ impl CoreSimulator {
                 break;
             }
 
-            self.evaluate();
+            self.evaluate_no_clock_capture();
         }
 
-        // prev_clock_values is saved at the start of tick(), not here
-        // This ensures we capture the clock values BEFORE evaluate propagates them
         self.apply_sync_read_ports_level();
-        self.evaluate();
+        self.evaluate_no_clock_capture();
+
+        for (i, &clk_idx) in self.clock_indices.iter().enumerate() {
+            self.prev_clock_values[i] = self.signals[clk_idx];
+        }
     }
 
     /// Tick with forced edge detection using prev_clock_values set by caller
@@ -2148,7 +2157,7 @@ impl CoreSimulator {
         // Skip saving current clock values - use prev_clock_values set by caller
 
         // Assigns are now topologically sorted, so a single evaluate pass is sufficient
-        self.evaluate();
+        self.evaluate_no_clock_capture();
         self.apply_write_ports_level();
 
         for (i, fast_path) in self.seq_fast_paths.iter().enumerate() {
@@ -2199,15 +2208,15 @@ impl CoreSimulator {
                 break;
             }
 
-            self.evaluate();
+            self.evaluate_no_clock_capture();
         }
+
+        self.apply_sync_read_ports_level();
+        self.evaluate_no_clock_capture();
 
         for (i, &clk_idx) in self.clock_indices.iter().enumerate() {
             self.prev_clock_values[i] = self.signals[clk_idx];
         }
-
-        self.apply_sync_read_ports_level();
-        self.evaluate();
     }
 
     pub fn reset(&mut self) {

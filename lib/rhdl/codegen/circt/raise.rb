@@ -20,11 +20,12 @@ module RHDL
       end
 
       class SourceResult
-        attr_reader :sources, :diagnostics
+        attr_reader :sources, :diagnostics, :modules
 
-        def initialize(sources:, diagnostics: [])
+        def initialize(sources:, diagnostics: [], modules: [])
           @sources = sources
           @diagnostics = diagnostics
+          @modules = modules
         end
 
         def success?
@@ -75,7 +76,7 @@ module RHDL
           end
 
           append_missing_top_error(modules, diagnostics, top)
-          SourceResult.new(sources: sources, diagnostics: diagnostics)
+          SourceResult.new(sources: sources, diagnostics: diagnostics, modules: modules)
         end
 
         def to_dsl(nodes_or_mlir, out_dir:, top: nil, strict: false, format: false)
@@ -107,9 +108,11 @@ module RHDL
         # Raise CIRCT nodes/MLIR into loaded Ruby DSL component classes.
         # Returns {module_name => component_class}.
         def to_components(nodes_or_mlir, namespace: Module.new, top: nil, strict: false)
+          source_module_texts = nodes_or_mlir.is_a?(String) ? module_texts_by_name(nodes_or_mlir) : {}
           source_result = to_sources(nodes_or_mlir, top: top, strict: strict)
           diagnostics = source_result.diagnostics.dup
           components = {}
+          module_by_name = source_result.modules.each_with_object({}) { |mod, memo| memo[mod.name.to_s] = mod }
 
           pending = source_result.sources.map do |module_name, ruby|
             { module_name: module_name, ruby: ruby, last_error: nil }
@@ -141,7 +144,13 @@ module RHDL
                   next
                 end
 
-                components[module_name] = namespace.const_get(class_name, false)
+                component = namespace.const_get(class_name, false)
+                attach_imported_circt_module!(
+                  component,
+                  module_by_name[module_name],
+                  module_text: source_module_texts[module_name]
+                )
+                components[module_name] = component
                 loaded_this_pass = true
               rescue NameError => e
                 next_pending << entry.merge(last_error: e)
@@ -185,6 +194,18 @@ module RHDL
           end
 
           ComponentResult.new(components: components, namespace: namespace, diagnostics: diagnostics)
+        end
+
+        def attach_imported_circt_module!(component_class, mod, module_text: nil)
+          return unless component_class && mod
+
+          component_class.instance_variable_set(:@_imported_circt_module, mod)
+          component_class.instance_variable_set(:@_imported_circt_module_by_name, { mod.name.to_s => mod })
+          component_class.instance_variable_set(:@_imported_circt_module_text, module_text&.strip)
+          component_class.instance_variable_set(
+            :@_imported_circt_module_text_by_name,
+            module_text ? { mod.name.to_s => module_text.strip } : {}
+          )
         end
 
         def normalize_modules(nodes_or_mlir)
@@ -1379,6 +1400,16 @@ module RHDL
             __FILE__ __LINE__ __ENCODING__
           ]
           reserved.include?(value)
+        end
+
+        def module_texts_by_name(mlir_text)
+          package = RHDL::Codegen::CIRCT::ImportCleanup.split_top_level_package(mlir_text)
+          return {} unless package
+
+          package.fetch(:entries).each_with_object({}) do |entry, acc|
+            name = RHDL::Codegen::CIRCT::ImportCleanup.module_name_for_entry(entry)
+            acc[name] = entry.strip if name
+          end
         end
       end
     end

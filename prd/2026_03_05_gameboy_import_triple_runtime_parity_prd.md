@@ -1,6 +1,7 @@
 ## Status
 In Progress (2026-03-05)
-Runtime update - Verilator vs imported IR JIT parity gate is green. Imported runtime initialization now uses CIRCT-native flattening + runtime JSON normalization instead of a raised-DSL round trip. Arcilator remains toolchain-gated by local `llc` incompatibility in the parity harness. (2026-03-05)
+Runtime update - Verilator vs imported IR JIT parity gate is green. Imported runtime initialization now uses CIRCT-native flattening + runtime JSON normalization instead of a raised-DSL round trip. The local Arcilator harness also now uses an `llc` invocation compatible with the installed toolchain. (2026-03-05)
+Validation update - targeted GameBoy runtime specs are green; full `spec/examples/gameboy/import` validation was started but not allowed to finish in this pass because a long roundtrip spec was still running without an early failure signal. (2026-03-05)
 
 ## Context
 Game Boy mixed import coverage currently validates:

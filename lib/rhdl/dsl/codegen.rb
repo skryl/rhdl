@@ -173,6 +173,10 @@ module RHDL
         # Build CIRCT node graph from the component.
         # This is the canonical in-memory IR for DSL lowering.
         def to_circt_nodes(top_name: nil, parameters: {})
+          if (cached = cached_imported_circt_module(top_name: top_name, parameters: parameters))
+            return cached
+          end
+
           build_circt_module(top_name: top_name, parameters: parameters)
         end
 
@@ -711,7 +715,66 @@ module RHDL
 
         # Generate CIRCT MLIR text from the component.
         def to_ir(top_name: nil, parameters: {})
+          if (cached_text = cached_imported_circt_module_text(top_name: top_name, parameters: parameters))
+            return cached_text
+          end
+
           RHDL::Codegen::CIRCT::MLIR.generate(to_circt_nodes(top_name: top_name, parameters: parameters))
+        end
+
+        def cached_imported_circt_module(top_name:, parameters:)
+          return nil unless (parameters.nil? || parameters.empty?)
+
+          base = instance_variable_get(:@_imported_circt_module)
+          return nil unless base
+
+          desired_name = top_name ? top_name.to_s : base.name.to_s
+          return base if desired_name == base.name.to_s
+
+          cached_by_name = instance_variable_get(:@_imported_circt_module_by_name) || {}
+          return cached_by_name[desired_name] if cached_by_name.key?(desired_name)
+
+          renamed = RHDL::Codegen::CIRCT::IR::ModuleOp.new(
+            name: desired_name,
+            ports: base.ports,
+            nets: base.nets,
+            regs: base.regs,
+            assigns: base.assigns,
+            processes: base.processes,
+            instances: base.instances,
+            memories: base.memories,
+            write_ports: base.write_ports,
+            sync_read_ports: base.sync_read_ports,
+            parameters: base.parameters
+          )
+          cached_by_name[desired_name] = renamed
+          instance_variable_set(:@_imported_circt_module_by_name, cached_by_name)
+          renamed
+        end
+
+        def cached_imported_circt_module_text(top_name:, parameters:)
+          return nil unless (parameters.nil? || parameters.empty?)
+
+          base = instance_variable_get(:@_imported_circt_module_text)
+          mod = instance_variable_get(:@_imported_circt_module)
+          return nil unless base && mod
+
+          desired_name = top_name ? top_name.to_s : mod.name.to_s
+          return base if desired_name == mod.name.to_s
+
+          cached_by_name = instance_variable_get(:@_imported_circt_module_text_by_name) || {}
+          return cached_by_name[desired_name] if cached_by_name.key?(desired_name)
+
+          header = /
+            ^
+            (?<prefix>\s*(?:hw|sv)\.module(?:\s+\w+)*\s+)
+            @#{Regexp.escape(mod.name.to_s)}
+            (?=[(<\s])
+          /x
+          renamed = base.sub(header, "\\k<prefix>@#{desired_name}")
+          cached_by_name[desired_name] = renamed
+          instance_variable_set(:@_imported_circt_module_text_by_name, cached_by_name)
+          renamed
         end
 
         # Generate CIRCT IR from Memory DSL definitions

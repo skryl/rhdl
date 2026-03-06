@@ -139,18 +139,19 @@ module RHDL
           counts = parent_counts(expr)
           hoisted = {}
           assigns = []
+          counter_ref = { value: temp_counter.to_i }
           rewritten = rewrite_expr_for_runtime(
             expr,
             counts: counts,
             hoisted: hoisted,
             assigns: assigns,
             prefix: sanitize_runtime_name(prefix),
-            counter: temp_counter
+            counter_ref: counter_ref
           )
           [rewritten, assigns]
         end
 
-        def rewrite_expr_for_runtime(expr, counts:, hoisted:, assigns:, prefix:, counter:)
+        def rewrite_expr_for_runtime(expr, counts:, hoisted:, assigns:, prefix:, counter_ref:)
           return expr if expr.nil? || expr.is_a?(IR::Literal) || expr.is_a?(IR::Signal)
 
           oid = expr.object_id
@@ -163,13 +164,14 @@ module RHDL
               hoisted: hoisted,
               assigns: assigns,
               prefix: prefix,
-              counter: counter + assigns.length
+              counter_ref: counter_ref
             )
           end
           rewritten = rebuild_expr(expr, rewritten_children)
 
           if counts[oid].to_i > 1
-            name = sanitize_runtime_name("#{prefix}_tmp_#{counter + assigns.length}")
+            name = sanitize_runtime_name("#{prefix}_tmp_#{counter_ref[:value]}")
+            counter_ref[:value] += 1
             signal = IR::Signal.new(name: name, width: expr.width.to_i)
             hoisted[oid] = { signal: signal }
             assigns << {

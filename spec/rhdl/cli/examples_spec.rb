@@ -28,7 +28,17 @@ RSpec.describe 'rhdl examples command' do
     expect(status.success?).to be true
     expect(stderr).not_to include('Unknown examples subcommand')
     expect(stdout).to include('Game Boy HDL Terminal Emulator')
+    expect(stdout).to include('import')
     expect(stdout).not_to include('Unknown examples subcommand')
+  end
+
+  it 'dispatches examples gameboy import help to the gameboy importer' do
+    stdout, stderr, status = run_cli('examples', 'gameboy', 'import', '--help')
+
+    expect(status.success?).to be true
+    expect(stderr).not_to include('Unknown examples subcommand')
+    expect(stdout).to include('Usage: bin/gameboy import')
+    expect(stdout).to include('Import the Game Boy reference design')
   end
 
   it 'dispatches examples riscv to the riscv runner' do
