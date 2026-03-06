@@ -47,9 +47,6 @@ module RHDL
           FileUtils.mkdir_p(work_dir)
 
           moore_mlir_path = File.join(work_dir, 'import.core.mlir')
-          normalized_llhd_mlir_path = File.join(work_dir, 'import.normalized.llhd.mlir')
-          hwseq_mlir_path = File.join(work_dir, 'import.hwseq.mlir')
-          arc_mlir_path = File.join(work_dir, 'import.arc.mlir')
 
           import = verilog_to_circt_mlir(
             verilog_path: verilog_path,
@@ -62,32 +59,28 @@ module RHDL
           imported_text = File.read(moore_mlir_path)
 
           unless imported_text.include?('moore.module')
-            FileUtils.cp(moore_mlir_path, hwseq_mlir_path)
-            arc = run_external_command(
-              tool: 'circt-opt',
-              cmd: ['circt-opt', '--canonicalize', '--convert-to-arcs', '--canonicalize', hwseq_mlir_path, '-o', arc_mlir_path],
-              out_path: arc_mlir_path
+            prepared = prepare_arc_mlir_from_circt_mlir(
+              mlir_path: moore_mlir_path,
+              work_dir: work_dir,
+              base_name: 'import'
             )
 
             return {
-              success: arc[:success],
+              success: prepared[:success],
               import: import,
-              normalize: nil,
-              transform: {
-                success: true,
-                output_text: imported_text,
-                transformed_modules: module_names_from_core_mlir(imported_text),
-                unsupported_modules: []
-              },
-              arc: arc,
+              normalize: prepared[:normalize],
+              transform: prepared[:transform],
+              arc: prepared[:arc],
               moore_mlir_path: moore_mlir_path,
-              normalized_llhd_mlir_path: nil,
-              hwseq_mlir_path: hwseq_mlir_path,
-              arc_mlir_path: arc[:success] ? arc_mlir_path : nil,
-              transformed_modules: module_names_from_core_mlir(imported_text),
-              unsupported_modules: []
+              normalized_llhd_mlir_path: prepared[:normalized_llhd_mlir_path],
+              hwseq_mlir_path: prepared[:hwseq_mlir_path],
+              arc_mlir_path: prepared[:arc_mlir_path],
+              transformed_modules: prepared[:transformed_modules],
+              unsupported_modules: prepared[:unsupported_modules]
             }
           end
+
+          normalized_llhd_mlir_path = File.join(work_dir, 'import.normalized.llhd.mlir')
 
           normalize_cmd = [
             'circt-opt',
@@ -113,9 +106,38 @@ module RHDL
           normalize = run_external_command(tool: 'circt-opt', cmd: normalize_cmd, out_path: normalized_llhd_mlir_path)
           return prepare_arc_failure(import: import, normalize: normalize, work_dir: work_dir) unless normalize[:success]
 
-          strip_dbg_ops!(normalized_llhd_mlir_path)
+          prepared = prepare_arc_mlir_from_circt_mlir(
+            mlir_path: normalized_llhd_mlir_path,
+            work_dir: work_dir,
+            base_name: 'import'
+          )
+          prepared.merge(
+            import: import,
+            normalize: normalize,
+            moore_mlir_path: moore_mlir_path,
+            normalized_llhd_mlir_path: normalized_llhd_mlir_path
+          )
+        end
 
-          transform = ArcPrepare.transform_normalized_llhd(File.read(normalized_llhd_mlir_path))
+        def prepare_arc_mlir_from_circt_mlir(mlir_path:, work_dir:, base_name: 'import', top: nil, strict: false, extern_modules: [])
+          FileUtils.mkdir_p(work_dir)
+
+          input_copy_path = File.join(work_dir, "#{base_name}.normalized.llhd.mlir")
+          hwseq_mlir_path = File.join(work_dir, "#{base_name}.hwseq.mlir")
+          arc_mlir_path = File.join(work_dir, "#{base_name}.arc.mlir")
+
+          text = File.read(mlir_path)
+          File.write(input_copy_path, text)
+          strip_dbg_ops!(input_copy_path)
+          cleaned_text = cleanup_imported_core_mlir_text(
+            File.read(input_copy_path),
+            top: top,
+            strict: strict,
+            extern_modules: extern_modules
+          )
+          File.write(input_copy_path, cleaned_text)
+
+          transform = prepare_hwseq_from_circt_mlir_text(cleaned_text)
           File.write(hwseq_mlir_path, transform.fetch(:output_text))
 
           arc = if transform.fetch(:unsupported_modules).empty?
@@ -135,12 +157,12 @@ module RHDL
 
           {
             success: arc[:success],
-            import: import,
-            normalize: normalize,
+            import: nil,
+            normalize: nil,
             transform: transform,
             arc: arc,
-            moore_mlir_path: moore_mlir_path,
-            normalized_llhd_mlir_path: normalized_llhd_mlir_path,
+            moore_mlir_path: nil,
+            normalized_llhd_mlir_path: input_copy_path,
             hwseq_mlir_path: hwseq_mlir_path,
             arc_mlir_path: arc[:success] ? arc_mlir_path : nil,
             transformed_modules: transform.fetch(:transformed_modules),
@@ -266,6 +288,36 @@ module RHDL
             transformed_modules: [],
             unsupported_modules: []
           }
+        end
+
+        def prepare_hwseq_from_circt_mlir_text(text)
+          return {
+            success: true,
+            output_text: text,
+            transformed_modules: module_names_from_core_mlir(text),
+            unsupported_modules: []
+          } unless text.include?('llhd.')
+
+          ArcPrepare.transform_normalized_llhd(text)
+        end
+
+        def cleanup_imported_core_mlir_text(text, top:, strict:, extern_modules:)
+          needs_cleanup = text.include?('llhd.') ||
+                          text.include?('hw.array_inject') ||
+                          text.include?('hw.aggregate_constant') ||
+                          text.include?('seq.clock_inv') ||
+                          text.match?(/!hw\.array</)
+          return text unless needs_cleanup
+
+          cleanup = RHDL::Codegen::CIRCT::ImportCleanup.cleanup_imported_core_mlir(
+            text,
+            strict: strict,
+            top: top,
+            extern_modules: Array(extern_modules).map(&:to_s)
+          )
+          raise RuntimeError, 'Imported CIRCT core cleanup failed during ARC preparation' unless cleanup.success?
+
+          cleanup.cleaned_text
         end
 
         def format_unsupported_modules(entries)

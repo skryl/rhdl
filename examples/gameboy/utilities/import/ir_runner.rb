@@ -19,13 +19,18 @@ module RHDL
           def initialize(component_class: nil, mlir: nil, top: 'gb', backend: :compile)
             @backend = backend
             @top_name = top.to_s
-            @nodes = resolve_nodes(component_class: component_class, mlir: mlir, top: @top_name)
+            resolved = resolve_nodes(component_class: component_class, mlir: mlir, top: @top_name)
+            @nodes = resolved.fetch(:top_module)
+            @runtime_nodes = resolved.fetch(:runtime_nodes)
 
             @input_ports = @nodes.ports.select { |port| port.direction == :in }.map { |port| port.name.to_s }
             @output_ports = @nodes.ports.select { |port| port.direction == :out }.map { |port| port.name.to_s }
+            @signal_names = (@nodes.ports.map { |port| port.name.to_s } +
+              @nodes.nets.map { |net| net.name.to_s } +
+              @nodes.regs.map { |reg| reg.name.to_s }).uniq
 
             @sim = RHDL::Sim::Native::IR::Simulator.new(
-              RHDL::Sim::Native::IR.sim_json(@nodes, backend: backend),
+              RHDL::Sim::Native::IR.sim_json(@runtime_nodes, backend: backend),
               backend: backend
             )
 
@@ -67,10 +72,10 @@ module RHDL
           end
 
           def peek(name)
-            port = resolve_port_name(name)
-            return 0 unless port
+            signal = resolve_signal_name(name)
+            return 0 unless signal
 
-            @sim.peek(port)
+            @sim.peek(signal)
           rescue StandardError
             0
           end
@@ -79,6 +84,10 @@ module RHDL
             Array(signal_names).each_with_object({}) do |name, acc|
               acc[name.to_s] = peek(name)
             end
+          end
+
+          def signal_available?(name_or_candidates)
+            !resolve_signal_name(name_or_candidates).nil?
           end
 
           def input_ports
@@ -97,20 +106,19 @@ module RHDL
             end
 
             if component_class
-              return component_class.to_flat_circt_nodes(top_name: top)
+              flat = component_class.to_flat_circt_nodes(top_name: top)
+              return { top_module: flat, runtime_nodes: flat }
             end
 
             if mlir
-              raised = RHDL::Codegen.raise_circt_components(mlir, namespace: Module.new, top: top, strict: true)
-              unless raised.success?
-                message = Array(raised.diagnostics).map { |diag| diag.respond_to?(:message) ? diag.message : diag.to_s }.join("\n")
-                raise RuntimeError, "Failed to raise imported MLIR components:\n#{message}"
+              imported = RHDL::Codegen.import_circt_mlir(mlir, strict: true, top: top)
+              unless imported.success?
+                message = Array(imported.diagnostics).map { |diag| diag.respond_to?(:message) ? diag.message : diag.to_s }.join("\n")
+                raise RuntimeError, "Failed to import CIRCT MLIR for runtime:\n#{message}"
               end
 
-              component = raised.components.fetch(top) do
-                raise KeyError, "Top component '#{top}' not present in raised import set"
-              end
-              return component.to_flat_circt_nodes(top_name: top)
+              flat = RHDL::Codegen::CIRCT::Flatten.to_flat_module(imported.modules, top: top)
+              return { top_module: flat, runtime_nodes: flat }
             end
 
             raise ArgumentError, 'One of component_class or mlir is required'
@@ -177,6 +185,23 @@ module RHDL
 
               ports = @input_ports + @output_ports
               return ports[idx]
+            end
+
+            nil
+          end
+
+          def resolve_signal_name(name_or_candidates)
+            candidates = Array(name_or_candidates).map(&:to_s)
+            candidates.each do |candidate|
+              return candidate if @signal_names.include?(candidate)
+            end
+
+            lowered = @signal_names.map(&:downcase)
+            candidates.each do |candidate|
+              idx = lowered.index(candidate.downcase)
+              next if idx.nil?
+
+              return @signal_names[idx]
             end
 
             nil

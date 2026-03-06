@@ -7,7 +7,7 @@ require 'open3'
 require 'fileutils'
 
 require_relative '../../../../examples/gameboy/utilities/import/system_importer'
-require_relative '../../../../examples/gameboy/utilities/runners/ir_runner'
+require_relative '../../../../examples/gameboy/utilities/import/ir_runner'
 require_relative '../../../../examples/gameboy/utilities/tasks/run_task'
 require_relative '../../../../lib/rhdl/cli/tasks/import_task'
 
@@ -41,8 +41,8 @@ RSpec.describe 'GameBoy mixed import runtime parity (Verilator/Arcilator/IR)', s
     path
   end
 
-  def require_ir_compiler!
-    skip 'IR compiler backend unavailable' unless RHDL::Sim::Native::IR::COMPILER_AVAILABLE
+  def require_ir_jit!
+    skip 'IR JIT backend unavailable' unless RHDL::Sim::Native::IR::JIT_AVAILABLE
   end
 
   def skip_arcilator?
@@ -65,7 +65,6 @@ RSpec.describe 'GameBoy mixed import runtime parity (Verilator/Arcilator/IR)', s
   def write_verilator_trace_harness(path)
     source = <<~CPP
       #include "Vgb.h"
-      #include "Vgb___024root.h"
       #include "verilated.h"
       #include <cstdint>
       #include <cstdio>
@@ -93,7 +92,6 @@ RSpec.describe 'GameBoy mixed import runtime parity (Verilator/Arcilator/IR)', s
         int max_cycles = (argc > 2) ? std::atoi(argv[2]) : 200000;
 
         Vgb dut;
-        auto* root = dut.rootp;
         auto rom = load_rom(rom_path);
 
         auto tick = [&]() {
@@ -125,8 +123,10 @@ RSpec.describe 'GameBoy mixed import runtime parity (Verilator/Arcilator/IR)', s
         uint16_t last_pc = 0xFFFF;
         for (int i = 0; i < max_cycles; ++i) {
           tick();
-          if ((root->gb__DOT__cpu_m1_n & 0x1) == 0) {
-            uint16_t pc = static_cast<uint16_t>(root->gb__DOT__cpu_addr);
+          if (dut.cart_rd) {
+            uint16_t pc =
+              (static_cast<uint16_t>(dut.ext_bus_a15 & 0x1) << 15) |
+              static_cast<uint16_t>(dut.ext_bus_addr & 0x7FFF);
             if (pc != last_pc) {
               uint8_t opcode = rom_read(rom, pc);
               std::printf("%u,%u\\n", static_cast<unsigned>(pc), static_cast<unsigned>(opcode));
@@ -152,7 +152,9 @@ RSpec.describe 'GameBoy mixed import runtime parity (Verilator/Arcilator/IR)', s
   end
 
   def normalize_trace(trace)
-    Array(trace).drop_while { |(pc, _opcode)| pc.to_i.zero? }
+    events = Array(trace)
+    trimmed = events.drop_while { |(pc, _opcode)| pc.to_i.zero? }
+    trimmed.empty? ? events : trimmed
   end
 
   def align_trace_prefix(lhs, rhs)
@@ -214,32 +216,31 @@ RSpec.describe 'GameBoy mixed import runtime parity (Verilator/Arcilator/IR)', s
     end
   end
 
-  def collect_ir_trace(raised_hdl_dir:, rom_bytes:)
-    with_env('RHDL_GAMEBOY_IMPORT_TOP' => 'gb') do
-      runner = RHDL::Examples::GameBoy::IrRunner.new(backend: :compile, hdl_dir: raised_hdl_dir)
-      runner.load_rom(rom_bytes)
-      runner.reset
+  def collect_ir_trace(mlir_path:, rom_bytes:)
+    runner = RHDL::Examples::GameBoy::Import::IrRunner.new(
+      mlir: File.read(mlir_path),
+      top: 'gb',
+      backend: :jit
+    )
+    runner.load_rom(rom_bytes)
+    runner.reset
 
-      trace = []
-      last_pc = nil
-      use_fetch_trace = runner.signal_available?('cpu_m1_n') && runner.signal_available?('cpu_addr')
-      MAX_CYCLES.times do
-        runner.run_steps(1)
-        if use_fetch_trace
-          next unless (runner.safe_peek('cpu_m1_n') & 0x1).zero?
+    trace = []
+    last_pc = nil
+    MAX_CYCLES.times do
+      runner.run_steps(1)
+      next unless (runner.peek('cart_rd') & 0x1) == 1
 
-          pc = runner.safe_peek('cpu_addr').to_i & 0xFFFF
-        else
-          pc = runner.cpu_state.fetch(:pc).to_i & 0xFFFF
-        end
-        next if pc == last_pc
+      bus_addr = runner.peek('ext_bus_addr').to_i & 0x7FFF
+      a15 = runner.peek('ext_bus_a15').to_i & 0x1
+      pc = (a15 << 15) | bus_addr
+      next if pc == last_pc
 
-        trace << [pc, rom_bytes.getbyte(pc) || 0]
-        last_pc = pc
-      end
-
-      normalize_trace(trace)
+      trace << [pc, rom_bytes.getbyte(pc) || 0]
+      last_pc = pc
     end
+
+    normalize_trace(trace)
   end
 
   def first_mismatch(lhs, rhs)
@@ -455,7 +456,7 @@ RSpec.describe 'GameBoy mixed import runtime parity (Verilator/Arcilator/IR)', s
     )
 
     begin
-      run_cmd!(['llc', '-opaque-pointers=1', '-relocation-model=pic', '-filetype=obj', ll_path, '-o', obj_path])
+      run_cmd!(['llc', '-filetype=obj', '-O2', '-relocation-model=pic', ll_path, '-o', obj_path])
       run_cmd!(['c++', '-std=c++17', '-O2', harness_path, obj_path, '-o', bin_path])
       output = run_cmd!([bin_path, rom_path, MAX_CYCLES.to_s])
       { trace: normalize_trace(parse_trace(output)), error: nil }
@@ -510,7 +511,7 @@ RSpec.describe 'GameBoy mixed import runtime parity (Verilator/Arcilator/IR)', s
     require_reference_tree!
     %w[ghdl circt-verilog circt-opt verilator llc c++].each { |tool| require_tool!(tool) }
     require_tool!('arcilator') unless skip_arcilator?
-    require_ir_compiler!
+    require_ir_jit!
     pop_rom_path = require_pop_rom!
 
     Dir.mktmpdir('gameboy_runtime_parity_out') do |out_dir|
@@ -566,12 +567,12 @@ RSpec.describe 'GameBoy mixed import runtime parity (Verilator/Arcilator/IR)', s
             summary_lines << "Verilator: #{verilator_trace.length} events"
           end
 
-          ir_trace = collect_ir_trace(raised_hdl_dir: out_dir, rom_bytes: rom_bytes)
+          ir_trace = collect_ir_trace(mlir_path: import_result.mlir_path, rom_bytes: rom_bytes)
           if ir_trace.empty?
             failures << 'Raised-RHDL IR trace is empty'
-            summary_lines << 'IR compiler: empty trace'
+            summary_lines << 'IR JIT: empty trace'
           else
-            summary_lines << "IR compiler: #{ir_trace.length} events"
+            summary_lines << "IR JIT: #{ir_trace.length} events"
           end
 
           vi_verilator_trace = verilator_trace
@@ -589,7 +590,7 @@ RSpec.describe 'GameBoy mixed import runtime parity (Verilator/Arcilator/IR)', s
                         { trace: nil, error: 'skipped via RHDL_SKIP_ARCILATOR=1' }
                       else
                         collect_arcilator_trace(
-                          staging_entry: runtime_entry,
+                          staging_entry: normalized_verilog,
                           rom_path: rom_path,
                           scratch_dir: File.join(scratch, 'arcilator')
                         )

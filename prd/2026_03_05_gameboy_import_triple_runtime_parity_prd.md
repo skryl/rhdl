@@ -1,20 +1,21 @@
 ## Status
 In Progress (2026-03-05)
+Runtime update - Verilator vs imported IR JIT parity gate is green. Imported runtime initialization now uses CIRCT-native flattening + runtime JSON normalization instead of a raised-DSL round trip. Arcilator remains toolchain-gated by local `llc` incompatibility in the parity harness. (2026-03-05)
 
 ## Context
 Game Boy mixed import coverage currently validates:
 1. mixed import path correctness,
 2. semantic roundtrip signature stability,
-3. imported-design behavioral checks on `ir_compiler`.
+3. imported-design behavioral checks on the IR backend. The current temporary runtime backend is `:jit`.
 
 It does not yet provide one integration gate that compares runtime instruction progression across all target stages in the import chain:
 1. `Mixed Verilog/VHDL -> GHDL -> staged pure Verilog` consumed by Verilator,
 2. `... -> CIRCT MLIR` consumed by Arcilator,
-3. `... -> raised RHDL` consumed by IR compiler.
+3. `... -> imported CIRCT runtime path` consumed by the IR backend. The current temporary runtime backend is `:jit`.
 
 ## Goals
 1. Add a deterministic runtime parity spec for Game Boy import under `spec/examples/gameboy/import`.
-2. Compare PC/opcode progression between Verilator (staged pure Verilog) and IR compiler (raised RHDL).
+2. Compare PC/opcode progression between Verilator (staged pure Verilog) and the IR runtime leg. The current temporary backend is `:jit`.
 3. Add Arcilator consumption of the CIRCT step and enforce 3-way parity when the CIRCT artifact is Arcilator-legal.
 4. Ensure Arcilator consumes only the pure-Verilog-derived CIRCT lowering path (`staged Verilog -> CIRCT -> ARC`), with no fallback to RHDL-generated CIRCT.
 5. Keep failure diagnostics actionable (which stage failed, command excerpt, first mismatching events).
@@ -45,7 +46,7 @@ Red:
 Green:
 1. Add deterministic post-staging runtime rewrite pass in GameBoy importer (`.mixed_import/runtime_sources` + `.mixed_import/mixed_runtime.v`) so both Verilator and Arcilator consume the same rewritten pure-Verilog artifact.
 2. Add Verilator trace harness (PC/opcode progression via fetch-level/internal signals).
-3. Add IR compiler trace harness using imported raised RHDL.
+3. Add IR runtime trace harness for the imported design. The current temporary backend is `:jit`.
 4. Assert strict parity between Verilator and IR traces.
 
 Exit Criteria:
@@ -78,7 +79,7 @@ Exit Criteria:
 ## Acceptance Criteria
 1. New runtime parity spec exists under `spec/examples/gameboy/import`.
 2. Verilator consumes staged pure Verilog artifact (not raised RHDL Verilog export).
-3. IR compiler consumes raised RHDL artifact.
+3. IR runtime consumes the imported design runtime path. The current temporary backend is `:jit`.
 4. Arcilator path is attempted on pure-Verilog-lowered CIRCT/ARC artifact and participates in parity when legal.
 5. Failures/pending states include actionable stage-specific diagnostics.
 

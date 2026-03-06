@@ -8,7 +8,7 @@ require_relative '../../../../examples/gameboy/utilities/tasks/run_task'
 require_relative '../../../../examples/gameboy/utilities/import/system_importer'
 require_relative '../../../../examples/gameboy/utilities/import/ir_runner'
 
-RSpec.describe 'GameBoy imported design behavioral parity on ir_compiler', slow: true do
+RSpec.describe 'GameBoy imported design behavioral parity on ir_jit', slow: true do
   TRACE_SIGNALS = %w[
     ext_bus_addr
     ext_bus_a15
@@ -30,8 +30,8 @@ RSpec.describe 'GameBoy imported design behavioral parity on ir_compiler', slow:
     skip "#{cmd} not available" unless HdlToolchain.which(cmd)
   end
 
-  def require_ir_compiler!
-    skip 'IR compiler backend unavailable' unless RHDL::Sim::Native::IR::COMPILER_AVAILABLE
+  def require_ir_jit!
+    skip 'IR JIT backend unavailable' unless RHDL::Sim::Native::IR::JIT_AVAILABLE
   end
 
   def collect_trace(runner, cycles:)
@@ -41,11 +41,11 @@ RSpec.describe 'GameBoy imported design behavioral parity on ir_compiler', slow:
     end
   end
 
-  it 'matches bounded bus-level behavior between source GB and imported gb on compile backend', timeout: 1800 do
+  it 'matches bounded bus-level behavior between source GB and imported gb on JIT backend', timeout: 1800 do
     require_reference_tree!
     require_tool!('ghdl')
     require_tool!('circt-verilog')
-    require_ir_compiler!
+    require_ir_jit!
 
     Dir.mktmpdir('gameboy_import_parity_out') do |out_dir|
       Dir.mktmpdir('gameboy_import_parity_ws') do |workspace|
@@ -63,12 +63,12 @@ RSpec.describe 'GameBoy imported design behavioral parity on ir_compiler', slow:
         source_runner = RHDL::Examples::GameBoy::Import::IrRunner.new(
           component_class: RHDL::Examples::GameBoy::GB,
           top: 'gb',
-          backend: :compile
+          backend: :jit
         )
         imported_runner = RHDL::Examples::GameBoy::Import::IrRunner.new(
           mlir: File.read(import_result.mlir_path),
           top: 'gb',
-          backend: :compile
+          backend: :jit
         )
 
         demo_rom = RHDL::Examples::GameBoy::Tasks::RunTask.create_demo_rom

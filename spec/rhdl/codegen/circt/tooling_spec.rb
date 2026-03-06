@@ -3,6 +3,40 @@
 require 'spec_helper'
 
 RSpec.describe RHDL::Codegen::CIRCT::Tooling do
+  let(:simple_dff_llhd) do
+    <<~MLIR
+      module {
+        hw.module @dff(in %clk : i1, in %d : i1, out q : i1) {
+          %0 = llhd.constant_time <0ns, 1d, 0e>
+          %1 = llhd.constant_time <0ns, 0d, 1e>
+          %true = hw.constant true
+          %false = hw.constant false
+          %clk_0 = llhd.sig name "clk" %false : i1
+          %2 = llhd.prb %clk_0 : i1
+          %d_1 = llhd.sig name "d" %false : i1
+          %q = llhd.sig %false : i1
+          llhd.process {
+            %4 = llhd.prb %clk_0 : i1
+            cf.br ^bb1(%4, %false, %false : i1, i1, i1)
+          ^bb1(%5: i1, %6: i1, %7: i1):
+            llhd.drv %q, %6 after %0 if %7 : i1
+            llhd.wait (%2 : i1), ^bb2(%5 : i1)
+          ^bb2(%8: i1):
+            %9 = llhd.prb %clk_0 : i1
+            %10 = llhd.prb %d_1 : i1
+            %11 = comb.xor bin %8, %true : i1
+            %12 = comb.and bin %11, %2 : i1
+            cf.cond_br %12, ^bb1(%9, %10, %true : i1, i1, i1), ^bb1(%9, %false, %false : i1, i1, i1)
+          }
+          llhd.drv %clk_0, %clk after %1 : i1
+          llhd.drv %d_1, %d after %1 : i1
+          %3 = llhd.prb %q : i1
+          hw.output %3 : i1
+        }
+      }
+    MLIR
+  end
+
   describe '.verilog_to_circt_mlir' do
     it 'invokes circt-verilog import command with expected args and writes stdout to the target file' do
       Dir.mktmpdir('tooling_spec_import') do |dir|
@@ -160,6 +194,57 @@ RSpec.describe RHDL::Codegen::CIRCT::Tooling do
         expect(hwseq).not_to include('llhd.')
         expect(hwseq).to include('seq.firreg').or include('seq.compreg')
         expect(File.read(result.fetch(:arc_mlir_path))).to include('arc.')
+      end
+    end
+  end
+
+  describe '.prepare_arc_mlir_from_circt_mlir' do
+    it 'builds shared hwseq and arc artifacts from canonical LLHD MLIR' do
+      skip 'circt-opt not available' unless HdlToolchain.which('circt-opt')
+
+      Dir.mktmpdir('tooling_prepare_arc_circt') do |dir|
+        mlir_path = File.join(dir, 'dff.normalized.llhd.mlir')
+        File.write(mlir_path, simple_dff_llhd)
+
+        result = described_class.prepare_arc_mlir_from_circt_mlir(
+          mlir_path: mlir_path,
+          work_dir: File.join(dir, 'work'),
+          base_name: 'dff'
+        )
+
+        expect(result[:success]).to be(true), result.dig(:arc, :stderr).to_s
+        expect(result.fetch(:unsupported_modules)).to be_empty
+        expect(result.fetch(:transformed_modules)).to eq(['dff'])
+        expect(File.basename(result.fetch(:hwseq_mlir_path))).to eq('dff.hwseq.mlir')
+        expect(File.read(result.fetch(:hwseq_mlir_path))).not_to include('llhd.')
+        expect(File.exist?(result.fetch(:arc_mlir_path))).to be(true)
+        expect(File.read(result.fetch(:arc_mlir_path))).not_to include('llhd.')
+      end
+    end
+
+    it 'emits hwseq MLIR that firtool accepts for Verilog export' do
+      skip 'circt-opt or firtool not available' unless HdlToolchain.which('circt-opt') && HdlToolchain.which('firtool')
+
+      Dir.mktmpdir('tooling_prepare_arc_circt_firtool') do |dir|
+        mlir_path = File.join(dir, 'dff.normalized.llhd.mlir')
+        File.write(mlir_path, simple_dff_llhd)
+
+        result = described_class.prepare_arc_mlir_from_circt_mlir(
+          mlir_path: mlir_path,
+          work_dir: File.join(dir, 'work'),
+          base_name: 'dff'
+        )
+
+        expect(result[:success]).to be(true), result.dig(:arc, :stderr).to_s
+
+        verilog_path = File.join(dir, 'dff.v')
+        export = described_class.circt_mlir_to_verilog(
+          mlir_path: result.fetch(:hwseq_mlir_path),
+          out_path: verilog_path
+        )
+
+        expect(export[:success]).to be(true), export[:stderr].to_s
+        expect(File.read(verilog_path)).to include('module dff')
       end
     end
   end

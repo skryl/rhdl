@@ -156,7 +156,10 @@ module RHDL
             raise "AO486 import strategy loop failed unexpectedly" unless strategy_used
 
             emit_progress("strategy '#{strategy_used}': normalize core MLIR")
-            normalized_core_mlir = normalize_core_mlir(File.read(prepared[:core_mlir_path]))
+            normalized_core_mlir = normalize_core_mlir_text(
+              File.read(prepared[:core_mlir_path]),
+              diagnostics: diagnostics
+            )
             File.write(prepared[:normalized_core_mlir_path], normalized_core_mlir)
 
             FileUtils.mkdir_p(output_dir)
@@ -313,19 +316,20 @@ module RHDL
             FileUtils.mkdir_p(workspace)
             force_stub_modules = Array(force_stub_modules).map(&:to_s).uniq
 
-            staged_system_path = File.join(workspace, 'system.v')
+            basename = artifact_basename
+            staged_system_path = File.join(workspace, "#{basename}.v")
             stub_path = File.join(workspace, "stubs.#{strategy}.v")
             wrapper_path = File.join(workspace, "import_all.#{strategy}.sv")
-            moore_mlir_path = File.join(workspace, "system.#{strategy}.moore.mlir")
-            core_mlir_path = File.join(workspace, "system.#{strategy}.core.mlir")
-            normalized_core_mlir_path = File.join(workspace, "system.#{strategy}.normalized.core.mlir")
+            moore_mlir_path = File.join(workspace, "#{basename}.#{strategy}.moore.mlir")
+            core_mlir_path = File.join(workspace, "#{basename}.#{strategy}.core.mlir")
+            normalized_core_mlir_path = File.join(workspace, "#{basename}.#{strategy}.normalized.core.mlir")
 
             FileUtils.cp(source_path, staged_system_path)
-            normalize_system_source!(staged_system_path)
+            normalize_staged_source!(staged_system_path)
 
             include_paths = [staged_system_path]
             stub_ports = {}
-            module_to_file, = build_module_index(File.dirname(source_path))
+            module_to_file, = build_module_index(source_root)
             module_source_relpaths = module_to_file.transform_values { |path| source_relative_path(path) }
 
             if strategy == :tree
@@ -430,6 +434,10 @@ module RHDL
             File.write(path, remaining.join)
           end
 
+          def normalize_staged_source!(path)
+            normalize_system_source!(path)
+          end
+
           def extract_stub_ports(source)
             stub_ports = Hash.new { |h, k| h[k] = { ports: [], params: [] } }
             each_instance(source) do |module_name, ports_body, params_body|
@@ -453,7 +461,7 @@ module RHDL
           end
 
           def discover_tree_module_files(force_stub_modules:)
-            root = File.dirname(source_path)
+            root = source_root
             module_to_file, module_to_body = build_module_index(root)
             force_stub_modules = Array(force_stub_modules).map(&:to_s).uniq
 
@@ -587,11 +595,11 @@ module RHDL
           end
 
           def stage_tree_module_files(workspace, force_stub_modules:)
-            source_root = File.dirname(source_path)
+            root = source_root
             stage_root = File.join(workspace, 'tree')
 
             staged = discover_tree_module_files(force_stub_modules: force_stub_modules).map do |src|
-              relative = src.delete_prefix("#{source_root}/")
+              relative = src.delete_prefix("#{root}/")
               dst = File.join(stage_root, relative)
               FileUtils.mkdir_p(File.dirname(dst))
               File.write(dst, normalize_tree_source(
@@ -601,12 +609,12 @@ module RHDL
               dst
             end
 
-            stage_tree_include_helpers(source_root, workspace, stage_root)
+            stage_tree_include_helpers(root, workspace, stage_root)
             staged
           end
 
           def stage_tree_include_helpers(source_root, workspace, stage_root)
-            ao486_root = File.join(source_root, 'ao486')
+            ao486_root = helper_include_source_root(source_root)
             return unless Dir.exist?(ao486_root)
 
             {
@@ -724,6 +732,10 @@ module RHDL
             end
           end
 
+          def normalize_core_mlir_text(text, diagnostics:)
+            normalize_core_mlir(text)
+          end
+
           def normalize_core_mlir(text)
             text.gsub(/\bhw\.module\s+private\s+@/, 'hw.module @')
           end
@@ -768,12 +780,28 @@ module RHDL
           end
 
           def source_relative_path(path)
-            root = File.expand_path(File.dirname(source_path))
+            root = File.expand_path(source_root)
             absolute = File.expand_path(path)
             prefix = "#{root}/"
             return absolute.delete_prefix(prefix) if absolute.start_with?(prefix)
 
             File.basename(absolute)
+          end
+
+          def artifact_basename
+            top.to_s
+          end
+
+          def source_root
+            File.expand_path(File.dirname(source_path))
+          end
+
+          def helper_include_source_root(root)
+            ao486_root = File.join(root, 'ao486')
+            return ao486_root if Dir.exist?(ao486_root)
+            return root if File.file?(File.join(root, 'defines.v'))
+
+            ao486_root
           end
 
           def underscore_module_name(name)
