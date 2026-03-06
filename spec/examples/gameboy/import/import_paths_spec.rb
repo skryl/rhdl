@@ -81,7 +81,7 @@ RSpec.describe 'GameBoy mixed import path coverage', slow: true do
         MSG
         expect(File.file?(runtime_import_mlir)).to be(true)
 
-        video_source = File.join(stable_root, 'rtl', 'video.v')
+        video_source = File.join(pure_root, 'rtl', 'video.v')
         if File.file?(video_source)
           video_text = File.read(video_source)
           expect(video_text).to include('wire [7:0] spr_extra_tile0;')

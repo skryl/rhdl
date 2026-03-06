@@ -303,7 +303,7 @@ RSpec.describe RHDL::Codegen::CIRCT::Raise do
       expect(result.sources.fetch('deep_mux')).to include('y <=')
     end
 
-    it 'collects referenced wires from shared mux DAGs without exponential blowup' do
+    it 'raises shared mux DAGs by hoisting repeated subexpressions into locals' do
       sel = ir::Signal.new(name: :sel, width: 1)
       shared = ir::Signal.new(name: :a, width: 1)
       120.times do |idx|
@@ -333,14 +333,68 @@ RSpec.describe RHDL::Codegen::CIRCT::Raise do
         parameters: {}
       )
 
-      inferred = nil
+      result = nil
       expect do
         Timeout.timeout(2) do
-          inferred = described_class.send(:infer_referenced_internal_wires, mod, extra_wires: [])
+          result = described_class.to_sources(mod, top: 'shared_mux_dag', strict: true)
         end
       end.not_to raise_error
 
-      expect(inferred).to eq([])
+      expect(result.success?).to be(true), result.diagnostics.map(&:message).join("\n")
+      source = result.sources.fetch('shared_mux_dag')
+      expect(source).to include('local(:y_expr_0_local_0')
+      expect(source).to include('y <=')
+    end
+
+    it 'raises shared sequential mux DAGs by hoisting repeated subexpressions into locals' do
+      sel = ir::Signal.new(name: :sel, width: 1)
+      shared = ir::Signal.new(name: :d, width: 8)
+      80.times do |idx|
+        shared = ir::Mux.new(
+          condition: idx.even? ? sel : ir::UnaryOp.new(op: :'~', operand: sel, width: 1),
+          when_true: shared,
+          when_false: shared,
+          width: 8
+        )
+      end
+
+      mod = ir::ModuleOp.new(
+        name: 'shared_seq_mux_dag',
+        ports: [
+          ir::Port.new(name: :clk, direction: :in, width: 1),
+          ir::Port.new(name: :sel, direction: :in, width: 1),
+          ir::Port.new(name: :d, direction: :in, width: 8),
+          ir::Port.new(name: :q, direction: :out, width: 8)
+        ],
+        nets: [],
+        regs: [],
+        assigns: [ir::Assign.new(target: :q, expr: ir::Signal.new(name: :q_reg, width: 8))],
+        processes: [
+          ir::Process.new(
+            name: 'p0',
+            statements: [ir::SeqAssign.new(target: :q_reg, expr: shared)],
+            clocked: true,
+            clock: :clk
+          )
+        ],
+        instances: [],
+        memories: [],
+        write_ports: [],
+        sync_read_ports: [],
+        parameters: {}
+      )
+
+      result = nil
+      expect do
+        Timeout.timeout(2) do
+          result = described_class.to_sources(mod, top: 'shared_seq_mux_dag', strict: true)
+        end
+      end.not_to raise_error
+
+      expect(result.success?).to be(true), result.diagnostics.map(&:message).join("\n")
+      source = result.sources.fetch('shared_seq_mux_dag')
+      expect(source).to include('local(:q_reg_seq_0_local_0')
+      expect(source).to include('q_reg <=')
     end
   end
 

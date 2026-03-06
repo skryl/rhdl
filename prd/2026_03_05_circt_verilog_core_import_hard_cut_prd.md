@@ -5,6 +5,7 @@ Phase 1 completed - March 5, 2026
 Phase 2 in progress - imported-core cleanup and workspace artifact mirroring landed - March 5, 2026
 Phase 2 telemetry update - mixed import now reports timed phase boundaries and fails fast on imported-core cleanup instead of appearing hung - March 5, 2026
 Phase 2 cleanup update - selective LLHD module cleanup and canonical firtool export now work on full GameBoy mixed import artifacts; remaining blocker is strict full-design CIRCT->RHDL import/raise performance on array-heavy cleaned core MLIR - March 5, 2026
+Phase 2 raise stabilization update - shared-subexpression hoisting in behavior and sequential emission eliminated the GameBoy CIRCT->RHDL raise blowups; the real mixed importer path now completes again with 77 raised files and green GameBoy import coverage specs - March 5, 2026
 
 ## Context
 

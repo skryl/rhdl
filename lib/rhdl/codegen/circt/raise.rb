@@ -416,6 +416,139 @@ module RHDL
           end
         end
 
+        def expr_children(expr)
+          case expr
+          when IR::UnaryOp
+            [expr.operand]
+          when IR::BinaryOp
+            [expr.left, expr.right]
+          when IR::Mux
+            [expr.condition, expr.when_true, expr.when_false]
+          when IR::Concat
+            Array(expr.parts)
+          when IR::Slice
+            [expr.base]
+          when IR::Resize
+            [expr.expr]
+          when IR::Case
+            [expr.selector, expr.default, *expr.cases.values]
+          when IR::MemoryRead
+            [expr.addr]
+          else
+            []
+          end.compact
+        end
+
+        def shared_expr_parent_counts(root)
+          counts = Hash.new(0)
+          seen = Set.new
+          stack = [root]
+
+          until stack.empty?
+            expr = stack.pop
+            next if expr.nil?
+
+            children = expr_children(expr)
+            children.each { |child| counts[child.object_id] += 1 }
+
+            oid = expr.object_id
+            next if seen.include?(oid)
+
+            seen << oid
+            children.each { |child| stack << child }
+          end
+
+          counts
+        end
+
+        def hoist_shared_behavior_expr(expr, prefix:)
+          counts = shared_expr_parent_counts(expr)
+          hoisted = {}
+          locals = []
+          rewritten = rewrite_expr_with_behavior_locals(
+            expr,
+            counts: counts,
+            hoisted: hoisted,
+            locals: locals,
+            prefix: sanitize_name(prefix)
+          )
+          [rewritten, locals]
+        end
+
+        def rewrite_expr_with_behavior_locals(expr, counts:, hoisted:, locals:, prefix:)
+          return expr if expr.nil? || expr.is_a?(IR::Literal) || expr.is_a?(IR::Signal)
+
+          oid = expr.object_id
+          if hoisted.key?(oid)
+            return IR::Signal.new(name: hoisted.fetch(oid), width: expr.width.to_i)
+          end
+
+          rewritten_children = expr_children(expr).map do |child|
+            rewrite_expr_with_behavior_locals(
+              child,
+              counts: counts,
+              hoisted: hoisted,
+              locals: locals,
+              prefix: prefix
+            )
+          end
+          rewritten = rebuild_expr_with_children(expr, rewritten_children)
+
+          if hoistable_behavior_expr?(expr, counts)
+            name = sanitize_name("#{prefix}_local_#{locals.length}")
+            locals << { name: name, expr: rewritten, width: rewritten.width.to_i }
+            hoisted[oid] = name
+            IR::Signal.new(name: name, width: rewritten.width.to_i)
+          else
+            rewritten
+          end
+        end
+
+        def hoistable_behavior_expr?(expr, counts)
+          counts[expr.object_id].to_i > 1 &&
+            !expr.is_a?(IR::Literal) &&
+            !expr.is_a?(IR::Signal)
+        end
+
+        def rebuild_expr_with_children(expr, children)
+          case expr
+          when IR::UnaryOp
+            IR::UnaryOp.new(op: expr.op, operand: children.fetch(0), width: expr.width.to_i)
+          when IR::BinaryOp
+            IR::BinaryOp.new(
+              op: expr.op,
+              left: children.fetch(0),
+              right: children.fetch(1),
+              width: expr.width.to_i
+            )
+          when IR::Mux
+            IR::Mux.new(
+              condition: children.fetch(0),
+              when_true: children.fetch(1),
+              when_false: children.fetch(2),
+              width: expr.width.to_i
+            )
+          when IR::Concat
+            IR::Concat.new(parts: children, width: expr.width.to_i)
+          when IR::Slice
+            IR::Slice.new(base: children.fetch(0), range: expr.range, width: expr.width.to_i)
+          when IR::Resize
+            IR::Resize.new(expr: children.fetch(0), width: expr.width.to_i)
+          when IR::Case
+            case_values = expr.cases.keys.zip(children.drop(2)).to_h
+            IR::Case.new(
+              selector: children.fetch(0),
+              cases: case_values,
+              default: children.fetch(1),
+              width: expr.width.to_i
+            )
+          when IR::MemoryRead
+            IR::MemoryRead.new(memory: expr.memory, addr: children.fetch(0), width: expr.width.to_i)
+          else
+            expr
+          end
+        end
+
         def emit_structure(lines, structure_plan)
           return if structure_plan[:lines].empty?
 
@@ -528,7 +661,7 @@ module RHDL
           clock = mod.processes.find(&:clocked)&.clock || :clk
           lines << "  sequential clock: :#{sanitize_name(clock)} do"
 
-          mod.processes.each do |process|
+          mod.processes.each_with_index do |process, process_idx|
             next unless process.clocked
 
             seq_state = {}
@@ -547,10 +680,26 @@ module RHDL
               expr = seq_state[target.to_s]
               next unless expr
 
+              rewritten_expr, locals = hoist_shared_behavior_expr(
+                expr,
+                prefix: "#{sanitize_name(target)}_seq_#{process_idx}"
+              )
+              Array(locals).each do |local|
+                emit_local_binding(
+                  lines,
+                  name: local[:name],
+                  expr: local[:expr],
+                  width: local[:width],
+                  diagnostics: diagnostics,
+                  strict: strict,
+                  indent: 4
+                )
+              end
+
               emit_assignment(
                 lines,
                 target: signal_ref(target),
-                expr: expr,
+                expr: rewritten_expr,
                 diagnostics: diagnostics,
                 strict: strict,
                 indent: 4
@@ -723,29 +872,31 @@ module RHDL
           assign_counts = Hash.new(0)
           mod.assigns.each { |assign| assign_counts[sanitize_name(assign.target)] += 1 }
 
-          Array(bridge_assignments).each do |assign|
+          Array(bridge_assignments).each_with_index do |assign, idx|
             target = sanitize_name(assign.target)
-            emit_assignment(
+            emit_behavior_assignment(
               lines,
               target: signal_ref(target),
               expr: assign.expr,
               diagnostics: diagnostics,
               strict: strict,
-              indent: 4
+              indent: 4,
+              local_prefix: "#{target}_bridge_#{idx}"
             )
           end
 
-          mod.assigns.each do |assign|
+          mod.assigns.each_with_index do |assign, idx|
             original_target = sanitize_name(assign.target)
             next if redundant_self_assign?(assign, original_target, assign_counts)
 
-            emit_assignment(
+            emit_behavior_assignment(
               lines,
               target: signal_ref(original_target),
               expr: assign.expr,
               diagnostics: diagnostics,
               strict: strict,
-              indent: 4
+              indent: 4,
+              local_prefix: "#{original_target}_expr_#{idx}"
             )
             driven_outputs << original_target if output_port?(mod, original_target)
           end
@@ -779,6 +930,30 @@ module RHDL
           lines << '  end'
         end
 
+        def emit_behavior_assignment(lines, target:, expr:, diagnostics:, strict:, indent:, local_prefix:)
+          rewritten_expr, locals = hoist_shared_behavior_expr(expr, prefix: local_prefix)
+          Array(locals).each do |local|
+            emit_local_binding(
+              lines,
+              name: local[:name],
+              expr: local[:expr],
+              width: local[:width],
+              diagnostics: diagnostics,
+              strict: strict,
+              indent: indent
+            )
+          end
+
+          emit_assignment(
+            lines,
+            target: target,
+            expr: rewritten_expr,
+            diagnostics: diagnostics,
+            strict: strict,
+            indent: indent
+          )
+        end
+
         def emit_assignment(lines, target:, expr:, diagnostics:, strict:, indent:)
           cache = {}
           expr_text = expr_to_ruby_cached(expr, diagnostics, strict: strict, cache: cache)
@@ -801,6 +976,34 @@ module RHDL
               cache: cache
             )
           )
+        end
+
+        def emit_local_binding(lines, name:, expr:, width:, diagnostics:, strict:, indent:)
+          cache = {}
+          expr_text = expr_to_ruby_cached(expr, diagnostics, strict: strict, cache: cache)
+          return if expr_text.nil? || expr_text.empty?
+
+          prefix = ' ' * indent
+          inline = "#{name} = local(:#{name}, #{expr_text}, width: #{width.to_i})"
+          if prefix.length + inline.length <= MAX_EMITTED_LINE_LENGTH
+            lines << "#{prefix}#{inline}"
+            return
+          end
+
+          expr_lines = render_expr_lines(
+            expr,
+            diagnostics,
+            strict: strict,
+            indent: indent + 2,
+            cache: cache
+          )
+          append_suffix_to_last_line(expr_lines, ',')
+
+          lines << "#{prefix}#{name} = local("
+          lines << "#{prefix}  :#{name},"
+          lines.concat(expr_lines)
+          lines << "#{prefix}  width: #{width.to_i}"
+          lines << "#{prefix})"
         end
 
         def render_expr_lines(expr, diagnostics, strict:, indent:, cache:)
