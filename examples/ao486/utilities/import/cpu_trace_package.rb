@@ -28,7 +28,12 @@ module RHDL
             trace_wr_eip: 32,
             trace_wr_consumed: 4,
             trace_cs_cache: 64,
-            trace_cs_cache_valid: 1
+            trace_cs_cache_valid: 1,
+            trace_prefetch_eip: 32,
+            trace_fetch_valid: 4,
+            trace_fetch_bytes: 64,
+            trace_dec_acceptable: 4,
+            trace_fetch_accept_length: 4
           }.freeze
 
           module_function
@@ -99,7 +104,13 @@ module RHDL
 
           def patch_pipeline_module!(modules)
             mod = find_module!(modules, 'pipeline')
+            fetch_inst = find_instance!(mod, 'fetch_inst')
+            decode_inst = find_instance!(mod, 'decode_inst')
             write_inst = find_instance!(mod, 'write_inst')
+
+            ensure_net(mod, 'write_inst_trace_wr_finished_1', 1)
+            ensure_net(mod, 'write_inst_trace_wr_ready_1', 1)
+            ensure_net(mod, 'write_inst_trace_wr_hlt_in_progress_1', 1)
 
             write_inst.connections << out_conn(:trace_wr_finished, 'write_inst_trace_wr_finished_1')
             write_inst.connections << out_conn(:trace_wr_ready, 'write_inst_trace_wr_ready_1')
@@ -122,22 +133,51 @@ module RHDL
             mod.ports << port(:trace_wr_ready, 1)
             mod.ports << port(:trace_wr_hlt_in_progress, 1)
             mod.ports << port(:trace_cs_cache_valid, 1)
+            mod.ports << port(:trace_prefetch_eip, 32)
+            mod.ports << port(:trace_fetch_valid, 4)
+            mod.ports << port(:trace_fetch_bytes, 64)
+            mod.ports << port(:trace_dec_acceptable, 4)
+            mod.ports << port(:trace_fetch_accept_length, 4)
             mod.assigns << assign('trace_retired', retired_expr)
             mod.assigns << assign('trace_wr_finished', signal('write_inst_trace_wr_finished_1', 1))
             mod.assigns << assign('trace_wr_ready', signal('write_inst_trace_wr_ready_1', 1))
             mod.assigns << assign('trace_wr_hlt_in_progress', signal('write_inst_trace_wr_hlt_in_progress_1', 1))
-            mod.assigns << assign('trace_cs_cache_valid', signal('write_inst_cs_cache_valid_1', 1))
+            mod.assigns << assign('trace_cs_cache_valid', connection_signal!(write_inst, 'cs_cache_valid'))
+            mod.assigns << assign('trace_prefetch_eip', connection_signal!(fetch_inst, 'prefetch_eip'))
+            mod.assigns << assign('trace_fetch_valid', connection_signal!(fetch_inst, 'fetch_valid'))
+            mod.assigns << assign('trace_fetch_bytes', connection_signal!(fetch_inst, 'fetch'))
+            mod.assigns << assign('trace_dec_acceptable', connection_signal!(decode_inst, 'dec_acceptable'))
+            mod.assigns << assign(
+              'trace_fetch_accept_length',
+              min_expr(connection_signal!(fetch_inst, 'fetch_valid'), connection_signal!(decode_inst, 'dec_acceptable'), 4)
+            )
           end
 
           def patch_top_module!(modules)
             mod = find_module!(modules, 'ao486')
             pipeline_inst = find_instance!(mod, 'pipeline_inst')
 
-            pipeline_inst.connections << out_conn(:trace_retired, 'pipeline_inst_trace_retired_1')
-            pipeline_inst.connections << out_conn(:trace_wr_finished, 'pipeline_inst_trace_wr_finished_1')
-            pipeline_inst.connections << out_conn(:trace_wr_ready, 'pipeline_inst_trace_wr_ready_1')
-            pipeline_inst.connections << out_conn(:trace_wr_hlt_in_progress, 'pipeline_inst_trace_wr_hlt_in_progress_1')
-            pipeline_inst.connections << out_conn(:trace_cs_cache_valid, 'pipeline_inst_cs_cache_valid_1')
+            ensure_net(mod, 'pipeline_inst_trace_retired_1', 1)
+            ensure_net(mod, 'pipeline_inst_trace_wr_finished_1', 1)
+            ensure_net(mod, 'pipeline_inst_trace_wr_ready_1', 1)
+            ensure_net(mod, 'pipeline_inst_trace_wr_hlt_in_progress_1', 1)
+            ensure_net(mod, 'pipeline_inst_cs_cache_valid_1', 1)
+            ensure_net(mod, 'pipeline_inst_trace_prefetch_eip_32', 32)
+            ensure_net(mod, 'pipeline_inst_trace_fetch_valid_4', 4)
+            ensure_net(mod, 'pipeline_inst_trace_fetch_bytes_64', 64)
+            ensure_net(mod, 'pipeline_inst_trace_dec_acceptable_4', 4)
+            ensure_net(mod, 'pipeline_inst_trace_fetch_accept_length_4', 4)
+
+            pipeline_inst.connections << out_conn(:trace_retired, 'pipeline_inst_trace_retired_1', width: 1)
+            pipeline_inst.connections << out_conn(:trace_wr_finished, 'pipeline_inst_trace_wr_finished_1', width: 1)
+            pipeline_inst.connections << out_conn(:trace_wr_ready, 'pipeline_inst_trace_wr_ready_1', width: 1)
+            pipeline_inst.connections << out_conn(:trace_wr_hlt_in_progress, 'pipeline_inst_trace_wr_hlt_in_progress_1', width: 1)
+            pipeline_inst.connections << out_conn(:trace_cs_cache_valid, 'pipeline_inst_cs_cache_valid_1', width: 1)
+            pipeline_inst.connections << out_conn(:trace_prefetch_eip, 'pipeline_inst_trace_prefetch_eip_32', width: 32)
+            pipeline_inst.connections << out_conn(:trace_fetch_valid, 'pipeline_inst_trace_fetch_valid_4', width: 4)
+            pipeline_inst.connections << out_conn(:trace_fetch_bytes, 'pipeline_inst_trace_fetch_bytes_64', width: 64)
+            pipeline_inst.connections << out_conn(:trace_dec_acceptable, 'pipeline_inst_trace_dec_acceptable_4', width: 4)
+            pipeline_inst.connections << out_conn(:trace_fetch_accept_length, 'pipeline_inst_trace_fetch_accept_length_4', width: 4)
 
             TRACE_PORTS.each do |name, width|
               mod.ports << port(name, width)
@@ -147,10 +187,15 @@ module RHDL
             mod.assigns << assign('trace_wr_finished', signal('pipeline_inst_trace_wr_finished_1', 1))
             mod.assigns << assign('trace_wr_ready', signal('pipeline_inst_trace_wr_ready_1', 1))
             mod.assigns << assign('trace_wr_hlt_in_progress', signal('pipeline_inst_trace_wr_hlt_in_progress_1', 1))
-            mod.assigns << assign('trace_wr_eip', signal('pipeline_inst_wr_eip_32', 32))
-            mod.assigns << assign('trace_wr_consumed', signal('pipeline_inst_wr_consumed_4', 4))
-            mod.assigns << assign('trace_cs_cache', signal('pipeline_inst_cs_cache_64', 64))
+            mod.assigns << assign('trace_wr_eip', connection_signal!(pipeline_inst, 'wr_eip'))
+            mod.assigns << assign('trace_wr_consumed', connection_signal!(pipeline_inst, 'wr_consumed'))
+            mod.assigns << assign('trace_cs_cache', connection_signal!(pipeline_inst, 'cs_cache'))
             mod.assigns << assign('trace_cs_cache_valid', signal('pipeline_inst_cs_cache_valid_1', 1))
+            mod.assigns << assign('trace_prefetch_eip', signal('pipeline_inst_trace_prefetch_eip_32', 32))
+            mod.assigns << assign('trace_fetch_valid', signal('pipeline_inst_trace_fetch_valid_4', 4))
+            mod.assigns << assign('trace_fetch_bytes', signal('pipeline_inst_trace_fetch_bytes_64', 64))
+            mod.assigns << assign('trace_dec_acceptable', signal('pipeline_inst_trace_dec_acceptable_4', 4))
+            mod.assigns << assign('trace_fetch_accept_length', signal('pipeline_inst_trace_fetch_accept_length_4', 4))
           end
 
           def find_module!(modules, name)
@@ -228,12 +273,21 @@ module RHDL
             RHDL::Codegen::CIRCT::IR::Assign.new(target: target, expr: expr)
           end
 
-          def out_conn(port_name, signal_name)
+          def out_conn(port_name, signal_name, width: nil)
             RHDL::Codegen::CIRCT::IR::PortConnection.new(
               port_name: port_name,
               signal: signal_name,
-              direction: :out
+              direction: :out,
+              width: width
             )
+          end
+
+          def ensure_net(mod, name, width)
+            return if mod.nets.any? { |net| net.name.to_s == name.to_s }
+            return if mod.regs.any? { |reg| reg.name.to_s == name.to_s }
+            return if mod.ports.any? { |port| port.name.to_s == name.to_s }
+
+            mod.nets << RHDL::Codegen::CIRCT::IR::Net.new(name: name.to_sym, width: width)
           end
 
           def binop(op, left, right, width)
@@ -241,6 +295,15 @@ module RHDL
               op: op,
               left: left,
               right: right,
+              width: width
+            )
+          end
+
+          def min_expr(left, right, width)
+            RHDL::Codegen::CIRCT::IR::Mux.new(
+              condition: binop(:<, left, right, 1),
+              when_true: left,
+              when_false: right,
               width: width
             )
           end

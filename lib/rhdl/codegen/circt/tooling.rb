@@ -3,6 +3,7 @@
 require 'open3'
 require 'shellwords'
 require 'fileutils'
+require_relative 'import_cleanup'
 
 module RHDL
   module Codegen

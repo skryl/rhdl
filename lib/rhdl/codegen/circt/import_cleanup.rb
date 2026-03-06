@@ -1,5 +1,8 @@
 # frozen_string_literal: true
 
+require_relative '../../codegen'
+require_relative 'mlir'
+
 module RHDL
   module Codegen
     module CIRCT

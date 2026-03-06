@@ -139,6 +139,7 @@ Exit Criteria:
 3. `INCLUDE_SLOW_TESTS=1 bundle exec rspec spec/examples/ao486/import/runtime_cpu_parity_3way_spec.rb`
 4. `bundle exec rspec spec/examples/ao486/import/parity_spec.rb spec/examples/ao486/import/roundtrip_spec.rb`
 5. `bundle exec rake "spec[ao486]"` if the slow gate is intended to join the AO486 suite
+6. `INCLUDE_SLOW_TESTS=1 bundle exec rspec spec/examples/ao486/import/runtime_cpu_step_parity_spec.rb`
 
 ## Implementation Checklist
 - [x] PRD created.
@@ -289,8 +290,20 @@ Completed in this iteration:
    - rewrites the imported `prefetch.limit` reset literal from the startup `16`-byte cap to a large parity-mode segment limit so later-line fetches remain legal even when `pr_reset` never reloads the limit
 35. Current execution classification after the prefetch repairs:
    - on JIT, larger fixtures now fetch beyond the first line; for example `prime_sieve` reaches later fetch groups through `pc = 0x10010`
-   - on Verilator, the stable mixed-backend checkpoint is still the shared initial fetch prefix only
-   - this means the parity harness has progressed past the one-line ceiling on JIT, but mixed-backend parity has not yet caught up beyond the initial prefix
+   - on Verilator, the same parity package now also reaches the longer current fetch window on the named fixtures
+   - mixed-backend parity is restored on the current fetch-trace window for all named programs
+36. Patched the parity-package `fetch` threshold logic:
+   - `examples/ao486/utilities/import/cpu_parity_package.rb`
+   - overrides the imported `fetch` accept-data predicates with explicit positive-width constants
+   - this avoids the broken lowered comparison that had turned the intended “length < 9” guard into a bogus “length == 8” special case on the Verilog path
+37. Current mixed-backend fetch window:
+   - JIT and Verilator now both return the same current 16-group fetch trace window for the named fixtures
+   - for `prime_sieve`, the common trace now extends through:
+     - `0x10000 -> [0x83, 0xFB, 0x20, 0x72]`
+     - `0x10004 -> [0xE2, 0x83, 0xFE, 0x0B]`
+     - `0x10008 -> [0x75, 0x07, 0x81, 0xFF]`
+     - `0x1000C -> [0xA0, 0x00, 0x75, 0x01]`
+   - the current fetch trace still contains repeated window segments, so this is a stronger fetch-side checkpoint, not yet a clean retired-instruction stream
 
 Validation run:
 1. `bundle exec rspec spec/examples/ao486/import/cpu_importer_spec.rb --format documentation`
@@ -317,6 +330,10 @@ Validation run:
    - result: `1 example, 0 failures`
 12. `bundle exec rspec spec/examples/ao486/import/cpu_parity_package_spec.rb spec/examples/ao486/import/cpu_parity_runtime_spec.rb spec/examples/ao486/import/cpu_parity_verilator_runtime_spec.rb --format documentation`
    - result: `5 examples, 0 failures`
+13. `bundle exec rspec spec/examples/ao486/import/cpu_parity_runtime_spec.rb spec/examples/ao486/import/cpu_parity_verilator_runtime_spec.rb --format documentation`
+   - result: `4 examples, 0 failures`
+14. `INCLUDE_SLOW_TESTS=1 bundle exec rspec spec/examples/ao486/import/runtime_cpu_fetch_parity_spec.rb --format documentation`
+   - result: `1 example, 0 failures`
 
 Current blocker for Phase 3:
 1. Ported the shared imported-core cleanup used by Game Boy/ImportTask into the AO486 CPU path:
@@ -344,12 +361,31 @@ Current blocker for Phase 3:
    - the aligned `icache.length_burst` parity-path regression is fixed
    - the imported `prefetch_fifo` storage path is now bypassed in parity mode
    - the startup prefetch-limit ceiling is now bypassed in parity mode
-   - the remaining blocker is now a backend split rather than a single-package dead stop:
-     - JIT progresses beyond the first fetch window on larger fixtures
-     - Verilator still only reaches the shared initial fetch prefix on the same parity package
-     - mixed-backend parity can therefore still only be asserted on that common initial prefix
+   - the imported/lowered `fetch` threshold logic is now bypassed in parity mode
+   - the traced-package signal export was corrected to use the real imported instance-output connections instead of synthesized placeholder names:
+     - `trace_wr_eip`, `trace_wr_consumed`, and `trace_cs_cache` now survive `firtool` export correctly
+     - `trace_prefetch_eip`, `trace_fetch_valid`, `trace_fetch_bytes`, and `trace_dec_acceptable` now also survive `firtool` export on the traced package
+   - the traced-package top-level bridge nets are now declared explicitly in the transformed `pipeline` and `ao486` modules:
+     - this keeps the new top-level `trace_fetch_*` and existing `trace_wr_*` ports aligned with the corresponding internal pipeline signals on JIT runtime
+     - focused coverage for that runtime alignment now lives in `spec/examples/ao486/import/cpu_trace_package_spec.rb`
+   - the repaired write-trace top ports now support a real mixed-backend checkpoint:
+     - `trace_wr_eip`, `trace_wr_consumed`, and `trace_retired` now produce the same current `EIP + bytes` event sequence on JIT and Verilator for `reset_smoke`
+     - the flattened `pc -> byte` stream reconstructed from that current write trace now matches across JIT and Verilator for `reset_smoke`, `prime_sieve`, and `game_of_life`
+     - `mandelbrot` is the remaining outlier on this surface; the byte stream agrees through the first 16 bytes and then diverges by one trailing byte under the current max-cycle window
+     - the stable write-trace byte-stream subset now has a slow mixed-backend gate:
+       - `spec/examples/ao486/import/runtime_cpu_step_parity_spec.rb`
+       - this is still a checkpoint on the current write-trace surface, not a claim of final retired-instruction parity
+   - a follow-on accepted-byte trace experiment was attempted on top of those new ports and then backed out:
+     - Verilator-side top-port export is structurally correct
+     - the earlier JIT top-port propagation bug is now fixed for the exported trace ports
+     - the remaining problem is semantic, not structural: the accepted-byte surface still does not yet correspond to exact retired-instruction boundaries
+     - because that surface is not yet trustworthy on both backends, the shipped mixed-backend gate remains the fetch-side `{pc, bytes}` trace rather than a new accepted-byte contract
+   - the remaining blocker is no longer mixed-backend fetch divergence; it is trace quality:
+     - JIT and Verilator now agree on the current fetch-side window
+     - that window still includes replayed fetch segments and does not yet correspond to a clean retired-instruction trace
+     - exact completed-instruction `EIP + bytes` parity is still not ready
 
 Next execution step:
-1. Trace why Verilator still stalls at the shared initial fetch prefix after the parity-only `prefetch_fifo` and startup-limit fixes, while JIT progresses beyond it.
+1. Determine whether the repeated fetch-window segments are legal imported CPU behavior or another parity-path artifact, and either fix them or formalize them as part of the fetch-side contract.
 2. Either repair the imported write-stage trace surface or formally switch the runtime parity contract to the fetch-side boundary if that proves to be the only stable imported-code interface.
 3. Once the parity package has a stable mixed-backend trace contract beyond the initial fetch window on JIT and Verilator, revisit the Arcilator branch separately if `write_commands_inst` loop-splitting is still blocking.

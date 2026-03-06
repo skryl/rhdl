@@ -27,6 +27,7 @@ module RHDL
             patch_icache_bypass!(modules)
             patch_prefetch_fifo_passthrough!(modules)
             patch_prefetch_startup_limit!(modules)
+            patch_fetch_threshold_logic!(modules)
 
             package = CpuTracePackage.build_from_modules(modules)
 
@@ -162,6 +163,101 @@ module RHDL
 
             stmt = proc.instance_variable_get(:@statements).first
             stmt.instance_variable_set(:@expr, rewrite_prefetch_limit_expr(stmt.expr))
+          end
+
+          def patch_fetch_threshold_logic!(modules)
+            mod = CpuTracePackage.find_module!(modules, 'fetch')
+            ir = RHDL::Codegen::CIRCT::IR
+
+            accept_empty = CpuTracePackage.signal('prefetchfifo_accept_empty', 1)
+            accept_data = CpuTracePackage.signal('prefetchfifo_accept_data', 68)
+            fetch_count = CpuTracePackage.signal('fetch_count', 4)
+            dec_acceptable = CpuTracePackage.signal('dec_acceptable', 4)
+            rst_n = CpuTracePackage.signal('rst_n', 1)
+            pr_reset = CpuTracePackage.signal('pr_reset', 1)
+            one = ir::Literal.new(value: 1, width: 1)
+            zero4 = ir::Literal.new(value: 0, width: 4)
+
+            fetch_len = ir::Slice.new(base: accept_data, range: 64..67, width: 4)
+            not_empty = CpuTracePackage.binop(:^, accept_empty, one, 1)
+            normal_data = CpuTracePackage.binop(
+              :&,
+              not_empty,
+              CpuTracePackage.binop(:<, fetch_len, ir::Literal.new(value: 9, width: 4), 1),
+              1
+            )
+            fetch_valid_expr = ir::Mux.new(
+              condition: normal_data,
+              when_true: CpuTracePackage.binop(:-, fetch_len, fetch_count, 4),
+              when_false: zero4,
+              width: 4
+            )
+            accept_do_expr = CpuTracePackage.binop(
+              :&,
+              CpuTracePackage.binop(:>=, dec_acceptable, fetch_valid_expr, 1),
+              normal_data,
+              1
+            )
+            partial_expr = CpuTracePackage.binop(
+              :&,
+              CpuTracePackage.binop(:<, dec_acceptable, fetch_valid_expr, 1),
+              normal_data,
+              1
+            )
+
+            mod.assigns.reject! do |assign|
+              %w[prefetchfifo_accept_do fetch_valid fetch_limit fetch_page_fault].include?(assign.target.to_s)
+            end
+            mod.assigns << CpuTracePackage.assign('prefetchfifo_accept_do', accept_do_expr)
+            mod.assigns << CpuTracePackage.assign('fetch_valid', fetch_valid_expr)
+            mod.assigns << CpuTracePackage.assign(
+              'fetch_limit',
+              CpuTracePackage.binop(
+                :&,
+                not_empty,
+                CpuTracePackage.binop(:==, fetch_len, ir::Literal.new(value: 15, width: 4), 1),
+                1
+              )
+            )
+            mod.assigns << CpuTracePackage.assign(
+              'fetch_page_fault',
+              CpuTracePackage.binop(
+                :&,
+                not_empty,
+                CpuTracePackage.binop(:==, fetch_len, ir::Literal.new(value: 14, width: 4), 1),
+                1
+              )
+            )
+
+            proc = mod.processes.find do |entry|
+              stmt = Array(entry.instance_variable_get(:@statements)).first
+              stmt.is_a?(RHDL::Codegen::CIRCT::IR::SeqAssign) && stmt.target.to_s == 'fetch_count'
+            end
+            raise KeyError, "SeqAssign target 'fetch_count' not found in module '#{mod.name}'" unless proc
+
+            stmt = proc.instance_variable_get(:@statements).first
+            fetch_count_expr = ir::Mux.new(
+              condition: CpuTracePackage.binop(:^, rst_n, one, 1),
+              when_true: zero4,
+              when_false: ir::Mux.new(
+                condition: pr_reset,
+                when_true: zero4,
+                when_false: ir::Mux.new(
+                  condition: accept_do_expr,
+                  when_true: zero4,
+                  when_false: ir::Mux.new(
+                    condition: partial_expr,
+                    when_true: CpuTracePackage.binop(:+, fetch_count, dec_acceptable, 4),
+                    when_false: fetch_count,
+                    width: 4
+                  ),
+                  width: 4
+                ),
+                width: 4
+              ),
+              width: 4
+            )
+            stmt.instance_variable_set(:@expr, fetch_count_expr)
           end
 
           def rewrite_prefetch_limit_expr(expr)

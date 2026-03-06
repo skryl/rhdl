@@ -5,6 +5,7 @@ require 'tmpdir'
 require 'json'
 require 'open3'
 require 'fileutils'
+require 'etc'
 
 require_relative '../../../../examples/gameboy/utilities/import/system_importer'
 require_relative '../../../../examples/gameboy/utilities/import/ir_runner'
@@ -35,6 +36,14 @@ RSpec.describe 'GameBoy mixed import runtime parity (Verilator/Arcilator/IR)', s
     skip "#{cmd} not available" unless HdlToolchain.which(cmd)
   end
 
+  def require_llvm_codegen_tool!
+    return if llvm_lli_available?
+    return if HdlToolchain.which('clang')
+    return if HdlToolchain.which('llc')
+
+    skip 'Neither lli/llvm-link nor clang/llc is available'
+  end
+
   def require_pop_rom!
     path = File.expand_path('../../../../examples/gameboy/software/roms/pop.gb', __dir__)
     skip "POP ROM not available: #{path}" unless File.file?(path)
@@ -60,6 +69,42 @@ RSpec.describe 'GameBoy mixed import runtime parity (Verilator/Arcilator/IR)', s
 
     detail = [stdout, stderr].join("\n").lines.first(120).join
     raise "Command failed: #{cmd.join(' ')}\n#{detail}"
+  end
+
+  def compile_llvm_ir_object!(ll_path:, obj_path:)
+    if HdlToolchain.which('clang')
+      run_cmd!(['clang', '-c', '-O0', '-fPIC', ll_path, '-o', obj_path])
+    else
+      run_cmd!(['llc', '-filetype=obj', '-O0', '-relocation-model=pic', ll_path, '-o', obj_path])
+    end
+  end
+
+  def llvm_lli_available?
+    HdlToolchain.which('lli') && HdlToolchain.which('llvm-link') && HdlToolchain.which('clang++')
+  end
+
+  def run_llvm_ir_harness!(ll_path:, harness_path:, obj_path:, bin_path:, rom_path:, max_cycles:)
+    if llvm_lli_available?
+      harness_ll_path = harness_path.sub(/\.cpp\z/, '.harness.ll')
+      linked_bc_path = harness_path.sub(/\.cpp\z/, '.bc')
+      compile_threads = [Etc.nprocessors, 8].compact.min
+
+      run_cmd!(['clang++', '-std=c++17', '-O0', '-S', '-emit-llvm', harness_path, '-o', harness_ll_path])
+      run_cmd!(['llvm-link', ll_path, harness_ll_path, '-o', linked_bc_path])
+      return run_cmd!([
+        'lli',
+        '--jit-kind=orc-lazy',
+        "--compile-threads=#{compile_threads}",
+        '-O0',
+        linked_bc_path,
+        rom_path,
+        max_cycles.to_s
+      ])
+    end
+
+    compile_llvm_ir_object!(ll_path: ll_path, obj_path: obj_path)
+    run_cmd!(['c++', '-std=c++17', '-O0', harness_path, obj_path, '-o', bin_path])
+    run_cmd!([bin_path, rom_path, max_cycles.to_s])
   end
 
   def write_verilator_trace_harness(path)
@@ -235,9 +280,17 @@ RSpec.describe 'GameBoy mixed import runtime parity (Verilator/Arcilator/IR)', s
 
     cpu_addr_candidates = %w[cpu_A_16 cpu__A cpu_addr]
     cpu_fetch_candidates = %w[cpu_M1_n_1 cpu__M1_n cpu_m1_n]
+    bus_addr_candidates = %w[ext_bus_addr]
+    bus_a15_candidates = %w[ext_bus_a15]
+    cart_rd_candidates = %w[cart_rd]
     use_cpu_fetch =
       runner.signal_available?(cpu_addr_candidates) &&
       runner.signal_available?(cpu_fetch_candidates)
+    cpu_addr_idx = runner.signal_index(cpu_addr_candidates)
+    cpu_fetch_idx = runner.signal_index(cpu_fetch_candidates)
+    bus_addr_idx = runner.signal_index(bus_addr_candidates)
+    bus_a15_idx = runner.signal_index(bus_a15_candidates)
+    cart_rd_idx = runner.signal_index(cart_rd_candidates)
 
     trace = []
     last_pc = nil
@@ -245,14 +298,14 @@ RSpec.describe 'GameBoy mixed import runtime parity (Verilator/Arcilator/IR)', s
       runner.run_steps(1)
       pc =
         if use_cpu_fetch
-          next unless (runner.peek(cpu_fetch_candidates) & 0x1).zero?
+          next unless (runner.peek_index(cpu_fetch_idx) & 0x1).zero?
 
-          runner.peek(cpu_addr_candidates).to_i & 0xFFFF
+          runner.peek_index(cpu_addr_idx).to_i & 0xFFFF
         else
-          next unless (runner.peek('cart_rd') & 0x1) == 1
+          next unless (runner.peek_index(cart_rd_idx) & 0x1) == 1
 
-          bus_addr = runner.peek('ext_bus_addr').to_i & 0x7FFF
-          a15 = runner.peek('ext_bus_a15').to_i & 0x1
+          bus_addr = runner.peek_index(bus_addr_idx).to_i & 0x7FFF
+          a15 = runner.peek_index(bus_a15_idx).to_i & 0x1
           (a15 << 15) | bus_addr
         end
       next if pc == last_pc
@@ -277,11 +330,16 @@ RSpec.describe 'GameBoy mixed import runtime parity (Verilator/Arcilator/IR)', s
     "length mismatch lhs=#{lhs.length} rhs=#{rhs.length}"
   end
 
-  def arcilator_state_offset(states, *names)
-    by_name = states.each_with_object({}) { |entry, acc| acc[entry.fetch('name')] = entry }
+  def arcilator_state_offset(states, *names, preferred_type: nil)
+    by_name = states.each_with_object({}) do |entry, acc|
+      (acc[entry.fetch('name')] ||= []) << entry
+    end
     names.each do |name|
-      entry = by_name[name]
-      return entry.fetch('offset') if entry
+      entries = by_name[name]
+      next unless entries
+
+      preferred_entry = preferred_type && entries.find { |entry| entry['type'] == preferred_type }
+      return (preferred_entry || entries.last).fetch('offset')
     end
 
     states.each do |entry|
@@ -439,6 +497,7 @@ RSpec.describe 'GameBoy mixed import runtime parity (Verilator/Arcilator/IR)', s
         '--observe-ports',
         '--observe-wires',
         '--observe-registers',
+        '--split-funcs-threshold=2000',
         "--state-file=#{state_path}",
         '-o', ll_path
       ])
@@ -452,19 +511,19 @@ RSpec.describe 'GameBoy mixed import runtime parity (Verilator/Arcilator/IR)', s
 
     states = Array(mod['states'])
     offsets = {
-      clk_sys: arcilator_state_offset(states, 'clk_sys'),
-      reset: arcilator_state_offset(states, 'reset'),
-      ce: arcilator_state_offset(states, 'ce'),
-      ce_n: arcilator_state_offset(states, 'ce_n'),
-      ce_2x: arcilator_state_offset(states, 'ce_2x'),
-      joystick: arcilator_state_offset(states, 'joystick'),
-      cart_oe: arcilator_state_offset(states, 'cart_oe'),
-      cart_do: arcilator_state_offset(states, 'cart_do'),
-      cart_rd: arcilator_state_offset(states, 'cart_rd'),
-      ext_bus_addr: arcilator_state_offset(states, 'ext_bus_addr'),
-      ext_bus_a15: arcilator_state_offset(states, 'ext_bus_a15'),
-      cpu_addr: arcilator_state_offset(states, 'cpu_addr', 'gb__DOT__cpu_addr', 'gb__cpu_addr'),
-      cpu_m1_n: arcilator_state_offset(states, 'cpu_m1_n', 'gb__DOT__cpu_m1_n', 'gb__cpu_m1_n')
+      clk_sys: arcilator_state_offset(states, 'clk_sys', preferred_type: 'input'),
+      reset: arcilator_state_offset(states, 'reset', preferred_type: 'input'),
+      ce: arcilator_state_offset(states, 'ce', preferred_type: 'input'),
+      ce_n: arcilator_state_offset(states, 'ce_n', preferred_type: 'input'),
+      ce_2x: arcilator_state_offset(states, 'ce_2x', preferred_type: 'input'),
+      joystick: arcilator_state_offset(states, 'joystick', preferred_type: 'input'),
+      cart_oe: arcilator_state_offset(states, 'cart_oe', preferred_type: 'input'),
+      cart_do: arcilator_state_offset(states, 'cart_do', preferred_type: 'input'),
+      cart_rd: arcilator_state_offset(states, 'cart_rd', preferred_type: 'output'),
+      ext_bus_addr: arcilator_state_offset(states, 'ext_bus_addr', preferred_type: 'output'),
+      ext_bus_a15: arcilator_state_offset(states, 'ext_bus_a15', preferred_type: 'output'),
+      cpu_addr: arcilator_state_offset(states, 'cpu/A', 'cpu/u0/a', 'cpu_A', 'cpu__A', 'gb__DOT___cpu_A', 'gb__cpu_A'),
+      cpu_m1_n: arcilator_state_offset(states, 'cpu/M1_n', 'cpu/u0/m1_n', 'cpu_M1_n', 'cpu__M1_n', 'gb__DOT___cpu_M1_n', 'gb__cpu_M1_n')
     }
 
     required = %i[clk_sys reset ce ce_n ce_2x joystick cart_oe cart_do cart_rd ext_bus_addr ext_bus_a15]
@@ -481,9 +540,14 @@ RSpec.describe 'GameBoy mixed import runtime parity (Verilator/Arcilator/IR)', s
     )
 
     begin
-      run_cmd!(['llc', '-filetype=obj', '-O2', '-relocation-model=pic', ll_path, '-o', obj_path])
-      run_cmd!(['c++', '-std=c++17', '-O2', harness_path, obj_path, '-o', bin_path])
-      output = run_cmd!([bin_path, rom_path, MAX_CYCLES.to_s])
+      output = run_llvm_ir_harness!(
+        ll_path: ll_path,
+        harness_path: harness_path,
+        obj_path: obj_path,
+        bin_path: bin_path,
+        rom_path: rom_path,
+        max_cycles: MAX_CYCLES
+      )
       { trace: normalize_trace(parse_trace(output)), error: nil }
     rescue StandardError => e
       { trace: nil, error: "Arcilator runtime build/execute failed: #{e.message}" }
@@ -534,7 +598,8 @@ RSpec.describe 'GameBoy mixed import runtime parity (Verilator/Arcilator/IR)', s
 
   it 'matches PC/opcode progression across pure Verilog, CIRCT, and raised RHDL', timeout: 3600 do
     require_reference_tree!
-    %w[ghdl circt-verilog circt-opt verilator llc c++].each { |tool| require_tool!(tool) }
+    %w[ghdl circt-verilog circt-opt verilator c++].each { |tool| require_tool!(tool) }
+    require_llvm_codegen_tool!
     require_tool!('arcilator') unless skip_arcilator?
     require_ir_jit!
     pop_rom_path = require_pop_rom!

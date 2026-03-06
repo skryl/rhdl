@@ -25,6 +25,7 @@ module RHDL
           FetchWordEvent = Struct.new(:address, :word, keyword_init: true)
           FetchGroupEvent = Struct.new(:address, :bytes, keyword_init: true)
           FetchPcGroupEvent = Struct.new(:pc, :bytes, keyword_init: true)
+          StepEvent = Struct.new(:eip, :consumed, :bytes, keyword_init: true)
 
           def self.build_from_cleaned_mlir(mlir_text, work_dir:)
             parity = CpuParityPackage.from_cleaned_mlir(mlir_text)
@@ -99,6 +100,19 @@ module RHDL
                 bytes: event.bytes
               )
             end.compact
+          end
+
+          def run_step_trace(max_cycles: DEFAULT_MAX_CYCLES)
+            raise 'Verilator binary not built' unless @binary_path && File.exist?(@binary_path)
+
+            memory_path = File.join(@work_dir, 'memory_init.txt')
+            write_memory_file(memory_path)
+
+            stdout, stderr, status = Open3.capture3(@binary_path, memory_path, max_cycles.to_i.to_s)
+            raise "Verilator parity runtime failed:\n#{stdout}\n#{stderr}" unless status.success?
+
+            @memory = read_memory_file(memory_path)
+            parse_step_trace(stdout)
           end
 
           private
@@ -178,6 +192,23 @@ module RHDL
               FetchWordEvent.new(
                 address: match[1].to_i(16),
                 word: match[2].to_i(16)
+              )
+            end
+          end
+
+          def parse_step_trace(stdout)
+            stdout.lines.filter_map do |line|
+              match = line.to_s.strip.match(/\Astep_trace 0x([0-9A-Fa-f]+) 0x([0-9A-Fa-f]+)\z/)
+              next unless match
+
+              wr_eip = match[1].to_i(16)
+              consumed = match[2].to_i(16)
+              start_eip = wr_eip - consumed
+
+              StepEvent.new(
+                eip: start_eip,
+                consumed: consumed,
+                bytes: read_bytes(CpuParityRuntime::STARTUP_CS_BASE + start_eip, consumed)
               )
             end
           end
@@ -294,6 +325,21 @@ module RHDL
                 dut->eval();
 
                 BurstState burst;
+                uint32_t prev_trace_wr_eip = 0;
+                uint32_t prev_trace_wr_consumed = 0;
+
+                auto emit_step_trace = [&]() {
+                  if (dut->trace_retired &&
+                      !(dut->trace_wr_eip == 0 && dut->trace_wr_consumed == 0) &&
+                      !(dut->trace_wr_eip == prev_trace_wr_eip &&
+                        dut->trace_wr_consumed == prev_trace_wr_consumed)) {
+                    std::printf("step_trace 0x%08X 0x%08X\\n",
+                                static_cast<uint32_t>(dut->trace_wr_eip),
+                                static_cast<uint32_t>(dut->trace_wr_consumed));
+                    prev_trace_wr_eip = static_cast<uint32_t>(dut->trace_wr_eip);
+                    prev_trace_wr_consumed = static_cast<uint32_t>(dut->trace_wr_consumed);
+                  }
+                };
 
                 for (int cycle = 0; cycle < max_cycles; ++cycle) {
                   if (burst.active && burst.started) {
@@ -308,10 +354,12 @@ module RHDL
                   dut->clk = 0;
                   dut->rst_n = 1;
                   dut->eval();
+                  emit_step_trace();
 
                   dut->clk = 1;
                   dut->rst_n = 1;
                   dut->eval();
+                  emit_step_trace();
 
                   if (dut->avm_write) {
                     uint32_t addr = static_cast<uint32_t>(dut->avm_address) << 2;

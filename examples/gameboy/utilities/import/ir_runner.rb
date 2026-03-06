@@ -46,6 +46,7 @@ module RHDL
               acc[name] = name
               acc[name.downcase] ||= name
             end
+            @signal_index_cache = {}
 
             @sim = RHDL::Sim::Native::IR::Simulator.new(
               RHDL::Sim::Native::IR.sim_json(@runtime_nodes, backend: backend),
@@ -107,6 +108,27 @@ module RHDL
 
           def signal_available?(name_or_candidates)
             !resolve_signal_name(name_or_candidates).nil?
+          end
+
+          def signal_index(name_or_candidates)
+            signal = resolve_signal_name(name_or_candidates)
+            return nil if signal.nil?
+            return nil unless @sim.respond_to?(:get_signal_idx)
+
+            @signal_index_cache.fetch(signal) do
+              @signal_index_cache[signal] = @sim.get_signal_idx(signal)
+            end
+          rescue StandardError
+            nil
+          end
+
+          def peek_index(idx)
+            return 0 if idx.nil?
+            return 0 unless @sim.respond_to?(:peek_by_idx)
+
+            @sim.peek_by_idx(idx)
+          rescue StandardError
+            0
           end
 
           def input_ports

@@ -11,12 +11,22 @@ module RHDL
     module Native
       module Netlist
         class << self
-          def native_lib_name(base)
+          def native_lib_candidates(base)
             case RbConfig::CONFIG['host_os']
-            when /darwin/ then "#{base}.dylib"
-            when /mswin|mingw/ then "#{base}.dll"
-            else "#{base}.so"
+            when /darwin/ then ["#{base}.bundle", "#{base}.dylib"]
+            when /mswin|mingw/ then ["#{base}.dll"]
+            else ["#{base}.so"]
             end
+          end
+
+          def native_lib_name(base)
+            native_lib_candidates(base).first
+          end
+
+          def resolve_native_lib_path(ext_dir, base)
+            native_lib_candidates(base)
+              .map { |name| [name, File.join(ext_dir, name)] }
+              .find { |_name, path| File.exist?(path) }
           end
 
           def sim_backend_available?(lib_path)
@@ -38,18 +48,15 @@ module RHDL
 
 
       INTERPRETER_EXT_DIR = File.expand_path('netlist_interpreter/lib', __dir__)
-      INTERPRETER_LIB_NAME = native_lib_name('netlist_interpreter')
-      INTERPRETER_LIB_PATH = File.join(INTERPRETER_EXT_DIR, INTERPRETER_LIB_NAME)
+      INTERPRETER_LIB_NAME, INTERPRETER_LIB_PATH = resolve_native_lib_path(INTERPRETER_EXT_DIR, 'netlist_interpreter')
       INTERPRETER_AVAILABLE = sim_backend_available?(INTERPRETER_LIB_PATH)
 
       JIT_EXT_DIR = File.expand_path('netlist_jit/lib', __dir__)
-      JIT_LIB_NAME = native_lib_name('netlist_jit')
-      JIT_LIB_PATH = File.join(JIT_EXT_DIR, JIT_LIB_NAME)
+      JIT_LIB_NAME, JIT_LIB_PATH = resolve_native_lib_path(JIT_EXT_DIR, 'netlist_jit')
       JIT_AVAILABLE = sim_backend_available?(JIT_LIB_PATH)
 
       COMPILER_EXT_DIR = File.expand_path('netlist_compiler/lib', __dir__)
-      COMPILER_LIB_NAME = native_lib_name('netlist_compiler')
-      COMPILER_LIB_PATH = File.join(COMPILER_EXT_DIR, COMPILER_LIB_NAME)
+      COMPILER_LIB_NAME, COMPILER_LIB_PATH = resolve_native_lib_path(COMPILER_EXT_DIR, 'netlist_compiler')
       COMPILER_AVAILABLE = sim_backend_available?(COMPILER_LIB_PATH)
 
       # Common Fiddle wrapper shared by netlist native backends.
