@@ -6,6 +6,34 @@ RSpec.describe RHDL::Codegen::CIRCT::MLIR do
   let(:ir) { RHDL::Codegen::CIRCT::IR }
 
   describe '.generate' do
+    it 'avoids infinite recursion when self-referential expression graphs appear in assign selection' do
+      mod = ir::ModuleOp.new(
+        name: 'cycle_guard',
+        ports: [],
+        nets: [],
+        regs: [],
+        assigns: [],
+        processes: [],
+        instances: [],
+        memories: [],
+        write_ports: [],
+        sync_read_ports: [],
+        parameters: {}
+      )
+      emitter = described_class::ModuleEmitter.new(mod)
+      cyclic_expr = ir::Resize.new(expr: ir::Literal.new(value: 1, width: 1), width: 1)
+      cyclic_expr.instance_variable_set(:@expr, cyclic_expr)
+      literal = ir::Literal.new(value: 0, width: 1)
+
+      selected = nil
+      Timeout.timeout(2) do
+        expect(emitter.send(:signal_expr_references_target?, cyclic_expr, :y)).to be(false)
+        selected = emitter.send(:preferred_assigned_expr, :y, [cyclic_expr, literal])
+      end
+
+      expect([cyclic_expr, literal]).to include(selected)
+    end
+
     it 'emits hw/comb/seq operations for mixed combinational and sequential logic' do
       mod = ir::ModuleOp.new(
         name: 'demo',

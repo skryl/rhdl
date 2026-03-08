@@ -3,6 +3,7 @@
 require 'json'
 require 'rhdl/codegen'
 require 'rhdl/sim/native/ir/simulator'
+require_relative '../clock_enable_waveform'
 
 module RHDL
   module Examples
@@ -15,6 +16,8 @@ module RHDL
         # This runner is intentionally minimal and geared toward deterministic
         # import parity checks.
         class IrRunner
+          SCREEN_WIDTH = 160
+          SCREEN_HEIGHT = 144
           RuntimePort = Struct.new(:name, :direction, :width, keyword_init: true)
           RuntimeSignal = Struct.new(:name, :width, keyword_init: true)
           RuntimeModule = Struct.new(:ports, :nets, :regs, keyword_init: true)
@@ -55,6 +58,7 @@ module RHDL
 
             @cycles = 0
             @rom = []
+            @clock_enable_phase = 0
             initialize_inputs
           end
 
@@ -64,6 +68,7 @@ module RHDL
           end
 
           def reset
+            @clock_enable_phase = 0
             poke(:reset, 1)
             run_cycles(10)
             poke(:reset, 0)
@@ -139,6 +144,29 @@ module RHDL
             @output_ports.dup
           end
 
+          def read_framebuffer
+            return Array.new(SCREEN_HEIGHT) { Array.new(SCREEN_WIDTH, 0) } unless @sim.respond_to?(:read_framebuffer)
+            return Array.new(SCREEN_HEIGHT) { Array.new(SCREEN_WIDTH, 0) } unless @sim.gameboy_mode?
+
+            flat = @sim.read_framebuffer
+            Array.new(SCREEN_HEIGHT) do |y|
+              Array.new(SCREEN_WIDTH) do |x|
+                flat[y * SCREEN_WIDTH + x] || 0
+              end
+            end
+          rescue StandardError
+            Array.new(SCREEN_HEIGHT) { Array.new(SCREEN_WIDTH, 0) }
+          end
+
+          def frame_count
+            return 0 unless @sim.respond_to?(:frame_count)
+            return 0 unless @sim.gameboy_mode?
+
+            @sim.frame_count.to_i
+          rescue StandardError
+            0
+          end
+
           private
 
           def resolve_nodes(component_class:, mlir:, runtime_json:, top:)
@@ -197,10 +225,9 @@ module RHDL
 
           def initialize_inputs
             @input_ports.each { |name| @sim.poke(name, 0) }
+            @clock_enable_phase = 0
             poke(%w[clk_sys], 0)
-            poke(%w[ce], 1)
-            poke(%w[ce_n], 1)
-            poke(%w[ce_2x], 1)
+            drive_clock_enable_inputs(falling_edge: false)
             poke(%w[joystick], 0xFF)
             poke(%w[cart_oe], 1)
             @sim.evaluate
@@ -219,6 +246,7 @@ module RHDL
             drive_clock_enable_inputs(falling_edge: false)
             poke(%w[clk_sys], 1)
             @sim.tick
+            @clock_enable_phase = RHDL::Examples::GameBoy::ClockEnableWaveform.advance_phase(@clock_enable_phase)
           end
 
           def run_cycles(steps)
@@ -274,9 +302,10 @@ module RHDL
           end
 
           def drive_clock_enable_inputs(falling_edge:)
-            poke(%w[ce], falling_edge ? 0 : 1)
-            poke(%w[ce_n], falling_edge ? 1 : 0)
-            poke(%w[ce_2x], 1)
+            values = RHDL::Examples::GameBoy::ClockEnableWaveform.values_for_phase(@clock_enable_phase)
+            poke(%w[ce], values[:ce])
+            poke(%w[ce_n], values[:ce_n])
+            poke(%w[ce_2x], values[:ce_2x])
           end
         end
       end

@@ -73,7 +73,7 @@ module RHDL
 
           attr_reader :reference_root, :qip_path, :top, :top_file, :output_dir, :workspace_dir,
                       :keep_workspace, :clean_output, :strict, :progress_callback, :import_task_class,
-                      :import_strategy
+                      :import_strategy, :maintain_directory_structure, :emit_runtime_json
 
           def initialize(reference_root: DEFAULT_REFERENCE_ROOT,
                          qip_path: DEFAULT_QIP_PATH,
@@ -83,6 +83,8 @@ module RHDL
                          workspace_dir: nil,
                          keep_workspace: false,
                          clean_output: true,
+                         maintain_directory_structure: true,
+                         emit_runtime_json: true,
                          strict: true,
                          progress: nil,
                          import_task_class: nil,
@@ -95,6 +97,8 @@ module RHDL
             @workspace_dir = workspace_dir && File.expand_path(workspace_dir)
             @keep_workspace = keep_workspace
             @clean_output = clean_output
+            @maintain_directory_structure = maintain_directory_structure
+            @emit_runtime_json = emit_runtime_json
             @strict = strict
             @progress_callback = progress
             @import_task_class = import_task_class
@@ -130,7 +134,27 @@ module RHDL
             raise_diagnostics.concat(Array(import_result[:raise_diagnostics]))
 
             if import_result[:success]
+              files_written = import_result[:files_written]
               report = read_report(report_path)
+              module_source_relpaths = module_source_relpaths_for_report(report: report, resolved: resolved)
+              if maintain_directory_structure
+                emit_progress('remap output to source directory layout')
+                files_written = remap_output_layout(
+                  files_written: files_written,
+                  module_source_relpaths: module_source_relpaths,
+                  diagnostics: diagnostics
+                )
+              end
+              component_manifest = build_component_manifest(
+                report: report,
+                files_written: files_written,
+                module_source_relpaths: module_source_relpaths
+              )
+              report = merge_component_manifest_into_report(
+                report_path: report_path,
+                components: component_manifest,
+                raised_files: files_written
+              )
               workspace_artifacts = stage_workspace_artifacts(
                 workspace: workspace,
                 artifacts: report.fetch('artifacts', {}),
@@ -145,7 +169,7 @@ module RHDL
                 success: true,
                 output_dir: output_dir,
                 workspace: workspace,
-                files_written: import_result[:files_written],
+                files_written: files_written,
                 manifest_path: manifest_path,
                 mlir_path: artifacts['core_mlir_path'] || requested_mlir_path,
                 report_path: report_path,
@@ -350,6 +374,11 @@ module RHDL
             top_path = File.expand_path(top_file)
             selected << top_path if File.extname(top_path).downcase.match?(/\A\.(v|sv)\z/) && File.file?(top_path)
             selected.to_set
+          end
+
+          def selected_module_source_relpaths_for_mixed(resolved:)
+            selected_verilog_paths = selected_verilog_source_paths_for_mixed(resolved: resolved).to_a
+            module_index(selected_verilog_paths).transform_values { |path| source_relative_path(path) }
           end
 
           def stage_verilog_source(path:, staged_root:)
@@ -624,7 +653,8 @@ module RHDL
               top: top,
               strict: strict,
               raise_to_dsl: true,
-              format_output: false
+              format_output: false,
+              emit_runtime_json: emit_runtime_json
             }
             options[:manifest] = manifest_path if manifest_path
             options[:input] = input_path if input_path
@@ -719,6 +749,313 @@ module RHDL
             end
             File.write(report_path, JSON.pretty_generate(report))
             report
+          end
+
+          def merge_component_manifest_into_report(report_path:, components:, raised_files:)
+            report = read_report(report_path)
+            return report if report.empty?
+
+            report['raised_files'] = Array(raised_files).sort
+            report['component_count'] = components.length
+            report['components'] = components
+            File.write(report_path, JSON.pretty_generate(report))
+            report
+          end
+
+          def module_source_relpaths_for_report(report:, resolved:)
+            mappings = selected_module_source_relpaths_for_mixed(resolved: resolved)
+            Array(report.dig('mixed_import', 'vhdl_synth_outputs')).each do |entry|
+              module_name = (entry['module_name'] || entry[:module_name]).to_s
+              source_path = (entry['source_path'] || entry[:source_path]).to_s
+              next if module_name.empty? || source_path.empty?
+
+              mappings[module_name] ||= source_relative_path(source_path)
+            end
+            mappings
+          end
+
+          def build_component_manifest(report:, files_written:, module_source_relpaths:)
+            modules = Array(report['modules'])
+            return [] if modules.empty?
+
+            staged_inventory = staged_module_inventory(report.fetch('mixed_import', {}).fetch('pure_verilog_files', []))
+            raised_inventory = raised_component_inventory(files_written)
+            synth_inventory = synth_output_inventory(report.dig('mixed_import', 'vhdl_synth_outputs'))
+
+            modules.map do |entry|
+              module_name = entry.fetch('name').to_s
+              staged = component_staged_metadata_from_report(entry) || staged_inventory[module_name]
+              raise "Missing staged pure-Verilog module mapping for imported component #{module_name}" unless staged
+
+              raised = raised_inventory[module_name] || component_raised_metadata_from_report(entry)
+              raise "Missing raised RHDL file mapping for imported component #{module_name}" unless raised
+
+              keep_structure_relative_path =
+                if %w[source_verilog source_vhdl_generated].include?(staged[:origin_kind].to_s)
+                  relative_output_path(raised[:raised_rhdl_path])
+                end
+              synth = component_vhdl_synth_metadata_from_report(entry) || synth_inventory[File.expand_path(staged[:path])]
+              source_kind = entry['source_kind'] || source_kind_for_origin(staged[:origin_kind])
+              emitted_dsl_features = Array(entry['emitted_dsl_features'] || raised[:dsl_features]).map(&:to_s)
+
+              {
+                'module_name' => module_name,
+                'verilog_module_name' => module_name,
+                'ruby_class_name' => entry['ruby_class_name'] || raised[:ruby_class_name],
+                'raised_rhdl_path' => raised[:raised_rhdl_path],
+                'staged_verilog_path' => staged[:path],
+                'staged_verilog_module_name' => staged[:module_name],
+                'origin_kind' => staged[:origin_kind],
+                'source_kind' => source_kind,
+                'original_source_path' => staged[:original_source_path],
+                'keep_structure_relative_path' => keep_structure_relative_path,
+                'expected_dsl_features' => entry['expected_dsl_features'],
+                'behavior' => emitted_dsl_features.include?('behavior'),
+                'sequential' => emitted_dsl_features.include?('sequential'),
+                'memory' => emitted_dsl_features.include?('memory'),
+                'emitted_dsl_features' => emitted_dsl_features,
+                'vhdl_synth' => synth,
+                'emitted_base_class' => entry['emitted_base_class'] || raised[:base_class]
+              }.compact
+            end.sort_by { |entry| entry.fetch('verilog_module_name') }
+          end
+
+          def component_staged_metadata_from_report(entry)
+            path = entry['staged_verilog_path']
+            return nil if path.nil? || path.to_s.empty?
+
+            {
+              module_name: entry['staged_verilog_module_name'] || entry['verilog_module_name'] || entry['name'],
+              path: path,
+              origin_kind: entry['origin_kind'],
+              original_source_path: entry['original_source_path']
+            }
+          end
+
+          def component_raised_metadata_from_report(entry)
+            path = entry['raised_rhdl_path']
+            return nil if path.nil? || path.to_s.empty?
+
+            {
+              ruby_class_name: entry['ruby_class_name'],
+              raised_rhdl_path: path,
+              base_class: entry['emitted_base_class'],
+              dsl_features: Array(entry['emitted_dsl_features']).map(&:to_s)
+            }
+          end
+
+          def component_vhdl_synth_metadata_from_report(entry)
+            value = entry['vhdl_synth']
+            return nil unless value.is_a?(Hash)
+
+            {
+              entity: value['entity'] || value[:entity],
+              module_name: value['module_name'] || value[:module_name],
+              library: value['library'] || value[:library],
+              standard: value['standard'] || value[:standard],
+              workdir: value['workdir'] || value[:workdir],
+              extra_args: value['extra_args'] || value[:extra_args],
+              source_path: value['source_path'] || value[:source_path]
+            }.compact
+          end
+
+          def source_kind_for_origin(origin_kind)
+            case origin_kind.to_s
+            when 'source_verilog'
+              'verilog'
+            when 'source_vhdl_generated', 'generated_helper'
+              'generated_vhdl'
+            else
+              origin_kind.to_s
+            end
+          end
+
+          def relative_output_path(path)
+            Pathname.new(File.expand_path(path)).relative_path_from(Pathname.new(output_dir)).to_s
+          end
+
+          def staged_module_inventory(pure_verilog_files)
+            Array(pure_verilog_files).each_with_object({}) do |entry, acc|
+              path = File.expand_path(entry['path'] || entry[:path])
+              next unless File.file?(path)
+
+              primary_module_name = (entry['primary_module_name'] || entry[:primary_module_name]).to_s
+              base_origin_kind = (entry['origin_kind'] || entry[:origin_kind]).to_s
+              generated = entry.key?('generated') ? entry['generated'] : entry[:generated]
+              base_origin_kind = 'source_verilog' if base_origin_kind.empty? && !generated
+              base_origin_kind = 'source_vhdl_generated' if base_origin_kind.empty? && generated
+              original_source_path = entry['original_source_path'] || entry[:original_source_path]
+
+              parse_verilog_module_names(path).each do |module_name|
+                existing = acc[module_name]
+                if existing && File.expand_path(existing[:path]) != File.expand_path(path)
+                  raise "Ambiguous staged module mapping for #{module_name}: #{existing[:path]} and #{path}"
+                end
+
+                origin_kind =
+                  if base_origin_kind == 'source_vhdl_generated' &&
+                     !primary_module_name.empty? &&
+                     module_name != primary_module_name
+                    'generated_helper'
+                  else
+                    base_origin_kind
+                  end
+
+                acc[module_name] = {
+                  module_name: module_name,
+                  path: path,
+                  origin_kind: origin_kind,
+                  original_source_path: original_source_path
+                }
+              end
+            end
+          end
+
+          def parse_verilog_module_names(path)
+            strip_comments(File.read(path)).scan(/\bmodule\s+([A-Za-z_][A-Za-z0-9_$]*)\b/).flatten.uniq
+          end
+
+          def raised_component_inventory(files_written)
+            Array(files_written).each_with_object({}) do |path, acc|
+              next unless File.file?(path)
+
+              text = File.read(path)
+              module_name = text[/def\s+self\.verilog_module_name.*?\n\s*["']([^"']+)["']/m, 1]
+              next if module_name.nil? || module_name.empty?
+
+              ruby_class_name = text[/^class\s+([A-Za-z0-9_:]+)\s+</, 1]
+              base_class = text[/^class\s+[A-Za-z0-9_:]+\s+<\s+([A-Za-z0-9_:]+)/, 1]
+              dsl_features = []
+              dsl_features << 'behavior' if text.include?('behavior do')
+              dsl_features << 'sequential' if text.include?('include RHDL::DSL::Sequential')
+              dsl_features << 'memory' if text.include?('include RHDL::DSL::Memory')
+
+              acc[module_name] = {
+                ruby_class_name: ruby_class_name,
+                raised_rhdl_path: path,
+                base_class: base_class,
+                dsl_features: dsl_features
+              }
+            end
+          end
+
+          def source_inventory_by_relative_path(files)
+            Array(files).each_with_object({}) do |entry, acc|
+              rel = source_relative_path(entry.fetch(:path))
+              acc[rel] = {
+                path: File.expand_path(entry.fetch(:path)),
+                language: entry.fetch(:language)
+              }
+            end
+          end
+
+          def synth_output_inventory(outputs)
+            Array(outputs).each_with_object({}) do |entry, acc|
+              output_path = entry['output_path'] || entry[:output_path]
+              next if output_path.nil? || output_path.empty?
+
+              acc[File.expand_path(output_path)] = {
+                entity: entry['entity'] || entry[:entity],
+                module_name: entry['module_name'] || entry[:module_name],
+                library: entry['library'] || entry[:library],
+                extra_args: entry['extra_args'] || entry[:extra_args],
+                source_path: entry['source_path'] || entry[:source_path]
+              }
+            end
+          end
+
+          def vhdl_entity_source_map(files)
+            Array(files)
+              .select { |entry| entry.fetch(:language) == 'vhdl' }
+              .each_with_object(Hash.new { |h, k| h[k] = [] }) do |entry, acc|
+                path = File.expand_path(entry.fetch(:path))
+                text = File.read(path)
+                text.scan(/\bentity\s+([A-Za-z_][A-Za-z0-9_]*)\s+is\b/i).flatten.each do |entity|
+                  acc[entity] << path unless acc[entity].include?(path)
+                end
+              end
+          end
+
+          def component_origin_metadata(staged:, pure_verilog_root:, source_inventory:, synth_inventory:, vhdl_entity_sources:)
+            staged_path = File.expand_path(staged.fetch(:path))
+            relative = if pure_verilog_root && staged_path.start_with?(File.expand_path(pure_verilog_root).to_s + '/')
+                         staged_path.delete_prefix("#{File.expand_path(pure_verilog_root)}/")
+                       else
+                         File.basename(staged_path)
+                       end
+
+            if (source_entry = source_inventory[relative])
+              return {
+                origin_kind: source_entry[:language] == 'verilog' ? 'source_verilog' : 'generated_helper',
+                original_source_path: source_entry[:path]
+              }
+            end
+
+            if (synth_entry = synth_inventory[staged_path])
+              original_source_path = nil
+              entity_sources = vhdl_entity_sources[synth_entry[:entity].to_s]
+              original_source_path = entity_sources.first if entity_sources.length == 1
+              return {
+                origin_kind: 'source_vhdl_generated',
+                original_source_path: original_source_path
+              }
+            end
+
+            {
+              origin_kind: 'generated_helper'
+            }
+          end
+
+          def remap_output_layout(files_written:, module_source_relpaths:, diagnostics:)
+            target_dirs_by_basename = Hash.new { |h, k| h[k] = [] }
+            module_source_relpaths.each do |module_name, rel_source_path|
+              rel_dir = File.dirname(rel_source_path.to_s)
+              next if rel_dir.nil? || rel_dir == '.'
+
+              basename = "#{underscore_module_name(module_name)}.rb"
+              target_dirs_by_basename[basename] << rel_dir
+            end
+
+            files_written.map do |source_path|
+              basename = File.basename(source_path)
+              dirs = target_dirs_by_basename[basename].uniq
+              if dirs.empty?
+                source_path
+              else
+                rel_dir = dirs.sort.first
+                if dirs.length > 1
+                  diagnostics << "GameBoy layout ambiguous for #{basename}: #{dirs.sort.join(', ')}; using #{rel_dir}"
+                end
+
+                destination_dir = File.join(output_dir, rel_dir)
+                FileUtils.mkdir_p(destination_dir)
+                destination_path = File.join(destination_dir, basename)
+                if File.expand_path(source_path) != File.expand_path(destination_path)
+                  FileUtils.rm_f(destination_path)
+                  FileUtils.mv(source_path, destination_path)
+                end
+                destination_path
+              end
+            end
+          end
+
+          def source_relative_path(path)
+            root = File.expand_path(reference_root)
+            absolute = File.expand_path(path)
+            prefix = "#{root}/"
+            return absolute.delete_prefix(prefix) if absolute.start_with?(prefix)
+
+            File.basename(absolute)
+          end
+
+          def underscore_module_name(name)
+            name.to_s
+                .gsub('::', '_')
+                .gsub(/([A-Z]+)([A-Z][a-z])/, '\\1_\\2')
+                .gsub(/([a-z\d])([A-Z])/, '\\1_\\2')
+                .tr('.', '_')
+                .downcase
+                .gsub(/[^a-z0-9_]/, '_')
           end
 
           def module_index(files)

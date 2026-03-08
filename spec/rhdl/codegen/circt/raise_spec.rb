@@ -21,6 +21,162 @@ RSpec.describe RHDL::Codegen::CIRCT::Raise do
     FileUtils.rm_rf(tmp_dir)
   end
 
+  describe '.dsl_features_for_module' do
+    it 'classifies combinational behavior modules as Behavior-only' do
+      mod = ir::ModuleOp.new(
+        name: 'comb_behavior',
+        ports: [
+          ir::Port.new(name: :a, direction: :in, width: 8),
+          ir::Port.new(name: :y, direction: :out, width: 8)
+        ],
+        nets: [],
+        regs: [],
+        assigns: [ir::Assign.new(target: :y, expr: ir::Signal.new(name: :a, width: 8))],
+        processes: [],
+        instances: [],
+        memories: [],
+        write_ports: [],
+        sync_read_ports: [],
+        parameters: {}
+      )
+
+      features = described_class.dsl_features_for_module(mod)
+      expect(features[:behavior]).to be(true)
+      expect(features[:sequential]).to be(false)
+      expect(features[:memory]).to be(false)
+      expect(features[:behavior_plan][:emit]).to be(true)
+
+      source = described_class.to_sources(mod, top: 'comb_behavior', strict: true).sources.fetch('comb_behavior')
+      expect(source).to include('class CombBehavior < RHDL::Sim::Component')
+      expect(source).to include('include RHDL::DSL::Behavior')
+      expect(source).not_to include('include RHDL::DSL::Sequential')
+      expect(source).not_to include('include RHDL::DSL::Memory')
+    end
+
+    it 'classifies structural-only modules without a behavior mixin' do
+      child = ir::ModuleOp.new(
+        name: 'child_passthrough',
+        ports: [
+          ir::Port.new(name: :a, direction: :in, width: 8),
+          ir::Port.new(name: :y, direction: :out, width: 8)
+        ],
+        nets: [],
+        regs: [],
+        assigns: [ir::Assign.new(target: :y, expr: ir::Signal.new(name: :a, width: 8))],
+        processes: [],
+        instances: [],
+        memories: [],
+        write_ports: [],
+        sync_read_ports: [],
+        parameters: {}
+      )
+
+      top = ir::ModuleOp.new(
+        name: 'top_struct_only',
+        ports: [
+          ir::Port.new(name: :a, direction: :in, width: 8),
+          ir::Port.new(name: :y, direction: :out, width: 8)
+        ],
+        nets: [],
+        regs: [],
+        assigns: [],
+        processes: [],
+        instances: [
+          ir::Instance.new(
+            name: 'u',
+            module_name: 'child_passthrough',
+            connections: [
+              ir::PortConnection.new(port_name: :a, signal: 'a', direction: :in),
+              ir::PortConnection.new(port_name: :y, signal: 'y', direction: :out)
+            ],
+            parameters: {}
+          )
+        ],
+        memories: [],
+        write_ports: [],
+        sync_read_ports: [],
+        parameters: {}
+      )
+
+      features = described_class.dsl_features_for_module(top)
+      expect(features[:behavior]).to be(false)
+      expect(features[:sequential]).to be(false)
+      expect(features[:memory]).to be(false)
+      expect(features[:behavior_plan][:emit]).to be(false)
+
+      source = described_class.to_sources([child, top], top: 'top_struct_only', strict: true).sources.fetch('top_struct_only')
+      expect(source).to include('class TopStructOnly < RHDL::Sim::Component')
+      expect(source).not_to include('include RHDL::DSL::Behavior')
+      expect(source).not_to include('include RHDL::DSL::Sequential')
+      expect(source).not_to include('behavior do')
+    end
+
+    it 'classifies sequential modules as Sequential plus Behavior' do
+      mod = ir::ModuleOp.new(
+        name: 'seq_logic',
+        ports: [
+          ir::Port.new(name: :clk, direction: :in, width: 1),
+          ir::Port.new(name: :d, direction: :in, width: 1),
+          ir::Port.new(name: :q, direction: :out, width: 1)
+        ],
+        nets: [],
+        regs: [ir::Reg.new(name: :q, width: 1)],
+        assigns: [ir::Assign.new(target: :q, expr: ir::Signal.new(name: :q, width: 1))],
+        processes: [
+          ir::Process.new(
+            name: :seq_logic,
+            clocked: true,
+            clock: :clk,
+            statements: [
+              ir::SeqAssign.new(target: :q, expr: ir::Signal.new(name: :d, width: 1))
+            ]
+          )
+        ],
+        instances: [],
+        memories: [],
+        write_ports: [],
+        sync_read_ports: [],
+        parameters: {}
+      )
+
+      features = described_class.dsl_features_for_module(mod)
+      expect(features[:behavior]).to be(true)
+      expect(features[:sequential]).to be(true)
+      expect(features[:memory]).to be(false)
+
+      source = described_class.to_sources(mod, top: 'seq_logic', strict: true).sources.fetch('seq_logic')
+      expect(source).to include('class SeqLogic < RHDL::Sim::SequentialComponent')
+      expect(source).to include('include RHDL::DSL::Behavior')
+      expect(source).to include('include RHDL::DSL::Sequential')
+    end
+
+    it 'classifies explicit CIRCT memory modules with the Memory mixin' do
+      mod = ir::ModuleOp.new(
+        name: 'mem_component',
+        ports: [],
+        nets: [],
+        regs: [],
+        assigns: [],
+        processes: [],
+        instances: [],
+        memories: [ir::Memory.new(name: :ram, depth: 16, width: 8)],
+        write_ports: [],
+        sync_read_ports: [],
+        parameters: {}
+      )
+
+      features = described_class.dsl_features_for_module(mod)
+      expect(features[:behavior]).to be(false)
+      expect(features[:sequential]).to be(false)
+      expect(features[:memory]).to be(true)
+
+      source = described_class.to_sources(mod, top: 'mem_component', strict: true).sources.fetch('mem_component')
+      expect(source).to include('include RHDL::DSL::Memory')
+      expect(source).not_to include('include RHDL::DSL::Behavior')
+      expect(source).not_to include('include RHDL::DSL::Sequential')
+    end
+  end
+
   describe '.to_sources' do
     it 'returns in-memory DSL source map for MLIR input' do
       result = described_class.to_sources(simple_mlir, top: 'simple')
@@ -100,6 +256,52 @@ RSpec.describe RHDL::Codegen::CIRCT::Raise do
       expect(source).to include('input :_class, width: 8')
       expect(source).to include('output :_0y, width: 8')
       expect(source).to include('_0y <= (_0a + _class)')
+    end
+
+    it 'renames numbered-parameter style identifiers so generated behavior stays valid Ruby' do
+      mod = ir::ModuleOp.new(
+        name: 'numbered_ident',
+        ports: [
+          ir::Port.new(name: :gclk, direction: :in, width: 1),
+          ir::Port.new(name: :y, direction: :out, width: 1)
+        ],
+        nets: [ir::Net.new(name: '_1', width: 1)],
+        regs: [],
+        assigns: [
+          ir::Assign.new(target: '_1', expr: ir::Signal.new(name: :gclk, width: 1)),
+          ir::Assign.new(target: :y, expr: ir::Signal.new(name: '_1', width: 1))
+        ],
+        processes: [],
+        instances: [],
+        memories: [],
+        write_ports: [],
+        sync_read_ports: [],
+        parameters: {}
+      )
+
+      result = described_class.to_sources(mod, top: 'numbered_ident')
+      expect(result.success?).to be(true)
+      source = result.sources['numbered_ident']
+      expect(source).to include('wire :__1')
+      expect(source).to include('__1 <= gclk')
+      expect(source).to include('y <= __1')
+      expect(source).not_to include('wire :_1')
+      expect(source).not_to include('<= _1')
+    end
+
+    it 'keeps mixed-case imported module names readable in raised class names' do
+      mlir = <<~MLIR
+        hw.module @eReg_SavestateV__vhdl_0a463cf78de5(%clk: i1) -> (Dout: i8) {
+          %zero = hw.constant 0 : i8
+          hw.output %zero : i8
+        }
+      MLIR
+
+      result = described_class.to_sources(mlir, top: 'eReg_SavestateV__vhdl_0a463cf78de5')
+      expect(result.success?).to be(true)
+      source = result.sources.fetch('eReg_SavestateV__vhdl_0a463cf78de5')
+      expect(source).to include('class ERegSavestateVVhdl0a463cf78de5 < RHDL::Sim::Component')
+      expect(source).to include('"eReg_SavestateV__vhdl_0a463cf78de5"')
     end
 
     it 'raises integer module parameters into DSL parameter declarations' do
@@ -689,6 +891,30 @@ RSpec.describe RHDL::Codegen::CIRCT::Raise do
       expect(generated).to include('class Simple')
       expect(generated).to include('behavior do')
       expect(generated).to include('y <= (a + b)')
+    end
+
+    it 'writes readable snake-case file names for mixed-case imported module names' do
+      mod = ir::ModuleOp.new(
+        name: 'eReg_SavestateV__vhdl_0a463cf78de5',
+        ports: [ir::Port.new(name: :Dout, direction: :out, width: 8)],
+        nets: [],
+        regs: [],
+        assigns: [ir::Assign.new(target: :Dout, expr: ir::Literal.new(value: 0, width: 8))],
+        processes: [],
+        instances: [],
+        memories: [],
+        write_ports: [],
+        sync_read_ports: [],
+        parameters: {}
+      )
+
+      result = described_class.to_dsl(mod, out_dir: tmp_dir, top: 'eReg_SavestateV__vhdl_0a463cf78de5')
+      expect(result.success?).to be(true)
+      expect(result.files_written).to eq([File.join(tmp_dir, 'e_reg_savestate_v__vhdl_0a463cf78de5.rb')])
+
+      generated = File.read(result.files_written.first)
+      expect(generated).to include('class ERegSavestateVVhdl0a463cf78de5')
+      expect(generated).not_to include('class M12egSavestat12Vhdl0a463cf78de5')
     end
 
     it 'preserves DSL <= assignment statements when format mode is enabled' do

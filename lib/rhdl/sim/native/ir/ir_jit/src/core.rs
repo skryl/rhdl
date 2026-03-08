@@ -13,6 +13,16 @@ use cranelift::prelude::*;
 use cranelift_jit::{JITBuilder, JITModule};
 use cranelift_module::{Linkage, Module};
 
+use crate::signal_value::{
+    deserialize_optional_signal_value,
+    deserialize_signal_values,
+    deserialize_signed_signal_value,
+    SignalValue,
+    SignedSignalValue,
+};
+
+type SimValue = u128;
+
 // ============================================================================
 // IR Data Structures
 // ============================================================================
@@ -46,7 +56,8 @@ pub struct RegDef {
     pub name: String,
     pub width: usize,
     #[serde(default)]
-    pub reset_value: Option<u64>,
+    #[serde(deserialize_with = "deserialize_optional_signal_value")]
+    pub reset_value: Option<SignalValue>,
 }
 
 /// Expression types (JSON deserialization)
@@ -54,7 +65,11 @@ pub struct RegDef {
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ExprDef {
     Signal { name: String, width: usize },
-    Literal { value: i64, width: usize },
+    Literal {
+        #[serde(deserialize_with = "deserialize_signed_signal_value")]
+        value: SignedSignalValue,
+        width: usize
+    },
     #[serde(alias = "unary")]
     UnaryOp { op: String, operand: Box<ExprDef>, width: usize },
     #[serde(alias = "binary")]
@@ -107,7 +122,8 @@ pub struct MemoryDef {
     #[allow(dead_code)]
     pub width: usize,
     #[serde(default)]
-    pub initial_data: Vec<u64>,
+    #[serde(deserialize_with = "deserialize_signal_values")]
+    pub initial_data: Vec<SignalValue>,
 }
 
 /// Memory write port definition (synchronous)
@@ -313,7 +329,7 @@ fn reg_to_normalized_value(value: &Value) -> Result<Value, String> {
     out.insert("width".to_string(), Value::from(value_to_u64(obj.get("width"))));
     if let Some(reset_value) = obj.get("reset_value") {
         if !reset_value.is_null() {
-            out.insert("reset_value".to_string(), Value::from(value_to_i64(Some(reset_value))));
+            out.insert("reset_value".to_string(), reset_value.clone());
         }
     }
     Ok(Value::Object(out))
@@ -515,10 +531,7 @@ fn expr_to_normalized_value(expr: Option<&Value>) -> Result<Value, String> {
             value_to_string(obj.get("name")),
             value_to_usize(obj.get("width")),
         )),
-        "literal" => Ok(literal_expr(
-            value_to_i64(obj.get("value")),
-            value_to_usize(obj.get("width")),
-        )),
+        "literal" => Ok(literal_expr_from_json(obj.get("value"), value_to_usize(obj.get("width")))),
         "unary" => Ok(unary_expr(
             &value_to_string(obj.get("op")),
             expr_to_normalized_value(obj.get("operand"))?,
@@ -717,6 +730,14 @@ fn literal_expr(value: i64, width: usize) -> Value {
     Value::Object(out)
 }
 
+fn literal_expr_from_json(value: Option<&Value>, width: usize) -> Value {
+    let mut out = Map::new();
+    out.insert("kind".to_string(), Value::String("literal".to_string()));
+    out.insert("value".to_string(), value.cloned().unwrap_or(Value::from(0)));
+    out.insert("width".to_string(), Value::from(width as u64));
+    Value::Object(out)
+}
+
 fn signal_expr(name: String, width: usize) -> Value {
     let mut out = Map::new();
     out.insert("kind".to_string(), Value::String("signal".to_string()));
@@ -785,11 +806,15 @@ struct ResolvedSyncReadPort {
 // JIT-compiled function types
 // ============================================================================
 
-/// Function signature for evaluate: fn(signals: *mut u64, mem_ptrs: *const *const u64) -> ()
-pub type EvaluateFn = unsafe extern "C" fn(*mut u64, *const *const u64);
+/// Function signature for evaluate: fn(signals: *mut u128, mem_ptrs: *const *const u128) -> ()
+pub type EvaluateFn = unsafe extern "C" fn(*mut SimValue, *const *const SimValue);
 
-/// Function signature for tick: fn(signals: *mut u64, next_regs: *mut u64, mem_ptrs: *const *const u64) -> ()
-pub type TickFn = unsafe extern "C" fn(*mut u64, *mut u64, *const *const u64);
+/// Function signature for tick: fn(signals: *mut u128, next_regs: *mut u128, mem_ptrs: *const *const u128) -> ()
+pub type TickFn = unsafe extern "C" fn(*mut SimValue, *mut SimValue, *const *const SimValue);
+
+unsafe extern "C" fn noop_evaluate_fn(_signals: *mut SimValue, _mem_ptrs: *const *const SimValue) {}
+
+unsafe extern "C" fn noop_tick_fn(_signals: *mut SimValue, _next_regs: *mut SimValue, _mem_ptrs: *const *const SimValue) {}
 
 // ============================================================================
 // Cranelift JIT Compiler
@@ -845,8 +870,20 @@ impl JitCompiler {
         self.mem_depths = mem_depths;
     }
 
-    fn compile_mask(width: usize) -> u64 {
-        if width >= 64 { u64::MAX } else { (1u64 << width) - 1 }
+    fn compile_mask(width: usize) -> SimValue {
+        if width == 0 {
+            0
+        } else if width >= 128 {
+            SimValue::MAX
+        } else {
+            (1u128 << width) - 1
+        }
+    }
+
+    fn emit_const(builder: &mut FunctionBuilder, value: SimValue) -> cranelift::prelude::Value {
+        let low = builder.ins().iconst(types::I64, value as u64 as i64);
+        let high = builder.ins().iconst(types::I64, (value >> 64) as u64 as i64);
+        builder.ins().iconcat(low, high)
     }
 
     /// Compile an expression, returning the Cranelift value
@@ -857,21 +894,22 @@ impl JitCompiler {
         signals_ptr: cranelift::prelude::Value,
         mem_ptrs: &[cranelift::prelude::Value],
     ) -> cranelift::prelude::Value {
+        let pointer_type = builder.func.dfg.value_type(signals_ptr);
         match expr {
             ExprDef::Signal { name, .. } => {
                 let idx = *self.name_to_idx.get(name).unwrap_or(&0);
-                let offset = (idx * 8) as i32;
-                builder.ins().load(types::I64, MemFlags::trusted(), signals_ptr, offset)
+                let offset = (idx * std::mem::size_of::<SimValue>()) as i32;
+                builder.ins().load(types::I128, MemFlags::trusted(), signals_ptr, offset)
             }
             ExprDef::Literal { value, width } => {
                 let mask = Self::compile_mask(*width);
-                let masked = (*value as u64) & mask;
-                builder.ins().iconst(types::I64, masked as i64)
+                let masked = (*value as i128 as SimValue) & mask;
+                Self::emit_const(builder, masked)
             }
             ExprDef::UnaryOp { op, operand, width } => {
                 let src = self.compile_expr(builder, operand, signals_ptr, mem_ptrs);
                 let mask = Self::compile_mask(*width);
-                let mask_val = builder.ins().iconst(types::I64, mask as i64);
+                let mask_val = Self::emit_const(builder, mask);
 
                 match op.as_str() {
                     "~" | "not" => {
@@ -881,19 +919,19 @@ impl JitCompiler {
                     "&" | "reduce_and" => {
                         let op_width = Self::expr_width(operand, &self.widths, &self.name_to_idx);
                         let op_mask = Self::compile_mask(op_width);
-                        let op_mask_val = builder.ins().iconst(types::I64, op_mask as i64);
+                        let op_mask_val = Self::emit_const(builder, op_mask);
                         let masked = builder.ins().band(src, op_mask_val);
                         let cmp = builder.ins().icmp(IntCC::Equal, masked, op_mask_val);
-                        builder.ins().uextend(types::I64, cmp)
+                        builder.ins().uextend(types::I128, cmp)
                     }
                     "|" | "reduce_or" => {
-                        let zero = builder.ins().iconst(types::I64, 0);
+                        let zero = builder.ins().iconst(types::I128, 0);
                         let cmp = builder.ins().icmp(IntCC::NotEqual, src, zero);
-                        builder.ins().uextend(types::I64, cmp)
+                        builder.ins().uextend(types::I128, cmp)
                     }
                     "^" | "reduce_xor" => {
                         let popcnt = builder.ins().popcnt(src);
-                        let one = builder.ins().iconst(types::I64, 1);
+                        let one = builder.ins().iconst(types::I128, 1);
                         builder.ins().band(popcnt, one)
                     }
                     _ => src,
@@ -903,7 +941,7 @@ impl JitCompiler {
                 let l = self.compile_expr(builder, left, signals_ptr, mem_ptrs);
                 let r = self.compile_expr(builder, right, signals_ptr, mem_ptrs);
                 let mask = Self::compile_mask(*width);
-                let mask_val = builder.ins().iconst(types::I64, mask as i64);
+                let mask_val = Self::emit_const(builder, mask);
 
                 let result = match op.as_str() {
                     "&" => builder.ins().band(l, r),
@@ -913,52 +951,52 @@ impl JitCompiler {
                     "-" => builder.ins().isub(l, r),
                     "*" => builder.ins().imul(l, r),
                     "/" => {
-                        let zero = builder.ins().iconst(types::I64, 0);
-                        let one = builder.ins().iconst(types::I64, 1);
+                        let zero = builder.ins().iconst(types::I128, 0);
+                        let one = builder.ins().iconst(types::I128, 1);
                         let is_zero = builder.ins().icmp(IntCC::Equal, r, zero);
                         let safe_r = builder.ins().select(is_zero, one, r);
                         let div_result = builder.ins().udiv(l, safe_r);
                         builder.ins().select(is_zero, zero, div_result)
                     }
                     "%" => {
-                        let zero = builder.ins().iconst(types::I64, 0);
-                        let one = builder.ins().iconst(types::I64, 1);
+                        let zero = builder.ins().iconst(types::I128, 0);
+                        let one = builder.ins().iconst(types::I128, 1);
                         let is_zero = builder.ins().icmp(IntCC::Equal, r, zero);
                         let safe_r = builder.ins().select(is_zero, one, r);
                         let mod_result = builder.ins().urem(l, safe_r);
                         builder.ins().select(is_zero, zero, mod_result)
                     }
                     "<<" => {
-                        let shift = builder.ins().ireduce(types::I32, r);
+                        let shift = builder.ins().ireduce(types::I8, r);
                         builder.ins().ishl(l, shift)
                     }
                     ">>" => {
-                        let shift = builder.ins().ireduce(types::I32, r);
+                        let shift = builder.ins().ireduce(types::I8, r);
                         builder.ins().ushr(l, shift)
                     }
                     "==" => {
                         let cmp = builder.ins().icmp(IntCC::Equal, l, r);
-                        builder.ins().uextend(types::I64, cmp)
+                        builder.ins().uextend(types::I128, cmp)
                     }
                     "!=" => {
                         let cmp = builder.ins().icmp(IntCC::NotEqual, l, r);
-                        builder.ins().uextend(types::I64, cmp)
+                        builder.ins().uextend(types::I128, cmp)
                     }
                     "<" => {
                         let cmp = builder.ins().icmp(IntCC::UnsignedLessThan, l, r);
-                        builder.ins().uextend(types::I64, cmp)
+                        builder.ins().uextend(types::I128, cmp)
                     }
                     ">" => {
                         let cmp = builder.ins().icmp(IntCC::UnsignedGreaterThan, l, r);
-                        builder.ins().uextend(types::I64, cmp)
+                        builder.ins().uextend(types::I128, cmp)
                     }
                     "<=" | "le" => {
                         let cmp = builder.ins().icmp(IntCC::UnsignedLessThanOrEqual, l, r);
-                        builder.ins().uextend(types::I64, cmp)
+                        builder.ins().uextend(types::I128, cmp)
                     }
                     ">=" => {
                         let cmp = builder.ins().icmp(IntCC::UnsignedGreaterThanOrEqual, l, r);
-                        builder.ins().uextend(types::I64, cmp)
+                        builder.ins().uextend(types::I128, cmp)
                     }
                     _ => l,
                 };
@@ -970,52 +1008,52 @@ impl JitCompiler {
                 let t = self.compile_expr(builder, when_true, signals_ptr, mem_ptrs);
                 let f = self.compile_expr(builder, when_false, signals_ptr, mem_ptrs);
 
-                let zero = builder.ins().iconst(types::I64, 0);
+                let zero = builder.ins().iconst(types::I128, 0);
                 let cond_bool = builder.ins().icmp(IntCC::NotEqual, cond, zero);
                 let result = builder.ins().select(cond_bool, t, f);
 
                 let mask = Self::compile_mask(*width);
-                let mask_val = builder.ins().iconst(types::I64, mask as i64);
+                let mask_val = Self::emit_const(builder, mask);
                 builder.ins().band(result, mask_val)
             }
             ExprDef::Slice { base, low, width, .. } => {
                 let src = self.compile_expr(builder, base, signals_ptr, mem_ptrs);
                 let mask = Self::compile_mask(*width);
-                let mask_val = builder.ins().iconst(types::I64, mask as i64);
-                let shift = builder.ins().iconst(types::I32, *low as i64);
+                let mask_val = Self::emit_const(builder, mask);
+                let shift = builder.ins().iconst(types::I8, *low as i64);
                 let shifted = builder.ins().ushr(src, shift);
                 builder.ins().band(shifted, mask_val)
             }
             ExprDef::Concat { parts, width } => {
-                let mut result = builder.ins().iconst(types::I64, 0);
-                let mut shift_acc = 0u64;
+                let mut result = builder.ins().iconst(types::I128, 0);
+                let mut shift_acc = 0u8;
 
                 for part in parts.iter().rev() {
                     let part_val = self.compile_expr(builder, part, signals_ptr, mem_ptrs);
                     let part_width = Self::expr_width(part, &self.widths, &self.name_to_idx);
                     let part_mask = Self::compile_mask(part_width);
-                    let mask_val = builder.ins().iconst(types::I64, part_mask as i64);
+                    let mask_val = Self::emit_const(builder, part_mask);
                     let masked = builder.ins().band(part_val, mask_val);
 
                     if shift_acc > 0 {
-                        let shift = builder.ins().iconst(types::I32, shift_acc as i64);
+                        let shift = builder.ins().iconst(types::I8, shift_acc as i64);
                         let shifted = builder.ins().ishl(masked, shift);
                         result = builder.ins().bor(result, shifted);
                     } else {
                         result = builder.ins().bor(result, masked);
                     }
 
-                    shift_acc += part_width as u64;
+                    shift_acc = shift_acc.saturating_add(part_width.min(128) as u8);
                 }
 
                 let final_mask = Self::compile_mask(*width);
-                let final_mask_val = builder.ins().iconst(types::I64, final_mask as i64);
+                let final_mask_val = Self::emit_const(builder, final_mask);
                 builder.ins().band(result, final_mask_val)
             }
             ExprDef::Resize { expr, width } => {
                 let src = self.compile_expr(builder, expr, signals_ptr, mem_ptrs);
                 let mask = Self::compile_mask(*width);
-                let mask_val = builder.ins().iconst(types::I64, mask as i64);
+                let mask_val = Self::emit_const(builder, mask);
                 builder.ins().band(src, mask_val)
             }
             ExprDef::MemRead { memory, addr, width } => {
@@ -1027,21 +1065,22 @@ impl JitCompiler {
                 if mem_idx < mem_ptrs.len() {
                     let mem_ptr = mem_ptrs[mem_idx];
 
-                    let depth_val = builder.ins().iconst(types::I64, depth as i64);
+                    let depth_val = Self::emit_const(builder, depth as SimValue);
                     let bounded_addr = builder.ins().urem(addr_val, depth_val);
 
-                    let eight = builder.ins().iconst(types::I64, 8);
-                    let byte_offset = builder.ins().imul(bounded_addr, eight);
+                    let elem_size = Self::emit_const(builder, std::mem::size_of::<SimValue>() as SimValue);
+                    let byte_offset = builder.ins().imul(bounded_addr, elem_size);
+                    let byte_offset_ptr = builder.ins().ireduce(pointer_type, byte_offset);
 
-                    let elem_ptr = builder.ins().iadd(mem_ptr, byte_offset);
+                    let elem_ptr = builder.ins().iadd(mem_ptr, byte_offset_ptr);
 
-                    let loaded = builder.ins().load(types::I64, MemFlags::trusted(), elem_ptr, 0);
+                    let loaded = builder.ins().load(types::I128, MemFlags::trusted(), elem_ptr, 0);
 
                     let mask = Self::compile_mask(*width);
-                    let mask_val = builder.ins().iconst(types::I64, mask as i64);
+                    let mask_val = Self::emit_const(builder, mask);
                     builder.ins().band(loaded, mask_val)
                 } else {
-                    builder.ins().iconst(types::I64, 0)
+                    builder.ins().iconst(types::I128, 0)
                 }
             }
         }
@@ -1215,7 +1254,7 @@ impl JitCompiler {
 
         let mut mem_ptrs: Vec<cranelift::prelude::Value> = Vec::new();
         for i in 0..num_memories {
-            let offset = (i * 8) as i32;
+            let offset = (i * std::mem::size_of::<*const SimValue>()) as i32;
             let mem_ptr = builder.ins().load(pointer_type, MemFlags::trusted(), mem_ptrs_base, offset);
             mem_ptrs.push(mem_ptr);
         }
@@ -1230,7 +1269,7 @@ impl JitCompiler {
                 };
                 let value = self.compile_expr(&mut builder, &assign.expr, signals_ptr, &mem_ptrs);
 
-                let offset = (target_idx * 8) as i32;
+                let offset = (target_idx * std::mem::size_of::<SimValue>()) as i32;
                 builder.ins().store(MemFlags::trusted(), value, signals_ptr, offset);
             }
         }
@@ -1278,14 +1317,14 @@ impl JitCompiler {
 
         let mut mem_ptrs: Vec<cranelift::prelude::Value> = Vec::new();
         for i in 0..num_memories {
-            let offset = (i * 8) as i32;
+            let offset = (i * std::mem::size_of::<*const SimValue>()) as i32;
             let mem_ptr = builder.ins().load(pointer_type, MemFlags::trusted(), mem_ptrs_base, offset);
             mem_ptrs.push(mem_ptr);
         }
 
         for (i, (_target, expr)) in seq_assigns.iter().enumerate() {
             let value = self.compile_expr(&mut builder, expr, signals_ptr, &mem_ptrs);
-            let offset = (i * 8) as i32;
+            let offset = (i * std::mem::size_of::<SimValue>()) as i32;
             builder.ins().store(MemFlags::trusted(), value, next_regs_ptr, offset);
         }
 
@@ -1310,6 +1349,8 @@ impl JitCompiler {
 pub struct CoreSimulator {
     /// Signal values
     pub signals: Vec<u64>,
+    /// Full-width signal values used by the runtime evaluator
+    wide_signals: Vec<SimValue>,
     /// Signal widths
     pub widths: Vec<usize>,
     /// Signal name to index mapping
@@ -1323,7 +1364,9 @@ pub struct CoreSimulator {
     /// Register count
     reg_count: usize,
     /// Next register values buffer
-    pub next_regs: Vec<u64>,
+    pub next_regs: Vec<SimValue>,
+    /// Original combinational assignments for runtime evaluation
+    comb_assigns: Vec<(usize, ExprDef)>,
     /// Sequential assignment target indices
     pub seq_targets: Vec<usize>,
     /// Original sequential assignment expressions for runtime sampling
@@ -1342,8 +1385,12 @@ pub struct CoreSimulator {
 
     /// Memory arrays (for mem_read operations)
     pub memory_arrays: Vec<Vec<u64>>,
+    /// Full-width memory arrays used by the runtime evaluator
+    wide_memory_arrays: Vec<Vec<SimValue>>,
     /// Memory reset snapshots
     memory_reset_arrays: Vec<Vec<u64>>,
+    /// Full-width memory reset snapshots
+    wide_memory_reset_arrays: Vec<Vec<SimValue>>,
     /// Memory name to index mapping
     pub memory_name_to_idx: HashMap<String, usize>,
     /// Memory write ports
@@ -1352,7 +1399,7 @@ pub struct CoreSimulator {
     sync_read_ports: Vec<ResolvedSyncReadPort>,
 
     /// Reset values for registers (signal index -> reset value)
-    reset_values: Vec<(usize, u64)>,
+    reset_values: Vec<(usize, SimValue)>,
 }
 
 impl CoreSimulator {
@@ -1387,11 +1434,11 @@ impl CoreSimulator {
 
         // Registers (with reset values)
         let reg_count = ir.regs.len();
-        let mut reset_values: Vec<(usize, u64)> = Vec::new();
+        let mut reset_values: Vec<(usize, SimValue)> = Vec::new();
         for reg in &ir.regs {
             let idx = signals.len();
-            let reset_val = reg.reset_value.unwrap_or(0);
-            signals.push(reset_val);
+            let reset_val = reg.reset_value.unwrap_or(0) as SimValue;
+            signals.push(reset_val as u64);
             widths.push(reg.width);
             name_to_idx.insert(reg.name.clone(), idx);
             if reset_val != 0 {
@@ -1429,7 +1476,7 @@ impl CoreSimulator {
         let prev_clock_values = vec![0u64; clock_indices.len()];
 
         let seq_exprs: Vec<ExprDef> = seq_assigns.iter().map(|(_, expr)| expr.clone()).collect();
-        let next_regs = vec![0u64; seq_targets.len()];
+        let next_regs = vec![0u128; seq_targets.len()];
 
         // Build memory arrays
         let mut memory_arrays: Vec<Vec<u64>> = Vec::new();
@@ -1441,7 +1488,7 @@ impl CoreSimulator {
             let mut data = vec![0u64; mem.depth];
             for (i, &val) in mem.initial_data.iter().enumerate() {
                 if i < data.len() {
-                    data[i] = val;
+                    data[i] = val as u64;
                 }
             }
             memory_arrays.push(data);
@@ -1450,8 +1497,22 @@ impl CoreSimulator {
             mem_widths.push(mem.width);
         }
 
+        let wide_signals: Vec<SimValue> = signals.iter().map(|&value| value as SimValue).collect();
+        let wide_memory_arrays: Vec<Vec<SimValue>> = memory_arrays.iter()
+            .map(|mem| mem.iter().map(|&value| value as SimValue).collect())
+            .collect();
         let memory_reset_arrays = memory_arrays.clone();
-        let num_memories = memory_arrays.len();
+        let wide_memory_reset_arrays = wide_memory_arrays.clone();
+        let mut compiler = JitCompiler::new()?;
+        compiler.set_mappings(name_to_idx.clone(), widths.clone(), mem_name_to_idx.clone(), mem_depths.clone());
+        let comb_assigns: Vec<(usize, ExprDef)> = compiler.compute_assignment_levels(&ir.assigns)
+            .into_iter()
+            .flatten()
+            .filter_map(|assign_idx| {
+                let assign = ir.assigns.get(assign_idx)?;
+                name_to_idx.get(&assign.target).copied().map(|idx| (idx, assign.expr.clone()))
+            })
+            .collect();
 
         let mut write_ports: Vec<ResolvedWritePort> = Vec::new();
         for wp in &ir.write_ports {
@@ -1494,15 +1555,12 @@ impl CoreSimulator {
             });
         }
 
-        // Create JIT compiler and compile functions
-        let mut compiler = JitCompiler::new()?;
-        compiler.set_mappings(name_to_idx.clone(), widths.clone(), mem_name_to_idx.clone(), mem_depths);
-
-        let evaluate_fn = compiler.compile_evaluate(&ir.assigns, num_memories)?;
-        let seq_sample_fn = compiler.compile_seq_sample(&seq_assigns, num_memories)?;
+        let evaluate_fn = noop_evaluate_fn as EvaluateFn;
+        let seq_sample_fn = noop_tick_fn as TickFn;
 
         Ok(Self {
             signals,
+            wide_signals,
             widths,
             name_to_idx,
             input_names,
@@ -1510,6 +1568,7 @@ impl CoreSimulator {
             signal_count,
             reg_count,
             next_regs,
+            comb_assigns,
             seq_targets,
             seq_exprs,
             seq_clocks,
@@ -1518,7 +1577,9 @@ impl CoreSimulator {
             evaluate_fn,
             seq_sample_fn,
             memory_arrays,
+            wide_memory_arrays,
             memory_reset_arrays,
+            wide_memory_reset_arrays,
             memory_name_to_idx: mem_name_to_idx,
             write_ports,
             sync_read_ports,
@@ -1526,8 +1587,50 @@ impl CoreSimulator {
         })
     }
 
-    fn compute_mask(width: usize) -> u64 {
-        if width >= 64 { u64::MAX } else { (1u64 << width) - 1 }
+    pub fn compute_mask(width: usize) -> SimValue {
+        if width == 0 {
+            0
+        } else if width >= 128 {
+            SimValue::MAX
+        } else {
+            (1u128 << width) - 1
+        }
+    }
+
+    #[inline(always)]
+    fn low_word(value: SimValue) -> u64 {
+        (value & 0xFFFF_FFFF_FFFF_FFFF) as u64
+    }
+
+    #[inline(always)]
+    pub fn peek_word_by_idx(&self, idx: usize, word_idx: usize) -> u64 {
+        if idx >= self.wide_signals.len() || word_idx > 1 {
+            return 0;
+        }
+        let width = self.widths.get(idx).copied().unwrap_or(0);
+        if word_idx * 64 >= width {
+            return 0;
+        }
+        let shift = (word_idx * 64) as u32;
+        ((self.wide_signals[idx] >> shift) & 0xFFFF_FFFF_FFFF_FFFF) as u64
+    }
+
+    #[inline(always)]
+    pub fn poke_word_by_idx(&mut self, idx: usize, word_idx: usize, value: u64) {
+        if idx >= self.signals.len() || word_idx > 1 {
+            return;
+        }
+
+        let width = self.widths.get(idx).copied().unwrap_or(0);
+        if width == 0 || word_idx * 64 >= width {
+            return;
+        }
+
+        let shift = (word_idx * 64) as u32;
+        let word_mask = (0xFFFF_FFFF_FFFF_FFFFu128) << shift;
+        let merged = (self.wide_signals[idx] & !word_mask) | ((value as SimValue) << shift);
+        self.wide_signals[idx] = merged & Self::compute_mask(width);
+        self.signals[idx] = Self::low_word(self.wide_signals[idx]);
     }
 
     fn sample_next_regs(&mut self) {
@@ -1556,15 +1659,15 @@ impl CoreSimulator {
         }
     }
 
-    fn eval_expr_runtime(&self, expr: &ExprDef) -> u64 {
+    fn eval_expr_runtime(&self, expr: &ExprDef) -> SimValue {
         match expr {
             ExprDef::Signal { name, width } => {
                 let val = self.name_to_idx.get(name)
-                    .and_then(|&idx| self.signals.get(idx).copied())
+                    .and_then(|&idx| self.wide_signals.get(idx).copied())
                     .unwrap_or(0);
                 val & Self::compute_mask(*width)
             }
-            ExprDef::Literal { value, width } => (*value as u64) & Self::compute_mask(*width),
+            ExprDef::Literal { value, width } => (*value as i128 as SimValue) & Self::compute_mask(*width),
             ExprDef::UnaryOp { op, operand, width } => {
                 let src = self.eval_expr_runtime(operand);
                 let mask = Self::compute_mask(*width);
@@ -1576,7 +1679,7 @@ impl CoreSimulator {
                         if (src & op_mask) == op_mask { 1 } else { 0 }
                     }
                     "|" | "reduce_or" => if src != 0 { 1 } else { 0 },
-                    "^" | "reduce_xor" => (src.count_ones() as u64) & 1,
+                    "^" | "reduce_xor" => (src.count_ones() as SimValue) & 1,
                     _ => src & mask,
                 }
             }
@@ -1593,8 +1696,8 @@ impl CoreSimulator {
                     "*" => l.wrapping_mul(r),
                     "/" => if r == 0 { 0 } else { l / r },
                     "%" => if r == 0 { 0 } else { l % r },
-                    "<<" => if r >= 64 { 0 } else { l << r },
-                    ">>" => if r >= 64 { 0 } else { l >> r },
+                    "<<" => if r >= 128 { 0 } else { l << (r as u32) },
+                    ">>" => if r >= 128 { 0 } else { l >> (r as u32) },
                     "==" => if l == r { 1 } else { 0 },
                     "!=" => if l != r { 1 } else { 0 },
                     "<" => if l < r { 1 } else { 0 },
@@ -1616,15 +1719,15 @@ impl CoreSimulator {
             }
             ExprDef::Slice { base, low, width, .. } => {
                 let base_val = self.eval_expr_runtime(base);
-                let shifted = if *low >= 64 { 0 } else { base_val >> (*low as u64) };
+                let shifted = if *low >= 128 { 0 } else { base_val >> (*low as u32) };
                 shifted & Self::compute_mask(*width)
             }
             ExprDef::Concat { parts, width } => {
-                let mut result = 0u64;
+                let mut result = 0u128;
                 for part in parts {
                     let part_width = Self::runtime_expr_width(part, &self.widths, &self.name_to_idx);
                     let part_val = self.eval_expr_runtime(part) & Self::compute_mask(part_width);
-                    result = if part_width >= 64 { 0 } else { result << part_width };
+                    result = if part_width >= 128 { 0 } else { result << part_width };
                     result |= part_val;
                     result &= Self::compute_mask(*width);
                 }
@@ -1635,7 +1738,7 @@ impl CoreSimulator {
                 let Some(&memory_idx) = self.memory_name_to_idx.get(memory) else {
                     return 0;
                 };
-                let Some(mem) = self.memory_arrays.get(memory_idx) else {
+                let Some(mem) = self.wide_memory_arrays.get(memory_idx) else {
                     return 0;
                 };
                 if mem.is_empty() {
@@ -1652,9 +1755,9 @@ impl CoreSimulator {
             return;
         }
 
-        let mut writes: Vec<(usize, usize, u64)> = Vec::new();
+        let mut writes: Vec<(usize, usize, SimValue)> = Vec::new();
         for wp in &self.write_ports {
-            if self.signals.get(wp.clock_idx).copied().unwrap_or(0) == 0 {
+            if self.wide_signals.get(wp.clock_idx).copied().unwrap_or(0) == 0 {
                 continue;
             }
             if (self.eval_expr_runtime(&wp.enable) & 1) == 0 {
@@ -1670,7 +1773,7 @@ impl CoreSimulator {
         }
 
         for (memory_idx, addr, data) in writes {
-            if let Some(mem) = self.memory_arrays.get_mut(memory_idx) {
+            if let Some(mem) = self.wide_memory_arrays.get_mut(memory_idx) {
                 if addr < mem.len() {
                     mem[addr] = data;
                 }
@@ -1683,9 +1786,9 @@ impl CoreSimulator {
             return;
         }
 
-        let mut updates: Vec<(usize, u64)> = Vec::new();
+        let mut updates: Vec<(usize, SimValue)> = Vec::new();
         for rp in &self.sync_read_ports {
-            if self.signals.get(rp.clock_idx).copied().unwrap_or(0) == 0 {
+            if self.wide_signals.get(rp.clock_idx).copied().unwrap_or(0) == 0 {
                 continue;
             }
             if let Some(enable) = &rp.enable {
@@ -1694,7 +1797,7 @@ impl CoreSimulator {
                 }
             }
 
-            let Some(mem) = self.memory_arrays.get(rp.memory_idx) else {
+            let Some(mem) = self.wide_memory_arrays.get(rp.memory_idx) else {
                 continue;
             };
             if mem.is_empty() {
@@ -1707,38 +1810,71 @@ impl CoreSimulator {
         }
 
         for (idx, value) in updates {
-            if idx < self.signals.len() {
-                self.signals[idx] = value;
+            if idx < self.wide_signals.len() {
+                self.wide_signals[idx] = value;
             }
         }
     }
 
     pub fn poke(&mut self, name: &str, value: u64) -> Result<(), String> {
+        self.poke_wide(name, value as SimValue)
+    }
+
+    pub fn poke_wide(&mut self, name: &str, value: SimValue) -> Result<(), String> {
         let idx = *self.name_to_idx.get(name)
             .ok_or_else(|| format!("Unknown signal: {}", name))?;
         let mask = Self::compute_mask(self.widths[idx]);
-        self.signals[idx] = value & mask;
+        self.wide_signals[idx] = value & mask;
+        self.signals[idx] = Self::low_word(self.wide_signals[idx]);
+        Ok(())
+    }
+
+    pub fn poke_word_by_name(&mut self, name: &str, word_idx: usize, value: u64) -> Result<(), String> {
+        let idx = *self.name_to_idx.get(name)
+            .ok_or_else(|| format!("Unknown signal: {}", name))?;
+        self.poke_word_by_idx(idx, word_idx, value);
         Ok(())
     }
 
     pub fn peek(&self, name: &str) -> Result<u64, String> {
+        Ok(Self::low_word(self.peek_wide(name)?))
+    }
+
+    pub fn peek_wide(&self, name: &str) -> Result<SimValue, String> {
         let idx = *self.name_to_idx.get(name)
             .ok_or_else(|| format!("Unknown signal: {}", name))?;
-        Ok(self.signals[idx])
+        Ok(self.wide_signals[idx])
+    }
+
+    pub fn peek_word_by_name(&self, name: &str, word_idx: usize) -> Result<u64, String> {
+        let idx = *self.name_to_idx.get(name)
+            .ok_or_else(|| format!("Unknown signal: {}", name))?;
+        Ok(self.peek_word_by_idx(idx, word_idx))
     }
 
     #[inline(always)]
     pub fn poke_by_idx(&mut self, idx: usize, value: u64) {
-        if idx < self.signals.len() {
+        self.poke_wide_by_idx(idx, value as SimValue);
+    }
+
+    #[inline(always)]
+    pub fn poke_wide_by_idx(&mut self, idx: usize, value: SimValue) {
+        if idx < self.wide_signals.len() {
             let mask = Self::compute_mask(self.widths[idx]);
-            self.signals[idx] = value & mask;
+            self.wide_signals[idx] = value & mask;
+            self.signals[idx] = Self::low_word(self.wide_signals[idx]);
         }
     }
 
     #[inline(always)]
     pub fn peek_by_idx(&self, idx: usize) -> u64 {
+        Self::low_word(self.peek_wide_by_idx(idx))
+    }
+
+    #[inline(always)]
+    pub fn peek_wide_by_idx(&self, idx: usize) -> SimValue {
         if idx < self.signals.len() {
-            self.signals[idx]
+            self.wide_signals[idx]
         } else {
             0
         }
@@ -1748,22 +1884,56 @@ impl CoreSimulator {
         self.name_to_idx.get(name).copied()
     }
 
+    fn sync_wide_from_low_views(&mut self) {
+        for (idx, &value) in self.signals.iter().enumerate() {
+            if idx < self.wide_signals.len() && self.widths.get(idx).copied().unwrap_or(0) <= 64 {
+                self.wide_signals[idx] = Self::set_low_word(self.wide_signals[idx], self.widths[idx], value);
+            }
+        }
+
+        for (low_mem, wide_mem) in self.memory_arrays.iter().zip(self.wide_memory_arrays.iter_mut()) {
+            for (idx, &value) in low_mem.iter().enumerate() {
+                if idx < wide_mem.len() {
+                    wide_mem[idx] = value as SimValue;
+                }
+            }
+        }
+    }
+
+    fn sync_low_views_from_wide(&mut self) {
+        for (idx, value) in self.wide_signals.iter().copied().enumerate() {
+            if idx < self.signals.len() {
+                self.signals[idx] = Self::low_word(value);
+            }
+        }
+
+        for (wide_mem, low_mem) in self.wide_memory_arrays.iter().zip(self.memory_arrays.iter_mut()) {
+            for (idx, &value) in wide_mem.iter().enumerate() {
+                if idx < low_mem.len() {
+                    low_mem[idx] = Self::low_word(value);
+                }
+            }
+        }
+    }
+
+    #[inline(always)]
+    fn set_low_word(current: SimValue, width: usize, value: u64) -> SimValue {
+        let merged = (current & !0xFFFF_FFFF_FFFF_FFFFu128) | (value as SimValue);
+        merged & Self::compute_mask(width)
+    }
+
     #[inline(always)]
     fn evaluate_no_clock_capture(&mut self) {
-        let mem_ptrs: Vec<*const u64> = self.memory_arrays.iter()
-            .map(|arr| arr.as_ptr())
-            .collect();
-        unsafe {
-            (self.evaluate_fn)(
-                self.signals.as_mut_ptr(),
-                mem_ptrs.as_ptr()
-            );
+        self.sync_wide_from_low_views();
+        for (target_idx, expr) in &self.comb_assigns {
+            self.wide_signals[*target_idx] = self.eval_expr_runtime(expr) & Self::compute_mask(self.widths[*target_idx]);
         }
     }
 
     #[inline(always)]
     pub fn evaluate(&mut self) {
         self.evaluate_no_clock_capture();
+        self.sync_low_views_from_wide();
 
         // Mirror compiler semantics so direct low-phase evaluate() calls record
         // the current clock levels for the next tick() edge check.
@@ -1777,7 +1947,9 @@ impl CoreSimulator {
         // Use prev_clock_values captured by the previous evaluate()/tick() call
         // as the "before" side of edge detection.
         self.evaluate_no_clock_capture();
+        self.sync_low_views_from_wide();
         self.apply_write_ports_level();
+        self.sync_low_views_from_wide();
 
         // Sample ALL register input expressions ONCE
         self.sample_next_regs();
@@ -1799,10 +1971,11 @@ impl CoreSimulator {
         for (i, &target_idx) in self.seq_targets.iter().enumerate() {
             let clk_idx = self.seq_clocks[i];
             if rising_clocks[clk_idx] && !updated[i] {
-                self.signals[target_idx] = self.next_regs[i];
+                self.wide_signals[target_idx] = self.next_regs[i];
                 updated[i] = true;
             }
         }
+        self.sync_low_views_from_wide();
 
         // Iterate for derived clocks
         for _iteration in 0..max_iterations {
@@ -1812,6 +1985,7 @@ impl CoreSimulator {
             }
 
             self.evaluate_no_clock_capture();
+            self.sync_low_views_from_wide();
 
             let mut rising_clocks: Vec<bool> = vec![false; self.signals.len()];
             let mut any_rising = false;
@@ -1831,14 +2005,17 @@ impl CoreSimulator {
             for (i, &target_idx) in self.seq_targets.iter().enumerate() {
                 let clk_idx = self.seq_clocks[i];
                 if rising_clocks[clk_idx] && !updated[i] {
-                    self.signals[target_idx] = self.next_regs[i];
+                    self.wide_signals[target_idx] = self.next_regs[i];
                     updated[i] = true;
                 }
             }
+            self.sync_low_views_from_wide();
         }
 
         self.apply_sync_read_ports_level();
+        self.sync_low_views_from_wide();
         self.evaluate_no_clock_capture();
+        self.sync_low_views_from_wide();
 
         for (i, &clk_idx) in self.clock_indices.iter().enumerate() {
             self.prev_clock_values[i] = self.signals[clk_idx];
@@ -1855,7 +2032,9 @@ impl CoreSimulator {
 
         // Evaluate to propagate external input changes
         self.evaluate_no_clock_capture();
+        self.sync_low_views_from_wide();
         self.apply_write_ports_level();
+        self.sync_low_views_from_wide();
 
         // Sample ALL register input expressions ONCE
         self.sample_next_regs();
@@ -1877,10 +2056,11 @@ impl CoreSimulator {
         for (i, &target_idx) in self.seq_targets.iter().enumerate() {
             let clk_idx = self.seq_clocks[i];
             if rising_clocks[clk_idx] && !updated[i] {
-                self.signals[target_idx] = self.next_regs[i];
+                self.wide_signals[target_idx] = self.next_regs[i];
                 updated[i] = true;
             }
         }
+        self.sync_low_views_from_wide();
 
         // Iterate for derived clocks
         for _iteration in 0..max_iterations {
@@ -1890,6 +2070,7 @@ impl CoreSimulator {
             }
 
             self.evaluate_no_clock_capture();
+            self.sync_low_views_from_wide();
 
             let mut rising_clocks: Vec<bool> = vec![false; self.signals.len()];
             let mut any_rising = false;
@@ -1909,14 +2090,17 @@ impl CoreSimulator {
             for (i, &target_idx) in self.seq_targets.iter().enumerate() {
                 let clk_idx = self.seq_clocks[i];
                 if rising_clocks[clk_idx] && !updated[i] {
-                    self.signals[target_idx] = self.next_regs[i];
+                    self.wide_signals[target_idx] = self.next_regs[i];
                     updated[i] = true;
                 }
             }
+            self.sync_low_views_from_wide();
         }
 
         self.apply_sync_read_ports_level();
+        self.sync_low_views_from_wide();
         self.evaluate_no_clock_capture();
+        self.sync_low_views_from_wide();
 
         // Update prev_clock_values to current values for next cycle
         for (i, &clk_idx) in self.clock_indices.iter().enumerate() {
@@ -1928,8 +2112,11 @@ impl CoreSimulator {
         for val in self.signals.iter_mut() {
             *val = 0;
         }
+        for val in self.wide_signals.iter_mut() {
+            *val = 0;
+        }
         for &(idx, reset_val) in &self.reset_values {
-            self.signals[idx] = reset_val;
+            self.wide_signals[idx] = reset_val;
         }
         for val in self.prev_clock_values.iter_mut() {
             *val = 0;
@@ -1937,6 +2124,10 @@ impl CoreSimulator {
         for (mem, initial) in self.memory_arrays.iter_mut().zip(self.memory_reset_arrays.iter()) {
             mem.clone_from(initial);
         }
+        for (mem, initial) in self.wide_memory_arrays.iter_mut().zip(self.wide_memory_reset_arrays.iter()) {
+            mem.clone_from(initial);
+        }
+        self.sync_low_views_from_wide();
     }
 
     pub fn run_ticks(&mut self, n: usize) {

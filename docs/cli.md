@@ -389,6 +389,9 @@ rhdl examples gameboy import
 
 # Keep the mixed-import workspace for debugging
 rhdl examples gameboy import --workspace tmp/gameboy_ws --keep-workspace
+
+# Keep output/report artifacts even when import diagnostics are present
+rhdl examples gameboy import --no-strict
 ```
 
 ### `import` options
@@ -401,6 +404,7 @@ rhdl examples gameboy import --workspace tmp/gameboy_ws --keep-workspace
 | `--qip FILE` | Override the Quartus QIP manifest path |
 | `--top NAME` | Top module name override (default: `gb`) |
 | `--top-file FILE` | Override the top source file (default: `examples/gameboy/reference/rtl/gb.v`) |
+| `--strategy STRATEGY` | Import strategy (default: `mixed`) |
 | `--keep-workspace` | Keep workspace artifacts after import |
 | `--[no-]clean` | Clean existing output directory contents before writing (default: enabled) |
 | `--[no-]strict` | Treat import issues as failures (default: enabled) |
@@ -431,17 +435,20 @@ rhdl examples ao486 <subcommand> [options]
 # Regenerate examples/ao486/hdl from rtl/system.v
 rhdl examples ao486 import --out examples/ao486/hdl
 
-# Attempt full RTL-tree import first; fallback to stubbed if CIRCT import fails
-rhdl examples ao486 import --out examples/ao486/hdl --strategy tree
+# Force the older top-level stubbed baseline import
+rhdl examples ao486 import --out examples/ao486/hdl --strategy stubbed
 
 # Keep flat output (disable directory mirroring)
-rhdl examples ao486 import --out examples/ao486/hdl --no-maintain-directory-structure
+rhdl examples ao486 import --out examples/ao486/hdl --no-keep-structure
 
 # Keep intermediate CIRCT/import workspace artifacts for debugging
 rhdl examples ao486 import --out examples/ao486/hdl --workspace tmp/ao486_ws --keep-workspace
 
-# Emit import diagnostics/report JSON
+# Emit import diagnostics/report JSON without fallback
 rhdl examples ao486 import --out examples/ao486/hdl --strategy tree --no-fallback --report tmp/ao486_report.json
+
+# Allow the import report/output to be written without AO486 strict-gate failure
+rhdl examples ao486 import --out examples/ao486/hdl --no-strict
 
 # Run bounded parity checks
 rhdl examples ao486 parity
@@ -459,9 +466,55 @@ rhdl examples ao486 verify
 | `--workspace DIR` | Workspace directory for intermediate artifacts |
 | `--report FILE` | Write AO486 import report JSON to this path |
 | `--top NAME` | Top module name override (default: `system`) |
-| `--strategy STRATEGY` | Import strategy: `stubbed` (default) or `tree` (attempts RTL-tree import) |
+| `--strategy STRATEGY` | Import strategy: `tree` (default) or `stubbed` (force top-level baseline) |
 | `--[no-]fallback` | For `tree` strategy, fallback to `stubbed` if CIRCT import fails (default: enabled) |
-| `--[no-]maintain-directory-structure` | Mirror source Verilog directory structure in output DSL paths (default: enabled) |
+| `--[no-]keep-structure` | Keep source Verilog directory structure in output DSL paths (default: enabled) |
+| `--[no-]strict` | Treat importer/raise issues as failures and keep AO486 strict gate enabled (default: enabled) |
+| `--keep-workspace` | Keep workspace artifacts after import |
+| `--[no-]clean` | Clean existing output directory contents before writing (default: enabled) |
+
+---
+
+## Examples SPARC64 Command
+
+Run the SPARC64 CIRCT import baseline for the reference core top.
+
+### Usage
+
+```bash
+rhdl examples sparc64 <subcommand> [options]
+```
+
+### Subcommands
+
+| Subcommand | Description |
+|------------|-------------|
+| `import` | Import the SPARC64 reference top and regenerate raised DSL |
+
+### Examples
+
+```bash
+# Regenerate examples/sparc64/import from the default SPARC64 top
+rhdl examples sparc64 import
+
+# Keep staged import workspace artifacts for debugging
+rhdl examples sparc64 import --workspace tmp/sparc64_ws --keep-workspace
+
+# Override the imported top module explicitly
+rhdl examples sparc64 import --top sparc --top-file examples/sparc64/reference/T1-CPU/rtl/sparc.v
+```
+
+### `import` options
+
+| Option | Description |
+|--------|-------------|
+| `--out DIR` | Output directory for raised DSL (default: `examples/sparc64/import`) |
+| `--workspace DIR` | Workspace directory for intermediate artifacts |
+| `--reference-root DIR` | Override the SPARC64 reference tree root |
+| `--top NAME` | Top module name override (default: `W1`) |
+| `--top-file FILE` | Top source file override (default: `examples/sparc64/reference/Top/W1.v`) |
+| `--[no-]keep-structure` | Keep source directory structure in output DSL paths (default: enabled) |
+| `--[no-]strict` | Treat import issues as failures (default: enabled) |
 | `--keep-workspace` | Keep workspace artifacts after import |
 | `--[no-]clean` | Clean existing output directory contents before writing (default: enabled) |
 

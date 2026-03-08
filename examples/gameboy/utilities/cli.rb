@@ -36,13 +36,32 @@ module RHDL
         end
 
         def run_import(args, out:, err:, importer_class:, program_name:)
+          default_output_dir = importer_constant(importer_class, :DEFAULT_OUTPUT_DIR,
+                                                 RHDL::Examples::GameBoy::Import::SystemImporter::DEFAULT_OUTPUT_DIR)
+          default_top = importer_constant(importer_class, :DEFAULT_TOP,
+                                          RHDL::Examples::GameBoy::Import::SystemImporter::DEFAULT_TOP)
+          default_top_file = importer_constant(importer_class, :DEFAULT_TOP_FILE,
+                                               RHDL::Examples::GameBoy::Import::SystemImporter::DEFAULT_TOP_FILE)
+          default_import_strategy = importer_constant(
+            importer_class,
+            :DEFAULT_IMPORT_STRATEGY,
+            RHDL::Examples::GameBoy::Import::SystemImporter::DEFAULT_IMPORT_STRATEGY
+          )
+          valid_import_strategies = importer_constant(
+            importer_class,
+            :VALID_IMPORT_STRATEGIES,
+            RHDL::Examples::GameBoy::Import::SystemImporter::VALID_IMPORT_STRATEGIES
+          )
+
           options = {
-            output_dir: RHDL::Examples::GameBoy::Import::SystemImporter::DEFAULT_OUTPUT_DIR,
+            output_dir: default_output_dir,
             workspace_dir: nil,
             reference_root: nil,
             qip_path: nil,
             top: nil,
             top_file: nil,
+            import_strategy: default_import_strategy,
+            maintain_directory_structure: true,
             keep_workspace: false,
             clean_output: true,
             strict: true,
@@ -59,15 +78,23 @@ module RHDL
             BANNER
 
             opts.on('--out DIR',
-                    "Output directory for raised DSL (default: #{RHDL::Examples::GameBoy::Import::SystemImporter::DEFAULT_OUTPUT_DIR})") do |v|
+                    "Output directory for raised DSL (default: #{default_output_dir})") do |v|
               options[:output_dir] = v
             end
             opts.on('--workspace DIR', 'Workspace directory for intermediate artifacts') { |v| options[:workspace_dir] = v }
             opts.on('--reference-root DIR', 'Override the Game Boy reference tree root') { |v| options[:reference_root] = v }
             opts.on('--qip FILE', 'Override the Quartus QIP manifest path') { |v| options[:qip_path] = v }
-            opts.on('--top NAME', 'Top module name override (default: gb)') { |v| options[:top] = v }
-            opts.on('--top-file FILE', 'Top source file override (default: examples/gameboy/reference/rtl/gb.v)') do |v|
+            opts.on('--top NAME', "Top module name override (default: #{default_top})") { |v| options[:top] = v }
+            opts.on('--top-file FILE', "Top source file override (default: #{default_top_file})") do |v|
               options[:top_file] = v
+            end
+            opts.on('--strategy STRATEGY', valid_import_strategies,
+                    "Import strategy (default: #{default_import_strategy})") do |v|
+              options[:import_strategy] = v
+            end
+            opts.on('--[no-]keep-structure',
+                    'Keep the raised RHDL output in the source directory structure (default: true)') do |v|
+              options[:maintain_directory_structure] = v
             end
             opts.on('--keep-workspace', 'Keep workspace artifacts after import') { options[:keep_workspace] = true }
             opts.on('--[no-]clean', '--[no-]clean-output',
@@ -96,7 +123,9 @@ module RHDL
             workspace_dir: expand_path(options[:workspace_dir]),
             keep_workspace: options[:keep_workspace],
             clean_output: options[:clean_output],
+            maintain_directory_structure: options[:maintain_directory_structure],
             strict: options[:strict],
+            import_strategy: options[:import_strategy],
             progress: ->(message) { out.puts("GameBoy import step: #{message}") }
           }
           importer_options[:reference_root] = expand_path(options[:reference_root]) if options[:reference_root]
@@ -128,6 +157,8 @@ module RHDL
             mode: :ruby,
             sim: nil,
             hdl_dir: nil,
+            top: nil,
+            use_staged_verilog: false,
             renderer: :color,
             headless: false
           }
@@ -153,6 +184,14 @@ module RHDL
 
             opts.on('--hdl-dir DIR', 'Game Boy HDL directory override (default: examples/gameboy/hdl)') do |v|
               options[:hdl_dir] = File.expand_path(v)
+            end
+
+            opts.on('--top NAME', 'Imported top component/module name override for imported HDL trees') do |v|
+              options[:top] = v
+            end
+
+            opts.on('--use-staged-verilog', 'Use staged imported Verilog artifact when available') do
+              options[:use_staged_verilog] = true
             end
 
             opts.on('--color', 'Use color renderer (default)') do
@@ -254,6 +293,7 @@ module RHDL
           1
         end
 
+
         def handle_import_failure(result, err:)
           diagnostics = Array(result.respond_to?(:diagnostics) ? result.diagnostics : nil)
           diagnostics = ['Game Boy import failed'] if diagnostics.empty?
@@ -265,6 +305,12 @@ module RHDL
           return nil if path.nil? || path.to_s.strip.empty?
 
           File.expand_path(path, Dir.pwd)
+        end
+
+        def importer_constant(importer_class, name, fallback)
+          return fallback unless importer_class.respond_to?(:const_defined?)
+
+          importer_class.const_defined?(name, false) ? importer_class.const_get(name, false) : fallback
         end
       end
     end

@@ -18,9 +18,21 @@ RSpec.describe RHDL::Examples::GameBoy::CLI do
       expect(stdout.string).to include('Usage: bin/gb import [options]')
       expect(stdout.string).to include('--out DIR')
       expect(stdout.string).to include('--workspace DIR')
+      expect(stdout.string).to include('--strategy STRATEGY')
+      expect(stdout.string).to include('--[no-]keep-structure')
       expect(stdout.string).to include('--keep-workspace')
       expect(stdout.string).to include('--[no-]clean')
       expect(stdout.string).to include('--[no-]strict')
+    end
+
+    it 'shows emulator options for imported staged Verilog runs' do
+      status = described_class.run(%w[--help], out: stdout, err: stderr)
+
+      expect(status).to eq(0)
+      expect(stderr.string).to eq('')
+      expect(stdout.string).to include('--hdl-dir DIR')
+      expect(stdout.string).to include('--top NAME')
+      expect(stdout.string).to include('--use-staged-verilog')
     end
 
     it 'runs import with the canonical output dir by default' do
@@ -60,7 +72,11 @@ RSpec.describe RHDL::Examples::GameBoy::CLI do
       )
       expect(fake_importer_class.last_kwargs[:clean_output]).to eq(true)
       expect(fake_importer_class.last_kwargs[:keep_workspace]).to eq(false)
+      expect(fake_importer_class.last_kwargs[:maintain_directory_structure]).to eq(true)
       expect(fake_importer_class.last_kwargs[:strict]).to eq(true)
+      expect(fake_importer_class.last_kwargs[:import_strategy]).to eq(
+        RHDL::Examples::GameBoy::Import::SystemImporter::DEFAULT_IMPORT_STRATEGY
+      )
       expect(stdout.string).to include('Imported Game Boy reference design')
       expect(stdout.string).to include('/tmp/gameboy_import')
     end
@@ -103,6 +119,8 @@ RSpec.describe RHDL::Examples::GameBoy::CLI do
           '--qip', 'examples/gameboy/reference/files.qip',
           '--top-file', 'examples/gameboy/reference/rtl/gb.v',
           '--top', 'gb_top',
+          '--strategy', 'mixed',
+          '--no-keep-structure',
           '--reference-root', 'examples/gameboy/reference',
           '--keep-workspace'
         ],
@@ -117,6 +135,8 @@ RSpec.describe RHDL::Examples::GameBoy::CLI do
       expect(fake_importer_class.last_kwargs[:workspace_dir]).to eq(File.expand_path('tmp/gameboy_ws', Dir.pwd))
       expect(fake_importer_class.last_kwargs[:clean_output]).to eq(false)
       expect(fake_importer_class.last_kwargs[:strict]).to eq(false)
+      expect(fake_importer_class.last_kwargs[:import_strategy]).to eq(:mixed)
+      expect(fake_importer_class.last_kwargs[:maintain_directory_structure]).to eq(false)
       expect(fake_importer_class.last_kwargs[:qip_path]).to eq(File.expand_path('examples/gameboy/reference/files.qip', Dir.pwd))
       expect(fake_importer_class.last_kwargs[:top_file]).to eq(File.expand_path('examples/gameboy/reference/rtl/gb.v', Dir.pwd))
       expect(fake_importer_class.last_kwargs[:top]).to eq('gb_top')
@@ -151,6 +171,33 @@ RSpec.describe RHDL::Examples::GameBoy::CLI do
       expect(status).to eq(1)
       expect(stderr.string).to include('missing ghdl')
       expect(stderr.string).to include('missing circt-verilog')
+    end
+
+    it 'passes imported runner options through for emulator runs' do
+      fake_run_task_class = Class.new do
+        class << self
+          attr_accessor :last_options
+        end
+
+        def initialize(options)
+          self.class.last_options = options
+        end
+
+        def run
+          { pc: 0x1234, a: 0x56, cycles: 7 }
+        end
+      end
+
+      status = described_class.run(
+        %w[--mode verilog --hdl-dir examples/gameboy/import --top gb --use-staged-verilog --pop --headless --cycles 7],
+        out: stdout,
+        err: stderr,
+        run_task_class: fake_run_task_class
+      )
+
+      expect(status).to eq(0)
+      expect(fake_run_task_class.last_options[:top]).to eq('gb')
+      expect(fake_run_task_class.last_options[:use_staged_verilog]).to eq(true)
     end
   end
 end

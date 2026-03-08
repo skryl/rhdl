@@ -207,6 +207,19 @@ RSpec.describe 'Rakefile interface' do
 
       Rake::Task['spec:bench'].invoke('riscv')
     end
+
+    it 'spec:bench scope sparc64 invokes BenchmarkTask with sparc64 pattern' do
+      task_instance = instance_double(RHDL::CLI::Tasks::BenchmarkTask)
+      allow(task_instance).to receive(:run)
+
+      expect(RHDL::CLI::Tasks::BenchmarkTask).to receive(:new) do |opts|
+        expect(opts[:type]).to eq(:tests)
+        expect(opts[:pattern]).to eq('spec/examples/sparc64/')
+        task_instance
+      end
+
+      Rake::Task['spec:bench'].invoke('sparc64')
+    end
   end
 
   describe 'native tasks' do
@@ -351,6 +364,7 @@ RSpec.describe 'Rakefile interface' do
       expect(SPEC_PATHS[:mos6502]).to eq('spec/examples/mos6502/')
       expect(SPEC_PATHS[:apple2]).to eq('spec/examples/apple2/')
       expect(SPEC_PATHS[:riscv]).to eq('spec/examples/riscv/')
+      expect(SPEC_PATHS[:sparc64]).to eq('spec/examples/sparc64/')
     end
   end
 
@@ -363,6 +377,7 @@ RSpec.describe 'Rakefile interface' do
       expect(RHDL::CLI::Tasks::AO486Task).to receive(:new) do |opts|
         expect(opts[:action]).to eq(:import)
         expect(opts[:output_dir]).to eq('/tmp/ao486_out')
+        expect(opts[:import_strategy]).to eq(RHDL::CLI::Tasks::AO486Task::DEFAULT_CLI_IMPORT_STRATEGY)
         task_instance
       end
 
@@ -398,15 +413,31 @@ RSpec.describe 'Rakefile interface' do
 
       Rake::Task['pspec:ao486'].invoke
     end
+
+    it 'spec:sparc64 delegates to spec[sparc64]' do
+      spec_task = Rake::Task['spec']
+      expect(spec_task).to receive(:reenable).and_call_original
+      expect(spec_task).to receive(:invoke).with('sparc64')
+
+      Rake::Task['spec:sparc64'].invoke
+    end
+
+    it 'pspec:sparc64 delegates to pspec[sparc64]' do
+      pspec_task = Rake::Task['pspec']
+      expect(pspec_task).to receive(:reenable).and_call_original
+      expect(pspec_task).to receive(:invoke).with('sparc64')
+
+      Rake::Task['pspec:sparc64'].invoke
+    end
   end
 
   describe 'rake task existence' do
     # Verify all custom rake tasks exist
       %w[
         spec pspec
-        spec:lib spec:hdl spec:ao486 spec:mos6502 spec:apple2 spec:riscv
+        spec:lib spec:hdl spec:ao486 spec:mos6502 spec:apple2 spec:riscv spec:sparc64
         spec:bench spec:bench:timing spec:bench:quick
-        pspec:lib pspec:hdl pspec:ao486 pspec:mos6502 pspec:apple2 pspec:riscv
+        pspec:lib pspec:hdl pspec:ao486 pspec:mos6502 pspec:apple2 pspec:riscv pspec:sparc64
         pspec:n pspec:prepare pspec:balanced
         deps deps:install deps:check deps:check_gpu
         bench:native bench:web

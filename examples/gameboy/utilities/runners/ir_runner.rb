@@ -13,6 +13,7 @@
 require_relative '../hdl_loader'
 require_relative '../output/speaker'
 require_relative '../renderers/lcd_renderer'
+require_relative '../clock_enable_waveform'
 
 module RHDL
   module Examples
@@ -86,10 +87,11 @@ module RHDL
       # Initialize the Game Boy IR runner
       # @param backend [Symbol] :interpret, :jit, or :compile
       # @param hdl_dir [String, nil] Optional HDL directory override.
-      def initialize(backend: :interpret, hdl_dir: nil)
+      # @param top [String, nil] Imported top component/module override for imported HDL trees.
+      def initialize(backend: :interpret, hdl_dir: nil, top: nil)
         require 'rhdl/codegen'
         require 'rhdl/sim/native/ir/simulator'
-        @component_class = resolve_component_class(hdl_dir: hdl_dir)
+        @component_class = resolve_component_class(hdl_dir: hdl_dir, top: top&.to_s)
 
         backend_names = { interpret: "Interpreter", jit: "JIT", compile: "Compiler" }
         log "Initializing Game Boy IR simulation [#{backend_names[backend]}]..."
@@ -137,6 +139,7 @@ module RHDL
         end
 
         @sim.reset
+        @clock_enable_phase = 0
         initialize_inputs
 
         # Load boot ROM if available
@@ -152,21 +155,48 @@ module RHDL
       end
 
       def initialize_inputs
+        @clock_enable_phase = 0
         poke_if_available('reset', 0)
         poke_if_available('clk_sys', 0)
-        poke_if_available('ce', 1)
-        poke_if_available('ce_n', 1)
-        poke_if_available('ce_2x', 1)
+        drive_clock_enable_inputs(falling_edge: false)
         poke_if_available('joystick', 0xFF)
+        @joystick_state = 0xFF
+        poke_if_available('joy_din', 0xF)
         poke_if_available('is_gbc', 0)
         poke_if_available('isGBC', 0)
         poke_if_available('is_sgb', 0)
         poke_if_available('isSGB', 0)
         poke_if_available('cart_oe', 1)
         poke_if_available('real_cgb_boot', 0)
+        poke_if_available('cgb_boot_download', 0)
+        poke_if_available('dmg_boot_download', 0)
+        poke_if_available('sgb_boot_download', 0)
+        poke_if_available('ioctl_wr', 0)
+        poke_if_available('ioctl_addr', 0)
+        poke_if_available('ioctl_dout', 0)
+        poke_if_available('boot_gba_en', 0)
+        poke_if_available('fast_boot_en', 0)
+        poke_if_available('audio_no_pops', 0)
         poke_if_available('extra_spr_en', 0)
         poke_if_available('megaduck', 0)
+        poke_if_available('gg_reset', 0)
+        poke_if_available('gg_en', 0)
+        poke_if_available('gg_code', 0)
+        poke_if_available('serial_clk_in', 0)
+        poke_if_available('serial_data_in', 1)
+        poke_if_available('increaseSSHeaderCount', 0)
+        poke_if_available('cart_ram_size', 0)
+        poke_if_available('save_state', 0)
+        poke_if_available('load_state', 0)
+        poke_if_available('savestate_number', 0)
+        poke_if_available('SaveStateExt_Dout', 0)
+        poke_if_available('Savestate_CRAMReadData', 0)
+        poke_if_available('SAVE_out_Dout', 0)
+        poke_if_available('SAVE_out_done', 1)
+        poke_if_available('rewind_on', 0)
+        poke_if_available('rewind_active', 0)
         @sim.evaluate unless @use_batched
+        update_joypad_input
       end
 
       def poke_input(name, value)
@@ -236,6 +266,7 @@ module RHDL
       end
 
       def reset
+        @clock_enable_phase = 0
         if @use_batched && @sim.gameboy_mode?
           # Keep reset deterministic for tests: assert reset for one cycle, then release.
           poke_input('reset', 1)
@@ -256,6 +287,8 @@ module RHDL
 
         # Initialize joystick to all buttons released (active low, 0xFF = no buttons)
         poke_input('joystick', 0xFF)
+        @joystick_state = 0xFF
+        update_joypad_input
 
         @cycles = 0
         @halted = false
@@ -293,6 +326,7 @@ module RHDL
         poke_if_available('clk_sys', 0)
         drive_clock_enable_inputs(falling_edge: false)
         @sim.evaluate
+        update_joypad_input
 
         # Handle memory access
         handle_memory_access
@@ -302,6 +336,7 @@ module RHDL
         drive_clock_enable_inputs(falling_edge: false)
         poke_if_available('clk_sys', 1)
         @sim.tick
+        @clock_enable_phase = ClockEnableWaveform.advance_phase(@clock_enable_phase)
       end
 
       def run_cycles(n)
@@ -350,13 +385,17 @@ module RHDL
       end
 
       def inject_key(button)
-        current = safe_peek('joystick') || 0xFF
-        poke_input('joystick', current & ~(1 << button))
+        current = @joystick_state || safe_peek('joystick') || 0xFF
+        @joystick_state = current & ~(1 << button)
+        poke_input('joystick', @joystick_state)
+        update_joypad_input
       end
 
       def release_key(button)
-        current = safe_peek('joystick') || 0xFF
-        poke_input('joystick', current | (1 << button))
+        current = @joystick_state || safe_peek('joystick') || 0xFF
+        @joystick_state = current | (1 << button)
+        poke_input('joystick', @joystick_state)
+        update_joypad_input
       end
 
       def read_framebuffer
@@ -411,9 +450,25 @@ module RHDL
       end
 
       def drive_clock_enable_inputs(falling_edge:)
-        poke_if_available('ce', falling_edge ? 0 : 1)
-        poke_if_available('ce_n', falling_edge ? 1 : 0)
-        poke_if_available('ce_2x', 1)
+        values = ClockEnableWaveform.values_for_phase(@clock_enable_phase)
+        poke_if_available('ce', values[:ce])
+        poke_if_available('ce_n', values[:ce_n])
+        poke_if_available('ce_2x', values[:ce_2x])
+      end
+
+      def update_joypad_input
+        return unless signal_available?('joy_din')
+        return unless signal_available?('joy_p54')
+
+        joy = (@joystick_state || safe_peek('joystick') || 0xFF) & 0xFF
+        joy_p54 = safe_peek('joy_p54') & 0x3
+        p14 = joy_p54 & 0x1
+        p15 = (joy_p54 >> 1) & 0x1
+        joy_dir = joy & 0xF
+        joy_btn = (joy >> 4) & 0xF
+        joy_dir_masked = joy_dir | (p14.zero? ? 0x0 : 0xF)
+        joy_btn_masked = joy_btn | (p15.zero? ? 0x0 : 0xF)
+        poke_input('joy_din', joy_dir_masked & joy_btn_masked)
       end
 
       def signal_available?(name)
@@ -496,7 +551,7 @@ module RHDL
 
       private
 
-      def resolve_component_class(hdl_dir:)
+      def resolve_component_class(hdl_dir:, top: nil)
         resolved_hdl_dir = HdlLoader.resolve_hdl_dir(hdl_dir: hdl_dir)
         if resolved_hdl_dir == HdlLoader::DEFAULT_HDL_DIR
           HdlLoader.configure!(hdl_dir: resolved_hdl_dir)
@@ -506,8 +561,8 @@ module RHDL
 
         HdlLoader.load_component_tree!(hdl_dir: resolved_hdl_dir)
         candidates = []
-        if ENV['RHDL_GAMEBOY_IMPORT_TOP']
-          top_name = ENV['RHDL_GAMEBOY_IMPORT_TOP']
+        if top
+          top_name = top
           class_name = camelize_name(top_name.to_s)
           candidates << Object.const_get(class_name, false) if Object.const_defined?(class_name, false)
           if defined?(::RHDL::Examples::GameBoy) && ::RHDL::Examples::GameBoy.const_defined?(class_name, false)
@@ -528,12 +583,12 @@ module RHDL
 
         return component_class if component_class
 
-        unless ENV['RHDL_GAMEBOY_IMPORT_TOP']
+        unless top
           require_relative '../../gameboy'
           return ::RHDL::Examples::GameBoy::Gameboy
         end
 
-        top_name = ENV['RHDL_GAMEBOY_IMPORT_TOP']
+        top_name = top
         class_name = camelize_name(top_name.to_s)
         raise NameError,
               "Unable to resolve imported Game Boy top component '#{top_name}' "\

@@ -158,14 +158,15 @@ SPEC_PATHS = {
   gameboy: 'spec/examples/gameboy/',
   mos6502: 'spec/examples/mos6502/',
   apple2: 'spec/examples/apple2/',
-  riscv: 'spec/examples/riscv/'
+  riscv: 'spec/examples/riscv/',
+  sparc64: 'spec/examples/sparc64/'
 }.freeze
 
 # RSpec tasks
 begin
   require "rspec/core/rake_task"
 
-  desc "Run specs by scope (all, lib, hdl, ao486, gameboy, mos6502, apple2, riscv)"
+  desc "Run specs by scope (all, lib, hdl, ao486, gameboy, mos6502, apple2, riscv, sparc64)"
   task :spec, [:scope] => 'build:setup:binstubs' do |_, args|
     scope = (args[:scope] || 'all').to_sym
 
@@ -177,13 +178,14 @@ begin
       gameboy: SPEC_PATHS[:gameboy],
       mos6502: SPEC_PATHS[:mos6502],
       apple2: SPEC_PATHS[:apple2],
-      riscv: SPEC_PATHS[:riscv]
+      riscv: SPEC_PATHS[:riscv],
+      sparc64: SPEC_PATHS[:sparc64]
     }
     pattern = patterns[scope]
 
     if pattern.nil?
       puts "Unknown spec scope '#{scope}'."
-      puts "Available scopes: all, lib, hdl, ao486, gameboy, mos6502, apple2, riscv"
+      puts "Available scopes: all, lib, hdl, ao486, gameboy, mos6502, apple2, riscv, sparc64"
       exit 1
     end
 
@@ -192,7 +194,7 @@ begin
   
   namespace :spec do
     # Benchmark tasks
-    desc "Benchmark specs by scope (all, lib, hdl, ao486, gameboy, mos6502, apple2, riscv)"
+    desc "Benchmark specs by scope (all, lib, hdl, ao486, gameboy, mos6502, apple2, riscv, sparc64)"
     task :bench, [:scope, :count] => 'build:setup:binstubs' do |_, args|
       load_cli_tasks
 
@@ -207,13 +209,14 @@ begin
         gameboy: SPEC_PATHS[:gameboy],
         mos6502: SPEC_PATHS[:mos6502],
         apple2: SPEC_PATHS[:apple2],
-        riscv: SPEC_PATHS[:riscv]
+        riscv: SPEC_PATHS[:riscv],
+        sparc64: SPEC_PATHS[:sparc64]
       }
       pattern = patterns[scope]
 
       if pattern.nil?
         puts "Unknown spec benchmark scope '#{scope}'."
-        puts "Available scopes: all, lib, hdl, ao486, gameboy, mos6502, apple2, riscv"
+        puts "Available scopes: all, lib, hdl, ao486, gameboy, mos6502, apple2, riscv, sparc64"
         exit 1
       end
 
@@ -240,7 +243,7 @@ begin
   end
 
 rescue LoadError
-  desc "Run specs by scope (all, lib, hdl, ao486, gameboy, mos6502, apple2, riscv)"
+  desc "Run specs by scope (all, lib, hdl, ao486, gameboy, mos6502, apple2, riscv, sparc64)"
   task :spec, [:scope] => 'build:setup:binstubs' do |_, args|
     scope = (args[:scope] || 'all').to_sym
     patterns = {
@@ -251,13 +254,14 @@ rescue LoadError
       gameboy: SPEC_PATHS[:gameboy],
       mos6502: SPEC_PATHS[:mos6502],
       apple2: SPEC_PATHS[:apple2],
-      riscv: SPEC_PATHS[:riscv]
+      riscv: SPEC_PATHS[:riscv],
+      sparc64: SPEC_PATHS[:sparc64]
     }
     pattern = patterns[scope]
 
     if pattern.nil?
       puts "Unknown spec scope '#{scope}'."
-      puts "Available scopes: all, lib, hdl, ao486, gameboy, mos6502, apple2, riscv"
+      puts "Available scopes: all, lib, hdl, ao486, gameboy, mos6502, apple2, riscv, sparc64"
       exit 1
     end
 
@@ -266,7 +270,7 @@ rescue LoadError
 
   namespace :spec do
     # Benchmark tasks
-    desc "Benchmark specs by scope (all, lib, hdl, ao486, gameboy, mos6502, apple2, riscv)"
+    desc "Benchmark specs by scope (all, lib, hdl, ao486, gameboy, mos6502, apple2, riscv, sparc64)"
     task :bench, [:scope, :count] do |_, args|
       load_cli_tasks
 
@@ -281,13 +285,14 @@ rescue LoadError
         gameboy: SPEC_PATHS[:gameboy],
         mos6502: SPEC_PATHS[:mos6502],
         apple2: SPEC_PATHS[:apple2],
-        riscv: SPEC_PATHS[:riscv]
+        riscv: SPEC_PATHS[:riscv],
+        sparc64: SPEC_PATHS[:sparc64]
       }
       pattern = patterns[scope]
 
       if pattern.nil?
         puts "Unknown spec benchmark scope '#{scope}'."
-        puts "Available scopes: all, lib, hdl, ao486, gameboy, mos6502, apple2, riscv"
+        puts "Available scopes: all, lib, hdl, ao486, gameboy, mos6502, apple2, riscv, sparc64"
         exit 1
       end
 
@@ -315,7 +320,7 @@ rescue LoadError
 end
 
 # Convenience aliases:
-#   rake spec:lib, spec:hdl, spec:ao486, spec:gameboy, spec:mos6502, spec:apple2, spec:riscv
+#   rake spec:lib, spec:hdl, spec:ao486, spec:gameboy, spec:mos6502, spec:apple2, spec:riscv, spec:sparc64
 namespace :spec do
   {
     lib: 'lib',
@@ -324,7 +329,8 @@ namespace :spec do
     gameboy: 'gameboy',
     mos6502: 'mos6502',
     apple2: 'apple2',
-    riscv: 'riscv'
+    riscv: 'riscv',
+    sparc64: 'sparc64'
   }.each do |name, scope|
     desc "Run #{scope} specs"
     task name => 'build:setup:binstubs' do
@@ -356,7 +362,7 @@ begin
     sh "RUBYOPT=-W0 #{parallel_rspec_cmd} --quiet --test-options '--format progress' #{args}"
   end
 
-  desc "Run specs in parallel by scope (all, lib, hdl, ao486, gameboy, mos6502, apple2, riscv)"
+  desc "Run specs in parallel by scope (all, lib, hdl, ao486, gameboy, mos6502, apple2, riscv, sparc64)"
   task :pspec, [:scope] => 'build:setup:binstubs' do |_, args|
     scope = (args[:scope] || 'all').to_sym
     patterns = {
@@ -367,13 +373,14 @@ begin
       gameboy: SPEC_PATHS[:gameboy],
       mos6502: SPEC_PATHS[:mos6502],
       apple2: SPEC_PATHS[:apple2],
-      riscv: SPEC_PATHS[:riscv]
+      riscv: SPEC_PATHS[:riscv],
+      sparc64: SPEC_PATHS[:sparc64]
     }
     pattern = patterns[scope]
 
     if pattern.nil?
       puts "Unknown pspec scope '#{scope}'."
-      puts "Available scopes: all, lib, hdl, ao486, gameboy, mos6502, apple2, riscv"
+      puts "Available scopes: all, lib, hdl, ao486, gameboy, mos6502, apple2, riscv, sparc64"
       exit 1
     end
 
@@ -418,12 +425,13 @@ rescue LoadError
       gameboy: SPEC_PATHS[:gameboy],
       mos6502: SPEC_PATHS[:mos6502],
       apple2: SPEC_PATHS[:apple2],
-      riscv: SPEC_PATHS[:riscv]
+      riscv: SPEC_PATHS[:riscv],
+      sparc64: SPEC_PATHS[:sparc64]
     }
 
     if patterns[scope].nil?
       puts "Unknown pspec scope '#{scope}'."
-      puts "Available scopes: all, lib, hdl, ao486, gameboy, mos6502, apple2, riscv"
+      puts "Available scopes: all, lib, hdl, ao486, gameboy, mos6502, apple2, riscv, sparc64"
     end
 
     abort "parallel_tests gem not installed. Run: bundle install"
@@ -431,7 +439,7 @@ rescue LoadError
 end
 
 # Convenience aliases:
-#   rake pspec:lib, pspec:hdl, pspec:ao486, pspec:gameboy, pspec:mos6502, pspec:apple2, pspec:riscv
+#   rake pspec:lib, pspec:hdl, pspec:ao486, pspec:gameboy, pspec:mos6502, pspec:apple2, pspec:riscv, pspec:sparc64
 namespace :pspec do
   {
     lib: 'lib',
@@ -440,7 +448,8 @@ namespace :pspec do
     gameboy: 'gameboy',
     mos6502: 'mos6502',
     apple2: 'apple2',
-    riscv: 'riscv'
+    riscv: 'riscv',
+    sparc64: 'sparc64'
   }.each do |name, scope|
     desc "Run #{scope} specs in parallel"
     task name => 'build:setup:binstubs' do
@@ -547,7 +556,7 @@ namespace :ao486 do
       abort 'ao486:import requires output_dir. Usage: rake "ao486:import[output_dir,workspace_dir,strategy,fallback,maintain_directory_structure,clean]"'
     end
 
-    import_strategy = args[:strategy]&.to_sym
+    import_strategy = args[:strategy]&.to_sym || RHDL::CLI::Tasks::AO486Task::DEFAULT_CLI_IMPORT_STRATEGY
     fallback_to_stubbed = if args[:fallback].nil?
       true
     else

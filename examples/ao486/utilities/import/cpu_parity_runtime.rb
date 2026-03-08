@@ -218,11 +218,12 @@ module RHDL
           end
 
           def capture_step_event(cycle)
-            return nil unless @sim.peek('trace_retired') == 1
-
             trace_key = [@sim.peek('trace_wr_eip'), @sim.peek('trace_wr_consumed')]
             return nil if trace_key == [0, 0]
             return nil if trace_key == @previous_trace_key
+
+            retired = @sim.peek('trace_retired') == 1
+            return nil unless retired || trace_key[1] > 0
 
             @previous_trace_key = trace_key
             consumed = trace_key[1]

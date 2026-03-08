@@ -12,16 +12,20 @@ module RHDL
   module Examples
     module GameBoy
       class HeadlessRunner
-      attr_reader :runner, :mode, :sim_backend, :hdl_dir
+      attr_reader :runner, :mode, :sim_backend, :hdl_dir, :top, :use_staged_verilog
 
       # Create a headless runner with the specified options
       # @param mode [Symbol] Simulation mode: :ruby, :ir, :verilog
       # @param sim [Symbol] Simulator backend for :ir mode: :interpret, :jit, :compile
       # @param hdl_dir [String, nil] Optional HDL directory override.
-      def initialize(mode: :ruby, sim: nil, hdl_dir: nil)
+      # @param top [String, nil] Imported top component/module override for imported HDL trees.
+      # @param use_staged_verilog [Boolean] Use the staged imported Verilog artifact when available.
+      def initialize(mode: :ruby, sim: nil, hdl_dir: nil, top: nil, use_staged_verilog: false)
         @mode = mode
         @sim_backend = sim || default_backend(mode)
         @hdl_dir = hdl_dir
+        @top = top
+        @use_staged_verilog = use_staged_verilog
 
         # Create runner based on mode and sim backend
         @runner = case mode
@@ -31,11 +35,16 @@ module RHDL
                     require_relative 'ir_runner'
                     RHDL::Examples::GameBoy::IrRunner.new(
                       backend: normalize_native_backend(@sim_backend),
-                      hdl_dir: @hdl_dir
+                      hdl_dir: @hdl_dir,
+                      top: @top
                     )
                   when :verilog
                     require_relative 'verilator_runner'
-                    RHDL::Examples::GameBoy::VerilogRunner.new(hdl_dir: @hdl_dir)
+                    RHDL::Examples::GameBoy::VerilogRunner.new(
+                      hdl_dir: @hdl_dir,
+                      top: @top,
+                      use_staged_verilog: @use_staged_verilog
+                    )
                   else
                     raise ArgumentError, "Unknown mode: #{mode}. Valid modes: ruby, ir, verilog"
                   end
@@ -165,8 +174,8 @@ module RHDL
       end
 
       # Create a headless runner with test ROM loaded
-      def self.with_test_rom(mode: :ruby, sim: nil, hdl_dir: nil)
-        runner = new(mode: mode, sim: sim, hdl_dir: hdl_dir)
+      def self.with_test_rom(mode: :ruby, sim: nil, hdl_dir: nil, top: nil, use_staged_verilog: false)
+        runner = new(mode: mode, sim: sim, hdl_dir: hdl_dir, top: top, use_staged_verilog: use_staged_verilog)
         test_rom = create_test_rom
         runner.load_rom(test_rom)
         runner

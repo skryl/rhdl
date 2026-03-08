@@ -15,6 +15,7 @@
 require_relative '../hdl_loader'
 require_relative '../output/speaker'
 require_relative '../renderers/lcd_renderer'
+require_relative '../clock_enable_waveform'
 require 'rhdl/codegen'
 require 'fileutils'
 require 'set'
@@ -46,6 +47,16 @@ module RHDL
       BUILD_DIR = File.expand_path('../../.verilator_build', __dir__)
       VERILOG_DIR = File.join(BUILD_DIR, 'verilog')
       OBJ_DIR = File.join(BUILD_DIR, 'obj_dir')
+      VERILATOR_WARN_FLAGS = %w[
+        -Wno-fatal
+        -Wno-ASCRANGE
+        -Wno-MULTIDRIVEN
+        -Wno-PINMISSING
+        -Wno-WIDTHEXPAND
+        -Wno-WIDTHTRUNC
+        -Wno-UNOPTFLAT
+        -Wno-CASEINCOMPLETE
+      ].freeze
 
       # Boot ROM path
       DMG_BOOT_ROM_PATH = File.expand_path('../../software/roms/dmg_boot.bin', __dir__)
@@ -64,8 +75,12 @@ module RHDL
 
       # Initialize the Game Boy Verilator runner
       # @param hdl_dir [String, nil] Optional HDL directory override.
-      def initialize(hdl_dir: nil)
-        @component_class = resolve_component_class(hdl_dir: hdl_dir)
+      # @param top [String, nil] Imported top component/module override for imported HDL trees.
+      # @param use_staged_verilog [Boolean] Use the staged imported Verilog artifact when available.
+      def initialize(hdl_dir: nil, top: nil, use_staged_verilog: false)
+        @import_top_name = top&.to_s
+        @use_staged_verilog = !!use_staged_verilog
+        @component_class = resolve_component_class(hdl_dir: hdl_dir, top: @import_top_name)
         @component_input_ports = Set.new
         @component_output_ports = Set.new
         @component_port_widths = {}
@@ -117,12 +132,15 @@ module RHDL
         @prev_lcd_clkena = 0
         @prev_lcd_vsync = 0
         @frame_count = 0
+        @last_fetch_addr = 0
+        @joystick_state = 0xFF
+        @clock_enable_phase = 0
 
         # Speaker audio simulation
         @speaker = Speaker.new
 
-        # Load boot ROM if available
-        load_boot_rom if File.exist?(DMG_BOOT_ROM_PATH)
+        # Only auto-load a boot ROM when the top exposes a real boot-ROM feed path.
+        load_boot_rom if auto_load_boot_rom?
       end
 
       def native?
@@ -188,6 +206,13 @@ module RHDL
         @boot_rom_loaded || false
       end
 
+      def auto_load_boot_rom?
+        return false unless File.exist?(DMG_BOOT_ROM_PATH)
+        return true if @top_module_name == 'gb'
+
+        !resolve_port_name('boot_rom_addr').nil? && !resolve_port_name('boot_rom_do').nil?
+      end
+
       def reset
         reset_simulation
         @cycles = 0
@@ -196,6 +221,9 @@ module RHDL
         @lcd_x = 0
         @lcd_y = 0
         @frame_count = 0
+        @last_fetch_addr = 0
+        @joystick_state = 0xFF
+        @clock_enable_phase = 0
       end
 
       # Main entry point for running cycles
@@ -219,25 +247,24 @@ module RHDL
 
       # Run a single clock cycle
       def run_clock_cycle
+        drive_clock_enable_inputs(falling_edge: true)
+        drive_cartridge_input
+
         # Falling edge
         verilator_poke('clk_sys', 0)
-        drive_clock_enable_inputs(falling_edge: true)
+        update_joypad_input
         verilator_eval
 
         # Handle ROM read
-        cart_rd = verilator_peek('cart_rd')
-        if cart_rd == 1
-          addr = verilator_peek('ext_bus_addr')
-          a15 = verilator_peek('ext_bus_a15')
-          full_addr = (a15 << 15) | addr
-          verilator_poke('cart_do', @rom[full_addr] || 0)
-        end
+        drive_cartridge_input
         verilator_eval
 
         # Rising edge
         verilator_poke('clk_sys', 1)
         drive_clock_enable_inputs(falling_edge: false)
+        drive_cartridge_input
         verilator_eval
+        @clock_enable_phase = ClockEnableWaveform.advance_phase(@clock_enable_phase)
 
         # Capture LCD output
         lcd_clkena = verilator_peek('lcd_clkena')
@@ -271,13 +298,17 @@ module RHDL
 
       # Inject a joypad button press
       def inject_key(button)
-        current = verilator_peek('joystick') || 0xFF
-        verilator_poke('joystick', current & ~(1 << button))
+        current = @joystick_state || (verilator_peek('joystick') || 0xFF)
+        @joystick_state = current & ~(1 << button)
+        verilator_poke('joystick', @joystick_state)
+        update_joypad_input
       end
 
       def release_key(button)
-        current = verilator_peek('joystick') || 0xFF
-        verilator_poke('joystick', current | (1 << button))
+        current = @joystick_state || (verilator_peek('joystick') || 0xFF)
+        @joystick_state = current | (1 << button)
+        verilator_poke('joystick', @joystick_state)
+        update_joypad_input
       end
 
       def read_framebuffer
@@ -323,23 +354,66 @@ module RHDL
       def cpu_state
         debug_pc = verilator_peek('debug_pc')
         bus_pc = ((verilator_peek('ext_bus_a15') & 0x1) << 15) | (verilator_peek('ext_bus_addr') & 0x7FFF)
+        internal_pc = begin
+          verilator_peek('cpu_pc_internal')
+        rescue StandardError
+          @last_fetch_addr || 0
+        end
+        internal_acc = begin
+          verilator_peek('debug_acc_internal')
+        rescue StandardError
+          0
+        end
+        internal_f = begin
+          verilator_peek('debug_f_internal')
+        rescue StandardError
+          0
+        end
+        internal_sp = begin
+          verilator_peek('debug_sp_internal')
+        rescue StandardError
+          0
+        end
         pc = if debug_port_available?('debug_pc')
-               debug_pc.to_i.zero? && !bus_pc.to_i.zero? ? bus_pc : debug_pc
+               if debug_pc.to_i.zero?
+                 next_pc = bus_pc.to_i.zero? ? internal_pc : bus_pc
+                 next_pc
+               else
+                 debug_pc
+               end
              else
-               bus_pc
+               bus_pc.to_i.zero? ? internal_pc : bus_pc
              end
+        acc = begin
+          value = verilator_peek('debug_acc')
+          value.to_i.zero? && internal_acc.to_i != 0 ? internal_acc : value
+        rescue StandardError
+          internal_acc
+        end
+        f_reg = begin
+          value = verilator_peek('debug_f')
+          value.to_i.zero? && internal_f.to_i != 0 ? internal_f : value
+        rescue StandardError
+          internal_f
+        end
+        sp_reg = begin
+          value = verilator_peek('debug_sp')
+          value.to_i.zero? && internal_sp.to_i != 0 ? internal_sp : value
+        rescue StandardError
+          internal_sp
+        end
 
         {
           pc: pc || 0,
-          a: verilator_peek('debug_acc') || 0,
-          f: verilator_peek('debug_f') || 0,
+          a: acc || 0,
+          f: f_reg || 0,
           b: verilator_peek('debug_b') || 0,
           c: verilator_peek('debug_c') || 0,
           d: verilator_peek('debug_d') || 0,
           e: verilator_peek('debug_e') || 0,
           h: verilator_peek('debug_h') || 0,
           l: verilator_peek('debug_l') || 0,
-          sp: verilator_peek('debug_sp') || 0,
+          sp: sp_reg || 0,
           cycles: @cycles,
           halted: @halted,
           simulator_type: simulator_type
@@ -401,7 +475,7 @@ module RHDL
 
       private
 
-      def resolve_component_class(hdl_dir:)
+      def resolve_component_class(hdl_dir:, top: nil)
         resolved_hdl_dir = HdlLoader.resolve_hdl_dir(hdl_dir: hdl_dir)
         @resolved_hdl_dir = resolved_hdl_dir
         if resolved_hdl_dir == HdlLoader::DEFAULT_HDL_DIR
@@ -411,12 +485,12 @@ module RHDL
         end
 
         HdlLoader.load_component_tree!(hdl_dir: resolved_hdl_dir)
-        unless ENV['RHDL_GAMEBOY_IMPORT_TOP']
+        unless top
           require_relative '../../gameboy'
           return ::RHDL::Examples::GameBoy::Gameboy
         end
 
-        top_name = ENV['RHDL_GAMEBOY_IMPORT_TOP']
+        top_name = top
         class_name = camelize_name(top_name.to_s)
 
         candidates = []
@@ -520,6 +594,24 @@ module RHDL
           keyword = idx.zero? ? 'if' : 'else if'
           lines << "#{keyword} (strcmp(name, \"#{api_name}\") == 0) return ctx->dut->#{port_name};"
         end
+        keyword = lines.empty? ? 'if' : 'else if'
+        if @top_module_name == 'gb'
+          lines << "#{keyword} (strcmp(name, \"cpu_pc_internal\") == 0) return ctx->dut->rootp->gb__DOT___cpu_A;"
+          lines << "else if (strcmp(name, \"boot_rom_enabled_internal\") == 0) return ctx->dut->rootp->gb__DOT__rt_tmp_22_1;"
+          lines << "else if (strcmp(name, \"boot_rom_addr_internal\") == 0) return ctx->dut->rootp->gb__DOT__boot_rom__DOT__address_a;"
+          lines << "else if (strcmp(name, \"boot_rom_q_internal\") == 0) return ctx->dut->rootp->gb__DOT___boot_rom_q_a;"
+          lines << "else if (strcmp(name, \"cpu_di_internal\") == 0) return ctx->dut->rootp->gb__DOT___GEN_178;"
+          lines << "else if (strcmp(name, \"cpu_do_internal\") == 0) return ctx->dut->rootp->gb__DOT___cpu_DO;"
+          lines << "else if (strcmp(name, \"cpu_rd_n_internal\") == 0) return ctx->dut->rootp->gb__DOT___cpu_RD_n;"
+          lines << "else if (strcmp(name, \"cpu_wr_n_internal\") == 0) return ctx->dut->rootp->gb__DOT___cpu_WR_n;"
+          lines << "else if (strcmp(name, \"cpu_m1_n_internal\") == 0) return ctx->dut->rootp->gb__DOT___cpu_M1_n;"
+          lines << "else if (strcmp(name, \"savestate_reset_out_internal\") == 0) return ctx->dut->rootp->gb__DOT___gb_savestates_reset_out;"
+          lines << "else if (strcmp(name, \"savestate_sleep_internal\") == 0) return ctx->dut->rootp->gb__DOT___gb_savestates_sleep_savestate;"
+          lines << "else if (strcmp(name, \"request_loadstate_internal\") == 0) return ctx->dut->rootp->gb__DOT___gb_statemanager_request_loadstate;"
+          lines << "else if (strcmp(name, \"request_savestate_internal\") == 0) return ctx->dut->rootp->gb__DOT___gb_statemanager_request_savestate;"
+        else
+          lines << "#{keyword} (strcmp(name, \"cpu_pc_internal\") == 0) return ctx->last_fetch_addr;"
+        end
         lines.map { |line| "      #{line}" }.join("\n")
       end
 
@@ -535,34 +627,75 @@ module RHDL
       end
 
       def c_cart_feed_lines(indent:)
-        cart_rd_port = resolve_port_name('cart_rd')
         cart_addr_port = resolve_port_name('ext_bus_addr')
         cart_a15_port = resolve_port_name('ext_bus_a15')
         cart_do_port = resolve_port_name('cart_do')
-        return '' unless cart_rd_port && cart_addr_port && cart_a15_port && cart_do_port
+        return '' unless cart_addr_port && cart_a15_port && cart_do_port
 
         [
-          "#{indent}if (ctx->dut->#{cart_rd_port}) {",
+          "#{indent}{",
           "#{indent}    unsigned int addr = ctx->dut->#{cart_addr_port};",
           "#{indent}    unsigned int a15 = ctx->dut->#{cart_a15_port};",
           "#{indent}    unsigned int full_addr = (a15 << 15) | addr;",
           "#{indent}    if (full_addr < sizeof(ctx->rom)) {",
           "#{indent}        ctx->dut->#{cart_do_port} = ctx->rom[full_addr];",
+          "#{indent}    } else {",
+          "#{indent}        ctx->dut->#{cart_do_port} = 0;",
           "#{indent}    }",
           "#{indent}}"
         ].join("\n")
       end
 
-      def c_ce_drive_lines(indent:, ce:, ce_n:, ce_2x:)
+      def c_joypad_drive_lines(indent:)
+        joystick_port = resolve_port_name('joystick')
+        joy_din_port = resolve_port_name('joy_din')
+        joy_p54_port = resolve_port_name('joy_p54')
+        return '' unless joystick_port && joy_din_port && joy_p54_port
+
+        [
+          "#{indent}{",
+          "#{indent}unsigned int joy = ctx->dut->#{joystick_port} & 0xFF;",
+          "#{indent}unsigned int joy_p54 = ctx->dut->#{joy_p54_port} & 0x3;",
+          "#{indent}unsigned int p14 = joy_p54 & 0x1;",
+          "#{indent}unsigned int p15 = (joy_p54 >> 1) & 0x1;",
+          "#{indent}unsigned int joy_dir = joy & 0xF;",
+          "#{indent}unsigned int joy_btn = (joy >> 4) & 0xF;",
+          "#{indent}unsigned int joy_dir_masked = joy_dir | (p14 ? 0xF : 0x0);",
+          "#{indent}unsigned int joy_btn_masked = joy_btn | (p15 ? 0xF : 0x0);",
+          "#{indent}ctx->dut->#{joy_din_port} = joy_dir_masked & joy_btn_masked;",
+          "#{indent}}"
+        ].join("\n")
+      end
+
+      def c_ce_drive_lines(indent:)
         ce_port = resolve_port_name('ce')
         ce_n_port = resolve_port_name('ce_n')
         ce_2x_port = resolve_port_name('ce_2x')
         return '' unless ce_port || ce_n_port || ce_2x_port
 
         lines = []
-        lines << "#{indent}ctx->dut->#{ce_port} = #{ce};" if ce_port
-        lines << "#{indent}ctx->dut->#{ce_n_port} = #{ce_n};" if ce_n_port
-        lines << "#{indent}ctx->dut->#{ce_2x_port} = #{ce_2x};" if ce_2x_port
+        lines << "#{indent}{"
+        lines << "#{indent}unsigned int ce_phase = ctx->clk_counter & 0x7u;"
+        lines << "#{indent}ctx->dut->#{ce_port} = (ce_phase == 0u) ? 1u : 0u;" if ce_port
+        lines << "#{indent}ctx->dut->#{ce_n_port} = (ce_phase == 4u) ? 1u : 0u;" if ce_n_port
+        lines << "#{indent}ctx->dut->#{ce_2x_port} = ((ce_phase & 0x3u) == 0u) ? 1u : 0u;" if ce_2x_port
+        lines << "#{indent}}"
+        lines.join("\n")
+      end
+
+      def c_constant_tieoff_lines(indent:)
+        lines = []
+
+        if resolve_port_name('gg_code') && @top_module_name == 'gb'
+          lines << "#{indent}for (int i = 0; i < 5; ++i) ctx->dut->gg_code[i] = 0u;"
+        end
+
+        save_state_ext_dout_port = resolve_port_name('SaveStateExt_Dout')
+        lines << "#{indent}ctx->dut->#{save_state_ext_dout_port} = 0ULL;" if save_state_ext_dout_port
+
+        save_out_dout_port = resolve_port_name('SAVE_out_Dout')
+        lines << "#{indent}ctx->dut->#{save_out_dout_port} = 0ULL;" if save_out_dout_port
+
         lines.join("\n")
       end
 
@@ -580,7 +713,7 @@ module RHDL
 
       def runtime_staged_verilog_entry
         return nil unless @resolved_hdl_dir
-        return nil unless ENV['RHDL_GAMEBOY_USE_STAGED_VERILOG'] == '1'
+        return nil unless @use_staged_verilog
 
         report_path = File.expand_path(File.join(@resolved_hdl_dir, 'import_report.json'))
         if File.file?(report_path)
@@ -638,8 +771,7 @@ module RHDL
           library_basename: "gameboy_sim_#{sanitize_identifier(@top_module_name)}",
           top_module: @top_module_name,
           verilator_prefix: @verilator_prefix,
-          x_assign: 'fast',
-          x_initial: 'fast'
+          extra_verilator_flags: ['--public-flat-rw', *VERILATOR_WARN_FLAGS]
         )
       end
 
@@ -675,9 +807,10 @@ module RHDL
 
         # Check if we need to rebuild
         lib_file = shared_lib_path
+        simulator_codegen = File.expand_path('../../../../lib/rhdl/codegen/verilog/sim/verilog_simulator.rb', __dir__)
+        build_deps = [verilog_file, wrapper_file, __FILE__, simulator_codegen].select { |path| File.exist?(path) }
         needs_build = !File.exist?(lib_file) ||
-                      File.mtime(verilog_file) > File.mtime(lib_file) ||
-                      File.mtime(wrapper_file) > File.mtime(lib_file)
+                      build_deps.any? { |path| File.mtime(path) > File.mtime(lib_file) }
 
         if needs_build
           log "  Compiling with Verilator..."
@@ -775,6 +908,7 @@ module RHDL
           // Memory access
           void sim_load_rom(void* sim, const unsigned char* data, unsigned int len);
           void sim_load_boot_rom(void* sim, const unsigned char* data, unsigned int len);
+          unsigned char sim_read_boot_rom(void* sim, unsigned int addr);
           void sim_write_vram(void* sim, unsigned int addr, unsigned char value);
           unsigned char sim_read_vram(void* sim, unsigned int addr);
 
@@ -802,8 +936,10 @@ module RHDL
         peek_dispatch = c_peek_dispatch_lines
         boot_feed = c_boot_rom_feed_lines(indent: '        ')
         cart_feed = c_cart_feed_lines(indent: '        ')
-        ce_feed_low = c_ce_drive_lines(indent: '        ', ce: 1, ce_n: 0, ce_2x: 1)
-        ce_feed_high = c_ce_drive_lines(indent: '        ', ce: 0, ce_n: 1, ce_2x: 0)
+        joypad_feed = c_joypad_drive_lines(indent: '        ')
+        ce_feed_low = c_ce_drive_lines(indent: '        ')
+        ce_feed_high = c_ce_drive_lines(indent: '        ')
+        constant_tieoffs = c_constant_tieoff_lines(indent: '        ')
 
         cpp_content = <<~CPP
           #include "#{@verilator_prefix}.h"
@@ -827,6 +963,7 @@ module RHDL
               unsigned char prev_lcd_clkena;
               unsigned char prev_lcd_vsync;
               unsigned long frame_count;
+              unsigned int last_fetch_addr;
               unsigned int clk_counter;       // System clock counter for CPU cycle estimation
           };
 
@@ -846,7 +983,9 @@ module RHDL
               ctx->prev_lcd_clkena = 0;
               ctx->prev_lcd_vsync = 0;
               ctx->frame_count = 0;
+              ctx->last_fetch_addr = 0;
               ctx->clk_counter = 0;
+      #{constant_tieoffs}
               return ctx;
           }
 
@@ -858,22 +997,61 @@ module RHDL
 
           void sim_reset(void* sim) {
               SimContext* ctx = static_cast<SimContext*>(sim);
+      #{constant_tieoffs}
               // Hold reset high and clock a few times to properly reset sequential logic
               ctx->dut->reset = 1;
               for (int i = 0; i < 10; i++) {
+          #{joypad_feed}
+          #{boot_feed}
+          #{cart_feed}
                   ctx->dut->clk_sys = 0;
           #{ce_feed_low}
                   ctx->dut->eval();
+          #{joypad_feed}
+          #{boot_feed}
+          #{cart_feed}
                   ctx->dut->clk_sys = 1;
           #{ce_feed_high}
                   ctx->dut->eval();
               }
+        #{if @top_module_name == 'gb'
+            <<~CPP.chomp
+                  ctx->dut->dmg_boot_download = 1;
+                  for (unsigned int i = 0; i < 128; ++i) {
+                      unsigned int lo = ctx->boot_rom[i * 2];
+                      unsigned int hi = ctx->boot_rom[(i * 2) + 1];
+                  ctx->dut->ioctl_addr = i * 2;
+                  ctx->dut->ioctl_dout = (hi << 8) | lo;
+                  ctx->dut->ioctl_wr = 1;
+          #{joypad_feed}
+          #{boot_feed}
+          #{cart_feed}
+                      ctx->dut->clk_sys = 0;
+          #{ce_feed_low}
+                      ctx->dut->eval();
+          #{joypad_feed}
+          #{boot_feed}
+          #{cart_feed}
+                      ctx->dut->clk_sys = 1;
+          #{ce_feed_high}
+                      ctx->dut->eval();
+                  }
+                  ctx->dut->ioctl_wr = 0;
+                  ctx->dut->dmg_boot_download = 0;
+            CPP
+          else
+            ''
+          end}
               // Release reset and clock to let the system initialize
               ctx->dut->reset = 0;
               for (int i = 0; i < 100; i++) {
+          #{joypad_feed}
+          #{boot_feed}
+          #{cart_feed}
                   ctx->dut->clk_sys = 0;
           #{ce_feed_low}
                   ctx->dut->eval();
+          #{joypad_feed}
           #{boot_feed}
           #{cart_feed}
 
@@ -885,7 +1063,8 @@ module RHDL
               ctx->lcd_x = 0;
               ctx->lcd_y = 0;
               ctx->frame_count = 0;
-              ctx->clk_counter = 0;  // Reset clock counter
+              ctx->last_fetch_addr = 0;
+              ctx->clk_counter = 0;  // Reset clock counter / external SpeedControl phase
               memset(ctx->framebuffer, 0, sizeof(ctx->framebuffer));
           }
 
@@ -920,6 +1099,14 @@ module RHDL
               for (unsigned int i = 0; i < len && i < sizeof(ctx->boot_rom); i++) {
                   ctx->boot_rom[i] = data[i];
               }
+          }
+
+          unsigned char sim_read_boot_rom(void* sim, unsigned int addr) {
+              SimContext* ctx = static_cast<SimContext*>(sim);
+              unsigned int byte_addr = addr & 0xFFFu;
+              unsigned int word_addr = (byte_addr >> 1) & 0x7FFu;
+              unsigned int word = ctx->dut->rootp->gb__DOT__boot_rom__DOT__mem[word_addr];
+              return (byte_addr & 0x1u) ? ((word >> 8) & 0xFFu) : (word & 0xFFu);
           }
 
           void sim_write_vram(void* sim, unsigned int addr, unsigned char value) {
@@ -957,16 +1144,28 @@ module RHDL
 
               while (result->cycles_run < n_cycles) {
                   // Falling edge
+          #{joypad_feed}
+          #{boot_feed}
+          #{cart_feed}
                   ctx->dut->clk_sys = 0;
           #{ce_feed_low}
                   ctx->dut->eval();
+          #{joypad_feed}
           #{boot_feed}
           #{cart_feed}
+                  if (ctx->dut->cart_rd) {
+                      unsigned int addr = ctx->dut->ext_bus_addr & 0x7FFF;
+                      unsigned int a15 = ctx->dut->ext_bus_a15 & 0x1;
+                      ctx->last_fetch_addr = (a15 << 15) | addr;
+                  }
                   ctx->dut->eval();
 
                   // Rising edge
                   ctx->dut->clk_sys = 1;
           #{ce_feed_high}
+          #{joypad_feed}
+          #{boot_feed}
+          #{cart_feed}
                   ctx->dut->eval();
 
                   // Count every system clock as a CPU cycle
@@ -1078,6 +1277,12 @@ module RHDL
           Fiddle::TYPE_VOID
         )
 
+        @sim_read_boot_rom_fn = Fiddle::Function.new(
+          @lib['sim_read_boot_rom'],
+          [Fiddle::TYPE_VOIDP, Fiddle::TYPE_INT],
+          Fiddle::TYPE_CHAR
+        )
+
         @sim_write_vram_fn = Fiddle::Function.new(
           @lib['sim_write_vram'],
           [Fiddle::TYPE_VOIDP, Fiddle::TYPE_INT, Fiddle::TYPE_CHAR],
@@ -1121,10 +1326,12 @@ module RHDL
       def initialize_inputs
         return unless @sim_ctx
 
+        @clock_enable_phase = 0
         verilator_poke('clk_sys', 0)
         verilator_poke('reset', 0)
         drive_clock_enable_inputs(falling_edge: false)
         poke_if_available('joystick', 0xFF)  # All buttons released
+        @joystick_state = 0xFF
         poke_if_available('joy_din', 0xF)
         poke_if_available('is_gbc', 0)       # DMG mode
         poke_if_available('is_sgb', 0)       # Not SGB
@@ -1140,9 +1347,9 @@ module RHDL
         poke_if_available('ioctl_addr', 0)
         poke_if_available('ioctl_dout', 0)
         poke_if_available('boot_gba_en', 0)
-        fast_boot_default = @component_input_ports.include?('boot_rom_do') ? 0 : 1
-        poke_if_available('fast_boot_en', fast_boot_default)
+        poke_if_available('fast_boot_en', 0)
         poke_if_available('audio_no_pops', 0)
+        poke_if_available('extra_spr_en', 0)
         poke_if_available('megaduck', 0)
         poke_if_available('gg_reset', 0)
         poke_if_available('gg_en', 0)
@@ -1161,12 +1368,44 @@ module RHDL
         poke_if_available('rewind_on', 0)
         poke_if_available('rewind_active', 0)
         verilator_eval
+        update_joypad_input
       end
 
       def drive_clock_enable_inputs(falling_edge:)
-        poke_if_available('ce', falling_edge ? 1 : 0)
-        poke_if_available('ce_n', falling_edge ? 0 : 1)
-        poke_if_available('ce_2x', falling_edge ? 1 : 0)
+        values = ClockEnableWaveform.values_for_phase(@clock_enable_phase)
+        poke_if_available('ce', values[:ce])
+        poke_if_available('ce_n', values[:ce_n])
+        poke_if_available('ce_2x', values[:ce_2x])
+      end
+
+      def drive_cartridge_input
+        cart_rd_port = @output_port_aliases['cart_rd']
+        ext_bus_addr_port = @output_port_aliases['ext_bus_addr']
+        ext_bus_a15_port = @output_port_aliases['ext_bus_a15']
+        cart_do_port = @input_port_aliases['cart_do']
+        return if cart_rd_port.nil? || ext_bus_addr_port.nil? || ext_bus_a15_port.nil? || cart_do_port.nil?
+
+        addr = verilator_peek(ext_bus_addr_port)
+        a15 = verilator_peek(ext_bus_a15_port)
+        full_addr = (a15 << 15) | addr
+        @last_fetch_addr = full_addr if verilator_peek(cart_rd_port) == 1
+        verilator_poke(cart_do_port, @rom[full_addr] || 0)
+      end
+
+      def update_joypad_input
+        joy_din_port = @input_port_aliases['joy_din']
+        joy_p54_port = @output_port_aliases['joy_p54']
+        return if joy_din_port.nil? || joy_p54_port.nil?
+
+        joy = (@joystick_state || verilator_peek('joystick') || 0xFF) & 0xFF
+        joy_p54 = verilator_peek(joy_p54_port) & 0x3
+        p14 = joy_p54 & 0x1
+        p15 = (joy_p54 >> 1) & 0x1
+        joy_dir = joy & 0xF
+        joy_btn = (joy >> 4) & 0xF
+        joy_dir_masked = joy_dir | (p14.zero? ? 0x0 : 0xF)
+        joy_btn_masked = joy_btn | (p15.zero? ? 0x0 : 0xF)
+        verilator_poke(joy_din_port, joy_dir_masked & joy_btn_masked)
       end
 
       def poke_if_available(name, value)
@@ -1203,6 +1442,11 @@ module RHDL
       def verilator_read_vram(addr)
         return 0 unless @sim_ctx
         @sim_read_vram_fn.call(@sim_ctx, addr) & 0xFF
+      end
+
+      def verilator_read_boot_rom(addr)
+        return 0 unless @sim_ctx
+        @sim_read_boot_rom_fn.call(@sim_ctx, addr) & 0xFF
       end
       end
     end

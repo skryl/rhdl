@@ -4,6 +4,7 @@
 
 use std::collections::HashMap;
 use crate::core::CoreSimulator;
+use crate::signal_value::SignalValue;
 
 const INVALID_SIGNAL_IDX: usize = usize::MAX;
 
@@ -284,7 +285,7 @@ impl GameBoyExtension {
     #[inline(always)]
     fn poke(core: &mut CoreSimulator, idx: usize, value: u64) {
         if idx != INVALID_SIGNAL_IDX && idx < core.signals.len() {
-            core.signals[idx] = value;
+            core.signals[idx] = value as SignalValue;
         }
     }
 
@@ -292,7 +293,7 @@ impl GameBoyExtension {
     #[inline(always)]
     fn peek(core: &CoreSimulator, idx: usize) -> u64 {
         if idx != INVALID_SIGNAL_IDX && idx < core.signals.len() {
-            core.signals[idx]
+            core.signals[idx] as u64
         } else {
             0
         }

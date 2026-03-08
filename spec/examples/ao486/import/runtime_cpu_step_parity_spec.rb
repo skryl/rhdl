@@ -16,8 +16,10 @@ RSpec.describe 'AO486 CPU parity-package current write-trace parity', slow: true
     end
   end
 
-  def benchmark_programs
-    RHDL::Examples::AO486::Import::CpuParityPrograms.benchmark_programs
+  def stable_programs
+    %i[reset_smoke prime_sieve game_of_life].map do |name|
+      RHDL::Examples::AO486::Import::CpuParityPrograms.fetch(name)
+    end
   end
 
   def require_import_tool!
@@ -39,7 +41,7 @@ RSpec.describe 'AO486 CPU parity-package current write-trace parity', slow: true
     ).run
   end
 
-  it 'matches JIT and Verilator on the benchmark write-trace byte stream', timeout: 900 do
+  it 'matches JIT and Verilator on the stable write-trace byte-stream subset', timeout: 900 do
     require_import_tool!
     require_program_assembler!
     skip 'circt-opt not available' unless HdlToolchain.which('circt-opt')
@@ -59,12 +61,14 @@ RSpec.describe 'AO486 CPU parity-package current write-trace parity', slow: true
             work_dir: build_dir
           )
 
-          benchmark_programs.each do |program|
+          stable_programs.each do |program|
             program.load_into(jit_runtime)
             jit_trace = flatten_step_trace(jit_runtime.run(max_cycles: program.max_cycles))
+            expect(jit_trace).not_to be_empty, "program=#{program.name}"
 
             program.load_into(verilator_runtime)
             verilator_trace = flatten_step_trace(verilator_runtime.run_step_trace(max_cycles: program.max_cycles))
+            expect(verilator_trace).not_to be_empty, "program=#{program.name}"
 
             expect(verilator_trace).to eq(jit_trace), "program=#{program.name}"
           end

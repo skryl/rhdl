@@ -58,10 +58,10 @@ RSpec.describe RHDL::CLI::Tasks::AO486Task do
       workspace: '/tmp/ws',
       diagnostics: ['warn line'],
       raise_diagnostics: [],
-      strategy_requested: :stubbed,
-      strategy_used: :stubbed,
+      strategy_requested: :tree,
+      strategy_used: :tree,
       fallback_used: false,
-      attempted_strategies: %i[stubbed],
+      attempted_strategies: %i[tree],
       stub_modules: %w[foo bar]
     )
 
@@ -76,12 +76,38 @@ RSpec.describe RHDL::CLI::Tasks::AO486Task do
     expect(FakeImporter.last_init_kwargs[:output_dir]).to eq('/tmp/out')
     expect(FakeImporter.last_init_kwargs[:top]).to eq(FakeImporter::DEFAULT_TOP)
     expect(FakeImporter.last_init_kwargs[:clean_output]).to eq(true)
-    expect(FakeImporter.last_init_kwargs[:import_strategy]).to eq(:stubbed)
+    expect(FakeImporter.last_init_kwargs[:import_strategy]).to eq(:tree)
     expect(FakeImporter.last_init_kwargs[:fallback_to_stubbed]).to eq(true)
     expect(FakeImporter.last_init_kwargs[:maintain_directory_structure]).to eq(true)
     expect(FakeImporter.last_init_kwargs[:format_output]).to eq(false)
     expect(FakeImporter.last_init_kwargs[:strict]).to eq(true)
     expect(FakeImporter.last_init_kwargs[:progress]).to respond_to(:call)
+  end
+
+  it 'uses the CLI default import strategy instead of inheriting the importer default' do
+    FakeImporter.next_result = FakeImportResult.new(
+      success: true,
+      files_written: [],
+      output_dir: '/tmp/generated',
+      workspace: '/tmp/ws',
+      diagnostics: [],
+      raise_diagnostics: [],
+      strategy_requested: :tree,
+      strategy_used: :tree,
+      fallback_used: false,
+      attempted_strategies: %i[tree],
+      stub_modules: []
+    )
+
+    task = described_class.new(
+      action: :import,
+      output_dir: '/tmp/out',
+      importer_class: FakeImporter
+    )
+
+    task.run
+    expect(FakeImporter::DEFAULT_IMPORT_STRATEGY).to eq(:stubbed)
+    expect(FakeImporter.last_init_kwargs[:import_strategy]).to eq(described_class::DEFAULT_CLI_IMPORT_STRATEGY)
   end
 
   it 'passes clean_output=false through to importer' do
@@ -92,10 +118,10 @@ RSpec.describe RHDL::CLI::Tasks::AO486Task do
       workspace: '/tmp/ws',
       diagnostics: [],
       raise_diagnostics: [],
-      strategy_requested: :stubbed,
-      strategy_used: :stubbed,
+      strategy_requested: :tree,
+      strategy_used: :tree,
       fallback_used: false,
-      attempted_strategies: %i[stubbed],
+      attempted_strategies: %i[tree],
       stub_modules: []
     )
 

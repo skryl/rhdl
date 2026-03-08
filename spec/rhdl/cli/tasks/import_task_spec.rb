@@ -572,6 +572,91 @@ RSpec.describe RHDL::CLI::Tasks::ImportTask do
     expect(File.read(normalized_path)).not_to include('reg [262143:0] v3_262144;')
   end
 
+  it 'also overlays non-memory generated VHDL modules into canonical normalized Verilog' do
+    normalized_path = File.join(tmp_dir, 'design.normalized.v')
+    pure_root = File.join(tmp_dir, 'pure_verilog')
+    generated_dir = File.join(pure_root, 'generated_vhdl')
+    FileUtils.mkdir_p(generated_dir)
+
+    File.write(
+      File.join(generated_dir, 'eReg_SavestateV__vhdl_deadbeef.v'),
+      <<~VERILOG
+        module eReg_SavestateV__vhdl_deadbeef(
+          input clk,
+          output [7:0] Dout
+        );
+          assign Dout = 8'hAA;
+        endmodule
+      VERILOG
+    )
+
+    File.write(
+      normalized_path,
+      <<~VERILOG
+        module eReg_SavestateV__vhdl_deadbeef(
+          input clk,
+          output [7:0] Dout
+        );
+          assign Dout = 8'h55;
+        endmodule
+      VERILOG
+    )
+
+    task = described_class.new(mode: :mixed, out: tmp_dir)
+    replaced = task.send(
+      :overlay_generated_memory_modules!,
+      normalized_verilog_path: normalized_path,
+      pure_verilog_root: pure_root
+    )
+
+    expect(replaced).to include('eReg_SavestateV__vhdl_deadbeef')
+    expect(File.read(normalized_path)).to include("assign Dout = 8'hAA;")
+    expect(File.read(normalized_path)).not_to include("assign Dout = 8'h55;")
+  end
+
+  it 'materializes VHDL defaulted memory control ports in staged Verilog instances' do
+    task = described_class.new(mode: :mixed, out: tmp_dir)
+    source = <<~VERILOG
+      module top;
+        dpram__vhdl_deadbeef vram0(
+          .clock_a(clk_cpu),
+          .address_a(vram_addr),
+          .wren_a(vram_wren),
+          .data_a(vram_di),
+          .q_a(vram_do)
+        );
+
+        dpram_dif__vhdl_deadbeef boot_rom(
+          .clock(clk_sys),
+          .address_a(boot_addr),
+          .q_a(boot_q),
+          .address_b(boot_wr_addr),
+          .wren_b(ioctl_wr && boot_download),
+          .data_b(ioctl_dout)
+        );
+      endmodule
+    VERILOG
+
+    rewritten = task.send(:materialize_vhdl_default_memory_ports, source)
+
+    expect(rewritten).to include(".clken_a(1'b1)")
+    expect(rewritten).to include(".clken_b(1'b1)")
+    expect(rewritten).to include(".enable_a(1'b1)")
+    expect(rewritten).to include(".cs_a(1'b1)")
+    expect(rewritten).to include(".enable_b(1'b1)")
+    expect(rewritten).to include(".cs_b(1'b1)")
+  end
+
+  it 'builds a byte-addressed runtime overlay for generated dpram_dif modules' do
+    task = described_class.new(mode: :mixed, out: tmp_dir)
+    rewritten = task.send(:runtime_dpram_dif_module_block, 'dpram_dif__vhdl_test')
+
+    expect(rewritten).to include('module dpram_dif__vhdl_test')
+    expect(rewritten).to include('wire [10:0] word_addr_a = address_a[11:1];')
+    expect(rewritten).to include('wire [7:0]  read_byte_a = byte_sel_a ? word_data_a[15:8] : word_data_a[7:0];')
+    expect(rewritten).to include('if (wren_b & cs_b)')
+  end
+
   describe 'mixed mode' do
     it 'requires either --manifest or a top source file --input' do
       task = described_class.new(
@@ -680,7 +765,16 @@ RSpec.describe RHDL::CLI::Tasks::ImportTask do
             top_name: 'mixed_top',
             top_language: 'verilog',
             top_file: staged_verilog,
-            source_files: [{ path: staged_verilog, language: 'verilog' }]
+            source_files: [{ path: staged_verilog, language: 'verilog' }],
+            pure_verilog_files: [
+              {
+                path: staged_verilog,
+                language: 'verilog',
+                generated: false,
+                origin_kind: 'source_verilog',
+                original_source_path: staged_verilog
+              }
+            ]
           }
         }
       )
@@ -718,14 +812,35 @@ RSpec.describe RHDL::CLI::Tasks::ImportTask do
       expect(report.fetch('top')).to eq('mixed_top')
       mixed = report.fetch('mixed_import')
       artifacts = report.fetch('artifacts')
+      mixed_top_module = report.fetch('modules').find { |entry| entry.fetch('name') == 'mixed_top' }
       expect(mixed.fetch('top_name')).to eq('mixed_top')
       expect(mixed.fetch('source_files').first.fetch('language')).to eq('verilog')
+      expect(mixed.fetch('pure_verilog_files').first).to include(
+        'path',
+        'language',
+        'generated',
+        'origin_kind'
+      )
       expect(mixed.fetch('pure_verilog_root')).to eq(File.join(tmp_dir, '.mixed_import', 'pure_verilog'))
       expect(mixed.fetch('pure_verilog_entry_path')).to eq(File.join(tmp_dir, '.mixed_import', 'pure_verilog_entry.v'))
       expect(mixed.fetch('core_mlir_path')).to eq(File.join(tmp_dir, 'mixed_top.core.mlir'))
       expect(mixed.fetch('runtime_json_path')).to eq(File.join(tmp_dir, '.mixed_import', 'mixed_top.runtime.json'))
       expect(mixed.fetch('normalized_verilog_path')).to eq(File.join(tmp_dir, '.mixed_import', 'mixed_top.normalized.v'))
       expect(mixed.fetch('firtool_verilog_path')).to eq(File.join(tmp_dir, '.mixed_import', 'mixed_top.firtool.v'))
+      expect(report.fetch('raised_files')).to include(File.join(tmp_dir, 'mixed_top.rb'))
+      expect(mixed_top_module).to include(
+        'verilog_module_name' => 'mixed_top',
+        'ruby_class_name' => 'MixedTop',
+        'raised_rhdl_path' => File.join(tmp_dir, 'mixed_top.rb'),
+        'staged_verilog_path' => staged_verilog,
+        'staged_verilog_module_name' => 'mixed_top',
+        'origin_kind' => 'source_verilog',
+        'source_kind' => 'verilog',
+        'original_source_path' => staged_verilog
+      )
+      expect(mixed_top_module.fetch('emitted_dsl_features')).to be_a(Array)
+      expect(mixed_top_module.fetch('emitted_base_class')).to be_a(String)
+      expect(mixed_top_module).not_to have_key('vhdl_synth')
       expect(artifacts.fetch('pure_verilog_root')).to eq(mixed.fetch('pure_verilog_root'))
       expect(artifacts.fetch('pure_verilog_entry_path')).to eq(mixed.fetch('pure_verilog_entry_path'))
       expect(artifacts.fetch('core_mlir_path')).to eq(mixed.fetch('core_mlir_path'))
@@ -780,6 +895,10 @@ RSpec.describe RHDL::CLI::Tasks::ImportTask do
         File.write(
           args.fetch(:out_path),
           <<~MLIR
+            hw.module @leaf() {
+              hw.output
+            }
+
             hw.module @mixed_top(%a: i1) -> (y: i1) {
               hw.output %a : i1
             }
@@ -812,20 +931,126 @@ RSpec.describe RHDL::CLI::Tasks::ImportTask do
       expect(report.fetch('top')).to eq('mixed_top')
       mixed = report.fetch('mixed_import')
       artifacts = report.fetch('artifacts')
+      leaf_module = report.fetch('modules').find { |entry| entry.fetch('name') == 'leaf' }
       expect(mixed.fetch('autoscan_root')).to eq(File.expand_path(rtl_dir))
       expect(mixed.fetch('top_file')).to eq(File.join(tmp_dir, '.mixed_import', 'pure_verilog', 'mixed_top.sv'))
       expect(mixed.fetch('top_language')).to eq('verilog')
       expect(mixed.fetch('vhdl_analysis_commands')).not_to be_empty
       expect(mixed.fetch('vhdl_synth_outputs')).not_to be_empty
+      expect(mixed.fetch('vhdl_synth_outputs').first).to include(
+        'source_path' => File.expand_path(leaf_vhdl),
+        'standard' => '08',
+        'workdir' => File.join(tmp_dir, '.mixed_import', 'ghdl_work')
+      )
+      expect(mixed.fetch('pure_verilog_files').first).to include('origin_kind')
       expect(mixed.fetch('pure_verilog_root')).to eq(File.join(tmp_dir, '.mixed_import', 'pure_verilog'))
       expect(mixed.fetch('pure_verilog_entry_path')).to eq(File.join(tmp_dir, '.mixed_import', 'pure_verilog_entry.v'))
       expect(mixed.fetch('core_mlir_path')).to eq(File.join(tmp_dir, 'mixed_top.core.mlir'))
       expect(mixed.fetch('runtime_json_path')).to eq(File.join(tmp_dir, '.mixed_import', 'mixed_top.runtime.json'))
       expect(mixed.fetch('normalized_verilog_path')).to eq(File.join(tmp_dir, '.mixed_import', 'mixed_top.normalized.v'))
       expect(mixed.fetch('firtool_verilog_path')).to eq(File.join(tmp_dir, '.mixed_import', 'mixed_top.firtool.v'))
+      expect(report.fetch('raised_files')).to include(File.join(tmp_dir, 'mixed_top.rb'), File.join(tmp_dir, 'leaf.rb'))
+      expect(leaf_module).to include(
+        'verilog_module_name' => 'leaf',
+        'ruby_class_name' => 'Leaf',
+        'raised_rhdl_path' => File.join(tmp_dir, 'leaf.rb'),
+        'staged_verilog_path' => File.join(tmp_dir, '.mixed_import', 'pure_verilog', 'generated_vhdl', 'leaf.v'),
+        'staged_verilog_module_name' => 'leaf',
+        'origin_kind' => 'source_vhdl_generated',
+        'source_kind' => 'generated_vhdl',
+        'original_source_path' => File.expand_path(leaf_vhdl),
+        'vhdl_synth' => include(
+          'entity' => 'leaf',
+          'module_name' => 'leaf',
+          'standard' => '08',
+          'workdir' => File.join(tmp_dir, '.mixed_import', 'ghdl_work'),
+          'source_path' => File.expand_path(leaf_vhdl)
+        )
+      )
       expect(artifacts.fetch('core_mlir_path')).to eq(mixed.fetch('core_mlir_path'))
       expect(artifacts.fetch('runtime_json_path')).to eq(mixed.fetch('runtime_json_path'))
       expect(artifacts.fetch('firtool_verilog_path')).to eq(mixed.fetch('firtool_verilog_path'))
+    end
+
+    it 'skips mixed runtime JSON emission when emit_runtime_json is false' do
+      staged_verilog = File.join(tmp_dir, 'mixed_top.sv')
+      report_path = File.join(tmp_dir, 'mixed_report.json')
+      File.write(staged_verilog, "module mixed_top(input a, output y); assign y = a; endmodule\n")
+
+      task = described_class.new(
+        mode: :mixed,
+        input: staged_verilog,
+        out: tmp_dir,
+        top: 'mixed_top',
+        strict: true,
+        report: report_path,
+        emit_runtime_json: false
+      )
+
+      allow(task).to receive(:discover_rtl_files).and_return([staged_verilog])
+      allow(task).to receive(:discover_source_files) do |input, no_autoscan:, source_paths:|
+        [described_class::MixedImportSource.new(path: input, language: :verilog, generated: false, origin: :source)]
+      end
+      allow(task).to receive(:build_mixed_pure_verilog_entry!) do |sources:, pure_verilog_root:, top_name:|
+        FileUtils.mkdir_p(pure_verilog_root)
+        copied = File.join(pure_verilog_root, File.basename(staged_verilog))
+        FileUtils.cp(staged_verilog, copied)
+        entry_path = File.join(tmp_dir, '.mixed_import', 'pure_verilog_entry.v')
+        File.write(entry_path, "module mixed_top(input a, output y); assign y = a; endmodule\n")
+        {
+          top_file: copied,
+          top_language: :verilog,
+          entry_path: entry_path,
+          copied_sources: [
+            {
+              source: described_class::MixedImportSource.new(
+                path: staged_verilog,
+                language: :verilog,
+                generated: false,
+                origin: :source
+              ),
+              copied_path: copied
+            }
+          ]
+        }
+      end
+      allow(RHDL::Codegen::CIRCT::Tooling).to receive(:verilog_to_circt_mlir) do |**args|
+        File.write(
+          args.fetch(:out_path),
+          <<~MLIR
+            hw.module @mixed_top(%a: i1) -> (y: i1) {
+              hw.output %a : i1
+            }
+          MLIR
+        )
+        {
+          success: true,
+          command: circt_verilog_import_command(staged_verilog),
+          stdout: '',
+          stderr: ''
+        }
+      end
+      allow(RHDL::Codegen::CIRCT::Tooling).to receive(:circt_mlir_to_verilog) do |**args|
+        FileUtils.mkdir_p(File.dirname(args.fetch(:out_path)))
+        File.write(args.fetch(:out_path), "module mixed_top(input a, output y); assign y = a; endmodule\n")
+        {
+          success: true,
+          command: 'firtool mixed_top.core.mlir --verilog',
+          stdout: '',
+          stderr: ''
+        }
+      end
+
+      expect { task.run }.to output(/Wrote import report/).to_stdout
+
+      report = JSON.parse(File.read(report_path))
+      mixed = report.fetch('mixed_import')
+      artifacts = report.fetch('artifacts')
+      runtime_json_path = File.join(tmp_dir, '.mixed_import', 'mixed_top.runtime.json')
+
+      expect(mixed).not_to have_key('runtime_json_path')
+      expect(artifacts).not_to have_key('runtime_json_path')
+      expect(File.exist?(runtime_json_path)).to be(false)
     end
 
     it 'fails fast when VHDL synth fails during mixed import run' do

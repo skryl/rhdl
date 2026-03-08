@@ -4,6 +4,32 @@ require 'spec_helper'
 require 'rhdl/cli'
 
 RSpec.describe RHDL::CLI::Tasks::DepsTask do
+  def stub_dependency_environment(task, firtool: true, arcilator: true, circt_verilog: true, llc: true)
+    allow(task).to receive(:command_available?).and_return(false)
+    allow(task).to receive(:command_available?).with('iverilog').and_return(true)
+    allow(task).to receive(:command_available?).with('verilator').and_return(true)
+    allow(task).to receive(:command_available?).with('dot').and_return(true)
+    allow(task).to receive(:command_available?).with('firtool').and_return(firtool)
+    allow(task).to receive(:command_available?).with('arcilator').and_return(arcilator)
+    allow(task).to receive(:command_available?).with('circt-verilog').and_return(circt_verilog)
+    allow(task).to receive(:command_available?).with('llc').and_return(llc)
+
+    allow(task).to receive(:command_healthy?).and_return(false)
+    allow(task).to receive(:command_healthy?).with('firtool', 'firtool --version').and_return(firtool)
+    allow(task).to receive(:command_healthy?).with('arcilator', 'arcilator --version').and_return(arcilator)
+    allow(task).to receive(:command_healthy?).with('circt-verilog', 'circt-verilog --version').and_return(circt_verilog)
+    allow(task).to receive(:command_healthy?).with('llc', 'llc --version').and_return(llc)
+
+    allow(task).to receive(:command_output_first_line).and_return('installed')
+    allow(task).to receive(:command_output_first_line).with('firtool --version').and_return('firtool-1.62.0')
+
+    allow(task).to receive(:`).and_call_original
+    allow(task).to receive(:`).with('iverilog -V 2>&1').and_return("Icarus Verilog version 11.0 (stable)\n")
+    allow(task).to receive(:`).with('verilator --version 2>&1').and_return("Verilator 4.038 2020-07-11\n")
+    allow(task).to receive(:`).with('firtool --version 2>&1').and_return("firtool-1.62.0\n")
+    allow(task).to receive(:`).with('dot -V 2>&1').and_return("dot - graphviz version 2.43.0\n")
+  end
+
   describe 'initialization' do
     it 'can be instantiated with no options' do
       expect { described_class.new }.not_to raise_error
@@ -115,32 +141,7 @@ RSpec.describe RHDL::CLI::Tasks::DepsTask do
       let(:task) { described_class.new }
 
       before do
-        # Mock command_available? to simulate tools are already installed
-        # This prevents actual package manager commands from running
-        allow(task).to receive(:command_available?).and_call_original
-        allow(task).to receive(:command_available?).with('iverilog').and_return(true)
-        allow(task).to receive(:command_available?).with('verilator').and_return(true)
-        allow(task).to receive(:command_available?).with('dot').and_return(true)
-        allow(task).to receive(:command_available?).with('firtool').and_return(true)
-        allow(task).to receive(:command_available?).with('arcilator').and_return(true)
-        allow(task).to receive(:command_available?).with('circt-verilog').and_return(true)
-        allow(task).to receive(:command_available?).with('circt-translate').and_return(true)
-        allow(task).to receive(:command_available?).with('llc').and_return(true)
-        allow(task).to receive(:command_healthy?).and_call_original
-        allow(task).to receive(:command_healthy?).with('firtool', 'firtool --version').and_return(true)
-        allow(task).to receive(:command_healthy?).with('arcilator', 'arcilator --version').and_return(true)
-        allow(task).to receive(:command_healthy?).with('circt-verilog', 'circt-verilog --version').and_return(true)
-        allow(task).to receive(:command_healthy?).with('circt-translate', 'circt-translate --version').and_return(true)
-        allow(task).to receive(:command_healthy?).with('llc', 'llc --version').and_return(true)
-        allow(task).to receive(:command_output_first_line).and_call_original
-        allow(task).to receive(:command_output_first_line).with('firtool --version').and_return('firtool-1.62.0')
-
-        # Mock backtick operator for version queries
-        allow(task).to receive(:`).and_call_original
-        allow(task).to receive(:`).with('iverilog -V 2>&1').and_return("Icarus Verilog version 11.0 (stable)\n")
-        allow(task).to receive(:`).with('verilator --version 2>&1').and_return("Verilator 4.038 2020-07-11\n")
-        allow(task).to receive(:`).with('firtool --version 2>&1').and_return("firtool-1.62.0\n")
-        allow(task).to receive(:`).with('dot -V 2>&1').and_return("dot - graphviz version 2.43.0\n")
+        stub_dependency_environment(task)
       end
 
       it 'displays platform information' do
@@ -157,29 +158,17 @@ RSpec.describe RHDL::CLI::Tasks::DepsTask do
 
       context 'when arcilator tools are missing' do
         before do
-          allow(task).to receive(:command_available?).and_call_original
-          allow(task).to receive(:command_available?).with('iverilog').and_return(true)
-          allow(task).to receive(:command_available?).with('verilator').and_return(true)
-          allow(task).to receive(:command_available?).with('dot').and_return(true)
+          stub_dependency_environment(task, firtool: false, arcilator: false, circt_verilog: false, llc: false)
           allow(task).to receive(:command_available?).with('firtool').and_return(false, true)
           allow(task).to receive(:command_available?).with('arcilator').and_return(false, true)
           allow(task).to receive(:command_available?).with('circt-verilog').and_return(false, true)
-          allow(task).to receive(:command_available?).with('circt-translate').and_return(true)
           allow(task).to receive(:command_available?).with('llc').and_return(false, true)
-          allow(task).to receive(:command_healthy?).and_call_original
           allow(task).to receive(:command_healthy?).with('firtool', 'firtool --version').and_return(false, true)
           allow(task).to receive(:command_healthy?).with('arcilator', 'arcilator --version').and_return(false, true)
           allow(task).to receive(:command_healthy?).with('circt-verilog', 'circt-verilog --version').and_return(false, true)
-          allow(task).to receive(:command_healthy?).with('circt-translate', 'circt-translate --version').and_return(true)
           allow(task).to receive(:command_healthy?).with('llc', 'llc --version').and_return(false, true)
-          allow(task).to receive(:command_output_first_line).and_call_original
           allow(task).to receive(:command_output_first_line).with('firtool --version').and_return('firtool-1.62.0')
           allow(task).to receive(:install_arcilator)
-          allow(task).to receive(:`).and_call_original
-          allow(task).to receive(:`).with('iverilog -V 2>&1').and_return("Icarus Verilog version 11.0 (stable)\n")
-          allow(task).to receive(:`).with('verilator --version 2>&1').and_return("Verilator 4.038 2020-07-11\n")
-          allow(task).to receive(:`).with('firtool --version 2>&1').and_return("firtool-1.62.0\n")
-          allow(task).to receive(:`).with('dot -V 2>&1').and_return("dot - graphviz version 2.43.0\n")
         end
 
         it 'attempts to install missing arcilator tools' do
@@ -303,32 +292,7 @@ RSpec.describe RHDL::CLI::Tasks::DepsTask do
     let(:task) { described_class.new }
 
     before do
-      # Mock command_available? to simulate tools are already installed
-      # This prevents actual package manager commands from running
-      allow(task).to receive(:command_available?).and_call_original
-      allow(task).to receive(:command_available?).with('iverilog').and_return(true)
-      allow(task).to receive(:command_available?).with('verilator').and_return(true)
-      allow(task).to receive(:command_available?).with('dot').and_return(true)
-      allow(task).to receive(:command_available?).with('firtool').and_return(true)
-      allow(task).to receive(:command_available?).with('arcilator').and_return(true)
-      allow(task).to receive(:command_available?).with('circt-verilog').and_return(true)
-      allow(task).to receive(:command_available?).with('circt-translate').and_return(true)
-      allow(task).to receive(:command_available?).with('llc').and_return(true)
-      allow(task).to receive(:command_healthy?).and_call_original
-      allow(task).to receive(:command_healthy?).with('firtool', 'firtool --version').and_return(true)
-      allow(task).to receive(:command_healthy?).with('arcilator', 'arcilator --version').and_return(true)
-      allow(task).to receive(:command_healthy?).with('circt-verilog', 'circt-verilog --version').and_return(true)
-      allow(task).to receive(:command_healthy?).with('circt-translate', 'circt-translate --version').and_return(true)
-      allow(task).to receive(:command_healthy?).with('llc', 'llc --version').and_return(true)
-      allow(task).to receive(:command_output_first_line).and_call_original
-      allow(task).to receive(:command_output_first_line).with('firtool --version').and_return('firtool-1.62.0')
-
-      # Mock backtick operator for version queries
-      allow(task).to receive(:`).and_call_original
-      allow(task).to receive(:`).with('iverilog -V 2>&1').and_return("Icarus Verilog version 11.0 (stable)\n")
-      allow(task).to receive(:`).with('verilator --version 2>&1').and_return("Verilator 4.038 2020-07-11\n")
-      allow(task).to receive(:`).with('firtool --version 2>&1').and_return("firtool-1.62.0\n")
-      allow(task).to receive(:`).with('dot -V 2>&1').and_return("dot - graphviz version 2.43.0\n")
+      stub_dependency_environment(task)
     end
 
     it 'displays installer header' do

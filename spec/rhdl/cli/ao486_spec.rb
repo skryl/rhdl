@@ -58,8 +58,9 @@ RSpec.describe 'rhdl examples ao486 command' do
     expect(stdout).to include('--report FILE')
     expect(stdout).to include('--strategy STRATEGY')
     expect(stdout).to include('--[no-]fallback')
-    expect(stdout).to include('--[no-]maintain-directory-structure')
+    expect(stdout).to include('--[no-]keep-structure')
     expect(stdout).to include('--[no-]format')
+    expect(stdout).to include('--[no-]strict')
     expect(stdout).to include('--[no-]clean')
   end
 
@@ -72,6 +73,13 @@ RSpec.describe 'rhdl examples ao486 command' do
 
   it 'accepts --no-clean on import' do
     _stdout, stderr, status = run_cli('examples', 'ao486', 'import', '--no-clean')
+
+    expect(status.success?).to be(false)
+    expect(stderr).to include('Missing required option: --out DIR')
+  end
+
+  it 'accepts --no-strict on import' do
+    _stdout, stderr, status = run_cli('examples', 'ao486', 'import', '--no-strict')
 
     expect(status.success?).to be(false)
     expect(stderr).to include('Missing required option: --out DIR')

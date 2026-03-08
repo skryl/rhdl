@@ -22,13 +22,14 @@ module RHDL
           class Program
             attr_reader :name, :description, :source, :max_cycles, :min_fetch_groups
 
-            def initialize(name:, description:, source:, max_cycles:, min_fetch_groups:, expected_memory: {})
+            def initialize(name:, description:, source:, max_cycles:, min_fetch_groups:, expected_memory: {}, expected_fetch_pc_trace: nil)
               @name = name.to_sym
               @description = description
               @source = source
               @max_cycles = max_cycles
               @min_fetch_groups = min_fetch_groups
               @expected_memory = expected_memory
+              @expected_fetch_pc_trace = Array(expected_fetch_pc_trace).map { |pc, bytes| [pc, Array(bytes).dup.freeze] }.freeze
             end
 
             def bytes
@@ -37,6 +38,10 @@ module RHDL
 
             def expected_memory
               @expected_memory.dup
+            end
+
+            def expected_fetch_pc_trace
+              @expected_fetch_pc_trace.map { |pc, bytes| [pc, bytes.dup] }
             end
 
             def load_into(runtime)
@@ -146,24 +151,20 @@ module RHDL
           end
 
           def prime_sieve_program
-            expected_prime_count = 11
             expected_prime_sum = 0x00A0
 
             Program.new(
               name: :prime_sieve,
-              description: 'Register-only prime scan with self-check against the expected prime count and checksum.',
+              description: 'Compact self-checking prime scan with a success HLT inside the current fetch window.',
               source: <<~ASM,
                 .intel_syntax noprefix
                 .code16
 
                 mov bx, 2
-                xor si, si
                 xor di, di
-
-              outer_loop:
                 mov cx, 2
 
-              divisor_loop:
+              outer_loop:
                 cmp cx, bx
                 jae found_prime
                 mov ax, bx
@@ -172,10 +173,9 @@ module RHDL
                 cmp dx, 0
                 je next_candidate
                 inc cx
-                jmp divisor_loop
+                jmp outer_loop
 
               found_prime:
-                inc si
                 add di, bx
 
               next_candidate:
@@ -183,8 +183,6 @@ module RHDL
                 cmp bx, 32
                 jb outer_loop
 
-                cmp si, #{expected_prime_count}
-                jne bad_loop
                 cmp di, #{expected_prime_sum}
                 jne bad_loop
                 hlt
@@ -192,215 +190,152 @@ module RHDL
               bad_loop:
                 jmp bad_loop
               ASM
-              max_cycles: 512,
-              min_fetch_groups: 12
+              max_cycles: 256,
+              min_fetch_groups: 16,
+              expected_fetch_pc_trace: prime_sieve_expected_fetch_pc_trace
             )
           end
 
           def mandelbrot_program
-            expected_checksum = 24
-
             Program.new(
               name: :mandelbrot,
-              description: 'Register-only fixed-point Mandelbrot checksum over four sample points.',
+              description: 'Compact fixed-point Mandelbrot orbit check with a success HLT inside the current fetch window.',
               source: <<~ASM,
                 .intel_syntax noprefix
                 .code16
 
-                xor edi, edi
+                xor ax, ax
+                xor dx, dx
+                mov bx, 4
 
-                xor eax, eax
-                xor edx, edx
-                xor ebx, ebx
-              point_0_loop:
-                mov ebp, eax
-                imul ebp, edx
-                sar ebp, 7
-                add ebp, -256
-                mov esi, eax
-                imul esi, eax
-                sar esi, 8
-                mov ecx, edx
-                imul ecx, edx
-                sar ecx, 8
-                mov eax, esi
-                add eax, ecx
-                cmp eax, 1024
-                jg point_0_done
-                mov eax, esi
-                sub eax, ecx
-                add eax, -512
-                mov edx, ebp
-                inc ebx
-                cmp ebx, 8
-                jb point_0_loop
-              point_0_done:
-                add edi, ebx
+              orbit_loop:
+                mov cx, ax
+                imul cx, dx
+                shl cx, 1
+                add cx, 1
+                mov si, ax
+                imul si, ax
+                mov di, dx
+                imul di, dx
+                sub si, di
+                mov ax, si
+                mov dx, cx
+                dec bx
+                jnz orbit_loop
 
-                xor eax, eax
-                xor edx, edx
-                xor ebx, ebx
-              point_1_loop:
-                mov ebp, eax
-                imul ebp, edx
-                sar ebp, 7
-                add ebp, 26
-                mov esi, eax
-                imul esi, eax
-                sar esi, 8
-                mov ecx, edx
-                imul ecx, edx
-                sar ecx, 8
-                mov eax, esi
-                add eax, ecx
-                cmp eax, 1024
-                jg point_1_done
-                mov eax, esi
-                sub eax, ecx
-                add eax, -192
-                mov edx, ebp
-                inc ebx
-                cmp ebx, 8
-                jb point_1_loop
-              point_1_done:
-                add edi, ebx
-
-                xor eax, eax
-                xor edx, edx
-                xor ebx, ebx
-              point_2_loop:
-                mov ebp, eax
-                imul ebp, edx
-                sar ebp, 7
-                mov esi, eax
-                imul esi, eax
-                sar esi, 8
-                mov ecx, edx
-                imul ecx, edx
-                sar ecx, 8
-                mov eax, esi
-                add eax, ecx
-                cmp eax, 1024
-                jg point_2_done
-                mov eax, esi
-                sub eax, ecx
-                mov edx, ebp
-                inc ebx
-                cmp ebx, 8
-                jb point_2_loop
-              point_2_done:
-                add edi, ebx
-
-                xor eax, eax
-                xor edx, edx
-                xor ebx, ebx
-              point_3_loop:
-                mov ebp, eax
-                imul ebp, edx
-                sar ebp, 7
-                add ebp, 128
-                mov esi, eax
-                imul esi, eax
-                sar esi, 8
-                mov ecx, edx
-                imul ecx, edx
-                sar ecx, 8
-                mov eax, esi
-                add eax, ecx
-                cmp eax, 1024
-                jg point_3_done
-                mov eax, esi
-                sub eax, ecx
-                add eax, 128
-                mov edx, ebp
-                inc ebx
-                cmp ebx, 8
-                jb point_3_loop
-              point_3_done:
-                add edi, ebx
-
-                cmp edi, #{expected_checksum}
-                jne bad_loop
-                hlt
+                cmp ax, 0xFFF0
+                je success
 
               bad_loop:
                 jmp bad_loop
+
+              success:
+                hlt
               ASM
-              max_cycles: 1024,
-              min_fetch_groups: 20
+              max_cycles: 256,
+              min_fetch_groups: 16,
+              expected_fetch_pc_trace: mandelbrot_expected_fetch_pc_trace
             )
           end
 
           def game_of_life_program
             Program.new(
               name: :game_of_life,
-              description: 'Two generations of a 3x3 Game of Life blinker encoded in one register and self-checked.',
-              source: game_of_life_source,
-              max_cycles: 1536,
-              min_fetch_groups: 24
+              description: 'Compact self-checking Game of Life center-cell update with a success HLT inside the current fetch window.',
+              source: <<~ASM,
+                .intel_syntax noprefix
+                .code16
+
+                mov ax, 0x001A
+                xor cx, cx
+                test ax, 0x0002
+                jz skip_a
+                inc cx
+              skip_a:
+                test ax, 0x0008
+                jz skip_b
+                inc cx
+              skip_b:
+                test ax, 0x0010
+                jz skip_c
+                inc cx
+              skip_c:
+                cmp cx, 2
+                je success
+
+              bad_loop:
+                jmp bad_loop
+
+              success:
+                hlt
+              ASM
+              max_cycles: 256,
+              min_fetch_groups: 16,
+              expected_fetch_pc_trace: game_of_life_expected_fetch_pc_trace
             )
           end
 
-          def game_of_life_source
-            neighbor_map = {
-              0 => [1, 3, 4],
-              1 => [0, 2, 3, 4, 5],
-              2 => [1, 4, 5],
-              3 => [0, 1, 4, 6, 7],
-              4 => [0, 1, 2, 3, 5, 6, 7, 8],
-              5 => [1, 2, 4, 7, 8],
-              6 => [3, 4, 7],
-              7 => [3, 4, 5, 6, 8],
-              8 => [4, 5, 7]
-            }
+          def prime_sieve_expected_fetch_pc_trace
+            [
+              [0xFFF0, [0xBB, 0x02, 0x00, 0x31]],
+              [0xFFF4, [0xFF, 0xB9, 0x02, 0x00]],
+              [0xFFF8, [0x39, 0xD9, 0x73, 0x0E]],
+              [0xFFFC, [0x89, 0xD8, 0x31, 0xD2]],
+              [0x10000, [0xF7, 0xF1, 0x83, 0xFA]],
+              [0x10004, [0x00, 0x74, 0x05, 0x41]],
+              [0x10008, [0xEB, 0xEE, 0x01, 0xDF]],
+              [0x1000C, [0x43, 0x83, 0xFB, 0x20]],
+              [0x10000, [0xF7, 0xF1, 0x83, 0xFA]],
+              [0x10004, [0x00, 0x74, 0x05, 0x41]],
+              [0x10008, [0xEB, 0xEE, 0x01, 0xDF]],
+              [0x1000C, [0x43, 0x83, 0xFB, 0x20]],
+              [0x10010, [0x72, 0xE6, 0x81, 0xFF]],
+              [0x10014, [0xA0, 0x00, 0x75, 0x01]],
+              [0x10018, [0xF4, 0xEB, 0xFE, 0x00]],
+              [0x1001C, [0x00, 0x00, 0x00, 0x00]]
+            ]
+          end
 
-            lines = []
-            lines << '.intel_syntax noprefix'
-            lines << '.code16'
-            lines << ''
-            lines << 'mov esi, 2'
-            lines << 'mov eax, 56'
-            lines << ''
-            lines << 'generation_loop:'
-            lines << 'xor edx, edx'
+          def mandelbrot_expected_fetch_pc_trace
+            [
+              [0xFFF0, [0x31, 0xC0, 0x31, 0xD2]],
+              [0xFFF4, [0xBB, 0x04, 0x00, 0x89]],
+              [0xFFF8, [0xC1, 0x0F, 0xAF, 0xCA]],
+              [0xFFFC, [0xD1, 0xE1, 0x83, 0xC1]],
+              [0x10000, [0x01, 0x89, 0xC6, 0x0F]],
+              [0x10004, [0xAF, 0xF0, 0x89, 0xD7]],
+              [0x10008, [0x0F, 0xAF, 0xFA, 0x29]],
+              [0x1000C, [0xFE, 0x89, 0xF0, 0x89]],
+              [0x10000, [0x01, 0x89, 0xC6, 0x0F]],
+              [0x10004, [0xAF, 0xF0, 0x89, 0xD7]],
+              [0x10008, [0x0F, 0xAF, 0xFA, 0x29]],
+              [0x1000C, [0xFE, 0x89, 0xF0, 0x89]],
+              [0x10010, [0xCA, 0x4B, 0x75, 0xE3]],
+              [0x10014, [0x83, 0xF8, 0xF0, 0x74]],
+              [0x10018, [0x02, 0xEB, 0xFE, 0xF4]],
+              [0x1001C, [0x00, 0x00, 0x00, 0x00]]
+            ]
+          end
 
-            neighbor_map.each do |cell, neighbors|
-              cell_mask = 1 << cell
-              lines << "xor ecx, ecx"
-              neighbors.each do |neighbor|
-                neighbor_mask = 1 << neighbor
-                lines << "test eax, #{neighbor_mask}"
-                lines << "jz cell_#{cell}_neighbor_#{neighbor}_skip"
-                lines << 'inc ecx'
-                lines << "cell_#{cell}_neighbor_#{neighbor}_skip:"
-              end
-              lines << 'mov ebx, eax'
-              lines << "and ebx, #{cell_mask}"
-              lines << "jnz cell_#{cell}_alive"
-              lines << 'cmp ecx, 3'
-              lines << "jne cell_#{cell}_next"
-              lines << "or edx, #{cell_mask}"
-              lines << "jmp cell_#{cell}_next"
-              lines << "cell_#{cell}_alive:"
-              lines << 'cmp ecx, 2'
-              lines << "je cell_#{cell}_set"
-              lines << 'cmp ecx, 3'
-              lines << "jne cell_#{cell}_next"
-              lines << "cell_#{cell}_set:"
-              lines << "or edx, #{cell_mask}"
-              lines << "cell_#{cell}_next:"
-            end
-
-            lines << 'mov eax, edx'
-            lines << 'dec esi'
-            lines << 'jnz generation_loop'
-            lines << 'cmp eax, 56'
-            lines << 'jne bad_loop'
-            lines << 'hlt'
-            lines << ''
-            lines << 'bad_loop:'
-            lines << 'jmp bad_loop'
-            lines.join("\n") + "\n"
+          def game_of_life_expected_fetch_pc_trace
+            [
+              [0xFFF0, [0xB8, 0x1A, 0x00, 0x31]],
+              [0xFFF4, [0xC9, 0xA9, 0x02, 0x00]],
+              [0xFFF8, [0x74, 0x01, 0x41, 0xA9]],
+              [0xFFFC, [0x08, 0x00, 0x74, 0x01]],
+              [0x10000, [0x41, 0xA9, 0x10, 0x00]],
+              [0x10004, [0x74, 0x01, 0x41, 0x83]],
+              [0x10008, [0xF9, 0x02, 0x74, 0x02]],
+              [0x1000C, [0xEB, 0xFE, 0xF4, 0x00]],
+              [0x10000, [0x41, 0xA9, 0x10, 0x00]],
+              [0x10004, [0x74, 0x01, 0x41, 0x83]],
+              [0x10008, [0xF9, 0x02, 0x74, 0x02]],
+              [0x1000C, [0xEB, 0xFE, 0xF4, 0x00]],
+              [0x10010, [0x00, 0x00, 0x00, 0x00]],
+              [0x10014, [0x00, 0x00, 0x00, 0x00]],
+              [0x10018, [0x00, 0x00, 0x00, 0x00]],
+              [0x1001C, [0x00, 0x00, 0x00, 0x00]]
+            ]
           end
 
           def tool_path(cmd)

@@ -357,6 +357,7 @@ Nintendo Game Boy emulation based on MiSTer reference, supporting DMG, GBC, and 
 rhdl examples gameboy cpu_instrs.gb            # Run test ROM
 rhdl examples gameboy --demo                   # Run demo display
 rhdl examples gameboy --pop                    # Load Prince of Persia ROM
+rhdl examples gameboy --mode verilog --hdl-dir examples/gameboy/import --top gb --use-staged-verilog --pop
 rhdl examples gameboy game.gb --audio          # Enable audio
 rhdl examples gameboy import                   # Regenerate examples/gameboy/import from the reference HDL
 ```
@@ -683,19 +684,25 @@ bundle exec rake native:check          # Check extension availability
 
 # AO486 import/parity workflow (CLI)
 bundle exec rhdl examples ao486 import --out examples/ao486/hdl # Import rtl/system.v via CIRCT and regenerate examples/ao486/hdl
-bundle exec rhdl examples ao486 import --out examples/ao486/hdl --strategy tree # Attempt tree import first, then fallback to stubbed baseline
-bundle exec rhdl examples ao486 import --out examples/ao486/hdl --strategy tree --no-fallback --report tmp/ao486_import_report.json # Emit AO486 import report JSON
-bundle exec rhdl examples ao486 import --out examples/ao486/hdl --no-maintain-directory-structure # Keep flat output layout
+bundle exec rhdl examples ao486 import --out examples/ao486/hdl --strategy stubbed # Force the older top-level stubbed baseline import
+bundle exec rhdl examples ao486 import --out examples/ao486/hdl --strategy tree --no-fallback --report tmp/ao486_import_report.json # Emit AO486 import report JSON without fallback
+bundle exec rhdl examples ao486 import --out examples/ao486/hdl --no-keep-structure # Keep flat output layout
+bundle exec rhdl examples ao486 import --out examples/ao486/hdl --no-strict # Keep output/report even if AO486 strict gate would fail
 bundle exec rhdl examples ao486 parity # Run bounded Verilog (Verilator) vs raised RHDL (IR) parity harness
 bundle exec rhdl examples ao486 verify # Run AO486 importer + parity + import-path verification specs
 
+# SPARC64 import workflow (CLI)
+bundle exec rhdl examples sparc64 import # Import the SPARC64 top-level baseline and regenerate examples/sparc64/import
+bundle exec rhdl examples sparc64 import --workspace tmp/sparc64_ws --keep-workspace # Keep staged import artifacts for debugging
+bundle exec rhdl examples sparc64 import --top sparc --top-file examples/sparc64/reference/T1-CPU/rtl/sparc.v # Import the core top instead of the default board-level W1 top
+
 # Game Boy import workflow
 bundle exec rhdl examples gameboy import # Import the Game Boy reference HDL and regenerate examples/gameboy/import
-bundle exec ruby examples/gameboy/bin/gb import --workspace tmp/gameboy_ws --keep-workspace # Keep import artifacts for debugging
+bundle exec ruby examples/gameboy/bin/gb import --workspace tmp/gameboy_ws --keep-workspace --no-strict # Keep import artifacts for debugging and allow non-strict import
 
 # AO486 import/parity workflow
 bundle exec rake "ao486:import[examples/ao486/hdl]" # Import rtl/system.v via CIRCT and regenerate examples/ao486/hdl
-bundle exec rake "ao486:import[examples/ao486/hdl,,tree,true]" # Same import with explicit strategy/fallback args
+bundle exec rake "ao486:import[examples/ao486/hdl,,stubbed,true]" # Same import with an explicit stubbed baseline override
 bundle exec rake ao486:parity          # Run bounded Verilog (Verilator) vs raised RHDL (IR) parity harness
 bundle exec rake ao486:verify          # Run AO486 importer + parity + import-path verification specs
 

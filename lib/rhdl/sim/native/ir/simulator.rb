@@ -235,6 +235,7 @@ module RHDL
           prepared = prepare_ir_json(ir_json, @input_format)
           @ir_json = prepared[:json]
           @effective_input_format = prepared[:effective_format]
+          @signal_widths_by_name, @signal_widths_by_idx = extract_signal_widths(@ir_json)
 
           if selected
             configure_backend(selected)
@@ -259,11 +260,17 @@ module RHDL
         end
 
         def poke(name, value)
-          core_signal(SIM_SIGNAL_POKE, name: name, value: value)[:ok]
+          width = signal_width_by_name(name)
+          return core_signal(SIM_SIGNAL_POKE, name: name, value: value)[:ok] unless width && width > 64
+
+          poke_wide_by_name(name, normalize_signal_value(value, width), width)
         end
 
         def peek(name)
-          core_signal(SIM_SIGNAL_PEEK, name: name)[:value]
+          width = signal_width_by_name(name)
+          return core_signal(SIM_SIGNAL_PEEK, name: name)[:value] unless width && width > 64
+
+          peek_wide_by_name(name, width)
         end
 
         def has_signal?(name)
@@ -435,12 +442,18 @@ module RHDL
 
         # Poke by index - faster than by name when index is cached
         def poke_by_idx(idx, value)
-          core_signal(SIM_SIGNAL_POKE_INDEX, idx: idx, value: value)
+          width = signal_width_by_idx(idx)
+          return core_signal(SIM_SIGNAL_POKE_INDEX, idx: idx, value: value) unless width && width > 64
+
+          poke_wide_by_idx(idx, normalize_signal_value(value, width), width)
         end
 
         # Peek by index - faster than by name when index is cached
         def peek_by_idx(idx)
-          core_signal(SIM_SIGNAL_PEEK_INDEX, idx: idx)[:value]
+          width = signal_width_by_idx(idx)
+          return core_signal(SIM_SIGNAL_PEEK_INDEX, idx: idx)[:value] unless width && width > 64
+
+          peek_wide_by_idx(idx, width)
         end
 
         # ====================================================================
@@ -727,6 +740,21 @@ module RHDL
           }
         end
 
+        def core_signal_wide(op, name: nil, idx: 0, value: 0)
+          in_ptr = Fiddle::Pointer.malloc(16)
+          low, high = split_wide_words(value)
+          in_ptr[0, 16] = [low, high].pack('QQ')
+
+          out = Fiddle::Pointer.malloc(16)
+          out[0, 16] = [0, 0].pack('QQ')
+          rc = @fn_sim_signal_wide.call(@ctx, op, name, idx, in_ptr, out)
+          lo, hi = out[0, 16].unpack('QQ')
+          {
+            ok: rc != 0,
+            value: join_wide_words(lo, hi)
+          }
+        end
+
         def core_exec(op, arg0 = 0, arg1 = 0, error_out = nil)
           out = Fiddle::Pointer.malloc(Fiddle::SIZEOF_LONG)
           out[0, Fiddle::SIZEOF_LONG] = [0].pack(Fiddle::SIZEOF_LONG == 8 ? 'Q' : 'L')
@@ -843,6 +871,36 @@ module RHDL
             Fiddle::TYPE_INT
           )
 
+          @fn_sim_signal_wide = load_optional_function(
+            'sim_signal_wide',
+            [Fiddle::TYPE_VOIDP, Fiddle::TYPE_UINT, Fiddle::TYPE_VOIDP, Fiddle::TYPE_UINT, Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP],
+            Fiddle::TYPE_INT
+          )
+
+          @fn_sim_poke_word_by_name = load_optional_function(
+            'sim_poke_word_by_name',
+            [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP, Fiddle::TYPE_UINT, Fiddle::TYPE_ULONG],
+            Fiddle::TYPE_INT
+          )
+
+          @fn_sim_peek_word_by_name = load_optional_function(
+            'sim_peek_word_by_name',
+            [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP, Fiddle::TYPE_UINT, Fiddle::TYPE_VOIDP],
+            Fiddle::TYPE_INT
+          )
+
+          @fn_sim_poke_word_by_idx = load_optional_function(
+            'sim_poke_word_by_idx',
+            [Fiddle::TYPE_VOIDP, Fiddle::TYPE_UINT, Fiddle::TYPE_UINT, Fiddle::TYPE_ULONG],
+            Fiddle::TYPE_INT
+          )
+
+          @fn_sim_peek_word_by_idx = load_optional_function(
+            'sim_peek_word_by_idx',
+            [Fiddle::TYPE_VOIDP, Fiddle::TYPE_UINT, Fiddle::TYPE_UINT, Fiddle::TYPE_VOIDP],
+            Fiddle::TYPE_INT
+          )
+
           @fn_sim_exec = Fiddle::Function.new(
             @lib['sim_exec'],
             [Fiddle::TYPE_VOIDP, Fiddle::TYPE_UINT, Fiddle::TYPE_ULONG, Fiddle::TYPE_ULONG, Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP],
@@ -913,6 +971,12 @@ module RHDL
           @destructor = @fn_destroy
         end
 
+        def load_optional_function(symbol_name, arg_types, return_type)
+          Fiddle::Function.new(@lib[symbol_name], arg_types, return_type)
+        rescue Fiddle::DLError
+          nil
+        end
+
         def prepare_ir_json(ir_json, input_format)
           case input_format
           when :circt
@@ -921,6 +985,120 @@ module RHDL
           else
             raise ArgumentError, "Unsupported IR input format: #{input_format.inspect}. Valid: :circt"
           end
+        end
+
+        def extract_signal_widths(ir_json)
+          payload = JSON.parse(ir_json, max_nesting: false)
+          mod = payload.is_a?(Hash) ? (payload['modules']&.first || payload) : {}
+          entries = Array(mod['ports']) + Array(mod['nets']) + Array(mod['regs'])
+
+          by_name = {}
+          by_idx = []
+
+          entries.each do |entry|
+            width = entry['width']&.to_i
+            name = entry['name']&.to_s
+            next unless width && name
+
+            by_name[name] = width
+            by_idx << width
+          end
+
+          [by_name, by_idx]
+        rescue JSON::ParserError, TypeError
+          [{}, []]
+        end
+
+        def signal_width_by_name(name)
+          @signal_widths_by_name[name.to_s]
+        end
+
+        def signal_width_by_idx(idx)
+          @signal_widths_by_idx[idx.to_i]
+        end
+
+        def normalize_signal_value(value, width)
+          width = width.to_i
+          return 0 if width <= 0
+
+          mask = width >= 128 ? ((1 << 128) - 1) : ((1 << width) - 1)
+          value.to_i & mask
+        end
+
+        def split_wide_words(value)
+          normalized = value.to_i
+          [
+            normalized & 0xFFFF_FFFF_FFFF_FFFF,
+            (normalized >> 64) & 0xFFFF_FFFF_FFFF_FFFF
+          ]
+        end
+
+        def join_wide_words(low, high)
+          (high.to_i << 64) | low.to_i
+        end
+
+        def poke_wide_by_name(name, value, width)
+          if @fn_sim_signal_wide
+            return core_signal_wide(SIM_SIGNAL_POKE, name: name, value: value)[:ok]
+          end
+          raise RangeError, "no wide signal API available for #{name}" unless @fn_sim_poke_word_by_name
+
+          low, high = split_wide_words(value)
+          rc_low = @fn_sim_poke_word_by_name.call(@ctx, name.to_s, 0, low)
+          rc_high = @fn_sim_poke_word_by_name.call(@ctx, name.to_s, 1, high)
+          rc_low != 0 && rc_high != 0
+        end
+
+        def peek_wide_by_name(name, width)
+          if @fn_sim_signal_wide
+            return core_signal_wide(SIM_SIGNAL_PEEK, name: name)[:value]
+          end
+          raise RangeError, "no wide signal API available for #{name}" unless @fn_sim_peek_word_by_name
+
+          low = wide_word_by_name(name, 0)
+          high = width > 64 ? wide_word_by_name(name, 1) : 0
+          join_wide_words(low, high)
+        end
+
+        def poke_wide_by_idx(idx, value, width)
+          if @fn_sim_signal_wide
+            return core_signal_wide(SIM_SIGNAL_POKE_INDEX, idx: idx, value: value)
+          end
+          raise RangeError, "no wide signal API available for #{idx}" unless @fn_sim_poke_word_by_idx
+
+          low, high = split_wide_words(value)
+          rc_low = @fn_sim_poke_word_by_idx.call(@ctx, idx, 0, low)
+          rc_high = @fn_sim_poke_word_by_idx.call(@ctx, idx, 1, high)
+          { ok: rc_low != 0 && rc_high != 0, value: 0 }
+        end
+
+        def peek_wide_by_idx(idx, width)
+          if @fn_sim_signal_wide
+            return core_signal_wide(SIM_SIGNAL_PEEK_INDEX, idx: idx)[:value]
+          end
+          raise RangeError, "no wide signal API available for #{idx}" unless @fn_sim_peek_word_by_idx
+
+          low = wide_word_by_idx(idx, 0)
+          high = width > 64 ? wide_word_by_idx(idx, 1) : 0
+          join_wide_words(low, high)
+        end
+
+        def wide_word_by_name(name, word_idx)
+          out = Fiddle::Pointer.malloc(Fiddle::SIZEOF_LONG)
+          out[0, Fiddle::SIZEOF_LONG] = [0].pack(Fiddle::SIZEOF_LONG == 8 ? 'Q' : 'L')
+          rc = @fn_sim_peek_word_by_name.call(@ctx, name.to_s, word_idx, out)
+          return 0 if rc == 0
+
+          out[0, Fiddle::SIZEOF_LONG].unpack1(Fiddle::SIZEOF_LONG == 8 ? 'Q' : 'L')
+        end
+
+        def wide_word_by_idx(idx, word_idx)
+          out = Fiddle::Pointer.malloc(Fiddle::SIZEOF_LONG)
+          out[0, Fiddle::SIZEOF_LONG] = [0].pack(Fiddle::SIZEOF_LONG == 8 ? 'Q' : 'L')
+          rc = @fn_sim_peek_word_by_idx.call(@ctx, idx, word_idx, out)
+          return 0 if rc == 0
+
+          out[0, Fiddle::SIZEOF_LONG].unpack1(Fiddle::SIZEOF_LONG == 8 ? 'Q' : 'L')
         end
       end
 

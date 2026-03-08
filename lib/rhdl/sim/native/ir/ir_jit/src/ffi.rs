@@ -14,6 +14,7 @@ use crate::core::CoreSimulator;
 use crate::extensions::{
     Apple2Extension, Cpu8BitExtension, GameBoyExtension, Mos6502Extension, RiscvExtension,
 };
+use crate::signal_value::{SignalValue, SignalValue128};
 use crate::vcd::{TraceMode, VcdTracer};
 
 // ============================================================================
@@ -1103,7 +1104,7 @@ pub unsafe extern "C" fn runner_probe(ctx: *const JitSimContext, op: c_uint, arg
             .as_ref()
             .map(|ext| {
                 if ext.ppu_v_cnt_idx < ctx_ref.core.signals.len() {
-                    ctx_ref.core.signals[ext.ppu_v_cnt_idx]
+                    ctx_ref.core.signals[ext.ppu_v_cnt_idx] as u64
                 } else {
                     0
                 }
@@ -1114,7 +1115,7 @@ pub unsafe extern "C" fn runner_probe(ctx: *const JitSimContext, op: c_uint, arg
             .as_ref()
             .map(|ext| {
                 if ext.ppu_h_cnt_idx < ctx_ref.core.signals.len() {
-                    ctx_ref.core.signals[ext.ppu_h_cnt_idx]
+                    ctx_ref.core.signals[ext.ppu_h_cnt_idx] as u64
                 } else {
                     0
                 }
@@ -1125,7 +1126,7 @@ pub unsafe extern "C" fn runner_probe(ctx: *const JitSimContext, op: c_uint, arg
             .as_ref()
             .map(|ext| {
                 if ext.ppu_vblank_irq_idx < ctx_ref.core.signals.len() {
-                    ctx_ref.core.signals[ext.ppu_vblank_irq_idx]
+                    ctx_ref.core.signals[ext.ppu_vblank_irq_idx] as u64
                 } else {
                     0
                 }
@@ -1136,7 +1137,7 @@ pub unsafe extern "C" fn runner_probe(ctx: *const JitSimContext, op: c_uint, arg
             .as_ref()
             .map(|ext| {
                 if ext.if_r_idx < ctx_ref.core.signals.len() {
-                    ctx_ref.core.signals[ext.if_r_idx]
+                    ctx_ref.core.signals[ext.if_r_idx] as u64
                 } else {
                     0
                 }
@@ -1145,7 +1146,7 @@ pub unsafe extern "C" fn runner_probe(ctx: *const JitSimContext, op: c_uint, arg
         RUNNER_PROBE_SIGNAL => {
             let idx = arg0 as usize;
             if idx < ctx_ref.core.signals.len() {
-                ctx_ref.core.signals[idx]
+                ctx_ref.core.signals[idx] as u64
             } else {
                 0
             }
@@ -1155,7 +1156,7 @@ pub unsafe extern "C" fn runner_probe(ctx: *const JitSimContext, op: c_uint, arg
             .as_ref()
             .map(|ext| {
                 if ext.ppu_lcdc_on_idx < ctx_ref.core.signals.len() {
-                    ctx_ref.core.signals[ext.ppu_lcdc_on_idx]
+                    ctx_ref.core.signals[ext.ppu_lcdc_on_idx] as u64
                 } else {
                     0
                 }
@@ -1166,7 +1167,7 @@ pub unsafe extern "C" fn runner_probe(ctx: *const JitSimContext, op: c_uint, arg
             .as_ref()
             .map(|ext| {
                 if ext.ppu_h_div_cnt_idx < ctx_ref.core.signals.len() {
-                    ctx_ref.core.signals[ext.ppu_h_div_cnt_idx]
+                    ctx_ref.core.signals[ext.ppu_h_div_cnt_idx] as u64
                 } else {
                     0
                 }
@@ -1285,6 +1286,14 @@ unsafe fn ir_sim_poke(
     name: *const c_char,
     value: c_ulong,
 ) -> c_int {
+    ir_sim_poke_wide(ctx, name, value as SignalValue)
+}
+
+unsafe fn ir_sim_poke_wide(
+    ctx: *mut JitSimContext,
+    name: *const c_char,
+    value: SignalValue,
+) -> c_int {
     if ctx.is_null() || name.is_null() {
         return -1;
     }
@@ -1294,14 +1303,39 @@ unsafe fn ir_sim_poke(
         Err(_) => return -1,
     };
 
-    match ctx.core.poke(name, value as u64) {
+    match ctx.core.poke_wide(name, value) {
         Ok(()) => 0,
         Err(_) => -1,
     }
 }
 
+unsafe fn ir_sim_poke_word_by_name(
+    ctx: *mut JitSimContext,
+    name: *const c_char,
+    word_idx: c_uint,
+    value: c_ulong,
+) -> c_int {
+    if ctx.is_null() || name.is_null() {
+        return -1;
+    }
+    let ctx = &mut *ctx;
+    let name = match CStr::from_ptr(name).to_str() {
+        Ok(s) => s,
+        Err(_) => return -1,
+    };
+    let Some(idx) = ctx.core.get_signal_idx(name) else {
+        return -1;
+    };
+    ctx.core.poke_word_by_idx(idx, word_idx as usize, value as u64);
+    0
+}
+
 /// Peek a signal value
 unsafe fn ir_sim_peek(ctx: *const JitSimContext, name: *const c_char) -> c_ulong {
+    ir_sim_peek_wide(ctx, name) as c_ulong
+}
+
+unsafe fn ir_sim_peek_wide(ctx: *const JitSimContext, name: *const c_char) -> SignalValue {
     if ctx.is_null() || name.is_null() {
         return 0;
     }
@@ -1311,7 +1345,26 @@ unsafe fn ir_sim_peek(ctx: *const JitSimContext, name: *const c_char) -> c_ulong
         Err(_) => return 0,
     };
 
-    ctx.core.peek(name).unwrap_or(0) as c_ulong
+    ctx.core.peek_wide(name).unwrap_or(0)
+}
+
+unsafe fn ir_sim_peek_word_by_name(
+    ctx: *const JitSimContext,
+    name: *const c_char,
+    word_idx: c_uint,
+) -> c_ulong {
+    if ctx.is_null() || name.is_null() {
+        return 0;
+    }
+    let ctx = &*ctx;
+    let name = match CStr::from_ptr(name).to_str() {
+        Ok(s) => s,
+        Err(_) => return 0,
+    };
+    let Some(idx) = ctx.core.get_signal_idx(name) else {
+        return 0;
+    };
+    ctx.core.peek_word_by_idx(idx, word_idx as usize) as c_ulong
 }
 
 /// Check if a signal exists
@@ -1409,17 +1462,40 @@ pub unsafe extern "C" fn jit_sim_mem_write_bytes(
 
 /// Poke by index
 unsafe fn ir_sim_poke_by_idx(ctx: *mut JitSimContext, idx: c_uint, value: c_ulong) {
+    ir_sim_poke_by_idx_wide(ctx, idx, value as SignalValue);
+}
+
+unsafe fn ir_sim_poke_by_idx_wide(ctx: *mut JitSimContext, idx: c_uint, value: SignalValue) {
     if !ctx.is_null() {
-        (*ctx).core.poke_by_idx(idx as usize, value as u64);
+        (*ctx).core.poke_wide_by_idx(idx as usize, value);
     }
+}
+
+unsafe fn ir_sim_poke_word_by_idx(ctx: *mut JitSimContext, idx: c_uint, word_idx: c_uint, value: c_ulong) -> c_int {
+    if ctx.is_null() {
+        return -1;
+    }
+    (*ctx).core.poke_word_by_idx(idx as usize, word_idx as usize, value as u64);
+    0
 }
 
 /// Peek by index
 unsafe fn ir_sim_peek_by_idx(ctx: *const JitSimContext, idx: c_uint) -> c_ulong {
+    ir_sim_peek_by_idx_wide(ctx, idx) as c_ulong
+}
+
+unsafe fn ir_sim_peek_by_idx_wide(ctx: *const JitSimContext, idx: c_uint) -> SignalValue {
     if ctx.is_null() {
         return 0;
     }
-    (*ctx).core.peek_by_idx(idx as usize) as c_ulong
+    (*ctx).core.peek_wide_by_idx(idx as usize)
+}
+
+unsafe fn ir_sim_peek_word_by_idx(ctx: *const JitSimContext, idx: c_uint, word_idx: c_uint) -> c_ulong {
+    if ctx.is_null() {
+        return 0;
+    }
+    (*ctx).core.peek_word_by_idx(idx as usize, word_idx as usize) as c_ulong
 }
 
 /// Evaluate combinational logic
@@ -1454,7 +1530,7 @@ unsafe fn ir_sim_set_prev_clock(
         let ctx = &mut *ctx;
         let idx = clock_list_idx as usize;
         if idx < ctx.core.prev_clock_values.len() {
-            ctx.core.prev_clock_values[idx] = value;
+            ctx.core.prev_clock_values[idx] = value as u64;
         }
     }
 }
@@ -1811,6 +1887,13 @@ unsafe fn write_out_ulong(out: *mut c_ulong, value: c_ulong) {
 }
 
 #[inline]
+unsafe fn write_out_wide(out: *mut SignalValue128, value: SignalValue) {
+    if !out.is_null() {
+        *out = SignalValue128::from_value(value);
+    }
+}
+
+#[inline]
 unsafe fn copy_blob(out_ptr: *mut u8, out_len: usize, bytes: &[u8]) -> usize {
     let required = bytes.len();
     if !out_ptr.is_null() && out_len != 0 && required != 0 {
@@ -1923,6 +2006,87 @@ pub unsafe extern "C" fn sim_signal(
         }
         _ => 0,
     }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn sim_signal_wide(
+    ctx: *mut JitSimContext,
+    op: c_uint,
+    name: *const c_char,
+    idx: c_uint,
+    value: *const SignalValue128,
+    out_value: *mut SignalValue128,
+) -> c_int {
+    if ctx.is_null() {
+        return 0;
+    }
+
+    let in_value = if value.is_null() {
+        0
+    } else {
+        (*value).to_value()
+    };
+
+    match op {
+        SIM_SIGNAL_PEEK => {
+            write_out_wide(out_value, ir_sim_peek_wide(ctx as *const JitSimContext, name));
+            1
+        }
+        SIM_SIGNAL_POKE => {
+            if ir_sim_poke_wide(ctx, name, in_value) == 0 { 1 } else { 0 }
+        }
+        SIM_SIGNAL_PEEK_INDEX => {
+            write_out_wide(out_value, ir_sim_peek_by_idx_wide(ctx as *const JitSimContext, idx));
+            1
+        }
+        SIM_SIGNAL_POKE_INDEX => {
+            ir_sim_poke_by_idx_wide(ctx, idx, in_value);
+            1
+        }
+        _ => 0,
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn sim_poke_word_by_name(
+    ctx: *mut JitSimContext,
+    name: *const c_char,
+    word_idx: c_uint,
+    value: c_ulong,
+) -> c_int {
+    (ir_sim_poke_word_by_name(ctx, name, word_idx, value) == 0) as c_int
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn sim_peek_word_by_name(
+    ctx: *const JitSimContext,
+    name: *const c_char,
+    word_idx: c_uint,
+    out_value: *mut c_ulong,
+) -> c_int {
+    write_out_ulong(out_value, ir_sim_peek_word_by_name(ctx, name, word_idx));
+    1
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn sim_poke_word_by_idx(
+    ctx: *mut JitSimContext,
+    idx: c_uint,
+    word_idx: c_uint,
+    value: c_ulong,
+) -> c_int {
+    (ir_sim_poke_word_by_idx(ctx, idx, word_idx, value) == 0) as c_int
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn sim_peek_word_by_idx(
+    ctx: *const JitSimContext,
+    idx: c_uint,
+    word_idx: c_uint,
+    out_value: *mut c_ulong,
+) -> c_int {
+    write_out_ulong(out_value, ir_sim_peek_word_by_idx(ctx, idx, word_idx));
+    1
 }
 
 #[no_mangle]

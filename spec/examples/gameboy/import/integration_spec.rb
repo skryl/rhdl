@@ -60,9 +60,11 @@ RSpec.describe 'GameBoy mixed import integration', slow: true do
         expect(report.fetch('success')).to be(true)
         expect(report.fetch('top')).to eq('gb')
         expect(report.fetch('module_count')).to be > 0
+        expect(report.fetch('component_count')).to eq(report.fetch('module_count'))
 
         mixed = report.fetch('mixed_import')
         artifacts = report.fetch('artifacts')
+        components = report.fetch('components')
         expect(mixed.fetch('top_name')).to eq('gb')
         expect(mixed.fetch('top_file')).to start_with(File.join(out_dir, '.mixed_import', 'pure_verilog'))
         expect(mixed.fetch('top_file')).to end_with('/rtl/gb.v')
@@ -83,6 +85,13 @@ RSpec.describe 'GameBoy mixed import integration', slow: true do
         expect(artifacts.fetch('runtime_json_path')).to eq(mixed.fetch('runtime_json_path'))
         expect(artifacts.fetch('normalized_verilog_path')).to eq(mixed.fetch('normalized_verilog_path'))
         expect(artifacts.fetch('firtool_verilog_path')).to eq(mixed.fetch('firtool_verilog_path'))
+        expect(components).not_to be_empty
+        gb_component = components.find { |entry| entry.fetch('verilog_module_name') == 'gb' }
+        expect(gb_component).not_to be_nil
+        expect(File.file?(gb_component.fetch('raised_rhdl_path'))).to be(true)
+        expect(File.file?(gb_component.fetch('staged_verilog_path'))).to be(true)
+        expect(gb_component.fetch('origin_kind')).to eq('source_verilog')
+        expect(gb_component.fetch('keep_structure_relative_path')).to eq(File.join('rtl', 'gb.rb'))
 
         degrade_diags = Array(report.fetch('raise_diagnostics', [])).select do |diag|
           RAISE_DEGRADE_OPS.include?(diag['op'].to_s)

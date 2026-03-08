@@ -4,6 +4,7 @@
 
 use std::collections::HashMap;
 use crate::core::{CoreSimulator, FlatOp, OP_COPY_TO_SIG};
+use crate::signal_value::SignalValue;
 
 /// Result of batched cycle execution
 pub struct Apple2BatchResult {
@@ -135,7 +136,7 @@ impl Apple2Extension {
     #[inline(always)]
     fn run_14m_cycle_internal(&mut self, core: &mut CoreSimulator, key_data: u8, key_ready: bool) -> (bool, bool, bool) {
         // Set keyboard input
-        let k_val = ((key_data as u64) | 0x80) * (key_ready as u64);
+        let k_val = ((key_data as SignalValue) | 0x80) * (key_ready as SignalValue);
         unsafe { *core.signals.get_unchecked_mut(self.k_idx) = k_val; }
 
         // Falling edge
@@ -145,7 +146,7 @@ impl Apple2Extension {
         // Provide RAM/ROM data
         let ram_addr = unsafe { *core.signals.get_unchecked(self.cpu_addr_idx) } as usize;
         let ram_data = self.read_mapped_byte(ram_addr);
-        unsafe { *core.signals.get_unchecked_mut(self.ram_do_idx) = ram_data as u64; }
+        unsafe { *core.signals.get_unchecked_mut(self.ram_do_idx) = ram_data as SignalValue; }
 
         // Rising edge
         unsafe { *core.signals.get_unchecked_mut(self.clk_idx) = 1; }
@@ -166,8 +167,8 @@ impl Apple2Extension {
         let key_cleared = unsafe { *core.signals.get_unchecked(self.read_key_idx) } == 1;
 
         let speaker = unsafe { *core.signals.get_unchecked(self.speaker_idx) };
-        let speaker_toggled = speaker != self.prev_speaker;
-        self.prev_speaker = speaker;
+        let speaker_toggled = speaker != (self.prev_speaker as SignalValue);
+        self.prev_speaker = speaker as u64;
 
         (text_dirty, key_cleared, speaker_toggled)
     }
@@ -183,7 +184,7 @@ impl Apple2Extension {
 
         for (i, seq_assign) in core.seq_assigns.iter().enumerate() {
             if let Some((src_idx, mask)) = seq_assign.fast_source {
-                let val = unsafe { *core.signals.get_unchecked(src_idx) } & mask;
+                let val = unsafe { *core.signals.get_unchecked(src_idx) } & (mask as SignalValue);
                 core.next_regs[i] = val;
                 continue;
             }
@@ -199,7 +200,7 @@ impl Apple2Extension {
 
             let last_op = &seq_assign.ops[ops_len - 1];
             if last_op.op_type == OP_COPY_TO_SIG {
-                let val = FlatOp::get_operand(&core.signals, &core.temps, last_op.arg0) & last_op.arg2;
+                let val = FlatOp::get_operand(&core.signals, &core.temps, last_op.arg0) & (last_op.arg2 as SignalValue);
                 core.next_regs[i] = val;
             } else {
                 CoreSimulator::execute_flat_op_static(&mut core.signals, &mut core.temps, &core.memory_arrays, last_op);
@@ -263,34 +264,34 @@ impl Apple2Extension {
 impl CoreSimulator {
     /// Static version of execute_flat_op for use in extensions
     #[inline(always)]
-    pub fn execute_flat_op_static(signals: &mut [u64], temps: &mut [u64], memories: &[Vec<u64>], op: &FlatOp) {
+    pub fn execute_flat_op_static(signals: &mut [SignalValue], temps: &mut [SignalValue], memories: &[Vec<SignalValue>], op: &FlatOp) {
         use crate::core::*;
 
         match op.op_type {
             OP_COPY_TO_SIG => {
-                let val = FlatOp::get_operand(signals, temps, op.arg0) & op.arg2;
+                let val = FlatOp::get_operand(signals, temps, op.arg0) & (op.arg2 as SignalValue);
                 unsafe { *signals.get_unchecked_mut(op.dst) = val; }
             }
             OP_COPY_SIG | OP_COPY_IMM | OP_COPY_TMP => {
-                let val = FlatOp::get_operand(signals, temps, op.arg0) & op.arg2;
+                let val = FlatOp::get_operand(signals, temps, op.arg0) & (op.arg2 as SignalValue);
                 unsafe { *temps.get_unchecked_mut(op.dst) = val; }
             }
             OP_NOT => {
-                let val = (!FlatOp::get_operand(signals, temps, op.arg0)) & op.arg2;
+                let val = (!FlatOp::get_operand(signals, temps, op.arg0)) & (op.arg2 as SignalValue);
                 unsafe { *temps.get_unchecked_mut(op.dst) = val; }
             }
             OP_REDUCE_AND => {
                 let val = FlatOp::get_operand(signals, temps, op.arg0);
-                let mask = op.arg1;
-                let result = ((val & mask) == mask) as u64;
+                let mask = op.arg1 as SignalValue;
+                let result = ((val & mask) == mask) as SignalValue;
                 unsafe { *temps.get_unchecked_mut(op.dst) = result; }
             }
             OP_REDUCE_OR => {
-                let result = (FlatOp::get_operand(signals, temps, op.arg0) != 0) as u64;
+                let result = (FlatOp::get_operand(signals, temps, op.arg0) != 0) as SignalValue;
                 unsafe { *temps.get_unchecked_mut(op.dst) = result; }
             }
             OP_REDUCE_XOR => {
-                let result = (FlatOp::get_operand(signals, temps, op.arg0).count_ones() & 1) as u64;
+                let result = (FlatOp::get_operand(signals, temps, op.arg0).count_ones() & 1) as SignalValue;
                 unsafe { *temps.get_unchecked_mut(op.dst) = result; }
             }
             OP_AND => {
@@ -306,15 +307,15 @@ impl CoreSimulator {
                 unsafe { *temps.get_unchecked_mut(op.dst) = result; }
             }
             OP_ADD => {
-                let result = FlatOp::get_operand(signals, temps, op.arg0).wrapping_add(FlatOp::get_operand(signals, temps, op.arg1)) & op.arg2;
+                let result = FlatOp::get_operand(signals, temps, op.arg0).wrapping_add(FlatOp::get_operand(signals, temps, op.arg1)) & (op.arg2 as SignalValue);
                 unsafe { *temps.get_unchecked_mut(op.dst) = result; }
             }
             OP_SUB => {
-                let result = FlatOp::get_operand(signals, temps, op.arg0).wrapping_sub(FlatOp::get_operand(signals, temps, op.arg1)) & op.arg2;
+                let result = FlatOp::get_operand(signals, temps, op.arg0).wrapping_sub(FlatOp::get_operand(signals, temps, op.arg1)) & (op.arg2 as SignalValue);
                 unsafe { *temps.get_unchecked_mut(op.dst) = result; }
             }
             OP_MUL => {
-                let result = FlatOp::get_operand(signals, temps, op.arg0).wrapping_mul(FlatOp::get_operand(signals, temps, op.arg1)) & op.arg2;
+                let result = FlatOp::get_operand(signals, temps, op.arg0).wrapping_mul(FlatOp::get_operand(signals, temps, op.arg1)) & (op.arg2 as SignalValue);
                 unsafe { *temps.get_unchecked_mut(op.dst) = result; }
             }
             OP_DIV => {
@@ -329,7 +330,7 @@ impl CoreSimulator {
             }
             OP_SHL => {
                 let shift = FlatOp::get_operand(signals, temps, op.arg1).min(63) as u32;
-                let result = (FlatOp::get_operand(signals, temps, op.arg0) << shift) & op.arg2;
+                let result = (FlatOp::get_operand(signals, temps, op.arg0) << shift) & (op.arg2 as SignalValue);
                 unsafe { *temps.get_unchecked_mut(op.dst) = result; }
             }
             OP_SHR => {
@@ -338,47 +339,47 @@ impl CoreSimulator {
                 unsafe { *temps.get_unchecked_mut(op.dst) = result; }
             }
             OP_EQ => {
-                let result = (FlatOp::get_operand(signals, temps, op.arg0) == FlatOp::get_operand(signals, temps, op.arg1)) as u64;
+                let result = (FlatOp::get_operand(signals, temps, op.arg0) == FlatOp::get_operand(signals, temps, op.arg1)) as SignalValue;
                 unsafe { *temps.get_unchecked_mut(op.dst) = result; }
             }
             OP_NE => {
-                let result = (FlatOp::get_operand(signals, temps, op.arg0) != FlatOp::get_operand(signals, temps, op.arg1)) as u64;
+                let result = (FlatOp::get_operand(signals, temps, op.arg0) != FlatOp::get_operand(signals, temps, op.arg1)) as SignalValue;
                 unsafe { *temps.get_unchecked_mut(op.dst) = result; }
             }
             OP_LT => {
-                let result = (FlatOp::get_operand(signals, temps, op.arg0) < FlatOp::get_operand(signals, temps, op.arg1)) as u64;
+                let result = (FlatOp::get_operand(signals, temps, op.arg0) < FlatOp::get_operand(signals, temps, op.arg1)) as SignalValue;
                 unsafe { *temps.get_unchecked_mut(op.dst) = result; }
             }
             OP_GT => {
-                let result = (FlatOp::get_operand(signals, temps, op.arg0) > FlatOp::get_operand(signals, temps, op.arg1)) as u64;
+                let result = (FlatOp::get_operand(signals, temps, op.arg0) > FlatOp::get_operand(signals, temps, op.arg1)) as SignalValue;
                 unsafe { *temps.get_unchecked_mut(op.dst) = result; }
             }
             OP_LE => {
-                let result = (FlatOp::get_operand(signals, temps, op.arg0) <= FlatOp::get_operand(signals, temps, op.arg1)) as u64;
+                let result = (FlatOp::get_operand(signals, temps, op.arg0) <= FlatOp::get_operand(signals, temps, op.arg1)) as SignalValue;
                 unsafe { *temps.get_unchecked_mut(op.dst) = result; }
             }
             OP_GE => {
-                let result = (FlatOp::get_operand(signals, temps, op.arg0) >= FlatOp::get_operand(signals, temps, op.arg1)) as u64;
+                let result = (FlatOp::get_operand(signals, temps, op.arg0) >= FlatOp::get_operand(signals, temps, op.arg1)) as SignalValue;
                 unsafe { *temps.get_unchecked_mut(op.dst) = result; }
             }
             OP_MUX => {
                 let c = FlatOp::get_operand(signals, temps, op.arg0);
                 let t = FlatOp::get_operand(signals, temps, op.arg1);
                 let f = FlatOp::get_operand(signals, temps, op.arg2);
-                let select = (c != 0) as u64;
-                let result = (select.wrapping_neg() & t) | ((!select.wrapping_neg()) & f);
+                let select = if c != 0 { SignalValue::MAX } else { 0 };
+                let result = (select & t) | ((!select) & f);
                 unsafe { *temps.get_unchecked_mut(op.dst) = result; }
             }
             OP_SLICE => {
                 let shift = op.arg1 as u32;
-                let result = (FlatOp::get_operand(signals, temps, op.arg0) >> shift) & op.arg2;
+                let result = (FlatOp::get_operand(signals, temps, op.arg0) >> shift) & (op.arg2 as SignalValue);
                 unsafe { *temps.get_unchecked_mut(op.dst) = result; }
             }
             OP_CONCAT_INIT => {
                 unsafe { *temps.get_unchecked_mut(op.dst) = 0; }
             }
             OP_CONCAT_ACCUM => {
-                let part = FlatOp::get_operand(signals, temps, op.arg0) & op.arg2;
+                let part = FlatOp::get_operand(signals, temps, op.arg0) & (op.arg2 as SignalValue);
                 let shift = op.arg1 as usize;
                 unsafe {
                     let current = *temps.get_unchecked(op.dst);
@@ -388,11 +389,11 @@ impl CoreSimulator {
             OP_CONCAT_FINISH => {
                 unsafe {
                     let val = *temps.get_unchecked(op.dst);
-                    *temps.get_unchecked_mut(op.dst) = val & op.arg2;
+                    *temps.get_unchecked_mut(op.dst) = val & (op.arg2 as SignalValue);
                 }
             }
             OP_RESIZE => {
-                let result = FlatOp::get_operand(signals, temps, op.arg0) & op.arg2;
+                let result = FlatOp::get_operand(signals, temps, op.arg0) & (op.arg2 as SignalValue);
                 unsafe { *temps.get_unchecked_mut(op.dst) = result; }
             }
             OP_MEM_READ => {
@@ -404,10 +405,10 @@ impl CoreSimulator {
                 } else {
                     0
                 };
-                unsafe { *temps.get_unchecked_mut(op.dst) = result & op.arg2; }
+                unsafe { *temps.get_unchecked_mut(op.dst) = result & (op.arg2 as SignalValue); }
             }
             OP_COPY_SIG_TO_SIG => {
-                let val = unsafe { *signals.get_unchecked(op.arg0 as usize) } & op.arg2;
+                let val = unsafe { *signals.get_unchecked(op.arg0 as usize) } & (op.arg2 as SignalValue);
                 unsafe { *signals.get_unchecked_mut(op.dst) = val; }
             }
             OP_AND_SS => {
@@ -423,15 +424,15 @@ impl CoreSimulator {
                 unsafe { *temps.get_unchecked_mut(op.dst) = result; }
             }
             OP_EQ_SS => {
-                let result = unsafe { (*signals.get_unchecked(op.arg0 as usize) == *signals.get_unchecked(op.arg1 as usize)) as u64 };
+                let result = unsafe { (*signals.get_unchecked(op.arg0 as usize) == *signals.get_unchecked(op.arg1 as usize)) as SignalValue };
                 unsafe { *temps.get_unchecked_mut(op.dst) = result; }
             }
             OP_MUX_SSS => {
                 let c = unsafe { *signals.get_unchecked(op.arg0 as usize) };
                 let t = unsafe { *signals.get_unchecked(op.arg1 as usize) };
                 let f = unsafe { *signals.get_unchecked(op.arg2 as usize) };
-                let select = (c != 0) as u64;
-                let result = (select.wrapping_neg() & t) | ((!select.wrapping_neg()) & f);
+                let select = if c != 0 { SignalValue::MAX } else { 0 };
+                let result = (select & t) | ((!select) & f);
                 unsafe { *temps.get_unchecked_mut(op.dst) = result; }
             }
             _ => {}

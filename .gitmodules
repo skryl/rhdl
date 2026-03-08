@@ -18,3 +18,6 @@
 	path = examples/ao486/reference
 	url = https://github.com/MiSTer-devel/ao486_MiSTer
 	ignore = dirty
+[submodule "examples/sparc64/reference"]
+	path = examples/sparc64/reference
+	url = git@github.com:freecores/sparc64soc.git

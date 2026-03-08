@@ -14,6 +14,7 @@ use crate::core::CoreSimulator;
 use crate::extensions::{
     Apple2Extension, Cpu8BitExtension, GameBoyExtension, Mos6502Extension, RiscvExtension,
 };
+use crate::signal_value::{SignalValue, SignalValue128};
 use crate::vcd::{TraceMode, VcdTracer};
 
 // ============================================================================
@@ -1083,7 +1084,7 @@ pub unsafe extern "C" fn runner_probe(ctx: *const IrSimContext, op: c_uint, arg0
             .as_ref()
             .map(|ext| {
                 if ext.ppu_v_cnt_idx < ctx_ref.core.signals.len() {
-                    ctx_ref.core.signals[ext.ppu_v_cnt_idx]
+                    ctx_ref.core.signals[ext.ppu_v_cnt_idx] as u64
                 } else {
                     0
                 }
@@ -1094,7 +1095,7 @@ pub unsafe extern "C" fn runner_probe(ctx: *const IrSimContext, op: c_uint, arg0
             .as_ref()
             .map(|ext| {
                 if ext.ppu_h_cnt_idx < ctx_ref.core.signals.len() {
-                    ctx_ref.core.signals[ext.ppu_h_cnt_idx]
+                    ctx_ref.core.signals[ext.ppu_h_cnt_idx] as u64
                 } else {
                     0
                 }
@@ -1105,7 +1106,7 @@ pub unsafe extern "C" fn runner_probe(ctx: *const IrSimContext, op: c_uint, arg0
             .as_ref()
             .map(|ext| {
                 if ext.ppu_vblank_irq_idx < ctx_ref.core.signals.len() {
-                    ctx_ref.core.signals[ext.ppu_vblank_irq_idx]
+                    ctx_ref.core.signals[ext.ppu_vblank_irq_idx] as u64
                 } else {
                     0
                 }
@@ -1116,7 +1117,7 @@ pub unsafe extern "C" fn runner_probe(ctx: *const IrSimContext, op: c_uint, arg0
             .as_ref()
             .map(|ext| {
                 if ext.if_r_idx < ctx_ref.core.signals.len() {
-                    ctx_ref.core.signals[ext.if_r_idx]
+                    ctx_ref.core.signals[ext.if_r_idx] as u64
                 } else {
                     0
                 }
@@ -1125,7 +1126,7 @@ pub unsafe extern "C" fn runner_probe(ctx: *const IrSimContext, op: c_uint, arg0
         RUNNER_PROBE_SIGNAL => {
             let idx = arg0 as usize;
             if idx < ctx_ref.core.signals.len() {
-                ctx_ref.core.signals[idx]
+                ctx_ref.core.signals[idx] as u64
             } else {
                 0
             }
@@ -1135,7 +1136,7 @@ pub unsafe extern "C" fn runner_probe(ctx: *const IrSimContext, op: c_uint, arg0
             .as_ref()
             .map(|ext| {
                 if ext.ppu_lcdc_on_idx < ctx_ref.core.signals.len() {
-                    ctx_ref.core.signals[ext.ppu_lcdc_on_idx]
+                    ctx_ref.core.signals[ext.ppu_lcdc_on_idx] as u64
                 } else {
                     0
                 }
@@ -1146,7 +1147,7 @@ pub unsafe extern "C" fn runner_probe(ctx: *const IrSimContext, op: c_uint, arg0
             .as_ref()
             .map(|ext| {
                 if ext.ppu_h_div_cnt_idx < ctx_ref.core.signals.len() {
-                    ctx_ref.core.signals[ext.ppu_h_div_cnt_idx]
+                    ctx_ref.core.signals[ext.ppu_h_div_cnt_idx] as u64
                 } else {
                     0
                 }
@@ -1267,6 +1268,14 @@ unsafe fn ir_sim_poke(
     name: *const c_char,
     value: c_ulong,
 ) -> c_int {
+    ir_sim_poke_wide(ctx, name, value as SignalValue)
+}
+
+unsafe fn ir_sim_poke_wide(
+    ctx: *mut IrSimContext,
+    name: *const c_char,
+    value: SignalValue,
+) -> c_int {
     if ctx.is_null() || name.is_null() {
         return -1;
     }
@@ -1276,7 +1285,7 @@ unsafe fn ir_sim_poke(
         Err(_) => return -1,
     };
 
-    match ctx.core.poke(name, value as u64) {
+    match ctx.core.poke_wide(name, value) {
         Ok(()) => 0,
         Err(_) => -1,
     }
@@ -1285,6 +1294,10 @@ unsafe fn ir_sim_poke(
 /// Peek a signal value
 /// Returns the value, or 0 on error (check return value of ir_sim_has_signal)
 unsafe fn ir_sim_peek(ctx: *const IrSimContext, name: *const c_char) -> c_ulong {
+    ir_sim_peek_wide(ctx, name) as c_ulong
+}
+
+unsafe fn ir_sim_peek_wide(ctx: *const IrSimContext, name: *const c_char) -> SignalValue {
     if ctx.is_null() || name.is_null() {
         return 0;
     }
@@ -1294,7 +1307,7 @@ unsafe fn ir_sim_peek(ctx: *const IrSimContext, name: *const c_char) -> c_ulong 
         Err(_) => return 0,
     };
 
-    ctx.core.peek(name).unwrap_or(0) as c_ulong
+    ctx.core.peek_wide(name).unwrap_or(0)
 }
 
 /// Check if a signal exists
@@ -1384,7 +1397,7 @@ pub unsafe extern "C" fn ir_sim_mem_write_bytes(
 
     for (i, &b) in data.iter().enumerate() {
         let addr = (start + i) % depth;
-        mem[addr] = b as u64;
+        mem[addr] = b as SignalValue;
     }
 }
 
@@ -1419,7 +1432,7 @@ unsafe fn ir_sim_set_prev_clock(
         let ctx = &mut *ctx;
         let idx = clock_list_idx as usize;
         if idx < ctx.core.prev_clock_values.len() {
-            ctx.core.prev_clock_values[idx] = value as u64;
+            ctx.core.prev_clock_values[idx] = value as SignalValue;
         }
     }
 }
@@ -1491,6 +1504,10 @@ unsafe fn ir_sim_output_names(ctx: *const IrSimContext) -> *mut c_char {
 
 /// Poke a signal value by index (faster than by name)
 unsafe fn ir_sim_poke_by_idx(ctx: *mut IrSimContext, idx: c_int, value: c_ulong) {
+    ir_sim_poke_by_idx_wide(ctx, idx, value as SignalValue);
+}
+
+unsafe fn ir_sim_poke_by_idx_wide(ctx: *mut IrSimContext, idx: c_int, value: SignalValue) {
     if ctx.is_null() || idx < 0 {
         return;
     }
@@ -1498,19 +1515,23 @@ unsafe fn ir_sim_poke_by_idx(ctx: *mut IrSimContext, idx: c_int, value: c_ulong)
     let i = idx as usize;
     if i < ctx.core.signals.len() {
         let mask = crate::core::CoreSimulator::compute_mask(ctx.core.widths[i]);
-        ctx.core.signals[i] = value as u64 & mask;
+        ctx.core.signals[i] = value & mask;
     }
 }
 
 /// Peek a signal value by index (faster than by name)
 unsafe fn ir_sim_peek_by_idx(ctx: *const IrSimContext, idx: c_int) -> c_ulong {
+    ir_sim_peek_by_idx_wide(ctx, idx) as c_ulong
+}
+
+unsafe fn ir_sim_peek_by_idx_wide(ctx: *const IrSimContext, idx: c_int) -> SignalValue {
     if ctx.is_null() || idx < 0 {
         return 0;
     }
     let ctx = &*ctx;
     let i = idx as usize;
     if i < ctx.core.signals.len() {
-        ctx.core.signals[i] as c_ulong
+        ctx.core.signals[i]
     } else {
         0
     }
@@ -1807,6 +1828,13 @@ unsafe fn write_out_ulong(out: *mut c_ulong, value: c_ulong) {
 }
 
 #[inline]
+unsafe fn write_out_wide(out: *mut SignalValue128, value: SignalValue) {
+    if !out.is_null() {
+        *out = SignalValue128::from_value(value);
+    }
+}
+
+#[inline]
 unsafe fn copy_blob(out_ptr: *mut u8, out_len: usize, bytes: &[u8]) -> usize {
     let required = bytes.len();
     if !out_ptr.is_null() && out_len != 0 && required != 0 {
@@ -1915,6 +1943,45 @@ pub unsafe extern "C" fn sim_signal(
         }
         SIM_SIGNAL_POKE_INDEX => {
             ir_sim_poke_by_idx(ctx, idx as c_int, value);
+            1
+        }
+        _ => 0,
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn sim_signal_wide(
+    ctx: *mut IrSimContext,
+    op: c_uint,
+    name: *const c_char,
+    idx: c_uint,
+    value: *const SignalValue128,
+    out_value: *mut SignalValue128,
+) -> c_int {
+    if ctx.is_null() {
+        return 0;
+    }
+
+    let in_value = if value.is_null() {
+        0
+    } else {
+        (*value).to_value()
+    };
+
+    match op {
+        SIM_SIGNAL_PEEK => {
+            write_out_wide(out_value, ir_sim_peek_wide(ctx as *const IrSimContext, name));
+            1
+        }
+        SIM_SIGNAL_POKE => {
+            if ir_sim_poke_wide(ctx, name, in_value) == 0 { 1 } else { 0 }
+        }
+        SIM_SIGNAL_PEEK_INDEX => {
+            write_out_wide(out_value, ir_sim_peek_by_idx_wide(ctx as *const IrSimContext, idx as c_int));
+            1
+        }
+        SIM_SIGNAL_POKE_INDEX => {
+            ir_sim_poke_by_idx_wide(ctx, idx as c_int, in_value);
             1
         }
         _ => 0,

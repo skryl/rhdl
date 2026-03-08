@@ -708,6 +708,7 @@ module RHDL
             check_block: check_block,
             value_map: value_map
           )
+          clock_name = resolve_existing_seq_clock(clock_name, processes)
           return false unless clock_name
 
           seq_statements = lower_llhd_clocked_process_statements(
@@ -778,21 +779,9 @@ module RHDL
           check_block = blocks[wait_term[:target]]
           return false unless check_block
 
-          edge_term = parse_cf_cond_br(check_block[:terminator])
-          return false unless edge_term
-          return false unless edge_term[:false_target] == entry_target
-
-          clock_name = infer_llhd_clock_signal(
-            wait_term: wait_term,
-            wait_block: wait_block,
-            check_block: check_block,
-            value_map: value_map
-          )
-          return false unless clock_name
-
           stop_env = resolve_llhd_stop_env(
             blocks: blocks,
-            current_label: edge_term[:true_target],
+            current_label: wait_term[:target],
             stop_label: entry_target,
             stop_block: wait_block,
             value_map: value_map.dup,
@@ -805,7 +794,7 @@ module RHDL
           )
           return false if stop_env.empty?
 
-          seq_statements = build_resultful_llhd_drive_statements(
+          result_assigns = build_resultful_llhd_assigns(
             process_token: process_token,
             drive_lines: drive_lines,
             stop_block: wait_block,
@@ -815,34 +804,9 @@ module RHDL
             line_no: line_no,
             strict: strict
           )
-          return false if seq_statements.empty?
+          return false if result_assigns.empty?
 
-          target_widths = {}
-          collect_seq_targets(seq_statements).each do |target_name, expr|
-            width = process_signal_width(
-              target: target_name,
-              expr: expr,
-              input_ports: input_ports,
-              output_ports: output_ports,
-              nets: nets,
-              regs: regs
-            )
-            target_widths[target_name] = [target_widths[target_name].to_i, width].max
-          end
-
-          target_widths.each do |target, width|
-            next if process_target_declared?(target, input_ports: input_ports, output_ports: output_ports, regs: regs)
-
-            regs << IR::Reg.new(name: target, width: width)
-          end
-
-          processes << IR::Process.new(
-            name: :"llhd_proc_#{processes.length}",
-            statements: seq_statements,
-            clocked: true,
-            clock: clock_name,
-            sensitivity_list: []
-          )
+          assigns.concat(result_assigns)
           true
         rescue StandardError => e
           diagnostics << Diagnostic.new(
@@ -969,7 +933,7 @@ module RHDL
             branch_args: branch_args
           )
 
-          Array(stop_block[:args]).drop(1).each_with_object({}) do |arg_spec, env|
+          Array(stop_block[:args]).each_with_object({}) do |arg_spec, env|
             env[arg_spec[:name]] = mapped[arg_spec[:name]]
           end
         end
@@ -998,7 +962,7 @@ module RHDL
 
         def build_resultful_llhd_drive_statements(process_token:, drive_lines:, stop_block:, stop_env:, value_map:,
                                                   diagnostics:, line_no:, strict:)
-          result_args = Array(stop_block[:args]).drop(1)
+          result_args = Array(stop_block[:args])
           result_token_map = result_args.each_with_index.each_with_object({}) do |(arg_spec, idx), map|
             map["#{process_token}##{idx}"] = arg_spec[:name]
           end
@@ -1036,6 +1000,59 @@ module RHDL
               op: 'llhd.drv'
             )
             []
+          end
+        end
+
+        def build_resultful_llhd_assigns(process_token:, drive_lines:, stop_block:, stop_env:, value_map:,
+                                         diagnostics:, line_no:, strict:)
+          result_args = Array(stop_block[:args])
+          result_token_map = result_args.each_with_index.each_with_object({}) do |(arg_spec, idx), map|
+            map["#{process_token}##{idx}"] = arg_spec[:name]
+          end
+
+          Array(drive_lines).filter_map do |line|
+            parsed_drive = parse_llhd_drive(line)
+            next unless parsed_drive
+
+            value_name = result_token_map[parsed_drive[:value_token]]
+            enable_name = parsed_drive[:enable_token] ? result_token_map[parsed_drive[:enable_token]] : nil
+            next unless value_name
+
+            value_expr = stop_env[value_name]
+            next if value_expr.nil?
+
+            target_expr = lookup_value(value_map, parsed_drive[:target_token], width: parsed_drive[:width])
+            target_name = if target_expr.is_a?(IR::Signal)
+                            target_expr.name.to_s
+                          else
+                            parsed_drive[:target_token].to_s.delete_prefix('%')
+                          end
+
+            expr = ensure_expr_with_width(pack_array_value(value_expr), width: parsed_drive[:width])
+            if enable_name
+              enable_expr = ensure_expr_with_width(stop_env[enable_name] || IR::Literal.new(value: 0, width: 1), width: 1)
+              if enable_expr.is_a?(IR::Literal)
+                next if enable_expr.value.to_i.zero?
+              else
+                expr = IR::Mux.new(
+                  condition: enable_expr,
+                  when_true: expr,
+                  when_false: ensure_expr_with_width(target_expr, width: parsed_drive[:width]),
+                  width: parsed_drive[:width]
+                )
+              end
+            end
+
+            IR::Assign.new(target: target_name, expr: expr)
+          rescue StandardError => e
+            diagnostics << Diagnostic.new(
+              severity: strict ? :error : :warning,
+              message: "Failed lowering llhd.drv result assign at line #{line_no}: #{e.class}: #{e.message}",
+              line: line_no,
+              column: 1,
+              op: 'llhd.drv'
+            )
+            nil
           end
         end
 
@@ -1111,8 +1128,10 @@ module RHDL
               blocks[current_label] ||= {
                 instructions: [],
                 terminator: nil,
-                args: parse_block_arguments(label_match[2])
+                args: []
               }
+              parsed_args = parse_block_arguments(label_match[2])
+              blocks[current_label][:args] = parsed_args unless parsed_args.empty?
               next
             end
 
@@ -1226,6 +1245,25 @@ module RHDL
           end
 
           nil
+        end
+
+        def resolve_existing_seq_clock(clock_name, processes)
+          resolved = clock_name.to_s
+          seen = Set.new
+
+          while !resolved.empty? && !seen.include?(resolved)
+            seen << resolved
+            source_process = Array(processes).find do |process|
+              process.clocked && Array(process.statements).any? do |statement|
+                statement.is_a?(IR::SeqAssign) && statement.target.to_s == resolved
+              end
+            end
+            break unless source_process&.clock
+
+            resolved = source_process.clock.to_s
+          end
+
+          resolved
         end
 
         def lower_llhd_clocked_process_statements(blocks:, start_label:, stop_label:, value_map:, array_meta:,
@@ -3122,7 +3160,7 @@ module RHDL
                        reset: nil,
                        reset_value: nil
                      }
-                   elsif (with_reset = args.match(/\A(#{SSA_TOKEN_PATTERN})\s*,\s*(#{SSA_TOKEN_PATTERN})\s+reset\s+(#{SSA_TOKEN_PATTERN})\s*,\s*(#{SSA_TOKEN_PATTERN}|-?\d+|true|false)\s*\z/))
+                   elsif (with_reset = args.match(/\A(#{SSA_TOKEN_PATTERN})\s*,\s*(#{SSA_TOKEN_PATTERN})\s+reset(?:\s+async)?\s+(#{SSA_TOKEN_PATTERN})\s*,\s*(#{SSA_TOKEN_PATTERN}|-?\d+|true|false)\s*\z/))
                      {
                        data: with_reset[1],
                        clock: with_reset[2],
@@ -3223,19 +3261,49 @@ module RHDL
           width = mlir_type_width(m[3])
           return false unless width
 
-          plain = args.match(/\A(.+?)\s+clock\s+(#{SSA_TOKEN_PATTERN})\s*\z/)
-          return false unless plain
+          parsed = if (plain = args.match(/\A(.+?)\s+clock\s+(#{SSA_TOKEN_PATTERN})\s*\z/))
+                     {
+                       data: plain[1],
+                       clock: plain[2],
+                       reset: nil,
+                       reset_value: nil
+                     }
+                   elsif (with_reset = args.match(/\A(.+?)\s+clock\s+(#{SSA_TOKEN_PATTERN})\s+reset(?:\s+async)?\s+(#{SSA_TOKEN_PATTERN})\s*,\s*(#{SSA_TOKEN_PATTERN}|-?\d+|true|false)\s*\z/))
+                     {
+                       data: with_reset[1],
+                       clock: with_reset[2],
+                       reset: with_reset[3],
+                       reset_value: with_reset[4]
+                     }
+                   end
+          return false unless parsed
 
-          data_expr = lookup_expr_value(value_map, plain[1], width: width)
+          data_expr = lookup_expr_value(value_map, parsed[:data], width: width)
           reg_name = out_token.sub('%', '')
-          regs << IR::Reg.new(name: reg_name, width: width, reset_value: nil)
+          reset_expr = parsed[:reset_value] ? lookup_value(value_map, parsed[:reset_value], width: width) : nil
+          reg_reset = case reset_expr
+                      when IR::Literal then reset_expr.value
+                      else nil
+                      end
+          regs << IR::Reg.new(name: reg_name, width: width, reset_value: reg_reset)
 
-          seq_stmt = IR::SeqAssign.new(target: reg_name, expr: data_expr)
+          seq_expr = if parsed[:reset]
+                       IR::Mux.new(
+                         condition: lookup_value(value_map, parsed[:reset], width: 1),
+                         when_true: reset_expr || IR::Literal.new(value: 0, width: width),
+                         when_false: data_expr,
+                         width: width
+                       )
+                     else
+                       data_expr
+                     end
+
+          seq_stmt = IR::SeqAssign.new(target: reg_name, expr: seq_expr)
           processes << IR::Process.new(
             name: :seq_logic,
             statements: [seq_stmt],
             clocked: true,
-            clock: clock_name_for_token(value_map, plain[2])
+            clock: clock_name_for_token(value_map, parsed[:clock])
           )
           value_map[out_token] = IR::Signal.new(name: reg_name, width: width)
           true

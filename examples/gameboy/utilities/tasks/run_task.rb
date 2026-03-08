@@ -46,6 +46,15 @@ module RHDL
         # Game Boy screen dimensions
         SCREEN_WIDTH = 160
         SCREEN_HEIGHT = 144
+        KEY_HOLD_SECONDS = 0.10
+        BUTTON_RIGHT = 0
+        BUTTON_LEFT = 1
+        BUTTON_UP = 2
+        BUTTON_DOWN = 3
+        BUTTON_A = 4
+        BUTTON_B = 5
+        BUTTON_SELECT = 6
+        BUTTON_START = 7
 
         # Braille display dimensions
         LCD_CHARS_WIDE = 80   # braille chars (160 pixels / 2)
@@ -153,7 +162,9 @@ module RHDL
           @runner = HeadlessRunner.new(
             mode: mode,
             sim: sim,
-            hdl_dir: options[:hdl_dir]
+            hdl_dir: options[:hdl_dir],
+            top: options[:top],
+            use_staged_verilog: options[:use_staged_verilog]
           )
         end
 
@@ -187,6 +198,7 @@ module RHDL
           # Input tracking
           @last_key = nil
           @last_key_time = nil
+          @pressed_buttons = {}
 
           # Keyboard mode
           @keyboard_mode = :normal
@@ -310,6 +322,7 @@ module RHDL
             frame_start = Process.clock_gettime(Process::CLOCK_MONOTONIC)
 
             handle_keyboard_input
+            release_expired_keys
             @runner.run_steps(@cycles_per_frame)
             update_performance_metrics
 
@@ -384,13 +397,13 @@ module RHDL
 
           case ascii
           when 65, 97, 90, 122  # A or Z - A button
-            inject_key(0)
+            inject_key(BUTTON_A)
           when 83, 115, 88, 120  # S or X - B button
-            inject_key(1)
+            inject_key(BUTTON_B)
           when 13, 10  # Enter - Start
-            inject_key(3)
+            inject_key(BUTTON_START)
           when 127, 8  # Backspace - Select
-            inject_key(2)
+            inject_key(BUTTON_SELECT)
           end
 
           @last_key = ascii
@@ -400,7 +413,22 @@ module RHDL
         end
 
         def inject_key(bit)
-          @runner.runner.inject_key(bit) if @runner.runner.respond_to?(:inject_key)
+          return unless @runner.runner.respond_to?(:inject_key)
+
+          @runner.runner.inject_key(bit)
+          @pressed_buttons[bit] = Time.now + KEY_HOLD_SECONDS
+        end
+
+        def release_expired_keys
+          return if @pressed_buttons.empty?
+          return unless @runner.runner.respond_to?(:release_key)
+
+          now = Time.now
+          expired = @pressed_buttons.select { |_bit, release_at| release_at <= now }.keys
+          expired.each do |bit|
+            @runner.runner.release_key(bit)
+            @pressed_buttons.delete(bit)
+          end
         end
 
         def handle_escape_sequence
@@ -417,13 +445,13 @@ module RHDL
               else
                 case seq
                 when '[A'  # Up
-                  inject_key(6)
+                  inject_key(BUTTON_UP)
                 when '[B'  # Down
-                  inject_key(7)
+                  inject_key(BUTTON_DOWN)
                 when '[C'  # Right
-                  inject_key(4)
+                  inject_key(BUTTON_RIGHT)
                 when '[D'  # Left
-                  inject_key(5)
+                  inject_key(BUTTON_LEFT)
                 end
               end
             rescue IO::WaitReadable, Errno::EAGAIN

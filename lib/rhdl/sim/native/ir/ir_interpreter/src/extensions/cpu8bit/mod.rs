@@ -6,6 +6,7 @@
 use std::collections::HashMap;
 
 use crate::core::CoreSimulator;
+use crate::signal_value::SignalValue;
 
 /// 8-bit CPU specific extension state
 pub struct Cpu8BitExtension {
@@ -108,7 +109,7 @@ impl Cpu8BitExtension {
                 }
             }
 
-            let data_in = unsafe { *self.memory.get_unchecked(addr) } as u64;
+            let data_in = unsafe { *self.memory.get_unchecked(addr) } as SignalValue;
             unsafe {
                 *core.signals.get_unchecked_mut(self.mem_data_in_idx) = data_in;
             }

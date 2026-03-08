@@ -990,34 +990,46 @@ module RHDL
             end
           end
 
-          def signal_expr_references_target?(expr, target_name)
+          def signal_expr_references_target?(expr, target_name, visiting = Set.new, memo = {})
+            return false if expr.nil?
+
+            key = [expr.object_id, target_name.to_s]
+            return memo[key] if memo.key?(key)
+            return false if visiting.include?(key)
+
+            visiting.add(key)
             case expr
             when IR::Signal
-              expr.name.to_s == target_name.to_s
+              memo[key] = expr.name.to_s == target_name.to_s
             when IR::UnaryOp
-              signal_expr_references_target?(expr.operand, target_name)
+              memo[key] = signal_expr_references_target?(expr.operand, target_name, visiting, memo)
             when IR::BinaryOp
-              signal_expr_references_target?(expr.left, target_name) ||
-                signal_expr_references_target?(expr.right, target_name)
+              memo[key] =
+                signal_expr_references_target?(expr.left, target_name, visiting, memo) ||
+                signal_expr_references_target?(expr.right, target_name, visiting, memo)
             when IR::Mux
-              signal_expr_references_target?(expr.condition, target_name) ||
-                signal_expr_references_target?(expr.when_true, target_name) ||
-                signal_expr_references_target?(expr.when_false, target_name)
+              memo[key] =
+                signal_expr_references_target?(expr.condition, target_name, visiting, memo) ||
+                signal_expr_references_target?(expr.when_true, target_name, visiting, memo) ||
+                signal_expr_references_target?(expr.when_false, target_name, visiting, memo)
             when IR::Concat
-              Array(expr.parts).any? { |part| signal_expr_references_target?(part, target_name) }
+              memo[key] = Array(expr.parts).any? { |part| signal_expr_references_target?(part, target_name, visiting, memo) }
             when IR::Slice
-              signal_expr_references_target?(expr.base, target_name)
+              memo[key] = signal_expr_references_target?(expr.base, target_name, visiting, memo)
             when IR::Resize
-              signal_expr_references_target?(expr.expr, target_name)
+              memo[key] = signal_expr_references_target?(expr.expr, target_name, visiting, memo)
             when IR::Case
-              signal_expr_references_target?(expr.selector, target_name) ||
-                expr.cases.any? { |_keys, branch| signal_expr_references_target?(branch, target_name) } ||
-                signal_expr_references_target?(expr.default, target_name)
+              memo[key] =
+                signal_expr_references_target?(expr.selector, target_name, visiting, memo) ||
+                expr.cases.any? { |_keys, branch| signal_expr_references_target?(branch, target_name, visiting, memo) } ||
+                signal_expr_references_target?(expr.default, target_name, visiting, memo)
             when IR::MemoryRead
-              signal_expr_references_target?(expr.addr, target_name)
+              memo[key] = signal_expr_references_target?(expr.addr, target_name, visiting, memo)
             else
-              false
+              memo[key] = false
             end
+          ensure
+            visiting.delete(key) if defined?(key)
           end
 
           def preferred_assigned_expr(target_name, exprs)
@@ -1066,7 +1078,7 @@ module RHDL
 
           def fresh(width)
             @temp_idx += 1
-            token = "%v#{@temp_idx}_#{width}"
+            token = "%rt_tmp_#{@temp_idx}_#{width}"
             @value_widths[token.sub(/^%/, '')] = [width.to_i, 1].max
             token
           end

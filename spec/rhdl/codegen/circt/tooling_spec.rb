@@ -136,19 +136,28 @@ RSpec.describe RHDL::Codegen::CIRCT::Tooling do
       expect(result[:output_path]).to eq('out.v')
     end
 
-    it 'invokes circt-translate export command when explicitly requested' do
+    it 'invokes the canonical export tool when explicitly requested' do
       status = instance_double(Process::Status, success?: true)
       expect(Open3).to receive(:capture3).with(
-        'circt-translate', '--export-verilog', 'in.mlir', '-o', 'out.v'
+        described_class::DEFAULT_VERILOG_EXPORT_TOOL,
+        'in.mlir',
+        '--verilog',
+        '-o',
+        'out.v',
+        "--lowering-options=#{described_class::DEFAULT_FIRTOOL_LOWERING_OPTIONS}",
+        '--format=mlir',
+        '--split-verilog'
       ).and_return(['', '', status])
 
       result = described_class.circt_mlir_to_verilog(
         mlir_path: 'in.mlir',
         out_path: 'out.v',
-        tool: 'circt-translate'
+        tool: described_class::DEFAULT_VERILOG_EXPORT_TOOL,
+        extra_args: ['--split-verilog']
       )
       expect(result[:success]).to be(true)
-      expect(result[:command]).to include('--export-verilog')
+      expect(result[:command]).to include('--verilog')
+      expect(result[:command]).to include('--split-verilog')
     end
 
     it 'returns a failure result when tool is missing' do

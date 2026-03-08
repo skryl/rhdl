@@ -259,4 +259,108 @@ RSpec.describe RHDL::Examples::GameBoy::Tasks::RunTask do
       expect(described_class::SHOW_CURSOR).to include("\e[")
     end
   end
+
+  describe 'interactive key release' do
+    let(:native_runner) { instance_double('GameBoyRunner') }
+    let(:headless_runner) { instance_double('HeadlessRunner', runner: native_runner) }
+    let(:task) { described_class.new }
+
+    before do
+      task.instance_variable_set(:@runner, headless_runner)
+      task.instance_variable_set(:@pressed_buttons, {})
+      allow(native_runner).to receive(:inject_key)
+      allow(native_runner).to receive(:release_key)
+    end
+
+    it 'releases a pressed key after the hold timeout' do
+      start_time = Time.at(1000)
+      allow(Time).to receive(:now).and_return(start_time)
+
+      task.send(:inject_key, 4)
+      expect(native_runner).to have_received(:inject_key).with(4)
+
+      allow(Time).to receive(:now).and_return(start_time + described_class::KEY_HOLD_SECONDS + 0.01)
+      task.send(:release_expired_keys)
+
+      expect(native_runner).to have_received(:release_key).with(4)
+      expect(task.instance_variable_get(:@pressed_buttons)).to be_empty
+    end
+
+    it 'extends the hold window when the same key is pressed again' do
+      start_time = Time.at(2000)
+      allow(Time).to receive(:now).and_return(start_time)
+      task.send(:inject_key, 4)
+
+      allow(Time).to receive(:now).and_return(start_time + (described_class::KEY_HOLD_SECONDS / 2.0))
+      task.send(:inject_key, 4)
+      task.send(:release_expired_keys)
+
+      expect(native_runner).not_to have_received(:release_key)
+
+      allow(Time).to receive(:now).and_return(start_time + described_class::KEY_HOLD_SECONDS + 0.06)
+      task.send(:release_expired_keys)
+
+      expect(native_runner).to have_received(:release_key).with(4).once
+    end
+  end
+
+  describe 'interactive input mapping' do
+    let(:native_runner) { instance_double('GameBoyRunner') }
+    let(:headless_runner) { instance_double('HeadlessRunner', runner: native_runner) }
+    let(:console) { instance_double(IO) }
+    let(:task) { described_class.new }
+
+    before do
+      task.instance_variable_set(:@runner, headless_runner)
+      task.instance_variable_set(:@pressed_buttons, {})
+      task.instance_variable_set(:@keyboard_mode, :normal)
+      task.instance_variable_set(:@debug, false)
+      allow(native_runner).to receive(:inject_key)
+      allow(native_runner).to receive(:release_key)
+      allow(IO).to receive(:console).and_return(console)
+    end
+
+    it 'maps A/Z to the Game Boy A button bit' do
+      allow(console).to receive(:read_nonblock).with(1).and_return('a')
+      allow(Time).to receive(:now).and_return(Time.at(3000))
+
+      task.send(:handle_keyboard_input)
+
+      expect(native_runner).to have_received(:inject_key).with(described_class::BUTTON_A)
+    end
+
+    it 'maps S/X to the Game Boy B button bit' do
+      allow(console).to receive(:read_nonblock).with(1).and_return('x')
+      allow(Time).to receive(:now).and_return(Time.at(3001))
+
+      task.send(:handle_keyboard_input)
+
+      expect(native_runner).to have_received(:inject_key).with(described_class::BUTTON_B)
+    end
+
+    it 'maps Enter to Start and Backspace to Select' do
+      allow(Time).to receive(:now).and_return(Time.at(3002))
+      allow(console).to receive(:read_nonblock).with(1).and_return("\r", "\b")
+
+      task.send(:handle_keyboard_input)
+      task.send(:handle_keyboard_input)
+
+      expect(native_runner).to have_received(:inject_key).with(described_class::BUTTON_START)
+      expect(native_runner).to have_received(:inject_key).with(described_class::BUTTON_SELECT)
+    end
+
+    it 'maps arrow escape sequences to directional button bits' do
+      allow(Time).to receive(:now).and_return(Time.at(3003))
+      allow(console).to receive(:read_nonblock).with(1).and_return("\e", "\e", "\e", "\e")
+      allow(IO).to receive(:select).and_return([[], [], []])
+      allow(console).to receive(:read_nonblock).with(2).and_return('[A', '[B', '[C', '[D')
+
+      4.times { task.send(:handle_keyboard_input) }
+
+      expect(native_runner).to have_received(:inject_key).with(described_class::BUTTON_UP)
+      expect(native_runner).to have_received(:inject_key).with(described_class::BUTTON_DOWN)
+      expect(native_runner).to have_received(:inject_key).with(described_class::BUTTON_RIGHT)
+      expect(native_runner).to have_received(:inject_key).with(described_class::BUTTON_LEFT)
+    end
+  end
 end

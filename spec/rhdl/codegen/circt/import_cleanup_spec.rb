@@ -203,6 +203,40 @@ RSpec.describe RHDL::Codegen::CIRCT::ImportCleanup do
     expect(parsed_chunks.first).not_to include('hw.module @clean')
   end
 
+  it 'cleans async-reset firregs that feed resultful LLHD process drives' do
+    mlir = <<~MLIR
+      hw.module @async_result_proc(in %clk : i1, in %rst : i1, in %req : i1, out gnt : i1) {
+        %false = hw.constant false
+        %true = hw.constant true
+        %t0 = llhd.constant_time <0ns, 0d, 1e>
+        %c0_i1 = hw.constant 0 : i1
+        %next_state = llhd.sig %c0_i1 : i1
+        %next_state_q = llhd.prb %next_state : i1
+        %clk_c = seq.to_clock %clk
+        %state = seq.firreg %next_state_q clock %clk_c reset async %rst, %c0_i1 : i1
+        %proc:2 = llhd.process -> i1, i1 {
+          cf.br ^bb1(%c0_i1, %false : i1, i1)
+        ^bb1(%value: i1, %enable: i1):
+          llhd.wait yield (%value, %enable : i1, i1), (%state, %req : i1, i1), ^bb2
+        ^bb2:
+          cf.cond_br %req, ^bb1(%true, %true : i1, i1), ^bb1(%state, %true : i1, i1)
+        }
+        llhd.drv %next_state, %proc#0 after %t0 if %proc#1 : i1
+        hw.output %state : i1
+      }
+    MLIR
+
+    result = described_class.cleanup_imported_core_mlir(mlir, strict: true, top: 'async_result_proc')
+
+    expect(result).to be_success
+    expect(result.cleaned_text).not_to include('llhd.')
+    expect(result.cleaned_text).to include('seq.compreg')
+    expect(result.cleaned_text).to include('hw.output')
+
+    firtool_result = firtool_accepts?(result.cleaned_text)
+    expect(firtool_result).not_to eq(false)
+  end
+
   it 'leaves aggregate-only core modules untouched when no LLHD overlay is present' do
     mlir = <<~MLIR
       hw.module @codes_like(in %idx : i2, out y : i8) {

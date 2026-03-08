@@ -111,5 +111,7 @@ web/build/verilator/*
 /examples/ao486/reference/
 
 # Import directories
-# /examples/gameboy/import/
+/examples/gameboy/import/
+/examples/ao486/import/
+/examples/sparc64/import/
 

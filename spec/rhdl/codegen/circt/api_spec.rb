@@ -317,7 +317,12 @@ RSpec.describe 'RHDL::Codegen CIRCT APIs' do
     it 'exports MLIR to Verilog through external tooling wrapper' do
       allow(RHDL::Codegen::CIRCT::Tooling).to receive(:circt_mlir_to_verilog) do |kwargs|
         File.write(kwargs[:out_path], "module top(input [7:0] a, input [7:0] b, output [7:0] y);\nendmodule\n")
-        { success: true, command: 'circt-translate --export-verilog input.mlir -o output.v', stdout: '', stderr: '' }
+        {
+          success: true,
+          command: "#{RHDL::Codegen::CIRCT::Tooling::DEFAULT_VERILOG_EXPORT_TOOL} input.mlir --verilog -o output.v",
+          stdout: '',
+          stderr: ''
+        }
       end
 
       verilog = RHDL::Codegen.verilog_from_mlir(mlir)
@@ -327,7 +332,12 @@ RSpec.describe 'RHDL::Codegen CIRCT APIs' do
 
     it 'raises a descriptive error when tooling export fails' do
       allow(RHDL::Codegen::CIRCT::Tooling).to receive(:circt_mlir_to_verilog).and_return(
-        { success: false, command: 'circt-translate --export-verilog input.mlir -o output.v', stdout: '', stderr: 'export failed' }
+        {
+          success: false,
+          command: "#{RHDL::Codegen::CIRCT::Tooling::DEFAULT_VERILOG_EXPORT_TOOL} input.mlir --verilog -o output.v",
+          stdout: '',
+          stderr: 'export failed'
+        }
       )
 
       expect { RHDL::Codegen.verilog_from_mlir(mlir) }.to raise_error(RuntimeError, /CIRCT MLIR->Verilog conversion failed/)
@@ -338,7 +348,12 @@ RSpec.describe 'RHDL::Codegen CIRCT APIs' do
     it 'exports a component via MLIR + external tooling path' do
       allow(RHDL::Codegen::CIRCT::Tooling).to receive(:circt_mlir_to_verilog) do |kwargs|
         File.write(kwargs[:out_path], "module spec_fixtures_circt_tooling_adder;\nendmodule\n")
-        { success: true, command: 'circt-translate --export-verilog input.mlir -o output.v', stdout: '', stderr: '' }
+        {
+          success: true,
+          command: "#{RHDL::Codegen::CIRCT::Tooling::DEFAULT_VERILOG_EXPORT_TOOL} input.mlir --verilog -o output.v",
+          stdout: '',
+          stderr: ''
+        }
       end
 
       verilog = RHDL::Codegen.verilog_via_circt(RHDL::SpecFixtures::CIRCTToolingAdder)

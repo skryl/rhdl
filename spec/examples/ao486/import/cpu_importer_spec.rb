@@ -79,7 +79,7 @@ RSpec.describe RHDL::Examples::AO486::Import::CpuImporter do
         normalized = File.read(result.normalized_core_mlir_path)
         expect(normalized).to include('hw.module @ao486')
         expect(normalized).not_to include('llhd.')
-        expect(normalized).not_to match(/!hw\.array</)
+        expect(normalized).to include('hw.array_get')
         expect(File.read(File.join(workspace, 'ao486.v'))).to include('`timescale 1ns/1ps')
 
         raised = RHDL::Codegen.raise_circt_components(normalized, top: 'ao486', strict: false)
@@ -160,8 +160,6 @@ RSpec.describe RHDL::Examples::AO486::Import::CpuImporter do
         sim.poke('clk', 1)
         sim.poke('rst_n', 1)
         sim.tick
-        expect(sim.peek('memory_inst__tlb_inst__v11_5')).to eq(1)
-        expect(sim.peek('memory_inst__tlb_inst__v9_2')).to eq(0)
         expect(sim.peek('memory_inst__tlb_inst__tlbcode_do')).to eq(1)
         expect(sim.peek('memory_inst__prefetch_control_inst__tlbcode_do')).to eq(1)
         expect(sim.peek('memory_inst__prefetch_control_inst__icacheread_do')).to eq(1)
@@ -173,7 +171,8 @@ RSpec.describe RHDL::Examples::AO486::Import::CpuImporter do
         sim.poke('rst_n', 1)
         sim.tick
 
-        expect(sim.peek('memory_inst__tlb_inst__v11_5')).to eq(0)
+        expect(sim.peek('memory_inst__tlb_inst__tlbcode_do')).to eq(0)
+        expect(sim.peek('memory_inst__prefetch_control_inst__tlbcode_do')).to eq(0)
         expect(sim.peek('memory_inst__prefetch_control_inst__icacheread_do')).to eq(1)
       end
     end

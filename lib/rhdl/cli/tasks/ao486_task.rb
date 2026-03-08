@@ -10,6 +10,7 @@ module RHDL
         DEFAULT_IMPORT_SPEC = 'spec/examples/ao486/import/system_importer_spec.rb'
         DEFAULT_PARITY_SPEC = 'spec/examples/ao486/import/parity_spec.rb'
         DEFAULT_IMPORT_PATH_SPEC = 'spec/rhdl/import/import_paths_spec.rb'
+        DEFAULT_CLI_IMPORT_STRATEGY = :tree
 
         attr_reader :options
 
@@ -48,7 +49,7 @@ module RHDL
             keep_workspace: options.fetch(:keep_workspace, false),
             workspace_dir: options[:workspace_dir],
             clean_output: options.fetch(:clean_output, true),
-            import_strategy: options[:import_strategy] || importer_class::DEFAULT_IMPORT_STRATEGY,
+            import_strategy: options[:import_strategy] || DEFAULT_CLI_IMPORT_STRATEGY,
             fallback_to_stubbed: options.fetch(:fallback_to_stubbed, true),
             maintain_directory_structure: options.fetch(:maintain_directory_structure, true),
             format_output: options.fetch(:format_output, false),

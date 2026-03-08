@@ -15,6 +15,9 @@ require_relative '../../../../lib/rhdl/cli/tasks/import_task'
 RSpec.describe 'GameBoy mixed import runtime parity (Verilator/Arcilator/IR)', slow: true do
   MAX_CYCLES = 500_000
   IR_TRACE_CYCLES = 100_000
+  VIDEO_PARITY_CYCLES = IR_TRACE_CYCLES
+  SCREEN_WIDTH = 160
+  SCREEN_HEIGHT = 144
   VERILATOR_WARN_FLAGS = %w[
     -Wno-fatal
     -Wno-ASCRANGE
@@ -53,6 +56,56 @@ RSpec.describe 'GameBoy mixed import runtime parity (Verilator/Arcilator/IR)', s
 
   def require_ir_jit!
     skip 'IR JIT backend unavailable' unless RHDL::Sim::Native::IR::JIT_AVAILABLE
+  end
+
+  def framebuffer_hash(framebuffer)
+    hash = 0xcbf29ce484222325
+    Array(framebuffer).flatten.each do |value|
+      hash ^= (value.to_i & 0xFF)
+      hash = (hash * 0x100000001b3) & 0xFFFF_FFFF_FFFF_FFFF
+    end
+    format('%016x', hash)
+  end
+
+  def framebuffer_nonzero_pixels(framebuffer)
+    Array(framebuffer).sum { |row| Array(row).count { |pixel| pixel.to_i != 0 } }
+  end
+
+  def build_video_snapshot(framebuffer:, frame_count:, cycles:)
+    {
+      cycles: cycles.to_i,
+      frame_count: frame_count.to_i,
+      nonzero_pixels: framebuffer_nonzero_pixels(framebuffer),
+      hash: framebuffer_hash(framebuffer)
+    }
+  end
+
+  def parse_video_snapshot(text)
+    text.to_s.lines.reverse_each do |line|
+      match = line.strip.match(/\AVIDEO_SNAPSHOT,(\d+),(\d+),(\d+),([0-9a-fA-F]+)\z/)
+      next unless match
+
+      return {
+        cycles: match[1].to_i,
+        frame_count: match[2].to_i,
+        nonzero_pixels: match[3].to_i,
+        hash: match[4].downcase
+      }
+    end
+    nil
+  end
+
+  def first_video_mismatch(lhs, rhs)
+    return 'missing lhs video snapshot' if lhs.nil?
+    return 'missing rhs video snapshot' if rhs.nil?
+
+    %i[cycles frame_count nonzero_pixels hash].each do |key|
+      next if lhs[key] == rhs[key]
+
+      return "#{key} mismatch lhs=#{lhs[key].inspect} rhs=#{rhs[key].inspect}"
+    end
+
+    nil
   end
 
   def skip_arcilator?
@@ -133,6 +186,23 @@ RSpec.describe 'GameBoy mixed import runtime parity (Verilator/Arcilator/IR)', s
         return rom[addr % rom.size()];
       }
 
+      static uint64_t framebuffer_hash(const std::vector<uint8_t>& framebuffer) {
+        uint64_t hash = 0xcbf29ce484222325ULL;
+        for (uint8_t pixel : framebuffer) {
+          hash ^= static_cast<uint64_t>(pixel);
+          hash *= 0x100000001b3ULL;
+        }
+        return hash;
+      }
+
+      static uint32_t framebuffer_nonzero(const std::vector<uint8_t>& framebuffer) {
+        uint32_t count = 0;
+        for (uint8_t pixel : framebuffer) {
+          if (pixel != 0) ++count;
+        }
+        return count;
+      }
+
       int main(int argc, char** argv) {
         Verilated::commandArgs(argc, argv);
         const char* rom_path = (argc > 1) ? argv[1] : "";
@@ -140,11 +210,55 @@ RSpec.describe 'GameBoy mixed import runtime parity (Verilator/Arcilator/IR)', s
 
         Vgb dut;
         auto rom = load_rom(rom_path);
+        std::vector<uint8_t> framebuffer(#{SCREEN_WIDTH} * #{SCREEN_HEIGHT}, 0);
+        int lcd_x = 0;
+        int lcd_y = 0;
+        uint8_t prev_lcd_clkena = 0;
+        uint8_t prev_lcd_vsync = 0;
+        uint64_t frame_count = 0;
+        bool video_emitted = false;
+
+        auto capture_video = [&]() {
+          uint8_t lcd_clkena = dut.lcd_clkena & 0x1;
+          uint8_t lcd_vsync = dut.lcd_vsync & 0x1;
+          uint8_t lcd_data = dut.lcd_data_gb & 0x3;
+
+          if (lcd_clkena == 1 && prev_lcd_clkena == 0) {
+            if (lcd_x < #{SCREEN_WIDTH} && lcd_y < #{SCREEN_HEIGHT}) {
+              framebuffer[(lcd_y * #{SCREEN_WIDTH}) + lcd_x] = lcd_data;
+            }
+            lcd_x += 1;
+            if (lcd_x >= #{SCREEN_WIDTH}) {
+              lcd_x = 0;
+              lcd_y += 1;
+            }
+          }
+
+          if (lcd_vsync == 1 && prev_lcd_vsync == 0) {
+            lcd_x = 0;
+            lcd_y = 0;
+            frame_count += 1;
+          }
+
+          prev_lcd_clkena = lcd_clkena;
+          prev_lcd_vsync = lcd_vsync;
+        };
+
+        auto emit_video_snapshot = [&](int cycles_run) {
+          std::printf(
+            "VIDEO_SNAPSHOT,%d,%llu,%u,%016llx\\n",
+            cycles_run,
+            static_cast<unsigned long long>(frame_count),
+            framebuffer_nonzero(framebuffer),
+            static_cast<unsigned long long>(framebuffer_hash(framebuffer))
+          );
+        };
 
         auto tick_clock = [&]() {
-          dut.ce = 1;
-          dut.ce_n = 0;
-          dut.ce_2x = 1;
+          static uint32_t ce_phase = 0;
+          dut.ce = (ce_phase == 0) ? 1 : 0;
+          dut.ce_n = (ce_phase == 4) ? 1 : 0;
+          dut.ce_2x = ((ce_phase & 0x3) == 0) ? 1 : 0;
           dut.clk_sys = 0;
           dut.eval();
 
@@ -158,6 +272,8 @@ RSpec.describe 'GameBoy mixed import runtime parity (Verilator/Arcilator/IR)', s
           dut.eval();
           dut.clk_sys = 1;
           dut.eval();
+          capture_video();
+          ce_phase = (ce_phase + 1) & 0x7;
         };
 
         auto run_machine_cycle = [&]() {
@@ -174,6 +290,10 @@ RSpec.describe 'GameBoy mixed import runtime parity (Verilator/Arcilator/IR)', s
         uint16_t last_pc = 0xFFFF;
         for (int i = 0; i < max_cycles; ++i) {
           run_machine_cycle();
+          if (!video_emitted && (i + 1) == #{VIDEO_PARITY_CYCLES}) {
+            emit_video_snapshot(i + 1);
+            video_emitted = true;
+          }
           const bool fetch = (dut.rootp->gb__DOT___cpu_M1_n == 0);
           if (fetch) {
             uint16_t pc = static_cast<uint16_t>(dut.rootp->gb__DOT___cpu_A);
@@ -183,6 +303,8 @@ RSpec.describe 'GameBoy mixed import runtime parity (Verilator/Arcilator/IR)', s
             last_pc = pc;
           }
         }
+
+        if (!video_emitted) emit_video_snapshot(max_cycles);
 
         return 0;
       }
@@ -245,7 +367,10 @@ RSpec.describe 'GameBoy mixed import runtime parity (Verilator/Arcilator/IR)', s
     run_cmd!(['make', '-C', build_dir, '-f', 'Vgb.mk', 'Vgb'])
 
     output = run_cmd!([File.join(build_dir, 'Vgb'), rom_path, MAX_CYCLES.to_s])
-    normalize_trace(parse_trace(output))
+    {
+      trace: normalize_trace(parse_trace(output)),
+      video: parse_video_snapshot(output)
+    }
   end
 
   def with_env(temp)
@@ -315,7 +440,14 @@ RSpec.describe 'GameBoy mixed import runtime parity (Verilator/Arcilator/IR)', s
       last_pc = pc
     end
 
-    normalize_trace(trace)
+    {
+      trace: normalize_trace(trace),
+      video: build_video_snapshot(
+        framebuffer: runner.read_framebuffer,
+        frame_count: runner.frame_count,
+        cycles: IR_TRACE_CYCLES
+      )
+    }
   end
 
   def first_mismatch(lhs, rhs)
@@ -379,6 +511,9 @@ RSpec.describe 'GameBoy mixed import runtime parity (Verilator/Arcilator/IR)', s
       static constexpr int OFF_EXT_BUS_A15 = #{offsets[:ext_bus_a15] || -1};
       static constexpr int OFF_CPU_ADDR = #{offsets[:cpu_addr] || -1};
       static constexpr int OFF_CPU_M1_N = #{offsets[:cpu_m1_n] || -1};
+      static constexpr int OFF_LCD_CLKENA = #{offsets[:lcd_clkena] || -1};
+      static constexpr int OFF_LCD_DATA_GB = #{offsets[:lcd_data_gb] || -1};
+      static constexpr int OFF_LCD_VSYNC = #{offsets[:lcd_vsync] || -1};
 
       static std::vector<uint8_t> load_rom(const char* path) {
         std::ifstream in(path, std::ios::binary);
@@ -420,19 +555,82 @@ RSpec.describe 'GameBoy mixed import runtime parity (Verilator/Arcilator/IR)', s
         return get_u8(state, off) & 0x1;
       }
 
+      static uint64_t framebuffer_hash(const std::vector<uint8_t>& framebuffer) {
+        uint64_t hash = 0xcbf29ce484222325ULL;
+        for (uint8_t pixel : framebuffer) {
+          hash ^= static_cast<uint64_t>(pixel);
+          hash *= 0x100000001b3ULL;
+        }
+        return hash;
+      }
+
+      static uint32_t framebuffer_nonzero(const std::vector<uint8_t>& framebuffer) {
+        uint32_t count = 0;
+        for (uint8_t pixel : framebuffer) {
+          if (pixel != 0) ++count;
+        }
+        return count;
+      }
+
       int main(int argc, char** argv) {
         const char* rom_path = (argc > 1) ? argv[1] : "";
         int max_cycles = (argc > 2) ? std::atoi(argv[2]) : 200000;
 
         auto rom = load_rom(rom_path);
         std::vector<uint8_t> state(STATE_SIZE, 0);
+        std::vector<uint8_t> framebuffer(#{SCREEN_WIDTH} * #{SCREEN_HEIGHT}, 0);
+        int lcd_x = 0;
+        int lcd_y = 0;
+        uint8_t prev_lcd_clkena = 0;
+        uint8_t prev_lcd_vsync = 0;
+        uint64_t frame_count = 0;
+        bool video_emitted = false;
 
         auto eval = [&]() { #{eval_symbol}(state.data()); };
 
+        auto capture_video = [&]() {
+          if (!has(OFF_LCD_CLKENA) || !has(OFF_LCD_DATA_GB) || !has(OFF_LCD_VSYNC)) return;
+
+          uint8_t lcd_clkena = get_bit(state, OFF_LCD_CLKENA);
+          uint8_t lcd_vsync = get_bit(state, OFF_LCD_VSYNC);
+          uint8_t lcd_data = get_u8(state, OFF_LCD_DATA_GB) & 0x3;
+
+          if (lcd_clkena == 1 && prev_lcd_clkena == 0) {
+            if (lcd_x < #{SCREEN_WIDTH} && lcd_y < #{SCREEN_HEIGHT}) {
+              framebuffer[(lcd_y * #{SCREEN_WIDTH}) + lcd_x] = lcd_data;
+            }
+            lcd_x += 1;
+            if (lcd_x >= #{SCREEN_WIDTH}) {
+              lcd_x = 0;
+              lcd_y += 1;
+            }
+          }
+
+          if (lcd_vsync == 1 && prev_lcd_vsync == 0) {
+            lcd_x = 0;
+            lcd_y = 0;
+            frame_count += 1;
+          }
+
+          prev_lcd_clkena = lcd_clkena;
+          prev_lcd_vsync = lcd_vsync;
+        };
+
+        auto emit_video_snapshot = [&](int cycles_run) {
+          std::printf(
+            "VIDEO_SNAPSHOT,%d,%llu,%u,%016llx\\n",
+            cycles_run,
+            static_cast<unsigned long long>(frame_count),
+            framebuffer_nonzero(framebuffer),
+            static_cast<unsigned long long>(framebuffer_hash(framebuffer))
+          );
+        };
+
         auto tick_clock = [&]() {
-          set_bit(state, OFF_CE, 1);
-          set_bit(state, OFF_CE_N, 0);
-          set_bit(state, OFF_CE_2X, 1);
+          static uint32_t ce_phase = 0;
+          set_bit(state, OFF_CE, (ce_phase == 0) ? 1 : 0);
+          set_bit(state, OFF_CE_N, (ce_phase == 4) ? 1 : 0);
+          set_bit(state, OFF_CE_2X, ((ce_phase & 0x3) == 0) ? 1 : 0);
           set_bit(state, OFF_CLK_SYS, 0);
           eval();
 
@@ -445,6 +643,8 @@ RSpec.describe 'GameBoy mixed import runtime parity (Verilator/Arcilator/IR)', s
           eval();
           set_bit(state, OFF_CLK_SYS, 1);
           eval();
+          capture_video();
+          ce_phase = (ce_phase + 1) & 0x7;
         };
 
         auto run_machine_cycle = [&]() {
@@ -464,6 +664,10 @@ RSpec.describe 'GameBoy mixed import runtime parity (Verilator/Arcilator/IR)', s
 
         for (int i = 0; i < max_cycles; ++i) {
           run_machine_cycle();
+          if (!video_emitted && (i + 1) == #{VIDEO_PARITY_CYCLES}) {
+            emit_video_snapshot(i + 1);
+            video_emitted = true;
+          }
           bool fetch = has_fetch_signals ? (get_bit(state, OFF_CPU_M1_N) == 0) : (get_bit(state, OFF_CART_RD) == 1);
           if (!fetch) continue;
 
@@ -475,6 +679,8 @@ RSpec.describe 'GameBoy mixed import runtime parity (Verilator/Arcilator/IR)', s
           std::printf("%u,%u\\n", static_cast<unsigned>(pc), static_cast<unsigned>(opcode));
           last_pc = pc;
         }
+
+        if (!video_emitted) emit_video_snapshot(max_cycles);
 
         return 0;
       }
@@ -523,11 +729,14 @@ RSpec.describe 'GameBoy mixed import runtime parity (Verilator/Arcilator/IR)', s
       cart_rd: arcilator_state_offset(states, 'cart_rd', preferred_type: 'output'),
       ext_bus_addr: arcilator_state_offset(states, 'ext_bus_addr', preferred_type: 'output'),
       ext_bus_a15: arcilator_state_offset(states, 'ext_bus_a15', preferred_type: 'output'),
+      lcd_clkena: arcilator_state_offset(states, 'lcd_clkena', preferred_type: 'output'),
+      lcd_data_gb: arcilator_state_offset(states, 'lcd_data_gb', preferred_type: 'output'),
+      lcd_vsync: arcilator_state_offset(states, 'lcd_vsync', preferred_type: 'output'),
       cpu_addr: arcilator_state_offset(states, 'cpu/A', 'cpu/u0/a', 'cpu_A', 'cpu__A', 'gb__DOT___cpu_A', 'gb__cpu_A'),
       cpu_m1_n: arcilator_state_offset(states, 'cpu/M1_n', 'cpu/u0/m1_n', 'cpu_M1_n', 'cpu__M1_n', 'gb__DOT___cpu_M1_n', 'gb__cpu_M1_n')
     }
 
-    required = %i[clk_sys reset ce ce_n ce_2x joystick cart_oe cart_do cart_rd ext_bus_addr ext_bus_a15]
+    required = %i[clk_sys reset ce ce_n ce_2x joystick cart_oe cart_do cart_rd ext_bus_addr ext_bus_a15 lcd_clkena lcd_data_gb lcd_vsync]
     missing = required.select { |key| offsets[key].nil? }
     unless missing.empty?
       return { trace: nil, error: "Arcilator state layout missing required signals: #{missing.join(', ')}" }
@@ -549,7 +758,11 @@ RSpec.describe 'GameBoy mixed import runtime parity (Verilator/Arcilator/IR)', s
         rom_path: rom_path,
         max_cycles: MAX_CYCLES
       )
-      { trace: normalize_trace(parse_trace(output)), error: nil }
+      {
+        trace: normalize_trace(parse_trace(output)),
+        video: parse_video_snapshot(output),
+        error: nil
+      }
     rescue StandardError => e
       { trace: nil, error: "Arcilator runtime build/execute failed: #{e.message}" }
     end
@@ -648,19 +861,29 @@ RSpec.describe 'GameBoy mixed import runtime parity (Verilator/Arcilator/IR)', s
           summary_lines << "Workspace Verilog source: workspace_normalized_verilog_path=#{workspace_normalized_verilog}" if workspace_normalized_verilog
           summary_lines << "Pure Verilog root: #{pure_verilog_root}"
 
-          verilator_trace = collect_verilator_trace(
+          verilator = collect_verilator_trace(
             staging_entry: normalized_verilog,
             rom_path: rom_path,
             scratch_dir: File.join(scratch, 'verilator')
           )
+          verilator_trace = verilator.fetch(:trace)
+          verilator_video = verilator.fetch(:video)
           if verilator_trace.empty?
             failures << 'Verilator trace is empty'
             summary_lines << 'Verilator: empty trace'
           else
             summary_lines << "Verilator: #{verilator_trace.length} events"
           end
+          if verilator_video
+            summary_lines << "Verilator video@#{verilator_video[:cycles]}: frames=#{verilator_video[:frame_count]} nonzero=#{verilator_video[:nonzero_pixels]} hash=#{verilator_video[:hash]}"
+          else
+            failures << 'Verilator video snapshot is missing'
+            summary_lines << 'Verilator video: missing snapshot'
+          end
 
-          ir_trace = collect_ir_trace(runtime_json_path: runtime_json_path, rom_bytes: rom_bytes)
+          ir = collect_ir_trace(runtime_json_path: runtime_json_path, rom_bytes: rom_bytes)
+          ir_trace = ir.fetch(:trace)
+          ir_video = ir.fetch(:video)
           if ir_trace.empty?
             failures << 'Raised-RHDL IR trace is empty'
             summary_lines << 'IR JIT: empty trace'
@@ -668,6 +891,7 @@ RSpec.describe 'GameBoy mixed import runtime parity (Verilator/Arcilator/IR)', s
             summary_lines << "IR JIT: #{ir_trace.length} events"
             summary_lines << "IR JIT cycle cap: #{IR_TRACE_CYCLES}" if IR_TRACE_CYCLES < MAX_CYCLES
           end
+          summary_lines << "IR JIT video@#{ir_video[:cycles]}: frames=#{ir_video[:frame_count]} nonzero=#{ir_video[:nonzero_pixels]} hash=#{ir_video[:hash]}"
 
           vi_verilator_trace = verilator_trace
           vi_ir_trace = ir_trace
@@ -683,8 +907,16 @@ RSpec.describe 'GameBoy mixed import runtime parity (Verilator/Arcilator/IR)', s
             summary_lines << "Verilator vs IR: OK on first #{vi_compare_len} events"
           end
 
+          video_mismatch = first_video_mismatch(verilator_video, ir_video)
+          if video_mismatch
+            failures << "Verilator vs IR video mismatch: #{video_mismatch}"
+            summary_lines << "Verilator vs IR video: mismatch (#{video_mismatch})"
+          else
+            summary_lines << 'Verilator vs IR video: OK'
+          end
+
           arcilator = if skip_arcilator?
-                        { trace: nil, error: 'skipped via RHDL_SKIP_ARCILATOR=1' }
+                        { trace: nil, video: nil, error: 'skipped via RHDL_SKIP_ARCILATOR=1' }
                       else
                         collect_arcilator_trace(
                           staging_entry: normalized_verilog,
@@ -695,11 +927,18 @@ RSpec.describe 'GameBoy mixed import runtime parity (Verilator/Arcilator/IR)', s
 
           if arcilator[:trace]
             arc_trace = arcilator.fetch(:trace)
+            arc_video = arcilator.fetch(:video)
             if arc_trace.empty?
               failures << 'Arcilator trace is empty'
               summary_lines << 'Arcilator: empty trace'
             else
               summary_lines << "Arcilator: #{arc_trace.length} events"
+            end
+            if arc_video
+              summary_lines << "Arcilator video@#{arc_video[:cycles]}: frames=#{arc_video[:frame_count]} nonzero=#{arc_video[:nonzero_pixels]} hash=#{arc_video[:hash]}"
+            else
+              failures << 'Arcilator video snapshot is missing'
+              summary_lines << 'Arcilator video: missing snapshot'
             end
 
             va_verilator_trace = verilator_trace
@@ -711,6 +950,14 @@ RSpec.describe 'GameBoy mixed import runtime parity (Verilator/Arcilator/IR)', s
               summary_lines << "Verilator vs Arcilator: mismatch (#{mismatch_arc})"
             else
               summary_lines << 'Verilator vs Arcilator: OK'
+            end
+
+            video_mismatch_arc = first_video_mismatch(verilator_video, arc_video)
+            if video_mismatch_arc
+              failures << "Verilator vs Arcilator video mismatch: #{video_mismatch_arc}"
+              summary_lines << "Verilator vs Arcilator video: mismatch (#{video_mismatch_arc})"
+            else
+              summary_lines << 'Verilator vs Arcilator video: OK'
             end
           else
             summary_lines << "Arcilator unavailable: #{arcilator[:error]}"

@@ -19,7 +19,7 @@ def show_help
       export        Export components to Verilog
       import        Import Verilog/mixed/CIRCT into RHDL DSL
       gates         Gate-level synthesis
-      examples      Run example emulators (mos6502, apple2, gameboy, riscv, ao486)
+      examples      Run example emulators (mos6502, apple2, gameboy, riscv, ao486, sparc64)
       disk          Disk image utilities for Apple II
       generate      Generate all output files (diagrams + HDL exports)
       clean         Clean all generated files
@@ -390,6 +390,7 @@ def show_examples_help
         gameboy       Game Boy HDL emulator (cycle-accurate with terminal renderers)
         riscv         RISC-V ISA emulator (with xv6 and interactive debugger support)
         ao486         AO486 CIRCT import/parity workflow
+        sparc64       SPARC64 CIRCT import workflow
 
       Examples:
         rhdl examples mos6502 --demo
@@ -399,6 +400,7 @@ def show_examples_help
         rhdl examples gameboy --demo
         rhdl examples riscv --xv6
         rhdl examples ao486 import --out examples/ao486/hdl
+        rhdl examples sparc64 import
 
     Run 'rhdl examples <subcommand> --help' for more information.
   HELP
@@ -609,6 +611,8 @@ def handle_examples(args)
     handle_examples_riscv(args)
   when 'ao486'
     handle_examples_ao486(args)
+  when 'sparc64'
+    handle_examples_sparc64(args)
   when '-h', '--help', 'help', nil
     show_examples_help
     exit 0
@@ -622,6 +626,11 @@ end
 
 def handle_examples_ao486(args)
   script = File.expand_path('../examples/ao486/bin/ao486', __dir__)
+  exec(script, *args)
+end
+
+def handle_examples_sparc64(args)
+  script = File.expand_path('../examples/sparc64/bin/sparc64', __dir__)
   exec(script, *args)
 end
 

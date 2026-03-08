@@ -37,11 +37,30 @@ bundle exec rhdl examples gameboy import
 # Same import via the local bin wrapper
 bundle exec ruby examples/gameboy/bin/gb import
 
+# Flatten the raised DSL instead of preserving the reference tree layout
+bundle exec ruby examples/gameboy/bin/gb import --no-keep-structure
+
 # Keep the import workspace for debugging
 bundle exec ruby examples/gameboy/bin/gb import --workspace tmp/gameboy_ws --keep-workspace
+
+# Allow the importer to write output/report artifacts without strict failure
+bundle exec ruby examples/gameboy/bin/gb import --no-strict
 ```
 
 The import command regenerates `examples/gameboy/import` by default and writes an import report to `examples/gameboy/import/import_report.json`.
+By default it preserves the original source directory structure in the raised RHDL output; use `--no-keep-structure` to keep the raised files flat.
+
+To run the imported Game Boy design through the same staged Verilator path used by the parity tests:
+
+```bash
+bundle exec ruby examples/gameboy/bin/gb import --out examples/gameboy/import
+bundle exec ruby examples/gameboy/bin/gb \
+  --mode verilog \
+  --hdl-dir examples/gameboy/import \
+  --top gb \
+  --use-staged-verilog \
+  --pop
+```
 
 ### Emulator Command Line Options
 

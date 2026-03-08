@@ -7,6 +7,7 @@
 use std::collections::{HashMap, VecDeque};
 
 use crate::core::CoreSimulator;
+use crate::signal_value::SignalValue;
 
 const FUNCT3_BYTE: u8 = 0b000;
 const FUNCT3_HALF: u8 = 0b001;
@@ -523,10 +524,10 @@ impl RiscvExtension {
 
     fn set_clk_rst(&mut self, core: &mut CoreSimulator, clk: u64, rst: u64) {
         if self.clk_idx < core.signals.len() {
-            core.signals[self.clk_idx] = clk;
+            core.signals[self.clk_idx] = clk as SignalValue;
         }
         if self.rst_idx < core.signals.len() {
-            core.signals[self.rst_idx] = rst;
+            core.signals[self.rst_idx] = rst as SignalValue;
         }
         self.apply_irq_inputs(core);
     }
@@ -1660,7 +1661,7 @@ impl RiscvExtension {
 
     fn signal(&self, core: &CoreSimulator, idx: usize) -> u64 {
         if idx < core.signals.len() {
-            core.signals[idx]
+            core.signals[idx] as u64
         } else {
             0
         }
@@ -1668,7 +1669,7 @@ impl RiscvExtension {
 
     fn set_signal(&self, core: &mut CoreSimulator, idx: usize, value: u64) {
         if idx < core.signals.len() {
-            core.signals[idx] = value;
+            core.signals[idx] = value as SignalValue;
         }
     }
 

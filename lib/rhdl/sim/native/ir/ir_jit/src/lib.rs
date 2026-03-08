@@ -14,6 +14,8 @@
 mod core;
 mod extensions;
 mod ffi;
+#[path = "../../common/signal_value.rs"]
+pub mod signal_value;
 mod vcd;
 
 pub use core::CoreSimulator;

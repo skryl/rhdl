@@ -4,6 +4,7 @@
 
 use std::collections::HashMap;
 use crate::core::CoreSimulator;
+use crate::signal_value::SignalValue;
 
 /// MOS6502 CPU specific extension state
 pub struct Mos6502Extension {
@@ -117,7 +118,7 @@ impl Mos6502Extension {
 
             if rw == 1 {
                 // Read: provide data from memory to CPU
-                let data = unsafe { *self.memory.get_unchecked(addr) } as u64;
+                let data = unsafe { *self.memory.get_unchecked(addr) } as SignalValue;
                 unsafe { *core.signals.get_unchecked_mut(self.data_in_idx) = data; }
             } else {
                 // Write: store CPU data to memory (unless ROM protected)
@@ -182,7 +183,7 @@ impl Mos6502Extension {
 
             if rw == 1 {
                 // Read: provide data from memory to CPU
-                let data = unsafe { *self.memory.get_unchecked(addr) } as u64;
+                let data = unsafe { *self.memory.get_unchecked(addr) } as SignalValue;
                 unsafe { *core.signals.get_unchecked_mut(self.data_in_idx) = data; }
             } else {
                 // Write: store CPU data to memory (unless ROM protected)
@@ -203,7 +204,7 @@ impl Mos6502Extension {
 
             // Check for state transition to DECODE
             let current_state = unsafe { *core.signals.get_unchecked(state_idx) };
-            if current_state == STATE_DECODE && last_state != STATE_DECODE {
+            if current_state == STATE_DECODE as SignalValue && last_state != STATE_DECODE as SignalValue {
                 let opcode = unsafe { *core.signals.get_unchecked(opcode_idx) } as u8;
                 let pc = (unsafe { *core.signals.get_unchecked(pc_idx) }.wrapping_sub(1) & 0xFFFF) as u16;
                 let sp = unsafe { *core.signals.get_unchecked(sp_idx) } as u8;

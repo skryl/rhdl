@@ -40,14 +40,14 @@ RSpec.describe 'GameBoy mixed import Verilog roundtrip AST comparison', slow: tr
   end
 
   def export_tool
-    return 'firtool' if HdlToolchain.which('firtool')
-    return 'circt-translate' if HdlToolchain.which('circt-translate')
+    tool = RHDL::Codegen::CIRCT::Tooling::DEFAULT_VERILOG_EXPORT_TOOL
+    return tool if HdlToolchain.which(tool)
 
     nil
   end
 
   def require_export_tool!
-    skip 'firtool or circt-translate not available for MLIR export' unless export_tool
+    skip "#{RHDL::Codegen::CIRCT::Tooling::DEFAULT_VERILOG_EXPORT_TOOL} not available for MLIR export" unless export_tool
   end
 
   def diagnostic_summary(result)

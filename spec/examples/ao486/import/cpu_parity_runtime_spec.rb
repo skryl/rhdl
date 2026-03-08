@@ -58,6 +58,47 @@ RSpec.describe RHDL::Examples::AO486::Import::CpuParityRuntime do
     end
   end
 
+  it 'keeps an accepted fetch word alive long enough for decode_regs to latch it on JIT', timeout: 240 do
+    require_import_tool!
+    require_program_assembler!
+    skip 'circt-opt not available' unless HdlToolchain.which('circt-opt')
+    skip 'IR JIT backend unavailable' unless RHDL::Sim::Native::IR::JIT_AVAILABLE
+
+    source = <<~ASM
+      .intel_syntax noprefix
+      .code16
+
+      mov ax, 0x1234
+      hlt
+    ASM
+
+    Dir.mktmpdir('ao486_cpu_parity_runtime_out') do |out_dir|
+      Dir.mktmpdir('ao486_cpu_parity_runtime_ws') do |workspace|
+        result = run_importer(out_dir: out_dir, workspace: workspace)
+        runtime = described_class.build_from_cleaned_mlir(File.read(result.normalized_core_mlir_path))
+        bytes = RHDL::Examples::AO486::Import::CpuParityPrograms.assemble(source, label: 'decode_regs_latch_probe')
+
+        runtime.load_bytes(RHDL::Examples::AO486::Import::CpuParityPrograms::RESET_VECTOR_PHYSICAL, bytes)
+        runtime.reset!
+
+        saw_fetch_word = false
+        saw_decoder_word = false
+
+        8.times do |cycle|
+          runtime.step(cycle)
+          saw_fetch_word ||= (
+            runtime.sim.peek('pipeline_inst__decode_inst__decode_regs_inst__fetch_valid') == 4 &&
+            runtime.sim.peek('pipeline_inst__decode_inst__decode_regs_inst__fetch') == 0xF41234B8
+          )
+          saw_decoder_word ||= (runtime.sim.peek('pipeline_inst__decode_inst__decode_regs_inst__decoder') != 0)
+        end
+
+        expect(saw_fetch_word).to be(true)
+        expect(saw_decoder_word).to be(true)
+      end
+    end
+  end
+
   it 'matches the expected initial fetch windows for the benchmark parity programs on JIT', timeout: 240 do
     require_import_tool!
     require_program_assembler!
@@ -74,6 +115,27 @@ RSpec.describe RHDL::Examples::AO486::Import::CpuParityRuntime do
           trace = runtime.run_fetch_pc_groups(max_cycles: program.max_cycles).map { |event| [event.pc, event.bytes] }
 
           expect(trace.first(program.initial_fetch_pc_groups.length)).to eq(program.initial_fetch_pc_groups), "program=#{program.name}"
+        end
+      end
+    end
+  end
+
+  it 'matches the exact compact benchmark correctness traces on JIT', timeout: 240 do
+    require_import_tool!
+    require_program_assembler!
+    skip 'circt-opt not available' unless HdlToolchain.which('circt-opt')
+    skip 'IR JIT backend unavailable' unless RHDL::Sim::Native::IR::JIT_AVAILABLE
+
+    Dir.mktmpdir('ao486_cpu_parity_runtime_out') do |out_dir|
+      Dir.mktmpdir('ao486_cpu_parity_runtime_ws') do |workspace|
+        result = run_importer(out_dir: out_dir, workspace: workspace)
+        runtime = described_class.build_from_cleaned_mlir(File.read(result.normalized_core_mlir_path))
+
+        RHDL::Examples::AO486::Import::CpuParityPrograms.benchmark_programs.each do |program|
+          program.load_into(runtime)
+          trace = runtime.run_fetch_pc_groups(max_cycles: program.max_cycles).map { |event| [event.pc, event.bytes] }
+
+          expect(trace).to eq(program.expected_fetch_pc_trace), "program=#{program.name}"
         end
       end
     end
@@ -101,4 +163,5 @@ RSpec.describe RHDL::Examples::AO486::Import::CpuParityRuntime do
       end
     end
   end
+
 end

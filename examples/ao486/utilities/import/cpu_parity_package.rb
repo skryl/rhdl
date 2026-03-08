@@ -51,6 +51,7 @@ module RHDL
             inst = CpuTracePackage.find_instance!(mod, 'l1_icache_inst')
             ir = RHDL::Codegen::CIRCT::IR
 
+            ensure_reg(mod, 'parity_last_readcode_done', 1, 0)
             rewrite_icache_partial_length_literals!(mod)
 
             cpu_valid_name = output_signal_name!(inst, 'CPU_VALID')
@@ -65,18 +66,45 @@ module RHDL
             remaining_length_expr = CpuTracePackage.signal('length', 5)
             has_pending_words = CpuTracePackage.binop(:!=, prefetched_length_expr, ir::Literal.new(value: 0, width: 5), 1)
             final_word = CpuTracePackage.binop(:<=, remaining_length_expr, prefetched_length_expr, 1)
+            new_readcode_word = CpuTracePackage.binop(
+              :&,
+              CpuTracePackage.signal('readcode_done', 1),
+              CpuTracePackage.binop(:^, CpuTracePackage.signal('parity_last_readcode_done', 1), ir::Literal.new(value: 1, width: 1), 1),
+              1
+            )
 
             mod.instances.reject! { |entry| entry.name.to_s == 'l1_icache_inst' }
             mod.assigns << CpuTracePackage.assign(mem_req_name, cpu_req_expr)
             mod.assigns << CpuTracePackage.assign(mem_addr_name, cpu_addr_expr)
             mod.assigns << CpuTracePackage.assign(
               cpu_valid_name,
-              CpuTracePackage.binop(:&, CpuTracePackage.signal('readcode_done', 1), has_pending_words, 1)
+              CpuTracePackage.binop(:&, new_readcode_word, has_pending_words, 1)
             )
             mod.assigns << CpuTracePackage.assign(cpu_data_name, CpuTracePackage.signal('readcode_partial', 32))
             mod.assigns << CpuTracePackage.assign(
               cpu_done_name,
-              CpuTracePackage.binop(:&, CpuTracePackage.signal('readcode_done', 1), final_word, 1)
+              CpuTracePackage.binop(:&, new_readcode_word, final_word, 1)
+            )
+            mod.processes << ir::Process.new(
+              name: 'parity_readcode_edge',
+              clocked: true,
+              clock: 'clk',
+              statements: [
+                ir::SeqAssign.new(
+                  target: 'parity_last_readcode_done',
+                  expr: ir::Mux.new(
+                    condition: CpuTracePackage.binop(
+                      :|,
+                      CpuTracePackage.binop(:^, CpuTracePackage.signal('rst_n', 1), ir::Literal.new(value: 1, width: 1), 1),
+                      CpuTracePackage.signal('pr_reset', 1),
+                      1
+                    ),
+                    when_true: ir::Literal.new(value: 0, width: 1),
+                    when_false: CpuTracePackage.signal('readcode_done', 1),
+                    width: 1
+                  )
+                )
+              ]
             )
           end
 
@@ -86,10 +114,23 @@ module RHDL
 
             mod.instances.clear
 
+            ensure_reg(mod, 'parity_fifo_valid', 1, 0)
+            ensure_reg(mod, 'parity_fifo_data', 68, 0)
+
             write_do = CpuTracePackage.signal('prefetchfifo_write_do', 1)
             limit_do = CpuTracePackage.signal('prefetchfifo_signal_limit_do', 1)
             pf_do = CpuTracePackage.signal('prefetchfifo_signal_pf_do', 1)
             write_data = CpuTracePackage.signal('prefetchfifo_write_data', 36)
+            accept_do = CpuTracePackage.signal('prefetchfifo_accept_do', 1)
+            fifo_valid = CpuTracePackage.signal('parity_fifo_valid', 1)
+            fifo_data = CpuTracePackage.signal('parity_fifo_data', 68)
+            rst_n = CpuTracePackage.signal('rst_n', 1)
+            pr_reset = CpuTracePackage.signal('pr_reset', 1)
+            one = ir::Literal.new(value: 1, width: 1)
+            zero1 = ir::Literal.new(value: 0, width: 1)
+            zero5 = ir::Literal.new(value: 0, width: 5)
+            one5 = ir::Literal.new(value: 1, width: 5)
+            zero68 = ir::Literal.new(value: 0, width: 68)
 
             any_valid = CpuTracePackage.binop(
               :|,
@@ -133,6 +174,70 @@ module RHDL
               ),
               width: 68
             )
+            accept_data = ir::Mux.new(
+              condition: fifo_valid,
+              when_true: fifo_data,
+              when_false: accept_data,
+              width: 68
+            )
+            accept_empty = CpuTracePackage.binop(
+              :^,
+              CpuTracePackage.binop(:|, fifo_valid, any_valid, 1),
+              one,
+              1
+            )
+            next_fifo_valid = ir::Mux.new(
+              condition: CpuTracePackage.binop(:^, rst_n, one, 1),
+              when_true: zero1,
+              when_false: ir::Mux.new(
+                condition: pr_reset,
+                when_true: zero1,
+                when_false: ir::Mux.new(
+                  condition: fifo_valid,
+                  when_true: ir::Mux.new(
+                    condition: accept_do,
+                    when_true: any_valid,
+                    when_false: fifo_valid,
+                    width: 1
+                  ),
+                  when_false: any_valid,
+                  width: 1
+                ),
+                width: 1
+              ),
+              width: 1
+            )
+            next_fifo_data = ir::Mux.new(
+              condition: CpuTracePackage.binop(:^, rst_n, one, 1),
+              when_true: zero68,
+              when_false: ir::Mux.new(
+                condition: pr_reset,
+                when_true: zero68,
+                when_false: ir::Mux.new(
+                  condition: fifo_valid,
+                  when_true: ir::Mux.new(
+                    condition: accept_do,
+                    when_true: ir::Mux.new(
+                      condition: any_valid,
+                      when_true: write_payload,
+                      when_false: fifo_data,
+                      width: 68
+                    ),
+                    when_false: fifo_data,
+                    width: 68
+                  ),
+                  when_false: ir::Mux.new(
+                    condition: any_valid,
+                    when_true: write_payload,
+                    when_false: fifo_data,
+                    width: 68
+                  ),
+                  width: 68
+                ),
+                width: 68
+              ),
+              width: 68
+            )
 
             mod.assigns.reject! do |assign|
               %w[prefetchfifo_used prefetchfifo_accept_data prefetchfifo_accept_empty].include?(assign.target.to_s)
@@ -140,16 +245,22 @@ module RHDL
             mod.assigns << CpuTracePackage.assign(
               'prefetchfifo_used',
               ir::Mux.new(
-                condition: any_valid,
-                when_true: ir::Literal.new(value: 1, width: 5),
-                when_false: ir::Literal.new(value: 0, width: 5),
+                condition: CpuTracePackage.binop(:|, fifo_valid, any_valid, 1),
+                when_true: one5,
+                when_false: zero5,
                 width: 5
               )
             )
             mod.assigns << CpuTracePackage.assign('prefetchfifo_accept_data', accept_data)
-            mod.assigns << CpuTracePackage.assign(
-              'prefetchfifo_accept_empty',
-              CpuTracePackage.binop(:^, any_valid, ir::Literal.new(value: 1, width: 1), 1)
+            mod.assigns << CpuTracePackage.assign('prefetchfifo_accept_empty', accept_empty)
+            mod.processes << ir::Process.new(
+              name: 'parity_prefetch_fifo',
+              clocked: true,
+              clock: 'clk',
+              statements: [
+                ir::SeqAssign.new(target: 'parity_fifo_valid', expr: next_fifo_valid),
+                ir::SeqAssign.new(target: 'parity_fifo_data', expr: next_fifo_data)
+              ]
             )
           end
 
@@ -378,6 +489,18 @@ module RHDL
             else
               expr
             end
+          end
+
+          def ensure_reg(mod, name, width, reset_value = nil)
+            return if mod.regs.any? { |reg| reg.name.to_s == name.to_s }
+            return if mod.nets.any? { |net| net.name.to_s == name.to_s }
+            return if mod.ports.any? { |port| port.name.to_s == name.to_s }
+
+            mod.regs << RHDL::Codegen::CIRCT::IR::Reg.new(
+              name: name.to_sym,
+              width: width,
+              reset_value: reset_value
+            )
           end
 
           def rewrite_length_burst_literal(expr)

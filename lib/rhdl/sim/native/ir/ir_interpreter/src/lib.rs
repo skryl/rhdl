@@ -13,6 +13,8 @@
 
 pub mod apple2_runner;
 pub mod core;
+#[path = "../../common/signal_value.rs"]
+pub mod signal_value;
 mod extensions;
 mod ffi;
 mod vcd;

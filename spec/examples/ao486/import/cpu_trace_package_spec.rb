@@ -85,7 +85,17 @@ RSpec.describe RHDL::Examples::AO486::Import::CpuTracePackage do
           ['trace_fetch_valid', 4],
           ['trace_fetch_bytes', 64],
           ['trace_dec_acceptable', 4],
-          ['trace_fetch_accept_length', 4]
+          ['trace_fetch_accept_length', 4],
+          ['trace_arch_new_export', 1],
+          ['trace_arch_eax', 32],
+          ['trace_arch_ebx', 32],
+          ['trace_arch_ecx', 32],
+          ['trace_arch_edx', 32],
+          ['trace_arch_esi', 32],
+          ['trace_arch_edi', 32],
+          ['trace_arch_esp', 32],
+          ['trace_arch_ebp', 32],
+          ['trace_arch_eip', 32]
         )
 
         pipeline = traced_import.modules.find { |mod| mod.name.to_s == 'pipeline' }
@@ -99,7 +109,17 @@ RSpec.describe RHDL::Examples::AO486::Import::CpuTracePackage do
           'trace_fetch_valid',
           'trace_fetch_bytes',
           'trace_dec_acceptable',
-          'trace_fetch_accept_length'
+          'trace_fetch_accept_length',
+          'trace_arch_new_export',
+          'trace_arch_eax',
+          'trace_arch_ebx',
+          'trace_arch_ecx',
+          'trace_arch_edx',
+          'trace_arch_esi',
+          'trace_arch_edi',
+          'trace_arch_esp',
+          'trace_arch_ebp',
+          'trace_arch_eip'
         )
 
         write = traced_import.modules.find { |mod| mod.name.to_s == 'write' }
@@ -135,6 +155,9 @@ RSpec.describe RHDL::Examples::AO486::Import::CpuTracePackage do
         expect(verilog).to match(/\boutput\b[\s\S]*\btrace_wr_hlt_in_progress\b/)
         expect(verilog).to match(/\boutput\b[\s\S]*\btrace_cs_cache_valid\b/)
         expect(verilog).to match(/\boutput\b[\s\S]*\btrace_prefetch_eip\b/)
+        expect(verilog).to match(/\boutput\b[\s\S]*\btrace_arch_eax\b/)
+        expect(verilog).to match(/\boutput\b[\s\S]*\btrace_arch_edi\b/)
+        expect(verilog).to match(/\boutput\b[\s\S]*\btrace_arch_eip\b/)
         expect(verilog).not_to include("assign trace_retired = 1'h0;")
       end
     end
@@ -173,6 +196,9 @@ RSpec.describe RHDL::Examples::AO486::Import::CpuTracePackage do
             expect(sim.peek('trace_wr_eip')).to eq(sim.peek('pipeline_inst.wr_eip'))
             expect(sim.peek('trace_wr_consumed')).to eq(sim.peek('pipeline_inst.wr_consumed'))
             expect(sim.peek('trace_retired')).to eq(sim.peek('pipeline_inst__trace_retired'))
+            expect(sim.peek('trace_arch_eax')).to eq(sim.peek('pipeline_inst__trace_arch_eax'))
+            expect(sim.peek('trace_arch_edi')).to eq(sim.peek('pipeline_inst__trace_arch_edi'))
+            expect(sim.peek('trace_arch_eip')).to eq(sim.peek('pipeline_inst__trace_arch_eip'))
             saw_write = true
           end
         end

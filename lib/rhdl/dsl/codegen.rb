@@ -323,6 +323,8 @@ module RHDL
           all_memories = []
           all_write_ports = []
           all_sync_read_ports = []
+          net_names = Set.new
+          reg_names = Set.new
 
           ir = build_circt_module(top_name: name, parameters: parameters)
 
@@ -330,23 +332,20 @@ module RHDL
 
           ir.nets.each do |net|
             prefixed_name = prefix.empty? ? net.name : :"#{prefix}__#{net.name}"
-            all_nets << RHDL::Codegen::CIRCT::IR::Net.new(name: prefixed_name, width: net.width)
+            append_flat_net!(all_nets, net_names, name: prefixed_name, width: net.width)
           end
 
           unless prefix.empty?
             ir.ports.each do |port|
               next unless port.direction.to_s == 'out'
               prefixed_name = :"#{prefix}__#{port.name}"
-              unless all_nets.any? { |n| n.name.to_s == prefixed_name.to_s } ||
-                     all_regs.any? { |r| r.name.to_s == prefixed_name.to_s }
-                all_nets << RHDL::Codegen::CIRCT::IR::Net.new(name: prefixed_name, width: port.width)
-              end
+              append_flat_net!(all_nets, net_names, reg_names: reg_names, name: prefixed_name, width: port.width)
             end
           end
 
           ir.regs.each do |reg|
             prefixed_name = prefix.empty? ? reg.name : :"#{prefix}__#{reg.name}"
-            all_regs << RHDL::Codegen::CIRCT::IR::Reg.new(name: prefixed_name, width: reg.width, reset_value: reg.reset_value)
+            append_flat_reg!(all_regs, reg_names, name: prefixed_name, width: reg.width, reset_value: reg.reset_value)
           end
 
           ir.assigns.each do |assign|
@@ -381,23 +380,29 @@ module RHDL
             inst_name = inst_def[:name]
             component_class = inst_def[:component_class]
             inst_prefix = prefix.empty? ? inst_name.to_s : "#{prefix}__#{inst_name}"
+            inst_params = inst_def[:parameters] || {}
 
             if component_class.respond_to?(:to_flat_circt_nodes)
-              sub_ir = component_class.to_flat_circt_nodes(prefix: inst_prefix, parameters: inst_def[:parameters] || {})
-
-              all_nets.concat(sub_ir.nets)
-              all_regs.concat(sub_ir.regs)
-              all_assigns.concat(sub_ir.assigns)
-              all_processes.concat(sub_ir.processes)
-              all_memories.concat(sub_ir.memories) if sub_ir.memories
-              all_write_ports.concat(sub_ir.write_ports) if sub_ir.write_ports
-              all_sync_read_ports.concat(sub_ir.sync_read_ports) if sub_ir.sync_read_ports
+              sub_ir = component_class.flat_circt_template(parameters: inst_params)
+              append_prefixed_flat_module!(
+                module_ir: sub_ir,
+                prefix: inst_prefix,
+                nets: all_nets,
+                net_names: net_names,
+                regs: all_regs,
+                reg_names: reg_names,
+                assigns: all_assigns,
+                processes: all_processes,
+                memories: all_memories,
+                write_ports: all_write_ports,
+                sync_read_ports: all_sync_read_ports
+              )
 
               connected_ports = Set.new
-              inst_params = inst_def[:parameters] || {}
+              port_defs_by_name = component_class.port_defs_by_name
               inst_def[:connections].each do |port_name, parent_signal|
                 connected_ports.add(port_name)
-                port_def = component_class._port_defs.find { |p| p[:name] == port_name }
+                port_def = port_defs_by_name[port_name]
                 direction = port_def ? port_def[:direction] : :in
                 raw_width = port_def ? port_def[:width] : 1
                 port_width = if raw_width.is_a?(Symbol)
@@ -426,9 +431,7 @@ module RHDL
                   )
                 end
 
-                unless all_nets.any? { |n| n.name.to_s == child_signal } || all_regs.any? { |r| r.name.to_s == child_signal }
-                  all_nets << RHDL::Codegen::CIRCT::IR::Net.new(name: child_signal.to_sym, width: port_width)
-                end
+                append_flat_net!(all_nets, net_names, reg_names: reg_names, name: child_signal.to_sym, width: port_width)
               end
 
               component_class._port_defs.each do |port_def|
@@ -451,9 +454,7 @@ module RHDL
                   expr: RHDL::Codegen::CIRCT::IR::Literal.new(value: default_value, width: resolved_width)
                 )
 
-                unless all_nets.any? { |n| n.name.to_s == child_signal } || all_regs.any? { |r| r.name.to_s == child_signal }
-                  all_nets << RHDL::Codegen::CIRCT::IR::Net.new(name: child_signal.to_sym, width: resolved_width)
-                end
+                append_flat_net!(all_nets, net_names, reg_names: reg_names, name: child_signal.to_sym, width: resolved_width)
               end
             end
           end
@@ -587,6 +588,122 @@ module RHDL
             end
           end
           resolved_params.merge(parameters)
+        end
+
+        def flat_circt_template(parameters: {})
+          cache = instance_variable_get(:@_flat_circt_template_cache) || {}
+          key = flat_circt_template_cache_key(parameters)
+          return cache[key] if cache.key?(key)
+
+          template = build_flat_circt_module(parameters: parameters)
+          cache[key] = template
+          instance_variable_set(:@_flat_circt_template_cache, cache)
+          template
+        end
+
+        def port_defs_by_name
+          instance_variable_get(:@_port_defs_by_name) || begin
+            mapping = _port_defs.each_with_object({}) do |port_def, result|
+              result[port_def[:name]] = port_def
+            end
+            instance_variable_set(:@_port_defs_by_name, mapping)
+          end
+        end
+
+        def append_prefixed_flat_module!(module_ir:, prefix:, nets:, net_names:, regs:, reg_names:, assigns:, processes:, memories:, write_ports:, sync_read_ports:)
+          module_ir.nets.each do |net|
+            append_flat_net!(
+              nets,
+              net_names,
+              name: :"#{prefix}__#{net.name}",
+              width: net.width
+            )
+          end
+
+          module_ir.ports.each do |port|
+            next unless port.direction.to_s == 'out'
+
+            append_flat_net!(
+              nets,
+              net_names,
+              reg_names: reg_names,
+              name: :"#{prefix}__#{port.name}",
+              width: port.width
+            )
+          end
+
+          module_ir.regs.each do |reg|
+            append_flat_reg!(
+              regs,
+              reg_names,
+              name: :"#{prefix}__#{reg.name}",
+              width: reg.width,
+              reset_value: reg.reset_value
+            )
+          end
+
+          module_ir.assigns.each do |assign|
+            assigns << prefix_circt_assign(assign, prefix)
+          end
+
+          module_ir.processes.each do |process|
+            processes << prefix_circt_process(process, prefix)
+          end
+
+          module_ir.memories.each do |mem|
+            memories << prefix_circt_memory(mem, prefix)
+          end
+
+          module_ir.write_ports.each do |write_port|
+            write_ports << prefix_circt_write_port(write_port, prefix)
+          end
+
+          module_ir.sync_read_ports.each do |read_port|
+            sync_read_ports << prefix_circt_sync_read_port(read_port, prefix)
+          end
+        end
+
+        def append_flat_net!(nets, net_names, name:, width:, reg_names: nil)
+          net_key = name.to_s
+          return if net_names.include?(net_key)
+          return if reg_names && reg_names.include?(net_key)
+
+          nets << RHDL::Codegen::CIRCT::IR::Net.new(name: name, width: width)
+          net_names.add(net_key)
+        end
+
+        def append_flat_reg!(regs, reg_names, name:, width:, reset_value:)
+          reg_key = name.to_s
+          return if reg_names.include?(reg_key)
+
+          regs << RHDL::Codegen::CIRCT::IR::Reg.new(name: name, width: width, reset_value: reset_value)
+          reg_names.add(reg_key)
+        end
+
+        def prefix_circt_memory(memory, prefix)
+          return memory if prefix.empty?
+
+          RHDL::Codegen::CIRCT::IR::Memory.new(
+            name: "#{prefix}__#{memory.name}",
+            depth: memory.depth,
+            width: memory.width,
+            read_ports: memory.read_ports,
+            write_ports: memory.write_ports,
+            initial_data: memory.initial_data
+          )
+        end
+
+        def flat_circt_template_cache_key(parameters)
+          case parameters
+          when Hash
+            parameters.keys.sort_by(&:to_s).map do |key|
+              [key.to_s, flat_circt_template_cache_key(parameters[key])]
+            end
+          when Array
+            parameters.map { |value| flat_circt_template_cache_key(value) }
+          else
+            parameters
+          end
         end
 
         def prefix_circt_assign(assign, prefix)

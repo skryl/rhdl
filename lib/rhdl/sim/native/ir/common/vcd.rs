@@ -15,7 +15,7 @@ use std::time::Instant;
 pub struct SignalChange {
     pub time: u64,
     pub signal_idx: usize,
-    pub value: u64,
+    pub value: u128,
 }
 
 /// VCD trace mode
@@ -42,7 +42,7 @@ pub struct VcdTracer {
     traced_signals: HashSet<usize>,
 
     /// Previous signal values for change detection
-    prev_values: Vec<u64>,
+    prev_values: Vec<u128>,
 
     /// Signal names (indexed by signal index)
     signal_names: Vec<String>,
@@ -256,7 +256,10 @@ impl VcdTracer {
     }
 
     /// Record the current state of all traced signals (called at each time step)
-    pub fn capture(&mut self, signals: &[u64]) {
+    pub fn capture<T>(&mut self, signals: &[T])
+    where
+        T: Copy + Into<u128>,
+    {
         if !self.enabled {
             return;
         }
@@ -271,15 +274,16 @@ impl VcdTracer {
         let traced_signals = &self.traced_signals;
         let prev_values = &self.prev_values;
 
-        let indices_to_update: Vec<(usize, u64)> = signals
+        let indices_to_update: Vec<(usize, u128)> = signals
             .iter()
             .enumerate()
             .filter(|&(idx, &val)| {
+                let value = val.into();
                 (traced_signals.is_empty() || traced_signals.contains(&idx))
                     && idx < prev_values.len()
-                    && val != prev_values[idx]
+                    && value != prev_values[idx]
             })
-            .map(|(idx, &val)| (idx, val))
+            .map(|(idx, &val)| (idx, val.into()))
             .collect();
 
         // Now update prev_values and build changes
@@ -438,7 +442,7 @@ impl VcdTracer {
     }
 
     /// Format a signal value for VCD output
-    fn format_value(value: u64, width: usize, vcd_id: &str) -> String {
+    fn format_value(value: u128, width: usize, vcd_id: &str) -> String {
         if width == 1 {
             format!("{}{}", value & 1, vcd_id)
         } else {

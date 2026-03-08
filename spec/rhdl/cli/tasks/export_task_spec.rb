@@ -19,6 +19,7 @@ end
 
 RSpec.describe RHDL::CLI::Tasks::ExportTask do
   let(:temp_dir) { Dir.mktmpdir('rhdl_export_test') }
+  let(:export_tool) { RHDL::Codegen::CIRCT::Tooling::DEFAULT_VERILOG_EXPORT_TOOL }
 
   after do
     FileUtils.rm_rf(temp_dir)
@@ -71,7 +72,7 @@ RSpec.describe RHDL::CLI::Tasks::ExportTask do
           component: 'RHDL::HDL::NotGate',
           lang: 'verilog',
           out: '/tmp',
-          tool: 'circt-translate',
+          tool: export_tool,
           tool_args: ['--lowering-options=disallowPackedArrays']
         )
       end.not_to raise_error
@@ -127,13 +128,13 @@ RSpec.describe RHDL::CLI::Tasks::ExportTask do
       )
       allow(RHDL::Codegen).to receive(:verilog_via_circt).and_return("module not_gate;\nendmodule\n")
 
-      task = described_class.new(all: true, scope: 'lib', tool: 'circt-translate', tool_args: ['--foo'])
+      task = described_class.new(all: true, scope: 'lib', tool: export_tool, tool_args: ['--foo'])
       expect { task.export_all }.to output(/Exported 1 components/).to_stdout
 
       expect(RHDL::Codegen).to have_received(:verilog_via_circt).with(
         RHDL::SpecFixtures::ExportTaskDummy,
         top_name: nil,
-        tool: 'circt-translate',
+        tool: export_tool,
         extra_args: ['--foo']
       )
       expect(File.exist?(File.join(temp_dir, 'fixtures/export_task_dummy.v'))).to be(true)
@@ -148,7 +149,7 @@ RSpec.describe RHDL::CLI::Tasks::ExportTask do
         component: 'RHDL::SpecFixtures::ExportTaskDummy',
         lang: 'verilog',
         out: temp_dir,
-        tool: 'circt-translate',
+        tool: export_tool,
         tool_args: ['--bar']
       )
 
@@ -156,7 +157,7 @@ RSpec.describe RHDL::CLI::Tasks::ExportTask do
       expect(RHDL::Codegen).to have_received(:verilog_via_circt).with(
         RHDL::SpecFixtures::ExportTaskDummy,
         top_name: nil,
-        tool: 'circt-translate',
+        tool: export_tool,
         extra_args: ['--bar']
       )
     end

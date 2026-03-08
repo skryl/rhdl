@@ -31,6 +31,19 @@ module RHDL
       port :a => [:u, :a]
       port [:u, :y] => :y
     end
+
+    class CIRCTSharedChildTop < RHDL::Sim::Component
+      input :a, width: 8
+      output :y0, width: 8
+      output :y1, width: 8
+
+      instance :u0, CIRCTWireChild
+      instance :u1, CIRCTWireChild
+      port :a => [:u0, :a]
+      port :a => [:u1, :a]
+      port [:u0, :y] => :y0
+      port [:u1, :y] => :y1
+    end
   end
 end
 
@@ -84,6 +97,20 @@ RSpec.describe 'CIRCT core IR pipeline' do
       expect(parsed['modules'].first['name']).to eq('spec_fixtures_circt_adder')
     end
 
+    it 'reuses the same child flatten template for repeated identical instances' do
+      allow(RHDL::SpecFixtures::CIRCTWireChild).to receive(:build_flat_circt_module).and_call_original
+
+      flat = RHDL::SpecFixtures::CIRCTSharedChildTop.to_flat_circt_nodes
+      assign_targets = flat.assigns.map { |assign| assign.target.to_s }
+      net_names = flat.nets.map { |net| net.name.to_s }
+
+      expect(RHDL::SpecFixtures::CIRCTWireChild).to have_received(:build_flat_circt_module)
+        .with(parameters: {})
+        .once
+      expect(assign_targets).to include('u0__a', 'u1__a', 'y0', 'y1')
+      expect(net_names).to include('u0__y', 'u1__y')
+    end
+
     it 'serializes instance connections with structured expression payloads' do
       ir = RHDL::Codegen::CIRCT::IR
       mod = ir::ModuleOp.new(
@@ -133,7 +160,12 @@ RSpec.describe 'CIRCT core IR pipeline' do
     it 'provides class-level verilog export via circt tooling path' do
       allow(RHDL::Codegen::CIRCT::Tooling).to receive(:circt_mlir_to_verilog) do |kwargs|
         File.write(kwargs[:out_path], "module spec_fixtures_circt_adder;\nendmodule\n")
-        { success: true, command: 'circt-translate --export-verilog input.mlir -o output.v', stdout: '', stderr: '' }
+        {
+          success: true,
+          command: "#{RHDL::Codegen::CIRCT::Tooling::DEFAULT_VERILOG_EXPORT_TOOL} input.mlir --verilog -o output.v",
+          stdout: '',
+          stderr: ''
+        }
       end
 
       verilog = RHDL::SpecFixtures::CIRCTAdder.to_verilog_via_circt

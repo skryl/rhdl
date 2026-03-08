@@ -244,15 +244,17 @@ module RHDL
         end
 
         def emit_component(mod, class_name, diagnostics, strict: false)
-          sequential = mod.processes.any?(&:clocked)
-          base = sequential ? 'RHDL::Sim::SequentialComponent' : 'RHDL::Sim::Component'
           structure_plan = build_structure_plan(mod, diagnostics)
+          dsl_features = dsl_features_for_module(mod, structure_plan: structure_plan)
+          base = dsl_features[:sequential] ? 'RHDL::Sim::SequentialComponent' : 'RHDL::Sim::Component'
 
           lines = []
           lines << '# frozen_string_literal: true'
           lines << ''
           lines << "class #{class_name} < #{base}"
-          lines << '  include RHDL::DSL::Sequential' if sequential
+          lines << '  include RHDL::DSL::Behavior' if dsl_features[:behavior]
+          lines << '  include RHDL::DSL::Sequential' if dsl_features[:sequential]
+          lines << '  include RHDL::DSL::Memory' if dsl_features[:memory]
           lines << '  def self.verilog_module_name'
           lines << "    #{mod.name.to_s.inspect}"
           lines << '  end'
@@ -271,7 +273,7 @@ module RHDL
           emit_internal_wires(lines, mod, extra_wires: extra_wires + inferred_wires)
           emit_structure(lines, structure_plan)
 
-          if sequential
+          if dsl_features[:sequential]
             emit_sequential(lines, mod, diagnostics, strict: strict)
           end
 
@@ -281,12 +283,100 @@ module RHDL
             diagnostics,
             strict: strict,
             bridge_assignments: structure_plan[:bridge_assignments],
-            structural_output_targets: structure_plan[:structural_output_targets]
+            structural_output_targets: structure_plan[:structural_output_targets],
+            behavior_plan: dsl_features[:behavior_plan]
           )
 
           lines << 'end'
           lines << ''
           lines.join("\n")
+        end
+
+        def dsl_features_for_module(mod, structure_plan: nil)
+          structure_plan ||= build_structure_plan(mod, [])
+          behavior_plan = behavior_plan_for_module(
+            mod,
+            bridge_assignments: structure_plan[:bridge_assignments],
+            structural_output_targets: structure_plan[:structural_output_targets]
+          )
+          sequential = Array(mod.processes).any?(&:clocked)
+          memory = memory_feature_for_module?(mod)
+
+          {
+            behavior: sequential || behavior_plan[:emit],
+            sequential: sequential,
+            memory: memory,
+            behavior_plan: behavior_plan
+          }
+        end
+
+        def behavior_plan_for_module(mod, bridge_assignments:, structural_output_targets:)
+          driven_outputs = Set.new(Array(structural_output_targets).map { |name| sanitize_name(name) })
+          assign_counts = Hash.new(0)
+          Array(mod.assigns).each { |assign| assign_counts[sanitize_name(assign.target)] += 1 }
+
+          emitted_assignments = []
+          Array(bridge_assignments).each { |assign| emitted_assignments << assign }
+
+          Array(mod.assigns).each do |assign|
+            original_target = sanitize_name(assign.target)
+            next if redundant_self_assign?(assign, original_target, assign_counts)
+
+            emitted_assignments << assign
+            driven_outputs << original_target if output_port?(mod, original_target)
+          end
+
+          output_targets = Array(mod.ports).select { |p| p.direction == :out }.map { |p| sanitize_name(p.name) }.to_set
+          missing_outputs = (output_targets - driven_outputs).to_a.sort
+
+          {
+            assignments: emitted_assignments,
+            missing_outputs: missing_outputs,
+            emit: emitted_assignments.any? || missing_outputs.any?
+          }
+        end
+
+        def memory_feature_for_module?(mod)
+          return true if Array(mod.memories).any? || Array(mod.write_ports).any? || Array(mod.sync_read_ports).any?
+          return true if memory_like_module_name?(mod.name)
+          return true if Array(mod.instances).any? { |inst| memory_like_module_name?(inst.module_name) }
+
+          seen_exprs = Set.new
+          Array(mod.assigns).any? { |assign| expr_contains_memory_feature?(assign.expr, seen_exprs: seen_exprs) } ||
+            Array(mod.processes).any? { |process| statements_contain_memory_feature?(process.statements, seen_exprs: seen_exprs) }
+        end
+
+        def memory_like_module_name?(name)
+          value = name.to_s
+          value == 'spram' ||
+            value.start_with?('altsyncram_', 'dpram__vhdl_', 'dpram_dif__vhdl_')
+        end
+
+        def statements_contain_memory_feature?(statements, seen_exprs: Set.new)
+          Array(statements).any? do |stmt|
+            case stmt
+            when IR::SeqAssign
+              expr_contains_memory_feature?(stmt.expr, seen_exprs: seen_exprs)
+            when IR::If
+              expr_contains_memory_feature?(stmt.condition, seen_exprs: seen_exprs) ||
+                statements_contain_memory_feature?(stmt.then_statements, seen_exprs: seen_exprs) ||
+                statements_contain_memory_feature?(stmt.else_statements, seen_exprs: seen_exprs)
+            else
+              false
+            end
+          end
+        end
+
+        def expr_contains_memory_feature?(expr, seen_exprs: Set.new)
+          return false if expr.nil?
+
+          oid = expr.object_id
+          return false if seen_exprs.include?(oid)
+
+          seen_exprs << oid
+          return true if expr.is_a?(IR::MemoryRead)
+
+          expr_children(expr).any? { |child| expr_contains_memory_feature?(child, seen_exprs: seen_exprs) }
         end
 
         def emit_module_parameters(lines, mod, diagnostics)
@@ -887,11 +977,16 @@ module RHDL
           end
         end
 
-        def emit_behavior(lines, mod, diagnostics, strict: false, bridge_assignments: [], structural_output_targets: [])
+        def emit_behavior(lines, mod, diagnostics, strict: false, bridge_assignments: [], structural_output_targets: [], behavior_plan: nil)
+          behavior_plan ||= behavior_plan_for_module(
+            mod,
+            bridge_assignments: bridge_assignments,
+            structural_output_targets: structural_output_targets
+          )
+          return unless behavior_plan[:emit]
+
           lines << '  behavior do'
-          driven_outputs = Set.new(Array(structural_output_targets).map { |name| sanitize_name(name) })
-          assign_counts = Hash.new(0)
-          mod.assigns.each { |assign| assign_counts[sanitize_name(assign.target)] += 1 }
+          bridge_count = Array(bridge_assignments).length
 
           Array(bridge_assignments).each_with_index do |assign, idx|
             target = sanitize_name(assign.target)
@@ -906,7 +1001,10 @@ module RHDL
             )
           end
 
-          mod.assigns.each_with_index do |assign, idx|
+          assign_counts = Hash.new(0)
+          Array(mod.assigns).each { |assign| assign_counts[sanitize_name(assign.target)] += 1 }
+
+          Array(mod.assigns).each_with_index do |assign, idx|
             original_target = sanitize_name(assign.target)
             next if redundant_self_assign?(assign, original_target, assign_counts)
 
@@ -917,13 +1015,11 @@ module RHDL
               diagnostics: diagnostics,
               strict: strict,
               indent: 4,
-              local_prefix: "#{original_target}_expr_#{idx}"
+              local_prefix: "#{original_target}_expr_#{idx + bridge_count}"
             )
-            driven_outputs << original_target if output_port?(mod, original_target)
           end
 
-          output_targets = mod.ports.select { |p| p.direction == :out }.map { |p| sanitize_name(p.name) }.to_set
-          missing_outputs = output_targets - driven_outputs
+          missing_outputs = Array(behavior_plan[:missing_outputs])
           unless missing_outputs.empty?
             if strict
               diagnostics << Diagnostic.new(
@@ -1364,8 +1460,8 @@ module RHDL
         def underscore(name)
           name.to_s
               .gsub('::', '_')
-              .gsub(/([A-Z]+)([A-Z][a-z])/, '\\\\1_\\\\2')
-              .gsub(/([a-z\\d])([A-Z])/, '\\\\1_\\\\2')
+              .gsub(/([A-Z]+)([A-Z][a-z])/, '\\1_\\2')
+              .gsub(/([a-z\\d])([A-Z])/, '\\1_\\2')
               .tr('.', '_')
               .downcase
               .gsub(/[^a-z0-9_]/, '_')
@@ -1399,7 +1495,11 @@ module RHDL
             next nil not or redo rescue retry return self super then true undef unless until when while yield
             __FILE__ __LINE__ __ENCODING__
           ]
-          reserved.include?(value)
+          reserved.include?(value) || numbered_parameter_identifier?(value)
+        end
+
+        def numbered_parameter_identifier?(value)
+          value.to_s.match?(/\A_[1-9]\d*\z/)
         end
 
         def module_texts_by_name(mlir_text)

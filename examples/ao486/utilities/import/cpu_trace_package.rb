@@ -33,7 +33,17 @@ module RHDL
             trace_fetch_valid: 4,
             trace_fetch_bytes: 64,
             trace_dec_acceptable: 4,
-            trace_fetch_accept_length: 4
+            trace_fetch_accept_length: 4,
+            trace_arch_new_export: 1,
+            trace_arch_eax: 32,
+            trace_arch_ebx: 32,
+            trace_arch_ecx: 32,
+            trace_arch_edx: 32,
+            trace_arch_esi: 32,
+            trace_arch_edi: 32,
+            trace_arch_esp: 32,
+            trace_arch_ebp: 32,
+            trace_arch_eip: 32
           }.freeze
 
           module_function
@@ -104,6 +114,7 @@ module RHDL
 
           def patch_pipeline_module!(modules)
             mod = find_module!(modules, 'pipeline')
+            execute_inst = find_instance!(mod, 'execute_inst')
             fetch_inst = find_instance!(mod, 'fetch_inst')
             decode_inst = find_instance!(mod, 'decode_inst')
             write_inst = find_instance!(mod, 'write_inst')
@@ -138,6 +149,16 @@ module RHDL
             mod.ports << port(:trace_fetch_bytes, 64)
             mod.ports << port(:trace_dec_acceptable, 4)
             mod.ports << port(:trace_fetch_accept_length, 4)
+            mod.ports << port(:trace_arch_new_export, 1)
+            mod.ports << port(:trace_arch_eax, 32)
+            mod.ports << port(:trace_arch_ebx, 32)
+            mod.ports << port(:trace_arch_ecx, 32)
+            mod.ports << port(:trace_arch_edx, 32)
+            mod.ports << port(:trace_arch_esi, 32)
+            mod.ports << port(:trace_arch_edi, 32)
+            mod.ports << port(:trace_arch_esp, 32)
+            mod.ports << port(:trace_arch_ebp, 32)
+            mod.ports << port(:trace_arch_eip, 32)
             mod.assigns << assign('trace_retired', retired_expr)
             mod.assigns << assign('trace_wr_finished', signal('write_inst_trace_wr_finished_1', 1))
             mod.assigns << assign('trace_wr_ready', signal('write_inst_trace_wr_ready_1', 1))
@@ -151,6 +172,16 @@ module RHDL
               'trace_fetch_accept_length',
               min_expr(connection_signal!(fetch_inst, 'fetch_valid'), connection_signal!(decode_inst, 'dec_acceptable'), 4)
             )
+            mod.assigns << assign('trace_arch_new_export', connection_signal!(execute_inst, 'exe_ready'))
+            mod.assigns << assign('trace_arch_eax', connection_signal!(write_inst, 'eax'))
+            mod.assigns << assign('trace_arch_ebx', connection_signal!(write_inst, 'ebx'))
+            mod.assigns << assign('trace_arch_ecx', connection_signal!(write_inst, 'ecx'))
+            mod.assigns << assign('trace_arch_edx', connection_signal!(write_inst, 'edx'))
+            mod.assigns << assign('trace_arch_esi', connection_signal!(write_inst, 'esi'))
+            mod.assigns << assign('trace_arch_edi', connection_signal!(write_inst, 'edi'))
+            mod.assigns << assign('trace_arch_esp', connection_signal!(write_inst, 'esp'))
+            mod.assigns << assign('trace_arch_ebp', connection_signal!(write_inst, 'ebp'))
+            mod.assigns << assign('trace_arch_eip', connection_signal!(decode_inst, 'eip'))
           end
 
           def patch_top_module!(modules)
@@ -167,6 +198,16 @@ module RHDL
             ensure_net(mod, 'pipeline_inst_trace_fetch_bytes_64', 64)
             ensure_net(mod, 'pipeline_inst_trace_dec_acceptable_4', 4)
             ensure_net(mod, 'pipeline_inst_trace_fetch_accept_length_4', 4)
+            ensure_net(mod, 'pipeline_inst_trace_arch_new_export_1', 1)
+            ensure_net(mod, 'pipeline_inst_trace_arch_eax_32', 32)
+            ensure_net(mod, 'pipeline_inst_trace_arch_ebx_32', 32)
+            ensure_net(mod, 'pipeline_inst_trace_arch_ecx_32', 32)
+            ensure_net(mod, 'pipeline_inst_trace_arch_edx_32', 32)
+            ensure_net(mod, 'pipeline_inst_trace_arch_esi_32', 32)
+            ensure_net(mod, 'pipeline_inst_trace_arch_edi_32', 32)
+            ensure_net(mod, 'pipeline_inst_trace_arch_esp_32', 32)
+            ensure_net(mod, 'pipeline_inst_trace_arch_ebp_32', 32)
+            ensure_net(mod, 'pipeline_inst_trace_arch_eip_32', 32)
 
             pipeline_inst.connections << out_conn(:trace_retired, 'pipeline_inst_trace_retired_1', width: 1)
             pipeline_inst.connections << out_conn(:trace_wr_finished, 'pipeline_inst_trace_wr_finished_1', width: 1)
@@ -178,6 +219,16 @@ module RHDL
             pipeline_inst.connections << out_conn(:trace_fetch_bytes, 'pipeline_inst_trace_fetch_bytes_64', width: 64)
             pipeline_inst.connections << out_conn(:trace_dec_acceptable, 'pipeline_inst_trace_dec_acceptable_4', width: 4)
             pipeline_inst.connections << out_conn(:trace_fetch_accept_length, 'pipeline_inst_trace_fetch_accept_length_4', width: 4)
+            pipeline_inst.connections << out_conn(:trace_arch_new_export, 'pipeline_inst_trace_arch_new_export_1', width: 1)
+            pipeline_inst.connections << out_conn(:trace_arch_eax, 'pipeline_inst_trace_arch_eax_32', width: 32)
+            pipeline_inst.connections << out_conn(:trace_arch_ebx, 'pipeline_inst_trace_arch_ebx_32', width: 32)
+            pipeline_inst.connections << out_conn(:trace_arch_ecx, 'pipeline_inst_trace_arch_ecx_32', width: 32)
+            pipeline_inst.connections << out_conn(:trace_arch_edx, 'pipeline_inst_trace_arch_edx_32', width: 32)
+            pipeline_inst.connections << out_conn(:trace_arch_esi, 'pipeline_inst_trace_arch_esi_32', width: 32)
+            pipeline_inst.connections << out_conn(:trace_arch_edi, 'pipeline_inst_trace_arch_edi_32', width: 32)
+            pipeline_inst.connections << out_conn(:trace_arch_esp, 'pipeline_inst_trace_arch_esp_32', width: 32)
+            pipeline_inst.connections << out_conn(:trace_arch_ebp, 'pipeline_inst_trace_arch_ebp_32', width: 32)
+            pipeline_inst.connections << out_conn(:trace_arch_eip, 'pipeline_inst_trace_arch_eip_32', width: 32)
 
             TRACE_PORTS.each do |name, width|
               mod.ports << port(name, width)
@@ -196,6 +247,16 @@ module RHDL
             mod.assigns << assign('trace_fetch_bytes', signal('pipeline_inst_trace_fetch_bytes_64', 64))
             mod.assigns << assign('trace_dec_acceptable', signal('pipeline_inst_trace_dec_acceptable_4', 4))
             mod.assigns << assign('trace_fetch_accept_length', signal('pipeline_inst_trace_fetch_accept_length_4', 4))
+            mod.assigns << assign('trace_arch_new_export', signal('pipeline_inst_trace_arch_new_export_1', 1))
+            mod.assigns << assign('trace_arch_eax', signal('pipeline_inst_trace_arch_eax_32', 32))
+            mod.assigns << assign('trace_arch_ebx', signal('pipeline_inst_trace_arch_ebx_32', 32))
+            mod.assigns << assign('trace_arch_ecx', signal('pipeline_inst_trace_arch_ecx_32', 32))
+            mod.assigns << assign('trace_arch_edx', signal('pipeline_inst_trace_arch_edx_32', 32))
+            mod.assigns << assign('trace_arch_esi', signal('pipeline_inst_trace_arch_esi_32', 32))
+            mod.assigns << assign('trace_arch_edi', signal('pipeline_inst_trace_arch_edi_32', 32))
+            mod.assigns << assign('trace_arch_esp', signal('pipeline_inst_trace_arch_esp_32', 32))
+            mod.assigns << assign('trace_arch_ebp', signal('pipeline_inst_trace_arch_ebp_32', 32))
+            mod.assigns << assign('trace_arch_eip', signal('pipeline_inst_trace_arch_eip_32', 32))
           end
 
           def find_module!(modules, name)

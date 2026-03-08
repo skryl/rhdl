@@ -14,9 +14,10 @@ RSpec.describe RHDL::Examples::GameBoy::Import::SystemImporter do
     skip 'GameBoy files.qip not available' unless File.file?(described_class::DEFAULT_QIP_PATH)
   end
 
-  def new_importer(output_dir:)
+  def new_importer(output_dir:, maintain_directory_structure: true)
     described_class.new(
       output_dir: output_dir,
+      maintain_directory_structure: maintain_directory_structure,
       clean_output: false,
       keep_workspace: true,
       progress: ->(_msg) {}
@@ -156,6 +157,90 @@ RSpec.describe RHDL::Examples::GameBoy::Import::SystemImporter do
       end
     end
 
+    it 'remaps raised files into source directory structure when enabled' do
+      require_reference_tree!
+
+      fake_task_class = Class.new do
+        def initialize(options)
+          @options = options
+        end
+
+        def run
+          out_dir = @options.fetch(:out)
+          FileUtils.mkdir_p(out_dir)
+          File.write(File.join(out_dir, 'gb.rb'), "# gb\n")
+          File.write(File.join(out_dir, 'video.rb'), "# video\n")
+          File.write(@options.fetch(:report), "{}\n")
+        end
+      end
+
+      Dir.mktmpdir('gameboy_import_keep_structure_out') do |out_dir|
+        Dir.mktmpdir('gameboy_import_keep_structure_ws') do |workspace|
+          importer = described_class.new(
+            output_dir: out_dir,
+            workspace_dir: workspace,
+            keep_workspace: true,
+            clean_output: true,
+            maintain_directory_structure: true,
+            progress: ->(_msg) {},
+            import_task_class: fake_task_class
+          )
+
+          result = importer.run
+          expect(result.success?).to be(true)
+          expect(result.files_written).to include(
+            File.join(out_dir, 'rtl', 'gb.rb'),
+            File.join(out_dir, 'rtl', 'video.rb')
+          )
+          expect(File.file?(File.join(out_dir, 'rtl', 'gb.rb'))).to be(true)
+          expect(File.file?(File.join(out_dir, 'rtl', 'video.rb'))).to be(true)
+          expect(File.exist?(File.join(out_dir, 'gb.rb'))).to be(false)
+          expect(File.exist?(File.join(out_dir, 'video.rb'))).to be(false)
+        end
+      end
+    end
+
+    it 'keeps raised files flat when keep-structure is disabled' do
+      require_reference_tree!
+
+      fake_task_class = Class.new do
+        def initialize(options)
+          @options = options
+        end
+
+        def run
+          out_dir = @options.fetch(:out)
+          FileUtils.mkdir_p(out_dir)
+          File.write(File.join(out_dir, 'gb.rb'), "# gb\n")
+          File.write(File.join(out_dir, 'video.rb'), "# video\n")
+          File.write(@options.fetch(:report), "{}\n")
+        end
+      end
+
+      Dir.mktmpdir('gameboy_import_flat_out') do |out_dir|
+        Dir.mktmpdir('gameboy_import_flat_ws') do |workspace|
+          importer = described_class.new(
+            output_dir: out_dir,
+            workspace_dir: workspace,
+            keep_workspace: true,
+            clean_output: true,
+            maintain_directory_structure: false,
+            progress: ->(_msg) {},
+            import_task_class: fake_task_class
+          )
+
+          result = importer.run
+          expect(result.success?).to be(true)
+          expect(result.files_written).to include(
+            File.join(out_dir, 'gb.rb'),
+            File.join(out_dir, 'video.rb')
+          )
+          expect(File.file?(File.join(out_dir, 'gb.rb'))).to be(true)
+          expect(File.file?(File.join(out_dir, 'video.rb'))).to be(true)
+        end
+      end
+    end
+
     it 'mirrors canonical import artifacts into the workspace and records their paths in the report' do
       require_reference_tree!
 
@@ -238,6 +323,255 @@ RSpec.describe RHDL::Examples::GameBoy::Import::SystemImporter do
           )
           expect(result.source_verilog_path).to eq(artifacts.fetch('workspace_normalized_verilog_path'))
         end
+      end
+    end
+
+    it 'writes a per-component manifest into the final report' do
+      require_reference_tree!
+
+      fake_task_class = Class.new do
+        def initialize(options)
+          @options = options
+        end
+
+        def run
+          out_dir = @options.fetch(:out)
+          staged_root = File.join(out_dir, '.mixed_import', 'pure_verilog', 'rtl')
+          FileUtils.mkdir_p(staged_root)
+
+          File.write(File.join(staged_root, 'gb.v'), "module gb(input logic a, output logic y); assign y = a; endmodule\n")
+          File.write(File.join(staged_root, 'video.v'), "module video(input logic a, output logic y); assign y = a; endmodule\n")
+
+          File.write(File.join(out_dir, 'gb.rb'), <<~RUBY)
+            class Gb < RHDL::Sim::SequentialComponent
+              def self.verilog_module_name
+                "gb"
+              end
+            end
+          RUBY
+          File.write(File.join(out_dir, 'video.rb'), <<~RUBY)
+            class Video < RHDL::Sim::SequentialComponent
+              def self.verilog_module_name
+                "video"
+              end
+            end
+          RUBY
+
+          File.write(@options.fetch(:report), JSON.pretty_generate(
+            success: true,
+            module_count: 2,
+            modules: [
+              { name: 'gb', start_line: 1, end_line: 1, import_errors: 0, import_warnings: 0, import_diagnostics: [] },
+              { name: 'video', start_line: 2, end_line: 2, import_errors: 0, import_warnings: 0, import_diagnostics: [] }
+            ],
+            mixed_import: {
+              pure_verilog_root: File.join(out_dir, '.mixed_import', 'pure_verilog'),
+              pure_verilog_files: [
+                {
+                  path: File.join(staged_root, 'gb.v'),
+                  language: 'verilog',
+                  generated: false,
+                  origin_kind: 'source_verilog',
+                  original_source_path: File.join(Dir.pwd, 'examples/gameboy/reference/rtl/gb.v')
+                },
+                {
+                  path: File.join(staged_root, 'video.v'),
+                  language: 'verilog',
+                  generated: false,
+                  origin_kind: 'source_verilog',
+                  original_source_path: File.join(Dir.pwd, 'examples/gameboy/reference/rtl/video.v')
+                }
+              ],
+              source_files: []
+            },
+            artifacts: {
+              pure_verilog_root: File.join(out_dir, '.mixed_import', 'pure_verilog')
+            }
+          ))
+        end
+      end
+
+      Dir.mktmpdir('gameboy_import_component_manifest_out') do |out_dir|
+        Dir.mktmpdir('gameboy_import_component_manifest_ws') do |workspace|
+          importer = described_class.new(
+            output_dir: out_dir,
+            workspace_dir: workspace,
+            keep_workspace: true,
+            clean_output: true,
+            maintain_directory_structure: true,
+            progress: ->(_msg) {},
+            import_task_class: fake_task_class
+          )
+
+          result = importer.run
+          expect(result.success?).to be(true)
+
+          report = JSON.parse(File.read(result.report_path))
+          components = report.fetch('components')
+          expect(report.fetch('component_count')).to eq(2)
+          expect(components.map { |entry| entry.fetch('verilog_module_name') }).to contain_exactly('gb', 'video')
+          expect(components.find { |entry| entry.fetch('verilog_module_name') == 'gb' }).to include(
+            'ruby_class_name',
+            'raised_rhdl_path',
+            'staged_verilog_path',
+            'staged_verilog_module_name',
+            'origin_kind'
+          )
+          gb = components.find { |entry| entry.fetch('verilog_module_name') == 'gb' }
+          expect(gb.fetch('origin_kind')).to eq('source_verilog')
+          expect(gb.fetch('keep_structure_relative_path')).to eq(File.join('rtl', 'gb.rb'))
+          expect(gb.fetch('staged_verilog_path')).to end_with('/.mixed_import/pure_verilog/rtl/gb.v')
+          expect(gb.fetch('original_source_path')).to end_with('/examples/gameboy/reference/rtl/gb.v')
+        end
+      end
+    end
+
+    it 'prefers importer-written per-module provenance when building the final component manifest' do
+      require_reference_tree!
+
+      fake_task_class = Class.new do
+        def initialize(options)
+          @options = options
+        end
+
+        def run
+          out_dir = @options.fetch(:out)
+          generated_dir = File.join(out_dir, '.mixed_import', 'pure_verilog', 'generated_vhdl')
+          FileUtils.mkdir_p(generated_dir)
+
+          staged_verilog_path = File.join(generated_dir, 'GBse.v')
+          raised_path = File.join(out_dir, 'g_bse.rb')
+          original_source_path = File.join(Dir.pwd, 'examples/gameboy/reference/rtl/T80/GBse.vhd')
+
+          File.write(staged_verilog_path, "module GBse(input logic clk, output logic q); assign q = clk; endmodule\n")
+          File.write(raised_path, <<~RUBY)
+            class GBse < RHDL::Sim::SequentialComponent
+              include RHDL::DSL::Sequential
+
+              def self.verilog_module_name
+                "GBse"
+              end
+            end
+          RUBY
+
+          File.write(@options.fetch(:report), JSON.pretty_generate(
+            success: true,
+            module_count: 1,
+            modules: [
+              {
+                name: 'GBse',
+                expected_dsl_features: { behavior: true, sequential: true, memory: false },
+                verilog_module_name: 'GBse',
+                ruby_class_name: 'GBse',
+                raised_rhdl_path: raised_path,
+                staged_verilog_path: staged_verilog_path,
+                staged_verilog_module_name: 'GBse',
+                origin_kind: 'source_vhdl_generated',
+                source_kind: 'generated_vhdl',
+                original_source_path: original_source_path,
+                emitted_dsl_features: %w[behavior sequential],
+                emitted_base_class: 'RHDL::Sim::SequentialComponent',
+                vhdl_synth: {
+                  entity: 'GBse',
+                  module_name: 'GBse',
+                  library: 'work',
+                  standard: '08',
+                  workdir: File.join(out_dir, '.mixed_import', 'ghdl_work'),
+                  extra_args: ['-gWIDTH=8'],
+                  source_path: original_source_path
+                }
+              }
+            ],
+            mixed_import: {
+              pure_verilog_root: File.join(out_dir, '.mixed_import', 'pure_verilog'),
+              vhdl_synth_outputs: [
+                {
+                  entity: 'GBse',
+                  module_name: 'GBse',
+                  library: 'work',
+                  standard: '08',
+                  workdir: File.join(out_dir, '.mixed_import', 'ghdl_work'),
+                  extra_args: ['-gWIDTH=8'],
+                  source_path: original_source_path,
+                  output_path: staged_verilog_path
+                }
+              ]
+            },
+            artifacts: {
+              pure_verilog_root: File.join(out_dir, '.mixed_import', 'pure_verilog')
+            }
+          ))
+        end
+      end
+
+      Dir.mktmpdir('gameboy_import_report_owned_provenance_out') do |out_dir|
+        Dir.mktmpdir('gameboy_import_report_owned_provenance_ws') do |workspace|
+          importer = described_class.new(
+            output_dir: out_dir,
+            workspace_dir: workspace,
+            keep_workspace: true,
+            clean_output: true,
+            maintain_directory_structure: true,
+            progress: ->(_msg) {},
+            import_task_class: fake_task_class
+          )
+
+          result = importer.run
+          expect(result.success?).to be(true)
+
+          report = JSON.parse(File.read(result.report_path))
+          component = report.fetch('components').fetch(0)
+          expect(component).to include(
+            'module_name' => 'GBse',
+            'verilog_module_name' => 'GBse',
+            'ruby_class_name' => 'GBse',
+            'staged_verilog_path' => File.join(out_dir, '.mixed_import', 'pure_verilog', 'generated_vhdl', 'GBse.v'),
+            'staged_verilog_module_name' => 'GBse',
+            'origin_kind' => 'source_vhdl_generated',
+            'source_kind' => 'generated_vhdl',
+            'original_source_path' => File.join(Dir.pwd, 'examples/gameboy/reference/rtl/T80/GBse.vhd'),
+            'raised_rhdl_path' => File.join(out_dir, 'rtl', 'T80', 'g_bse.rb'),
+            'keep_structure_relative_path' => File.join('rtl', 'T80', 'g_bse.rb'),
+            'expected_dsl_features' => { 'behavior' => true, 'sequential' => true, 'memory' => false },
+            'behavior' => true,
+            'sequential' => true,
+            'memory' => false,
+            'emitted_dsl_features' => contain_exactly('behavior', 'sequential'),
+            'emitted_base_class' => 'RHDL::Sim::SequentialComponent',
+            'vhdl_synth' => include(
+              'entity' => 'GBse',
+              'module_name' => 'GBse',
+              'library' => 'work',
+              'standard' => '08',
+              'workdir' => File.join(out_dir, '.mixed_import', 'ghdl_work'),
+              'extra_args' => ['-gWIDTH=8'],
+              'source_path' => File.join(Dir.pwd, 'examples/gameboy/reference/rtl/T80/GBse.vhd')
+            )
+          )
+        end
+      end
+    end
+
+    it 'detects behavior DSL from raised files that emit behavior blocks without a behavior mixin' do
+      Dir.mktmpdir('gameboy_import_behavior_inventory_out') do |out_dir|
+        importer = new_importer(output_dir: out_dir)
+        raised_path = File.join(out_dir, 'gbc_snd.rb')
+        File.write(raised_path, <<~RUBY)
+          class GbcSnd < RHDL::Sim::Component
+            def self.verilog_module_name
+              "gbc_snd"
+            end
+
+            behavior do
+              out <= 0
+            end
+          end
+        RUBY
+
+        inventory = importer.send(:raised_component_inventory, [raised_path])
+        entry = inventory.fetch('gbc_snd')
+
+        expect(entry.fetch(:dsl_features)).to include('behavior')
       end
     end
   end
