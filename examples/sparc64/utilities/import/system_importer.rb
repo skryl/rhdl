@@ -21,8 +21,7 @@ module RHDL
             File.join(DEFAULT_REFERENCE_ROOT, 'T1-common', 'include')
           ].freeze
           EXCLUDED_SOURCE_PATHS = [
-            File.join(DEFAULT_REFERENCE_ROOT, 'T1-common', 'srams', 'bw_r_tlb.v'),
-            File.join(DEFAULT_REFERENCE_ROOT, 'T1-common', 'u1', 'u1.V')
+            File.join(DEFAULT_REFERENCE_ROOT, 'T1-common', 'srams', 'bw_r_tlb.v')
           ].freeze
           FORCE_STUB_SOURCE_PREFIXES = [
             File.join(DEFAULT_REFERENCE_ROOT, 'WB2ALTDDR3'),
@@ -152,6 +151,7 @@ module RHDL
                   diagnostics: diagnostics
                 )
               end
+              files_written = patch_generated_runtime_primitives(files_written: files_written, diagnostics: diagnostics)
 
               report = read_report(report_path)
               artifacts = report.fetch('artifacts', {})
@@ -524,10 +524,34 @@ module RHDL
               text.sub!(/reg fifo_rd;\s*reg fifo_rd1;\s*reg cpu;\s*reg cpu2;\s*wire \[123:0\] pcx_packet;\s*assign pcx_packet=cpu \? pcx1_data_fifo\[123:0\]:pcx_data_fifo\[123:0\];\s*/m, '')
               text.sub!(/reg fifo_rd;\s*reg fifo_rd1;\s*wire \[123:0\] pcx_packet;\s*assign pcx_packet=cpu \? pcx1_data_fifo\[123:0\]:pcx_data_fifo\[123:0\];\s*reg cpu;\s*reg cpu2;\s*/m, '')
               text.sub!(/pcx_fifo pcx_fifo_inst\(/, "#{declarations}pcx_fifo pcx_fifo_inst(")
+            when 'lsu_qctl1.v'
+              text.sub!(
+                /assign\s+pcx_pkt_src_sel_tmp\[2\]\s*=\s*~\|\{pcx_pkt_src_sel\[3\],\s*pcx_pkt_src_sel\[1:0\]\};/,
+                'assign pcx_pkt_src_sel_tmp[2] = ~rst_tri_en & ~|{pcx_pkt_src_sel_tmp[3], pcx_pkt_src_sel_tmp[1], pcx_pkt_src_sel_tmp[0]};'
+              )
+              text.sub!(
+                /assign\s+fwd_int_fp_pcx_mx_sel_tmp\[0\]\s*=\s*~fwd_int_fp_pcx_mx_sel\[1\]\s*&\s*~fwd_int_fp_pcx_mx_sel\[2\];/,
+                'assign fwd_int_fp_pcx_mx_sel_tmp[0] = ~rst_tri_en & ~fwd_int_fp_pcx_mx_sel_tmp[1] & ~fwd_int_fp_pcx_mx_sel_tmp[2];'
+              )
             when 'sparc_ifu_milfsm.v'
               text.gsub!(/`CMP_CLK_PERIOD/, '1333')
             when 'sparc_exu_alu.v'
               text.gsub!(/\bsparc_exu_alulogic\s+logic\s*\(/, 'sparc_exu_alulogic logic_inst(')
+            when 'sparc_tlu_dec64.v'
+              text.sub!(
+                /reg\s+\[63:0\]\s+out\s*;\s*integer\s+\w+\s*;\s*always\s*@\s*\(in\)\s*begin.*?end\s*end\s*/m,
+                "assign out[63:0] = (64'h1 << in[5:0]);\n"
+              )
+            when 'sparc_tlu_penc64.v'
+              text.sub!(
+                /reg\s+\[5:0\]\s+out\s*;\s*integer\s+\w+\s*;\s*always\s*@\s*\(in\)\s*begin.*?end\s*end\s*/m,
+                "assign out[5:0] = #{priority_encoder_chain(width: 64, input_signal: 'in', output_width: 6)};\n"
+              )
+            when 'lsu_dc_parity_gen.v'
+              text.sub!(
+                /reg\s+\[NUM\s*-\s*1\s*:\s*0\]\s+parity\b.*?assign\s+parity_out\[NUM\s*-\s*1\s*:\s*0\]\s*=\s*parity\[NUM\s*-\s*1\s*:\s*0\]\s*;\s*/m,
+                "assign parity_out[15:0] = #{bytewise_parity_concat(input_signal: 'data_in', groups: 16, group_width: 8)};\n"
+              )
             when 'sparc_ffu_ctl_visctl.v'
               text.gsub!(/\blogic\b/, 'logic_op')
             when 'spu_mactl.v'
@@ -556,6 +580,26 @@ module RHDL
             end
 
             text
+          end
+
+          def priority_encoder_chain(width:, input_signal:, output_width:)
+            expr = "#{output_width}'d0"
+
+            0.upto(width - 1) do |index|
+              expr = "#{input_signal}[#{index}] ? #{output_width}'d#{index} : (#{expr})"
+            end
+
+            expr
+          end
+
+          def bytewise_parity_concat(input_signal:, groups:, group_width:)
+            parts = (0...groups).reverse_each.map do |index|
+              low = index * group_width
+              high = low + group_width - 1
+              "(^#{input_signal}[#{high}:#{low}])"
+            end
+
+            "{#{parts.join(', ')}}"
           end
 
           def include_names(path)
@@ -701,6 +745,53 @@ module RHDL
                 stem.start_with?("#{candidate_stem}_")
               end
               .max_by { |candidate| File.basename(candidate, '.rb').length }
+          end
+
+          def patch_generated_runtime_primitives(files_written:, diagnostics:)
+            Array(files_written).map do |path|
+              next path unless File.file?(path)
+
+              text = File.read(path)
+              module_name = text[/def\s+self\.verilog_module_name.*?\n\s*["']([^"']+)["']/m, 1]
+              next path unless module_name == 'dffrl_async'
+
+              File.write(path, dffrl_async_runtime_template)
+              diagnostics << "SPARC64 runtime primitive patch applied for #{module_name}"
+              path
+            end
+          end
+
+          def dffrl_async_runtime_template
+            <<~RUBY
+              # frozen_string_literal: true
+
+              class DffrlAsync < RHDL::Sim::SequentialComponent
+                include RHDL::DSL::Behavior
+                include RHDL::DSL::Sequential
+
+                def self.verilog_module_name
+                  "dffrl_async"
+                end
+
+                input :din
+                input :clk
+                input :rst_l
+                input :se
+                input :si
+                output :q
+                output :so
+
+                sequential clock: :clk, reset: :rst_l, reset_values: { q: 0 } do
+                  # The SPARC64 import suite runs with FPGA_SYN/NO_SCAN enabled, so
+                  # scan ports are present in the interface but inactive in behavior.
+                  q <= din
+                end
+
+                behavior do
+                  so <= 0
+                end
+              end
+            RUBY
           end
 
           def source_relative_path(path)

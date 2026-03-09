@@ -66,7 +66,7 @@ RSpec.describe 'IR compiler wide internal expression lowering' do
   def create_sim
     skip 'IR compiler backend unavailable' unless RHDL::Sim::Native::IR::COMPILER_AVAILABLE
 
-    runtime_json = RHDL::Codegen::CIRCT::RuntimeJSON.dump(build_runtime_package)
+    runtime_json = RHDL::Sim::Native::IR.sim_json(build_runtime_package, backend: :compiler)
     RHDL::Sim::Native::IR::Simulator.new(runtime_json, backend: :compiler)
   end
 

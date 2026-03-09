@@ -14,10 +14,30 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use serde::Deserialize;
 use serde_json::{Map, Value};
 
+use crate::signal_value::{
+    compute_mask as wide_mask,
+    deserialize_optional_signal_value,
+    deserialize_signal_values,
+    deserialize_signed_signal_value,
+    mask_signed_value,
+    SignalValue,
+    SignedSignalValue,
+};
+
 #[cfg(feature = "aot")]
 type CompiledLibrary = ();
 #[cfg(not(feature = "aot"))]
 type CompiledLibrary = libloading::Library;
+
+const CHUNKED_EVALUATE_ASSIGN_THRESHOLD: usize = 256;
+const CHUNKED_EVALUATE_ASSIGNS_PER_FN: usize = 32;
+const RUNTIME_ONLY_EXPR_THRESHOLD: usize = 100_000;
+
+#[derive(Default)]
+struct ExprCodegenState {
+    emitted: HashSet<usize>,
+    emitting: HashSet<usize>,
+}
 
 // ============================================================================
 // IR data structures for normalized CIRCT runtime JSON.
@@ -48,14 +68,20 @@ pub struct RegDef {
     pub name: String,
     pub width: usize,
     #[serde(default)]
-    pub reset_value: Option<u64>,
+    #[serde(deserialize_with = "deserialize_optional_signal_value")]
+    pub reset_value: Option<SignalValue>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ExprDef {
     Signal { name: String, width: usize },
-    Literal { value: i64, width: usize },
+    Literal {
+        #[serde(deserialize_with = "deserialize_signed_signal_value")]
+        value: SignedSignalValue,
+        width: usize
+    },
+    ExprRef { id: usize, width: usize },
     #[serde(alias = "unary")]
     UnaryOp { op: String, operand: Box<ExprDef>, width: usize },
     #[serde(alias = "binary")]
@@ -104,7 +130,8 @@ pub struct MemoryDef {
     #[allow(dead_code)]
     pub width: usize,
     #[serde(default)]
-    pub initial_data: Vec<u64>,
+    #[serde(deserialize_with = "deserialize_signal_values")]
+    pub initial_data: Vec<SignalValue>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -133,6 +160,8 @@ pub struct ModuleIR {
     pub ports: Vec<PortDef>,
     pub nets: Vec<NetDef>,
     pub regs: Vec<RegDef>,
+    #[serde(default)]
+    pub exprs: Vec<ExprDef>,
     pub assigns: Vec<AssignDef>,
     pub processes: Vec<ProcessDef>,
     #[serde(default)]
@@ -233,6 +262,15 @@ fn module_to_normalized_value(module_obj: Map<String, Value>) -> Result<Value, S
         ),
     );
     out.insert(
+        "exprs".to_string(),
+        Value::Array(
+            array_field(&module_obj, "exprs")
+                .into_iter()
+                .map(|v| expr_to_normalized_value(Some(&v)))
+                .collect::<Result<Vec<_>, _>>()?,
+        ),
+    );
+    out.insert(
         "assigns".to_string(),
         Value::Array(
             array_field(&module_obj, "assigns")
@@ -307,7 +345,7 @@ fn reg_to_normalized_value(value: &Value) -> Result<Value, String> {
     out.insert("width".to_string(), Value::from(value_to_u64(obj.get("width"))));
     if let Some(reset_value) = obj.get("reset_value") {
         if !reset_value.is_null() {
-            out.insert("reset_value".to_string(), Value::from(value_to_i64(Some(reset_value))));
+            out.insert("reset_value".to_string(), reset_value.clone());
         }
     }
     Ok(Value::Object(out))
@@ -509,10 +547,14 @@ fn expr_to_normalized_value(expr: Option<&Value>) -> Result<Value, String> {
             value_to_string(obj.get("name")),
             value_to_usize(obj.get("width")),
         )),
-        "literal" => Ok(literal_expr(
-            value_to_i64(obj.get("value")),
-            value_to_usize(obj.get("width")),
-        )),
+        "literal" => Ok(literal_expr_from_json(obj.get("value"), value_to_usize(obj.get("width")))),
+        "expr_ref" => {
+            let mut out = Map::new();
+            out.insert("kind".to_string(), Value::String("expr_ref".to_string()));
+            out.insert("id".to_string(), Value::from(value_to_u64(obj.get("id"))));
+            out.insert("width".to_string(), Value::from(value_to_u64(obj.get("width"))));
+            Ok(Value::Object(out))
+        }
         "unary" => Ok(unary_expr(
             &value_to_string(obj.get("op")),
             expr_to_normalized_value(obj.get("operand"))?,
@@ -622,7 +664,7 @@ fn lower_case_expr(case_obj: &Map<String, Value>) -> Result<Value, String> {
     Ok(result)
 }
 
-fn parse_case_values(raw: &str) -> Vec<i64> {
+fn parse_case_values(raw: &str) -> Vec<SignedSignalValue> {
     let text = raw.trim();
     if text.is_empty() {
         return Vec::new();
@@ -632,11 +674,11 @@ fn parse_case_values(raw: &str) -> Vec<i64> {
         let inner = &text[1..text.len() - 1];
         return inner
             .split(',')
-            .filter_map(|v| v.trim().parse::<i64>().ok())
+            .filter_map(|v| v.trim().parse::<SignedSignalValue>().ok())
             .collect();
     }
 
-    text.parse::<i64>().ok().into_iter().collect()
+    text.parse::<SignedSignalValue>().ok().into_iter().collect()
 }
 
 fn as_object<'a>(value: &'a Value, what: &str) -> Result<&'a Map<String, Value>, String> {
@@ -703,10 +745,18 @@ fn value_to_i64(value: Option<&Value>) -> i64 {
     }
 }
 
-fn literal_expr(value: i64, width: usize) -> Value {
+fn literal_expr(value: SignedSignalValue, width: usize) -> Value {
     let mut out = Map::new();
     out.insert("kind".to_string(), Value::String("literal".to_string()));
-    out.insert("value".to_string(), Value::from(value));
+    out.insert("value".to_string(), Value::String(value.to_string()));
+    out.insert("width".to_string(), Value::from(width as u64));
+    Value::Object(out)
+}
+
+fn literal_expr_from_json(value: Option<&Value>, width: usize) -> Value {
+    let mut out = Map::new();
+    out.insert("kind".to_string(), Value::String("literal".to_string()));
+    out.insert("value".to_string(), value.cloned().unwrap_or(Value::from(0)));
     out.insert("width".to_string(), Value::from(width as u64));
     Value::Object(out)
 }
@@ -762,7 +812,7 @@ pub struct CoreSimulator {
     /// IR definition
     pub ir: ModuleIR,
     /// Signal values (Vec for O(1) access)
-    pub signals: Vec<u64>,
+    pub signals: Vec<SignalValue>,
     /// Signal widths
     pub widths: Vec<usize>,
     /// Signal name to index mapping
@@ -772,9 +822,13 @@ pub struct CoreSimulator {
     /// Output names
     pub output_names: Vec<String>,
     /// Reset values for registers (signal index -> reset value)
-    pub reset_values: Vec<(usize, u64)>,
+    pub reset_values: Vec<(usize, SignalValue)>,
+    /// Topologically sorted combinational assignments for runtime fallback
+    pub comb_assigns: Vec<(usize, usize)>,
     /// Next register values buffer
-    pub next_regs: Vec<u64>,
+    pub next_regs: Vec<SignalValue>,
+    /// Sequential assignment expressions
+    pub seq_exprs: Vec<(usize, usize)>,
     /// Sequential assignment target indices
     pub seq_targets: Vec<usize>,
     /// Clock signal index for each sequential assignment
@@ -782,17 +836,20 @@ pub struct CoreSimulator {
     /// All unique clock signal indices
     pub clock_indices: Vec<usize>,
     /// Old clock values for edge detection
-    pub old_clocks: Vec<u64>,
+    pub old_clocks: Vec<SignalValue>,
     /// Pre-grouped: for each clock domain, list of (seq_assign_idx, target_idx)
     pub clock_domain_assigns: Vec<Vec<(usize, usize)>>,
     /// Memory arrays
-    pub memory_arrays: Vec<Vec<u64>>,
+    pub memory_arrays: Vec<Vec<SignalValue>>,
     /// Memory name to index
     pub memory_name_to_idx: HashMap<String, usize>,
     /// Compiled library (if compilation succeeded)
     pub compiled_lib: Option<CompiledLibrary>,
     /// Whether compilation succeeded
     pub compiled: bool,
+    /// Adaptive pure-core fallback that skips per-module rustc and uses the
+    /// native runtime evaluator in this crate instead.
+    pub runtime_only: bool,
 }
 
 impl CoreSimulator {
@@ -808,7 +865,7 @@ impl CoreSimulator {
         // Build signal table - ports first
         for port in &ir.ports {
             let idx = signals.len();
-            signals.push(0u64);
+            signals.push(0u128);
             widths.push(port.width);
             name_to_idx.insert(port.name.clone(), idx);
             match port.direction {
@@ -820,7 +877,7 @@ impl CoreSimulator {
         // Then nets
         for net in &ir.nets {
             let idx = signals.len();
-            signals.push(0u64);
+            signals.push(0u128);
             widths.push(net.width);
             name_to_idx.insert(net.name.clone(), idx);
         }
@@ -840,11 +897,12 @@ impl CoreSimulator {
         }
 
         // Build sequential assignment info
+        let mut seq_exprs = Vec::new();
         let mut seq_targets = Vec::new();
         let mut seq_clocks = Vec::new();
         let mut clock_indices_set = HashSet::new();
 
-        for process in &ir.processes {
+        for (process_idx, process) in ir.processes.iter().enumerate() {
             if !process.clocked {
                 continue;
             }
@@ -852,8 +910,9 @@ impl CoreSimulator {
             let clk_idx = *name_to_idx.get(clk_name).unwrap_or(&0);
             clock_indices_set.insert(clk_idx);
 
-            for stmt in &process.statements {
+            for (stmt_idx, stmt) in process.statements.iter().enumerate() {
                 if let Some(&idx) = name_to_idx.get(&stmt.target) {
+                    seq_exprs.push((process_idx, stmt_idx));
                     seq_targets.push(idx);
                     seq_clocks.push(clk_idx);
                 }
@@ -863,8 +922,8 @@ impl CoreSimulator {
         // Sort clock indices for deterministic ordering (HashSet iteration order is undefined)
         let mut clock_indices: Vec<usize> = clock_indices_set.into_iter().collect();
         clock_indices.sort();
-        let old_clocks = vec![0u64; clock_indices.len()];
-        let next_regs = vec![0u64; seq_targets.len()];
+        let old_clocks = vec![0u128; clock_indices.len()];
+        let next_regs = vec![0u128; seq_targets.len()];
 
         // Pre-group assignments by clock domain
         let mut clock_domain_assigns: Vec<Vec<(usize, usize)>> = vec![Vec::new(); clock_indices.len()];
@@ -878,7 +937,7 @@ impl CoreSimulator {
         let mut memory_arrays = Vec::new();
         let mut memory_name_to_idx = HashMap::new();
         for (idx, mem) in ir.memories.iter().enumerate() {
-            let mut arr = vec![0u64; mem.depth];
+            let mut arr = vec![0u128; mem.depth];
             for (i, &val) in mem.initial_data.iter().enumerate() {
                 if i < arr.len() {
                     arr[i] = val;
@@ -888,7 +947,7 @@ impl CoreSimulator {
             memory_name_to_idx.insert(mem.name.clone(), idx);
         }
 
-        Ok(Self {
+        let mut sim = Self {
             ir,
             signals,
             widths,
@@ -896,7 +955,9 @@ impl CoreSimulator {
             input_names,
             output_names,
             reset_values,
+            comb_assigns: Vec::new(),
             next_regs,
+            seq_exprs,
             seq_targets,
             seq_clocks,
             clock_indices,
@@ -906,25 +967,60 @@ impl CoreSimulator {
             memory_name_to_idx,
             compiled_lib: None,
             compiled: cfg!(feature = "aot"),
-        })
+            runtime_only: false,
+        };
+
+        let levels = sim.compute_assignment_levels();
+        sim.comb_assigns = levels
+            .iter()
+            .flat_map(|level| level.iter().copied())
+            .filter_map(|assign_idx| {
+                let assign = sim.ir.assigns.get(assign_idx)?;
+                sim.name_to_idx
+                    .get(&assign.target)
+                    .copied()
+                    .map(|target_idx| (target_idx, assign_idx))
+            })
+            .collect();
+
+        Ok(sim)
     }
 
-    pub fn mask(width: usize) -> u64 {
-        if width >= 64 { u64::MAX } else { (1u64 << width) - 1 }
+    pub fn compute_mask(width: usize) -> SignalValue {
+        wide_mask(width)
     }
 
     pub fn mask_const(width: usize) -> String {
-        if width >= 64 {
-            "0xFFFFFFFFFFFFFFFFu64".to_string()
+        if width == 0 {
+            "0u128".to_string()
+        } else if width >= 128 {
+            "u128::MAX".to_string()
         } else {
-            format!("0x{:X}u64", (1u64 << width) - 1)
+            format!("0x{:X}u128", (1u128 << width) - 1)
+        }
+    }
+
+    pub fn value_const(value: SignalValue) -> String {
+        format!("0x{:X}u128", value)
+    }
+
+    fn resolve_expr<'a>(&'a self, expr: &'a ExprDef) -> &'a ExprDef {
+        match expr {
+            ExprDef::ExprRef { id, .. } => self
+                .ir
+                .exprs
+                .get(*id)
+                .map(|inner| self.resolve_expr(inner))
+                .unwrap_or(expr),
+            _ => expr,
         }
     }
 
     pub fn expr_width(&self, expr: &ExprDef) -> usize {
-        match expr {
+        match self.resolve_expr(expr) {
             ExprDef::Signal { width, .. } => *width,
             ExprDef::Literal { width, .. } => *width,
+            ExprDef::ExprRef { width, .. } => *width,
             ExprDef::UnaryOp { width, .. } => *width,
             ExprDef::BinaryOp { width, .. } => *width,
             ExprDef::Mux { width, .. } => *width,
@@ -935,7 +1031,96 @@ impl CoreSimulator {
         }
     }
 
-    pub fn evaluate(&mut self) {
+    pub fn should_use_runtime_only_compile(&self, include_tick_helpers: bool) -> bool {
+        !include_tick_helpers && self.ir.exprs.len() > RUNTIME_ONLY_EXPR_THRESHOLD
+    }
+
+    pub fn enable_runtime_only_compile(&mut self) {
+        self.compiled_lib = None;
+        self.compiled = true;
+        self.runtime_only = true;
+    }
+
+    fn shed_compiled_ir_state(&mut self) {
+        if self.runtime_only {
+            return;
+        }
+
+        self.comb_assigns.clear();
+        self.comb_assigns.shrink_to_fit();
+        self.clock_domain_assigns.clear();
+        self.clock_domain_assigns.shrink_to_fit();
+
+        self.ir.name.clear();
+        self.ir.ports.clear();
+        self.ir.ports.shrink_to_fit();
+        self.ir.nets.clear();
+        self.ir.nets.shrink_to_fit();
+        self.ir.regs.clear();
+        self.ir.regs.shrink_to_fit();
+        self.ir.assigns.clear();
+        self.ir.assigns.shrink_to_fit();
+
+        for process in &mut self.ir.processes {
+            process.name.clear();
+            process.clock = None;
+            for stmt in &mut process.statements {
+                stmt.target.clear();
+            }
+        }
+    }
+
+    pub fn shed_batched_gameboy_state(&mut self) {
+        if self.runtime_only {
+            return;
+        }
+
+        self.shed_compiled_ir_state();
+
+        self.reset_values.clear();
+        self.reset_values.shrink_to_fit();
+        self.next_regs.clear();
+        self.next_regs.shrink_to_fit();
+        self.seq_exprs.clear();
+        self.seq_exprs.shrink_to_fit();
+        self.seq_targets.clear();
+        self.seq_targets.shrink_to_fit();
+        self.seq_clocks.clear();
+        self.seq_clocks.shrink_to_fit();
+        self.clock_indices.clear();
+        self.clock_indices.shrink_to_fit();
+        self.old_clocks.clear();
+        self.old_clocks.shrink_to_fit();
+
+        self.ir.exprs.clear();
+        self.ir.exprs.shrink_to_fit();
+        self.ir.processes.clear();
+        self.ir.processes.shrink_to_fit();
+        self.ir.write_ports.clear();
+        self.ir.write_ports.shrink_to_fit();
+        self.ir.sync_read_ports.clear();
+        self.ir.sync_read_ports.shrink_to_fit();
+        for memory in &mut self.ir.memories {
+            memory.initial_data.clear();
+            memory.initial_data.shrink_to_fit();
+        }
+
+        self.memory_arrays.clear();
+        self.memory_arrays.shrink_to_fit();
+    }
+
+    #[inline(always)]
+    fn evaluate_compiled_without_clock_capture(&mut self) {
+        if self.runtime_only {
+            for (target_idx, assign_idx) in &self.comb_assigns {
+                let Some(assign) = self.ir.assigns.get(*assign_idx) else {
+                    continue;
+                };
+                self.signals[*target_idx] =
+                    self.eval_expr_runtime(&assign.expr) & Self::compute_mask(self.widths[*target_idx]);
+            }
+            return;
+        }
         if !self.compiled {
             return;
         }
@@ -947,12 +1132,236 @@ impl CoreSimulator {
         {
             let lib = self.compiled_lib.as_ref().unwrap();
             unsafe {
-                type EvalFn = unsafe extern "C" fn(*mut u64, usize);
+                type EvalFn = unsafe extern "C" fn(*mut SignalValue, usize);
                 let func: libloading::Symbol<EvalFn> =
                     lib.get(b"evaluate").expect("evaluate function not found");
                 func(self.signals.as_mut_ptr(), self.signals.len());
             }
         }
+    }
+
+    fn runtime_expr_width(&self, expr: &ExprDef) -> usize {
+        self.expr_width(expr)
+    }
+
+    fn eval_expr_runtime(&self, expr: &ExprDef) -> SignalValue {
+        match self.resolve_expr(expr) {
+            ExprDef::Signal { name, width } => {
+                let val = self.name_to_idx.get(name)
+                    .and_then(|&idx| self.signals.get(idx).copied())
+                    .unwrap_or(0);
+                val & Self::compute_mask(*width)
+            }
+            ExprDef::Literal { value, width } => mask_signed_value(*value, *width),
+            ExprDef::ExprRef { .. } => 0,
+            ExprDef::UnaryOp { op, operand, width } => {
+                let src = self.eval_expr_runtime(operand);
+                let mask = Self::compute_mask(*width);
+                match op.as_str() {
+                    "~" | "not" => (!src) & mask,
+                    "&" | "reduce_and" => {
+                        let op_width = self.runtime_expr_width(operand);
+                        let op_mask = Self::compute_mask(op_width);
+                        if (src & op_mask) == op_mask { 1 } else { 0 }
+                    }
+                    "|" | "reduce_or" => if src != 0 { 1 } else { 0 },
+                    "^" | "reduce_xor" => (src.count_ones() as SignalValue) & 1,
+                    _ => src & mask,
+                }
+            }
+            ExprDef::BinaryOp { op, left, right, width } => {
+                let l = self.eval_expr_runtime(left);
+                let r = self.eval_expr_runtime(right);
+                let mask = Self::compute_mask(*width);
+                let result = match op.as_str() {
+                    "&" => l & r,
+                    "|" => l | r,
+                    "^" => l ^ r,
+                    "+" => l.wrapping_add(r),
+                    "-" => l.wrapping_sub(r),
+                    "*" => l.wrapping_mul(r),
+                    "/" => if r == 0 { 0 } else { l / r },
+                    "%" => if r == 0 { 0 } else { l % r },
+                    "<<" => if r >= 128 { 0 } else { l << (r as u32) },
+                    ">>" => if r >= 128 { 0 } else { l >> (r as u32) },
+                    "==" => if l == r { 1 } else { 0 },
+                    "!=" => if l != r { 1 } else { 0 },
+                    "<" => if l < r { 1 } else { 0 },
+                    ">" => if l > r { 1 } else { 0 },
+                    "<=" | "le" => if l <= r { 1 } else { 0 },
+                    ">=" => if l >= r { 1 } else { 0 },
+                    _ => l,
+                };
+                result & mask
+            }
+            ExprDef::Mux { condition, when_true, when_false, width } => {
+                let cond = self.eval_expr_runtime(condition);
+                let selected = if cond != 0 {
+                    self.eval_expr_runtime(when_true)
+                } else {
+                    self.eval_expr_runtime(when_false)
+                };
+                selected & Self::compute_mask(*width)
+            }
+            ExprDef::Slice { base, low, width, .. } => {
+                let base_val = self.eval_expr_runtime(base);
+                let shifted = if *low >= 128 { 0 } else { base_val >> (*low as u32) };
+                shifted & Self::compute_mask(*width)
+            }
+            ExprDef::Concat { parts, width } => {
+                let mut result = 0u128;
+                for part in parts {
+                    let part_width = self.runtime_expr_width(part);
+                    let part_val = self.eval_expr_runtime(part) & Self::compute_mask(part_width);
+                    result = if part_width >= 128 { 0 } else { result << part_width };
+                    result |= part_val;
+                    result &= Self::compute_mask(*width);
+                }
+                result & Self::compute_mask(*width)
+            }
+            ExprDef::Resize { expr, width } => self.eval_expr_runtime(expr) & Self::compute_mask(*width),
+            ExprDef::MemRead { memory, addr, width } => {
+                let Some(&memory_idx) = self.memory_name_to_idx.get(memory) else {
+                    return 0;
+                };
+                let Some(mem) = self.memory_arrays.get(memory_idx) else {
+                    return 0;
+                };
+                if mem.is_empty() {
+                    return 0;
+                }
+                let addr_val = self.eval_expr_runtime(addr) as usize % mem.len();
+                mem[addr_val] & Self::compute_mask(*width)
+            }
+        }
+    }
+
+    fn sample_next_regs_runtime(&mut self) {
+        for (idx, &(process_idx, stmt_idx)) in self.seq_exprs.iter().enumerate() {
+            let Some(process) = self.ir.processes.get(process_idx) else {
+                continue;
+            };
+            let Some(stmt) = process.statements.get(stmt_idx) else {
+                continue;
+            };
+            self.next_regs[idx] = self.eval_expr_runtime(&stmt.expr);
+        }
+    }
+
+    fn write_compiled_memory_word(&self, memory_idx: usize, addr: usize, value: SignalValue) {
+        if !self.compiled || self.runtime_only {
+            return;
+        }
+
+        #[cfg(feature = "aot")]
+        unsafe {
+            crate::aot_generated::mem_write_word(memory_idx as u32, addr as u32, value);
+        }
+
+        #[cfg(not(feature = "aot"))]
+        if let Some(ref lib) = self.compiled_lib {
+            unsafe {
+                type MemWriteWordFn = unsafe extern "C" fn(u32, u32, SignalValue);
+                if let Ok(func) = lib.get::<MemWriteWordFn>(b"mem_write_word") {
+                    func(memory_idx as u32, addr as u32, value);
+                }
+            }
+        }
+    }
+
+    fn store_memory_word(&mut self, memory_idx: usize, addr: usize, value: SignalValue) {
+        let Some(mem) = self.memory_arrays.get_mut(memory_idx) else {
+            return;
+        };
+        if addr >= mem.len() {
+            return;
+        }
+
+        mem[addr] = value;
+        self.write_compiled_memory_word(memory_idx, addr, value);
+    }
+
+    fn apply_write_ports_runtime(&mut self) {
+        if self.ir.write_ports.is_empty() {
+            return;
+        }
+
+        let mut writes: Vec<(usize, usize, SignalValue)> = Vec::new();
+        for wp in &self.ir.write_ports {
+            let Some(&memory_idx) = self.memory_name_to_idx.get(&wp.memory) else {
+                continue;
+            };
+            let Some(memory) = self.ir.memories.get(memory_idx) else {
+                continue;
+            };
+            if memory.depth == 0 {
+                continue;
+            }
+            let Some(&clock_idx) = self.name_to_idx.get(&wp.clock) else {
+                continue;
+            };
+            if self.signals.get(clock_idx).copied().unwrap_or(0) == 0 {
+                continue;
+            }
+            if (self.eval_expr_runtime(&wp.enable) & 1) == 0 {
+                continue;
+            }
+
+            let addr = (self.eval_expr_runtime(&wp.addr) as usize) % memory.depth;
+            let data = self.eval_expr_runtime(&wp.data) & Self::compute_mask(memory.width);
+            writes.push((memory_idx, addr, data));
+        }
+
+        for (memory_idx, addr, value) in writes {
+            self.store_memory_word(memory_idx, addr, value);
+        }
+    }
+
+    fn apply_sync_read_ports_runtime(&mut self) {
+        if self.ir.sync_read_ports.is_empty() {
+            return;
+        }
+
+        let mut updates: Vec<(usize, SignalValue)> = Vec::new();
+        for rp in &self.ir.sync_read_ports {
+            let Some(&memory_idx) = self.memory_name_to_idx.get(&rp.memory) else {
+                continue;
+            };
+            let Some(mem) = self.memory_arrays.get(memory_idx) else {
+                continue;
+            };
+            if mem.is_empty() {
+                continue;
+            }
+            let Some(&clock_idx) = self.name_to_idx.get(&rp.clock) else {
+                continue;
+            };
+            if self.signals.get(clock_idx).copied().unwrap_or(0) == 0 {
+                continue;
+            }
+            if let Some(enable) = &rp.enable {
+                if (self.eval_expr_runtime(enable) & 1) == 0 {
+                    continue;
+                }
+            }
+            let Some(&data_idx) = self.name_to_idx.get(&rp.data) else {
+                continue;
+            };
+            let data_width = self.widths.get(data_idx).copied().unwrap_or(64);
+            let addr = (self.eval_expr_runtime(&rp.addr) as usize) % mem.len();
+            let data = mem[addr] & Self::compute_mask(self.ir.memories[memory_idx].width);
+            updates.push((data_idx, data & Self::compute_mask(data_width)));
+        }
+
+        for (idx, value) in updates {
+            if idx < self.signals.len() {
+                self.signals[idx] = value;
+            }
+        }
+    }
+
+    pub fn evaluate(&mut self) {
+        self.evaluate_compiled_without_clock_capture();
 
         // Update old_clocks to current clock values after evaluation
         // This ensures that after poke('clk', 0); evaluate(), old_clocks will be 0,
@@ -965,9 +1374,13 @@ impl CoreSimulator {
     }
 
     pub fn poke(&mut self, name: &str, value: u64) -> Result<(), String> {
+        self.poke_wide(name, value as SignalValue)
+    }
+
+    pub fn poke_wide(&mut self, name: &str, value: SignalValue) -> Result<(), String> {
         if let Some(&idx) = self.name_to_idx.get(name) {
             let width = self.widths.get(idx).copied().unwrap_or(64);
-            self.signals[idx] = value & Self::mask(width);
+            self.signals[idx] = value & Self::compute_mask(width);
             Ok(())
         } else {
             Err(format!("Unknown signal: {}", name))
@@ -975,6 +1388,10 @@ impl CoreSimulator {
     }
 
     pub fn peek(&self, name: &str) -> Result<u64, String> {
+        Ok(self.peek_wide(name)? as u64)
+    }
+
+    pub fn peek_wide(&self, name: &str) -> Result<SignalValue, String> {
         if let Some(&idx) = self.name_to_idx.get(name) {
             Ok(self.signals[idx])
         } else {
@@ -986,28 +1403,70 @@ impl CoreSimulator {
         if !self.compiled {
             return;
         }
-        #[cfg(feature = "aot")]
-        unsafe {
-            crate::aot_generated::tick(
-                self.signals.as_mut_ptr(),
-                self.signals.len(),
-                self.old_clocks.as_mut_ptr(),
-                self.next_regs.as_mut_ptr(),
-            );
+
+        // Mirror the JIT runtime semantics for sequential sampling and memory
+        // ports. AO486 import trees exercise nested mux chains that the fully
+        // generated tick path does not currently handle reliably.
+        self.evaluate_compiled_without_clock_capture();
+        self.apply_write_ports_runtime();
+        self.sample_next_regs_runtime();
+
+        let mut updated: Vec<bool> = vec![false; self.seq_targets.len()];
+        let mut rising_clocks: Vec<bool> = vec![false; self.signals.len()];
+        for (i, &clk_idx) in self.clock_indices.iter().enumerate() {
+            let before = self.old_clocks.get(i).copied().unwrap_or(0);
+            let after = self.signals.get(clk_idx).copied().unwrap_or(0);
+            if before == 0 && after == 1 {
+                rising_clocks[clk_idx] = true;
+            }
         }
-        #[cfg(not(feature = "aot"))]
-        {
-            let lib = self.compiled_lib.as_ref().unwrap();
-            unsafe {
-                type TickFn = unsafe extern "C" fn(*mut u64, usize, *mut u64, *mut u64);
-                let func: libloading::Symbol<TickFn> =
-                    lib.get(b"tick").expect("tick function not found");
-                func(
-                    self.signals.as_mut_ptr(),
-                    self.signals.len(),
-                    self.old_clocks.as_mut_ptr(),
-                    self.next_regs.as_mut_ptr(),
-                );
+
+        for (i, &target_idx) in self.seq_targets.iter().enumerate() {
+            let clk_idx = self.seq_clocks[i];
+            if rising_clocks.get(clk_idx).copied().unwrap_or(false) && !updated[i] {
+                self.signals[target_idx] = self.next_regs[i] & Self::compute_mask(self.widths[target_idx]);
+                updated[i] = true;
+            }
+        }
+
+        for _iteration in 0..10 {
+            let clock_before: Vec<SignalValue> = self.clock_indices
+                .iter()
+                .map(|&clk_idx| self.signals.get(clk_idx).copied().unwrap_or(0))
+                .collect();
+
+            self.evaluate_compiled_without_clock_capture();
+
+            let mut any_rising = false;
+            let mut derived_rising: Vec<bool> = vec![false; self.signals.len()];
+            for (i, &clk_idx) in self.clock_indices.iter().enumerate() {
+                let before = clock_before[i];
+                let after = self.signals.get(clk_idx).copied().unwrap_or(0);
+                if before == 0 && after == 1 {
+                    derived_rising[clk_idx] = true;
+                    any_rising = true;
+                }
+            }
+
+            if !any_rising {
+                break;
+            }
+
+            for (i, &target_idx) in self.seq_targets.iter().enumerate() {
+                let clk_idx = self.seq_clocks[i];
+                if derived_rising.get(clk_idx).copied().unwrap_or(false) && !updated[i] {
+                    self.signals[target_idx] = self.next_regs[i] & Self::compute_mask(self.widths[target_idx]);
+                    updated[i] = true;
+                }
+            }
+        }
+
+        self.apply_sync_read_ports_runtime();
+        self.evaluate_compiled_without_clock_capture();
+
+        for (i, &clk_idx) in self.clock_indices.iter().enumerate() {
+            if i < self.old_clocks.len() {
+                self.old_clocks[i] = self.signals.get(clk_idx).copied().unwrap_or(0);
             }
         }
     }
@@ -1066,13 +1525,14 @@ impl CoreSimulator {
     }
 
     fn collect_expr_deps(&self, expr: &ExprDef, deps: &mut HashSet<usize>) {
-        match expr {
+        match self.resolve_expr(expr) {
             ExprDef::Signal { name, .. } => {
                 if let Some(&idx) = self.name_to_idx.get(name) {
                     deps.insert(idx);
                 }
             }
             ExprDef::Literal { .. } => {}
+            ExprDef::ExprRef { .. } => {}
             ExprDef::UnaryOp { operand, .. } => {
                 self.collect_expr_deps(operand, deps);
             }
@@ -1207,7 +1667,7 @@ impl CoreSimulator {
         // Find all signals that are direct copies of the input clock
         // These are assignments of the form: signals[X] = signals[input_clk_idx]
         for assign in &self.ir.assigns {
-            if let ExprDef::Signal { name, .. } = &assign.expr {
+            if let ExprDef::Signal { name, .. } = self.resolve_expr(&assign.expr) {
                 // Check if this assignment copies from the input clock
                 if let Some(&source_idx) = self.name_to_idx.get(name) {
                     if source_idx == input_clk_idx {
@@ -1238,7 +1698,7 @@ impl CoreSimulator {
     // ========================================================================
 
     /// Generate core evaluation and tick code (without example-specific extensions)
-    pub fn generate_core_code(&self) -> String {
+    pub fn generate_core_code(&self, include_tick_helpers: bool) -> String {
         let mut code = String::new();
 
         code.push_str("//! Auto-generated circuit simulation code\n");
@@ -1250,7 +1710,10 @@ impl CoreSimulator {
         // so we generate `static mut` arrays and expose a C ABI to write them.
         for (idx, mem) in self.ir.memories.iter().enumerate() {
             code.push_str(&format!("const MEM_{}_DEPTH: usize = {};\n", idx, mem.depth));
-            code.push_str(&format!("static mut MEM_{}: [u64; MEM_{}_DEPTH] = [0u64; MEM_{}_DEPTH];\n\n", idx, idx, idx));
+            code.push_str(&format!(
+                "static mut MEM_{}: [u128; MEM_{}_DEPTH] = [0u128; MEM_{}_DEPTH];\n\n",
+                idx, idx, idx
+            ));
         }
 
         // Initialize memories with non-zero initial data (ROMs).
@@ -1258,14 +1721,19 @@ impl CoreSimulator {
         code.push_str("pub unsafe extern \"C\" fn init_memories() {\n");
         for (idx, _mem) in self.ir.memories.iter().enumerate() {
             code.push_str(&format!(
-                "    for i in 0..MEM_{}_DEPTH {{ MEM_{}[i] = 0u64; }}\n",
+                "    for i in 0..MEM_{}_DEPTH {{ MEM_{}[i] = 0u128; }}\n",
                 idx, idx
             ));
         }
         for (idx, mem) in self.ir.memories.iter().enumerate() {
             for (i, &val) in mem.initial_data.iter().enumerate() {
                 if val != 0 {
-                    code.push_str(&format!("    MEM_{}[{}] = {}u64;\n", idx, i, val));
+                    code.push_str(&format!(
+                        "    MEM_{}[{}] = {};\n",
+                        idx,
+                        i,
+                        Self::value_const(val)
+                    ));
                 }
             }
         }
@@ -1279,7 +1747,7 @@ impl CoreSimulator {
         code.push_str("    match mem_idx {\n");
         for (idx, _mem) in self.ir.memories.iter().enumerate() {
             code.push_str(&format!(
-                "        {} => {{ let depth = MEM_{}_DEPTH; for (i, &b) in data.iter().enumerate() {{ MEM_{}[(offset as usize + i) % depth] = b as u64; }} }},\n",
+                "        {} => {{ let depth = MEM_{}_DEPTH; for (i, &b) in data.iter().enumerate() {{ MEM_{}[(offset as usize + i) % depth] = b as u128; }} }},\n",
                 idx, idx, idx
             ));
         }
@@ -1287,280 +1755,308 @@ impl CoreSimulator {
         code.push_str("    }\n");
         code.push_str("}\n\n");
 
-        // Generate evaluate function (inline for performance)
-        code.push_str("/// Evaluate all combinational assignments (topologically sorted)\n");
-        code.push_str("#[inline(always)]\n");
-        code.push_str("pub unsafe fn evaluate_inline(signals: &mut [u64]) {\n");
-        code.push_str("    let s = signals.as_mut_ptr();\n");
-
-        // Cache frequently-used signals to reduce pointer loads in hot evaluate loop.
-        // We cache:
-        // - stable signals (not assigned by combinational assigns) when used many times
-        // - combinational targets when used multiple times downstream
-        let mut comb_use_counts: HashMap<usize, usize> = HashMap::new();
-        for assign in &self.ir.assigns {
-            let deps = self.expr_dependencies(&assign.expr);
-            for sig_idx in deps {
-                *comb_use_counts.entry(sig_idx).or_insert(0) += 1;
-            }
+        code.push_str("#[no_mangle]\n");
+        code.push_str("pub unsafe extern \"C\" fn mem_write_word(mem_idx: u32, offset: u32, value: u128) {\n");
+        code.push_str("    match mem_idx {\n");
+        for (idx, _mem) in self.ir.memories.iter().enumerate() {
+            code.push_str(&format!(
+                "        {} => {{ let depth = MEM_{}_DEPTH; if depth != 0 {{ MEM_{}[(offset as usize) % depth] = value; }} }},\n",
+                idx, idx, idx
+            ));
         }
-        let mut comb_targets: HashSet<usize> = HashSet::new();
-        for assign in &self.ir.assigns {
-            if let Some(&idx) = self.name_to_idx.get(&assign.target) {
-                comb_targets.insert(idx);
-            }
-        }
-
-        let stable_cache_threshold = 5usize;
-        let max_stable_cached = 32usize;
-        let max_target_cached = 128usize;
-
-        let mut stable_cached: Vec<(usize, usize)> = comb_use_counts
-            .iter()
-            .filter_map(|(&idx, &count)| {
-                if count > stable_cache_threshold && !comb_targets.contains(&idx) {
-                    Some((idx, count))
-                } else {
-                    None
-                }
-            })
-            .collect();
-        stable_cached.sort_by(|(a_idx, a_count), (b_idx, b_count)| {
-            b_count.cmp(a_count).then(a_idx.cmp(b_idx))
-        });
-        stable_cached.truncate(max_stable_cached);
-
-        let mut cached_targets: Vec<(usize, usize)> = comb_use_counts
-            .iter()
-            .filter_map(|(&idx, &count)| {
-                if count > 1 && comb_targets.contains(&idx) {
-                    Some((idx, count))
-                } else {
-                    None
-                }
-            })
-            .collect();
-        cached_targets.sort_by(|(a_idx, a_count), (b_idx, b_count)| {
-            b_count.cmp(a_count).then(a_idx.cmp(b_idx))
-        });
-        cached_targets.truncate(max_target_cached);
-        let cached_target_set: HashSet<usize> = cached_targets.iter().map(|(idx, _)| *idx).collect();
-
-        let mut comb_cache_names: HashMap<usize, String> = HashMap::new();
-        let mut comb_cache_counter: usize = 0;
-        for (idx, _count) in &stable_cached {
-            let name = format!("c{}", comb_cache_counter);
-            comb_cache_counter += 1;
-            code.push_str(&format!("    let {} = *s.add({});\n", name, idx));
-            comb_cache_names.insert(*idx, name);
-        }
-        if !stable_cached.is_empty() {
-            code.push_str("\n");
-        }
+        code.push_str("        _ => {}\n");
+        code.push_str("    }\n");
+        code.push_str("}\n\n");
 
         let levels = self.compute_assignment_levels();
-        for level in &levels {
-            for &assign_idx in level {
-                let assign = &self.ir.assigns[assign_idx];
+        let flat_assign_indices: Vec<usize> = levels.iter().flat_map(|level| level.iter().copied()).collect();
+        // Compact CIRCT payloads already carry an explicit shared-expression
+        // pool. Splitting large evaluate blocks into chunks duplicates those
+        // expr-ref definitions across chunk functions and explodes the emitted
+        // Rust source for large imports like AO486.
+        if flat_assign_indices.len() > CHUNKED_EVALUATE_ASSIGN_THRESHOLD {
+            self.generate_chunked_evaluate_inline(&mut code, &flat_assign_indices);
+        } else {
+            // Generate evaluate function (inline for performance)
+            code.push_str("/// Evaluate all combinational assignments (topologically sorted)\n");
+            code.push_str("#[inline(always)]\n");
+            code.push_str("pub unsafe fn evaluate_inline(signals: &mut [u128]) {\n");
+            code.push_str("    let s = signals.as_mut_ptr();\n");
+
+            // Cache frequently-used signals to reduce pointer loads in hot evaluate loop.
+            // We cache:
+            // - stable signals (not assigned by combinational assigns) when used many times
+            // - combinational targets when used multiple times downstream
+            let mut comb_use_counts: HashMap<usize, usize> = HashMap::new();
+            for assign in &self.ir.assigns {
+                let deps = self.expr_dependencies(&assign.expr);
+                for sig_idx in deps {
+                    *comb_use_counts.entry(sig_idx).or_insert(0) += 1;
+                }
+            }
+            let mut comb_targets: HashSet<usize> = HashSet::new();
+            for assign in &self.ir.assigns {
                 if let Some(&idx) = self.name_to_idx.get(&assign.target) {
-                    let width = self.widths.get(idx).copied().unwrap_or(64);
-                    let expr_width = self.expr_width(&assign.expr);
-                    let expr_code = self.expr_to_rust_ptr_cached(&assign.expr, "s", &comb_cache_names);
-                    if expr_width == width {
-                        if cached_target_set.contains(&idx) {
-                            let name = format!("c{}", comb_cache_counter);
-                            comb_cache_counter += 1;
-                            code.push_str(&format!("    let {} = {};\n", name, expr_code));
-                            code.push_str(&format!("    *s.add({}) = {};\n", idx, name));
-                            comb_cache_names.insert(idx, name);
-                        } else {
-                            code.push_str(&format!("    *s.add({}) = {};\n", idx, expr_code));
-                        }
+                    comb_targets.insert(idx);
+                }
+            }
+
+            let stable_cache_threshold = 5usize;
+            let max_stable_cached = 32usize;
+            let max_target_cached = 128usize;
+
+            let mut stable_cached: Vec<(usize, usize)> = comb_use_counts
+                .iter()
+                .filter_map(|(&idx, &count)| {
+                    if count > stable_cache_threshold && !comb_targets.contains(&idx) {
+                        Some((idx, count))
                     } else {
-                        if cached_target_set.contains(&idx) {
-                            let name = format!("c{}", comb_cache_counter);
-                            comb_cache_counter += 1;
-                            code.push_str(&format!(
-                                "    let {} = ({}) & {};\n",
-                                name,
-                                expr_code,
-                                Self::mask_const(width)
-                            ));
-                            code.push_str(&format!("    *s.add({}) = {};\n", idx, name));
-                            comb_cache_names.insert(idx, name);
+                        None
+                    }
+                })
+                .collect();
+            stable_cached.sort_by(|(a_idx, a_count), (b_idx, b_count)| {
+                b_count.cmp(a_count).then(a_idx.cmp(b_idx))
+            });
+            stable_cached.truncate(max_stable_cached);
+
+            let mut cached_targets: Vec<(usize, usize)> = comb_use_counts
+                .iter()
+                .filter_map(|(&idx, &count)| {
+                    if count > 1 && comb_targets.contains(&idx) {
+                        Some((idx, count))
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+            cached_targets.sort_by(|(a_idx, a_count), (b_idx, b_count)| {
+                b_count.cmp(a_count).then(a_idx.cmp(b_idx))
+            });
+            cached_targets.truncate(max_target_cached);
+            let cached_target_set: HashSet<usize> = cached_targets.iter().map(|(idx, _)| *idx).collect();
+
+            let mut comb_cache_names: HashMap<usize, String> = HashMap::new();
+            let mut comb_cache_counter: usize = 0;
+            for (idx, _count) in &stable_cached {
+                let name = format!("c{}", comb_cache_counter);
+                comb_cache_counter += 1;
+                code.push_str(&format!("    let {} = *s.add({});\n", name, idx));
+                comb_cache_names.insert(*idx, name);
+            }
+            if !stable_cached.is_empty() {
+                code.push_str("\n");
+            }
+
+            let mut expr_state = ExprCodegenState::default();
+            for level in &levels {
+                for &assign_idx in level {
+                    let assign = &self.ir.assigns[assign_idx];
+                    if let Some(&idx) = self.name_to_idx.get(&assign.target) {
+                        let width = self.widths.get(idx).copied().unwrap_or(64);
+                        let expr_width = self.expr_width(&assign.expr);
+                        let mut expr_lines = Vec::new();
+                        let expr_code = self.expr_to_rust_ptr_cached_emitting(
+                            &assign.expr,
+                            "s",
+                            Some(&comb_cache_names),
+                            &mut expr_state,
+                            &mut expr_lines,
+                        );
+                        self.append_indented_lines(&mut code, "    ", &expr_lines);
+                        if expr_width == width {
+                            if cached_target_set.contains(&idx) {
+                                let name = format!("c{}", comb_cache_counter);
+                                comb_cache_counter += 1;
+                                code.push_str(&format!("    let {} = {};\n", name, expr_code));
+                                code.push_str(&format!("    *s.add({}) = {};\n", idx, name));
+                                comb_cache_names.insert(idx, name);
+                            } else {
+                                code.push_str(&format!("    *s.add({}) = {};\n", idx, expr_code));
+                            }
                         } else {
-                            code.push_str(&format!(
-                                "    *s.add({}) = ({}) & {};\n",
-                                idx,
-                                expr_code,
-                                Self::mask_const(width)
-                            ));
+                            if cached_target_set.contains(&idx) {
+                                let name = format!("c{}", comb_cache_counter);
+                                comb_cache_counter += 1;
+                                code.push_str(&format!(
+                                    "    let {} = ({}) & {};\n",
+                                    name,
+                                    expr_code,
+                                    Self::mask_const(width)
+                                ));
+                                code.push_str(&format!("    *s.add({}) = {};\n", idx, name));
+                                comb_cache_names.insert(idx, name);
+                            } else {
+                                code.push_str(&format!(
+                                    "    *s.add({}) = ({}) & {};\n",
+                                    idx,
+                                    expr_code,
+                                    Self::mask_const(width)
+                                ));
+                            }
                         }
                     }
                 }
             }
-        }
 
-        code.push_str("}\n\n");
+            code.push_str("}\n\n");
+        }
 
         // Generate extern "C" wrapper for evaluate
         code.push_str("#[no_mangle]\n");
-        code.push_str("pub unsafe extern \"C\" fn evaluate(signals: *mut u64, len: usize) {\n");
+        code.push_str("pub unsafe extern \"C\" fn evaluate(signals: *mut u128, len: usize) {\n");
         code.push_str("    let signals = std::slice::from_raw_parts_mut(signals, len);\n");
         code.push_str("    evaluate_inline(signals);\n");
         code.push_str("}\n\n");
 
-        // Generate tick function
-        self.generate_tick_function(&mut code);
+        if include_tick_helpers {
+            self.generate_tick_function(&mut code);
+        }
 
         code
     }
 
-    pub fn expr_to_rust_ptr(&self, expr: &ExprDef, signals_ptr: &str) -> String {
-        match expr {
-            ExprDef::Signal { name, .. } => {
-                let idx = self.name_to_idx.get(name).copied().unwrap_or(0);
-                format!("(*{}.add({}))", signals_ptr, idx)
-            }
-            ExprDef::Literal { value, width } => {
-                let masked = (*value as u64) & Self::mask(*width);
-                format!("{}u64", masked)
-            }
-            ExprDef::UnaryOp { op, operand, width } => {
-                let operand_code = self.expr_to_rust_ptr(operand, signals_ptr);
-                match op.as_str() {
-                    "~" | "not" => format!("((!{}) & {})", operand_code, Self::mask_const(*width)),
-                    "&" | "reduce_and" => {
-                        let op_width = self.expr_width(operand);
-                        let m = Self::mask_const(op_width);
-                        format!("(if ({} & {}) == {} {{ 1u64 }} else {{ 0u64 }})",
-                                operand_code, m, m)
-                    }
-                    "|" | "reduce_or" => format!("(if {} != 0 {{ 1u64 }} else {{ 0u64 }})", operand_code),
-                    "^" | "reduce_xor" => format!("(({}).count_ones() as u64 & 1)", operand_code),
-                    _ => operand_code,
+    fn generate_chunked_evaluate_inline(&self, code: &mut String, assign_indices: &[usize]) {
+        for (chunk_idx, chunk) in assign_indices.chunks(CHUNKED_EVALUATE_ASSIGNS_PER_FN).enumerate() {
+            code.push_str("/// Evaluate a chunk of combinational assignments\n");
+            code.push_str("#[inline(never)]\n");
+            code.push_str(&format!("unsafe fn evaluate_chunk_{}(s: *mut u128) {{\n", chunk_idx));
+            let mut expr_state = ExprCodegenState::default();
+            for &assign_idx in chunk {
+                let assign = &self.ir.assigns[assign_idx];
+                if let Some(&idx) = self.name_to_idx.get(&assign.target) {
+                    self.generate_direct_assign_store(code, assign, idx, "s", &mut expr_state);
                 }
             }
-            ExprDef::BinaryOp { op, left, right, width } => {
-                let l = self.expr_to_rust_ptr(left, signals_ptr);
-                let r = self.expr_to_rust_ptr(right, signals_ptr);
-                let m = Self::mask_const(*width);
-                match op.as_str() {
-                    "&" => format!("({} & {})", l, r),
-                    "|" => format!("({} | {})", l, r),
-                    "^" => format!("({} ^ {})", l, r),
-                    "+" => format!("({}.wrapping_add({}) & {})", l, r, m),
-                    "-" => format!("({}.wrapping_sub({}) & {})", l, r, m),
-                    "*" => format!("({}.wrapping_mul({}) & {})", l, r, m),
-                    "/" => format!("(if {} != 0 {{ {} / {} }} else {{ 0u64 }})", r, l, r),
-                    "%" => format!("(if {} != 0 {{ {} % {} }} else {{ 0u64 }})", r, l, r),
-                    "<<" => format!("(({} << {}.min(63)) & {})", l, r, m),
-                    ">>" => format!("({} >> {}.min(63))", l, r),
-                    "==" => format!("(if {} == {} {{ 1u64 }} else {{ 0u64 }})", l, r),
-                    "!=" => format!("(if {} != {} {{ 1u64 }} else {{ 0u64 }})", l, r),
-                    "<" => format!("(if {} < {} {{ 1u64 }} else {{ 0u64 }})", l, r),
-                    ">" => format!("(if {} > {} {{ 1u64 }} else {{ 0u64 }})", l, r),
-                    "<=" | "le" => format!("(if {} <= {} {{ 1u64 }} else {{ 0u64 }})", l, r),
-                    ">=" => format!("(if {} >= {} {{ 1u64 }} else {{ 0u64 }})", l, r),
-                    _ => "0u64".to_string(),
-                }
-            }
-            ExprDef::Mux { condition, when_true, when_false, width } => {
-                let cond = self.expr_to_rust_ptr(condition, signals_ptr);
-                let t = self.expr_to_rust_ptr(when_true, signals_ptr);
-                let f = self.expr_to_rust_ptr(when_false, signals_ptr);
-                format!(
-                    "((if {} != 0 {{ {} }} else {{ {} }}) & {})",
-                    cond,
-                    t,
-                    f,
-                    Self::mask_const(*width)
-                )
-            }
-            ExprDef::Slice { base, low, width, .. } => {
-                let base_code = self.expr_to_rust_ptr(base, signals_ptr);
-                format!(
-                    "(({} >> ({}usize).min(63)) & {})",
-                    base_code,
-                    low,
-                    Self::mask_const(*width)
-                )
-            }
-            ExprDef::Concat { parts, width } => {
-                let mut result = String::from("((");
-                let mut shift = 0usize;
-                let mut first = true;
-                for part in parts.iter().rev() {
-                    let part_code = self.expr_to_rust_ptr(part, signals_ptr);
-                    let part_width = self.expr_width(part);
-                    if shift >= 64 {
-                        shift += part_width;
-                        continue;
-                    }
-                    if !first {
-                        result.push_str(" | ");
-                    }
-                    first = false;
-                    if shift > 0 {
-                        result.push_str(&format!("(({} & {}) << {})", part_code, Self::mask_const(part_width), shift));
-                    } else {
-                        result.push_str(&format!("({} & {})", part_code, Self::mask_const(part_width)));
-                    }
-                    shift += part_width;
-                }
-                result.push_str(&format!(") & {})", Self::mask_const(*width)));
-                result
-            }
-            ExprDef::Resize { expr, width } => {
-                let expr_code = self.expr_to_rust_ptr(expr, signals_ptr);
-                format!("({} & {})", expr_code, Self::mask_const(*width))
-            }
-            ExprDef::MemRead { memory, addr, width } => {
-                let mem_idx = self.memory_name_to_idx.get(memory).copied().unwrap_or(0);
-                let addr_code = self.expr_to_rust_ptr(addr, signals_ptr);
-                format!("(MEM_{}.get({} as usize).copied().unwrap_or(0) & {})",
-                        mem_idx, addr_code, Self::mask_const(*width))
-            }
+            code.push_str("}\n\n");
+        }
+
+        code.push_str("/// Evaluate all combinational assignments (topologically sorted)\n");
+        code.push_str("#[inline(always)]\n");
+        code.push_str("pub unsafe fn evaluate_inline(signals: &mut [u128]) {\n");
+        code.push_str("    let s = signals.as_mut_ptr();\n");
+        for chunk_idx in 0..assign_indices.chunks(CHUNKED_EVALUATE_ASSIGNS_PER_FN).len() {
+            code.push_str(&format!("    evaluate_chunk_{}(s);\n", chunk_idx));
+        }
+        code.push_str("}\n\n");
+    }
+
+    fn append_indented_lines(&self, code: &mut String, indent: &str, lines: &[String]) {
+        for line in lines {
+            code.push_str(indent);
+            code.push_str(line);
+            code.push('\n');
         }
     }
 
-    pub fn expr_to_rust_ptr_cached(
+    fn generate_direct_assign_store(
+        &self,
+        code: &mut String,
+        assign: &AssignDef,
+        target_idx: usize,
+        signals_ptr: &str,
+        expr_state: &mut ExprCodegenState,
+    ) {
+        let width = self.widths.get(target_idx).copied().unwrap_or(64);
+        let expr_width = self.expr_width(&assign.expr);
+        let mut expr_lines = Vec::new();
+        let expr_code = self.expr_to_rust_ptr_emitting(&assign.expr, signals_ptr, expr_state, &mut expr_lines);
+        self.append_indented_lines(code, "    ", &expr_lines);
+        if expr_width == width {
+            code.push_str(&format!("    *{}.add({}) = {};\n", signals_ptr, target_idx, expr_code));
+        } else {
+            code.push_str(&format!(
+                "    *{}.add({}) = ({}) & {};\n",
+                signals_ptr,
+                target_idx,
+                expr_code,
+                Self::mask_const(width)
+            ));
+        }
+    }
+
+    fn emit_expr_ref_value(
+        &self,
+        id: usize,
+        signals_ptr: &str,
+        cache: Option<&HashMap<usize, String>>,
+        state: &mut ExprCodegenState,
+        emitted_lines: &mut Vec<String>,
+    ) -> String {
+        let var_name = format!("e{}", id);
+        if state.emitted.contains(&id) {
+            return var_name;
+        }
+        if state.emitting.contains(&id) {
+            return "0u128".to_string();
+        }
+
+        let Some(expr) = self.ir.exprs.get(id) else {
+            return "0u128".to_string();
+        };
+
+        state.emitting.insert(id);
+        let expr_code = self.expr_to_rust_ptr_cached_emitting(expr, signals_ptr, cache, state, emitted_lines);
+        state.emitting.remove(&id);
+        state.emitted.insert(id);
+        emitted_lines.push(format!("let {} = {};", var_name, expr_code));
+        var_name
+    }
+
+    fn expr_to_rust_ptr_emitting(
         &self,
         expr: &ExprDef,
         signals_ptr: &str,
-        cache: &HashMap<usize, String>,
+        state: &mut ExprCodegenState,
+        emitted_lines: &mut Vec<String>,
+    ) -> String {
+        self.expr_to_rust_ptr_cached_emitting(expr, signals_ptr, None, state, emitted_lines)
+    }
+
+    fn expr_to_rust_ptr_cached_emitting(
+        &self,
+        expr: &ExprDef,
+        signals_ptr: &str,
+        cache: Option<&HashMap<usize, String>>,
+        state: &mut ExprCodegenState,
+        emitted_lines: &mut Vec<String>,
     ) -> String {
         match expr {
             ExprDef::Signal { name, .. } => {
                 let idx = self.name_to_idx.get(name).copied().unwrap_or(0);
-                if let Some(temp) = cache.get(&idx) {
-                    temp.clone()
-                } else {
-                    format!("(*{}.add({}))", signals_ptr, idx)
+                if let Some(cache) = cache {
+                    if let Some(temp) = cache.get(&idx) {
+                        return temp.clone();
+                    }
                 }
+                format!("(*{}.add({}))", signals_ptr, idx)
             }
             ExprDef::Literal { value, width } => {
-                let masked = (*value as u64) & Self::mask(*width);
-                format!("{}u64", masked)
+                let masked = mask_signed_value(*value, *width);
+                Self::value_const(masked)
+            }
+            ExprDef::ExprRef { id, .. } => {
+                self.emit_expr_ref_value(*id, signals_ptr, cache, state, emitted_lines)
             }
             ExprDef::UnaryOp { op, operand, width } => {
-                let operand_code = self.expr_to_rust_ptr_cached(operand, signals_ptr, cache);
+                let operand_code =
+                    self.expr_to_rust_ptr_cached_emitting(operand, signals_ptr, cache, state, emitted_lines);
                 match op.as_str() {
                     "~" | "not" => format!("((!{}) & {})", operand_code, Self::mask_const(*width)),
                     "&" | "reduce_and" => {
                         let op_width = self.expr_width(operand);
                         let m = Self::mask_const(op_width);
-                        format!("(if ({} & {}) == {} {{ 1u64 }} else {{ 0u64 }})",
+                        format!("(if ({} & {}) == {} {{ 1u128 }} else {{ 0u128 }})",
                                 operand_code, m, m)
                     }
-                    "|" | "reduce_or" => format!("(if {} != 0 {{ 1u64 }} else {{ 0u64 }})", operand_code),
-                    "^" | "reduce_xor" => format!("(({}).count_ones() as u64 & 1)", operand_code),
+                    "|" | "reduce_or" => format!("(if {} != 0 {{ 1u128 }} else {{ 0u128 }})", operand_code),
+                    "^" | "reduce_xor" => format!("(({}).count_ones() as u128 & 1u128)", operand_code),
                     _ => operand_code,
                 }
             }
             ExprDef::BinaryOp { op, left, right, width } => {
-                let l = self.expr_to_rust_ptr_cached(left, signals_ptr, cache);
-                let r = self.expr_to_rust_ptr_cached(right, signals_ptr, cache);
+                let l = self.expr_to_rust_ptr_cached_emitting(left, signals_ptr, cache, state, emitted_lines);
+                let r = self.expr_to_rust_ptr_cached_emitting(right, signals_ptr, cache, state, emitted_lines);
                 let m = Self::mask_const(*width);
                 match op.as_str() {
                     "&" => format!("({} & {})", l, r),
@@ -1569,23 +2065,26 @@ impl CoreSimulator {
                     "+" => format!("({}.wrapping_add({}) & {})", l, r, m),
                     "-" => format!("({}.wrapping_sub({}) & {})", l, r, m),
                     "*" => format!("({}.wrapping_mul({}) & {})", l, r, m),
-                    "/" => format!("(if {} != 0 {{ {} / {} }} else {{ 0u64 }})", r, l, r),
-                    "%" => format!("(if {} != 0 {{ {} % {} }} else {{ 0u64 }})", r, l, r),
-                    "<<" => format!("(({} << {}.min(63)) & {})", l, r, m),
-                    ">>" => format!("({} >> {}.min(63))", l, r),
-                    "==" => format!("(if {} == {} {{ 1u64 }} else {{ 0u64 }})", l, r),
-                    "!=" => format!("(if {} != {} {{ 1u64 }} else {{ 0u64 }})", l, r),
-                    "<" => format!("(if {} < {} {{ 1u64 }} else {{ 0u64 }})", l, r),
-                    ">" => format!("(if {} > {} {{ 1u64 }} else {{ 0u64 }})", l, r),
-                    "<=" | "le" => format!("(if {} <= {} {{ 1u64 }} else {{ 0u64 }})", l, r),
-                    ">=" => format!("(if {} >= {} {{ 1u64 }} else {{ 0u64 }})", l, r),
-                    _ => "0u64".to_string(),
+                    "/" => format!("(if {} != 0 {{ {} / {} }} else {{ 0u128 }})", r, l, r),
+                    "%" => format!("(if {} != 0 {{ {} % {} }} else {{ 0u128 }})", r, l, r),
+                    "<<" => format!("(({} << (({}).min(127u128) as u32)) & {})", l, r, m),
+                    ">>" => format!("({} >> (({}).min(127u128) as u32))", l, r),
+                    "==" => format!("(if {} == {} {{ 1u128 }} else {{ 0u128 }})", l, r),
+                    "!=" => format!("(if {} != {} {{ 1u128 }} else {{ 0u128 }})", l, r),
+                    "<" => format!("(if {} < {} {{ 1u128 }} else {{ 0u128 }})", l, r),
+                    ">" => format!("(if {} > {} {{ 1u128 }} else {{ 0u128 }})", l, r),
+                    "<=" | "le" => format!("(if {} <= {} {{ 1u128 }} else {{ 0u128 }})", l, r),
+                    ">=" => format!("(if {} >= {} {{ 1u128 }} else {{ 0u128 }})", l, r),
+                    _ => "0u128".to_string(),
                 }
             }
             ExprDef::Mux { condition, when_true, when_false, width } => {
-                let cond = self.expr_to_rust_ptr_cached(condition, signals_ptr, cache);
-                let t = self.expr_to_rust_ptr_cached(when_true, signals_ptr, cache);
-                let f = self.expr_to_rust_ptr_cached(when_false, signals_ptr, cache);
+                let cond =
+                    self.expr_to_rust_ptr_cached_emitting(condition, signals_ptr, cache, state, emitted_lines);
+                let t =
+                    self.expr_to_rust_ptr_cached_emitting(when_true, signals_ptr, cache, state, emitted_lines);
+                let f =
+                    self.expr_to_rust_ptr_cached_emitting(when_false, signals_ptr, cache, state, emitted_lines);
                 format!(
                     "((if {} != 0 {{ {} }} else {{ {} }}) & {})",
                     cond,
@@ -1595,9 +2094,9 @@ impl CoreSimulator {
                 )
             }
             ExprDef::Slice { base, low, width, .. } => {
-                let base_code = self.expr_to_rust_ptr_cached(base, signals_ptr, cache);
+                let base_code = self.expr_to_rust_ptr_cached_emitting(base, signals_ptr, cache, state, emitted_lines);
                 format!(
-                    "(({} >> ({}usize).min(63)) & {})",
+                    "(({} >> ({}usize).min(127)) & {})",
                     base_code,
                     low,
                     Self::mask_const(*width)
@@ -1608,9 +2107,10 @@ impl CoreSimulator {
                 let mut shift = 0usize;
                 let mut first = true;
                 for part in parts.iter().rev() {
-                    let part_code = self.expr_to_rust_ptr_cached(part, signals_ptr, cache);
+                    let part_code =
+                        self.expr_to_rust_ptr_cached_emitting(part, signals_ptr, cache, state, emitted_lines);
                     let part_width = self.expr_width(part);
-                    if shift >= 64 {
+                    if shift >= 128 {
                         shift += part_width;
                         continue;
                     }
@@ -1629,12 +2129,12 @@ impl CoreSimulator {
                 result
             }
             ExprDef::Resize { expr, width } => {
-                let expr_code = self.expr_to_rust_ptr_cached(expr, signals_ptr, cache);
+                let expr_code = self.expr_to_rust_ptr_cached_emitting(expr, signals_ptr, cache, state, emitted_lines);
                 format!("({} & {})", expr_code, Self::mask_const(*width))
             }
             ExprDef::MemRead { memory, addr, width } => {
                 let mem_idx = self.memory_name_to_idx.get(memory).copied().unwrap_or(0);
-                let addr_code = self.expr_to_rust_ptr_cached(addr, signals_ptr, cache);
+                let addr_code = self.expr_to_rust_ptr_cached_emitting(addr, signals_ptr, cache, state, emitted_lines);
                 format!("(MEM_{}.get({} as usize).copied().unwrap_or(0) & {})",
                         mem_idx, addr_code, Self::mask_const(*width))
             }
@@ -1676,6 +2176,7 @@ impl CoreSimulator {
 
         let mut seq_targets_order: Vec<usize> = Vec::new();
         let mut seq_idx = 0usize;
+        let mut seq_expr_state = ExprCodegenState::default();
         for process in &self.ir.processes {
             if !process.clocked {
                 continue;
@@ -1684,7 +2185,15 @@ impl CoreSimulator {
                 if let Some(&target_idx) = self.name_to_idx.get(&stmt.target) {
                     let width = self.widths.get(target_idx).copied().unwrap_or(64);
                     let expr_width = self.expr_width(&stmt.expr);
-                    let expr_code = self.expr_to_rust_ptr_cached(&stmt.expr, "s", &seq_cache_names);
+                    let mut expr_lines = Vec::new();
+                    let expr_code = self.expr_to_rust_ptr_cached_emitting(
+                        &stmt.expr,
+                        "s",
+                        Some(&seq_cache_names),
+                        &mut seq_expr_state,
+                        &mut expr_lines,
+                    );
+                    self.append_indented_lines(&mut seq_sample_code, "    ", &expr_lines);
                     if expr_width == width {
                         seq_sample_code.push_str(&format!("    next_regs[{}] = {};\n", seq_idx, expr_code));
                     } else {
@@ -1721,11 +2230,16 @@ impl CoreSimulator {
                 continue;
             }
 
-            let enable_code = self.expr_to_rust_ptr(&wp.enable, "s");
-            let addr_code = self.expr_to_rust_ptr(&wp.addr, "s");
-            let data_code = self.expr_to_rust_ptr(&wp.data, "s");
+            let mut port_expr_state = ExprCodegenState::default();
+            let mut enable_lines = Vec::new();
+            let enable_code = self.expr_to_rust_ptr_emitting(&wp.enable, "s", &mut port_expr_state, &mut enable_lines);
+            let mut data_lines = Vec::new();
+            let addr_code = self.expr_to_rust_ptr_emitting(&wp.addr, "s", &mut port_expr_state, &mut data_lines);
+            let data_code = self.expr_to_rust_ptr_emitting(&wp.data, "s", &mut port_expr_state, &mut data_lines);
             write_port_code.push_str(&format!("    if *s.add({}) != 0 {{\n", clock_idx));
+            self.append_indented_lines(&mut write_port_code, "        ", &enable_lines);
             write_port_code.push_str(&format!("        if (({}) & 1) != 0 {{\n", enable_code));
+            self.append_indented_lines(&mut write_port_code, "            ", &data_lines);
             write_port_code.push_str(&format!(
                 "            let wp_addr_{} = (({}) as usize) % {};\n",
                 wp_idx, addr_code, memory.depth
@@ -1762,11 +2276,17 @@ impl CoreSimulator {
                 continue;
             }
             let data_width = self.widths.get(data_idx).copied().unwrap_or(64);
-            let addr_code = self.expr_to_rust_ptr(&rp.addr, "s");
+            let mut port_expr_state = ExprCodegenState::default();
+            let mut addr_lines = Vec::new();
+            let addr_code = self.expr_to_rust_ptr_emitting(&rp.addr, "s", &mut port_expr_state, &mut addr_lines);
             sync_read_port_code.push_str(&format!("    if *s.add({}) != 0 {{\n", clock_idx));
             if let Some(enable) = &rp.enable {
-                let enable_code = self.expr_to_rust_ptr(enable, "s");
+                let mut enable_lines = Vec::new();
+                let enable_code =
+                    self.expr_to_rust_ptr_emitting(enable, "s", &mut port_expr_state, &mut enable_lines);
+                self.append_indented_lines(&mut sync_read_port_code, "        ", &enable_lines);
                 sync_read_port_code.push_str(&format!("        if (({}) & 1) != 0 {{\n", enable_code));
+                self.append_indented_lines(&mut sync_read_port_code, "            ", &addr_lines);
                 sync_read_port_code.push_str(&format!(
                     "            let rp_addr_{} = (({}) as usize) % {};\n",
                     rp_idx, addr_code, memory.depth
@@ -1786,6 +2306,7 @@ impl CoreSimulator {
                 ));
                 sync_read_port_code.push_str("        }\n");
             } else {
+                self.append_indented_lines(&mut sync_read_port_code, "        ", &addr_lines);
                 sync_read_port_code.push_str(&format!(
                     "        let rp_addr_{} = (({}) as usize) % {};\n",
                     rp_idx, addr_code, memory.depth
@@ -1810,7 +2331,7 @@ impl CoreSimulator {
         code.push_str("/// Sample next values for all sequential targets\n");
         code.push_str("#[inline(always)]\n");
         code.push_str(&format!(
-            "pub unsafe fn sample_next_regs_inline(signals: &mut [u64], next_regs: &mut [u64; {}]) {{\n",
+            "pub unsafe fn sample_next_regs_inline(signals: &mut [u128], next_regs: &mut [u128; {}]) {{\n",
             num_regs.max(1)
         ));
         code.push_str("    let s = signals.as_mut_ptr();\n");
@@ -1820,7 +2341,7 @@ impl CoreSimulator {
         code.push_str("/// Apply sampled sequential values to target registers\n");
         code.push_str("#[inline(always)]\n");
         code.push_str(&format!(
-            "pub unsafe fn apply_next_regs_inline(signals: &mut [u64], next_regs: &[u64; {}]) {{\n",
+            "pub unsafe fn apply_next_regs_inline(signals: &mut [u128], next_regs: &[u128; {}]) {{\n",
             num_regs.max(1)
         ));
         code.push_str("    let s = signals.as_mut_ptr();\n");
@@ -1829,7 +2350,7 @@ impl CoreSimulator {
 
         code.push_str("/// Apply synchronous memory write ports for the current level\n");
         code.push_str("#[inline(always)]\n");
-        code.push_str("pub unsafe fn apply_write_ports_inline(signals: &mut [u64]) {\n");
+        code.push_str("pub unsafe fn apply_write_ports_inline(signals: &mut [u128]) {\n");
         code.push_str("    let s = signals.as_mut_ptr();\n");
         if write_port_code.is_empty() {
             code.push_str("    let _ = s;\n");
@@ -1840,7 +2361,7 @@ impl CoreSimulator {
 
         code.push_str("/// Apply synchronous memory read ports for the current level\n");
         code.push_str("#[inline(always)]\n");
-        code.push_str("pub unsafe fn apply_sync_read_ports_inline(signals: &mut [u64]) {\n");
+        code.push_str("pub unsafe fn apply_sync_read_ports_inline(signals: &mut [u128]) {\n");
         code.push_str("    let s = signals.as_mut_ptr();\n");
         if sync_read_port_code.is_empty() {
             code.push_str("    let _ = s;\n");
@@ -1854,7 +2375,7 @@ impl CoreSimulator {
         code.push_str("/// sequential updates unconditionally (one edge per call).\n");
         code.push_str("#[inline(always)]\n");
         code.push_str(&format!(
-            "pub unsafe fn tick_forced_inline(signals: &mut [u64], next_regs: &mut [u64; {}]) {{\n",
+            "pub unsafe fn tick_forced_inline(signals: &mut [u128], next_regs: &mut [u128; {}]) {{\n",
             num_regs.max(1)
         ));
         code.push_str("    evaluate_inline(signals);\n");
@@ -1868,7 +2389,7 @@ impl CoreSimulator {
         code.push_str("/// Drive a specific clock low and evaluate combinational logic.\n");
         code.push_str("/// Reusable falling-edge helper for extension batched loops.\n");
         code.push_str("#[inline(always)]\n");
-        code.push_str("pub unsafe fn drive_clock_low_inline(signals: &mut [u64], clk_idx: usize) {\n");
+        code.push_str("pub unsafe fn drive_clock_low_inline(signals: &mut [u128], clk_idx: usize) {\n");
         code.push_str("    let s = signals.as_mut_ptr();\n");
         code.push_str("    *s.add(clk_idx) = 0;\n");
         code.push_str("    evaluate_inline(signals);\n");
@@ -1878,7 +2399,7 @@ impl CoreSimulator {
         code.push_str("/// Reusable rising-edge helper for extension batched loops using generic tick.\n");
         code.push_str("#[inline(always)]\n");
         code.push_str(&format!(
-            "pub unsafe fn drive_clock_high_tick_inline(signals: &mut [u64], clk_idx: usize, old_clocks: &mut [u64; {}], next_regs: &mut [u64; {}]) {{\n",
+            "pub unsafe fn drive_clock_high_tick_inline(signals: &mut [u128], clk_idx: usize, old_clocks: &mut [u128; {}], next_regs: &mut [u128; {}]) {{\n",
             num_clocks,
             num_regs.max(1)
         ));
@@ -1894,7 +2415,7 @@ impl CoreSimulator {
         code.push_str("/// Reusable helper for single-clock forced stepping loops.\n");
         code.push_str("#[inline(always)]\n");
         code.push_str(&format!(
-            "pub unsafe fn pulse_clock_forced_inline(signals: &mut [u64], clk_idx: usize, next_regs: &mut [u64; {}]) {{\n",
+            "pub unsafe fn pulse_clock_forced_inline(signals: &mut [u128], clk_idx: usize, next_regs: &mut [u128; {}]) {{\n",
             num_regs.max(1)
         ));
         code.push_str("    let s = signals.as_mut_ptr();\n");
@@ -1908,7 +2429,7 @@ impl CoreSimulator {
         code.push_str("/// Uses old_clocks (set by caller) for edge detection, not current signal values.\n");
         code.push_str("/// This allows the caller to control exactly what \"previous\" clock state means.\n");
         code.push_str("#[inline(always)]\n");
-        code.push_str(&format!("pub unsafe fn tick_inline(signals: &mut [u64], old_clocks: &mut [u64; {}], next_regs: &mut [u64; {}]) {{\n",
+        code.push_str(&format!("pub unsafe fn tick_inline(signals: &mut [u128], old_clocks: &mut [u128; {}], next_regs: &mut [u128; {}]) {{\n",
                                num_clocks, num_regs.max(1)));
         code.push_str("    let s = signals.as_mut_ptr();\n");
 
@@ -1940,7 +2461,7 @@ impl CoreSimulator {
         // additional clock edges in derived/gated clocks
         code.push_str("    // Loop for derived clock propagation (like JIT)\n");
         code.push_str("    for _iter in 0..10 {\n");
-        code.push_str(&format!("        let mut clock_before = [0u64; {}];\n", num_clocks));
+        code.push_str(&format!("        let mut clock_before = [0u128; {}];\n", num_clocks));
         for (domain_idx, &clk_idx) in clock_indices.iter().enumerate() {
             code.push_str(&format!("        clock_before[{}] = *s.add({});\n", domain_idx, clk_idx));
         }
@@ -1976,10 +2497,10 @@ impl CoreSimulator {
         // This wrapper updates old_clocks AFTER tick_inline for the regular tick() path
         // (MOS6502 extension calls tick_inline directly and manages old_clocks itself)
         code.push_str("#[no_mangle]\n");
-        code.push_str(&format!("pub unsafe extern \"C\" fn tick(signals: *mut u64, len: usize, old_clocks: *mut u64, next_regs: *mut u64) {{\n"));
+        code.push_str(&format!("pub unsafe extern \"C\" fn tick(signals: *mut u128, len: usize, old_clocks: *mut u128, next_regs: *mut u128) {{\n"));
         code.push_str("    let signals = std::slice::from_raw_parts_mut(signals, len);\n");
-        code.push_str(&format!("    let old_clocks = &mut *(old_clocks as *mut [u64; {}]);\n", num_clocks));
-        code.push_str(&format!("    let next_regs = &mut *(next_regs as *mut [u64; {}]);\n", num_regs.max(1)));
+        code.push_str(&format!("    let old_clocks = &mut *(old_clocks as *mut [u128; {}]);\n", num_clocks));
+        code.push_str(&format!("    let next_regs = &mut *(next_regs as *mut [u128; {}]);\n", num_regs.max(1)));
         code.push_str("    tick_inline(signals, old_clocks, next_regs);\n");
 
         // Update old_clocks to current clock signal values for next tick() call
@@ -1996,6 +2517,10 @@ impl CoreSimulator {
     // ========================================================================
 
     pub fn compile_code(&mut self, code: &str) -> Result<bool, String> {
+        if self.runtime_only {
+            self.compiled = true;
+            return Ok(true);
+        }
         #[cfg(feature = "aot")]
         {
             let _ = code;
@@ -2052,6 +2577,7 @@ impl CoreSimulator {
             }
             self.compiled = true;
             self.init_compiled_memories()?;
+            self.shed_compiled_ir_state();
             return Ok(true);
         }
 
@@ -2063,11 +2589,13 @@ impl CoreSimulator {
                 "--crate-type=cdylib",
                 "--crate-name",
                 crate_name.as_str(),
-                "-C", "opt-level=3",
-                "-C", "target-cpu=native",
+                // Favor compile latency and memory over peak throughput for
+                // per-module runtime compilation during test execution.
+                "-C", "opt-level=0",
+                "-C", "debuginfo=0",
+                "-C", "embed-bitcode=no",
                 "-C", "panic=abort",
-                "-C", "lto=thin",
-                "-C", "codegen-units=1",
+                "-C", "codegen-units=8",
                 "-A", "warnings",
                 "-o",
                 tmp_lib_path.to_str().unwrap(),
@@ -2102,13 +2630,14 @@ impl CoreSimulator {
         }
         self.compiled = true;
         self.init_compiled_memories()?;
+        self.shed_compiled_ir_state();
         Ok(false)
         }
     }
 
     #[cfg(not(feature = "aot"))]
     fn init_compiled_memories(&mut self) -> Result<(), String> {
-        if !self.compiled {
+        if !self.compiled || self.runtime_only {
             return Ok(());
         }
         let lib = self.compiled_lib.as_ref().ok_or_else(|| "Compiled library not loaded".to_string())?;

@@ -1048,9 +1048,10 @@ module RHDL
               return nil
             end
 
-            json = RHDL::Codegen::CIRCT::RuntimeJSON.dump(flat)
             FileUtils.mkdir_p(File.dirname(runtime_json_path))
-            File.write(runtime_json_path, json)
+            File.open(runtime_json_path, 'w') do |io|
+              RHDL::Codegen::CIRCT::RuntimeJSON.dump_to_io(flat, io, compact_exprs: true)
+            end
           end
           puts "Wrote runtime JSON: #{runtime_json_path}"
           runtime_json_path
@@ -1076,17 +1077,26 @@ module RHDL
           return [] if overlay_modules.empty?
 
           normalized_text = File.read(normalized_verilog_path)
+          normalized_spans = verilog_module_spans(normalized_text)
           replaced = []
-          overlay_modules.each do |name, block|
-            pattern = /\bmodule\s+#{Regexp.escape(name)}\b.*?\bendmodule\b/m
-            next unless normalized_text.match?(pattern)
+          rewritten = +''
+          cursor = 0
 
-            normalized_text.sub!(pattern, block)
-            replaced << name
+          normalized_spans.each do |span|
+            rewritten << normalized_text[cursor...span.fetch(:start)]
+            replacement = overlay_modules[span.fetch(:name)]
+            if replacement
+              rewritten << replacement
+              replaced << span.fetch(:name)
+            else
+              rewritten << normalized_text[span.fetch(:start)...span.fetch(:end)]
+            end
+            cursor = span.fetch(:end)
           end
+          rewritten << normalized_text[cursor..] if cursor < normalized_text.length
 
           unless replaced.empty?
-            File.write(normalized_verilog_path, normalized_text)
+            File.write(normalized_verilog_path, rewritten)
             puts "Patched canonical Verilog memory modules: #{replaced.join(', ')}"
           end
 
@@ -1094,7 +1104,13 @@ module RHDL
         end
 
         def verilog_module_blocks(text)
-          blocks = {}
+          verilog_module_spans(text).each_with_object({}) do |span, acc|
+            acc[span.fetch(:name)] = text[span.fetch(:start)...span.fetch(:end)]
+          end
+        end
+
+        def verilog_module_spans(text)
+          spans = []
           idx = 0
 
           while (header = text.match(/\bmodule\s+([A-Za-z_][A-Za-z0-9_$]*)\b.*?;/m, idx))
@@ -1102,11 +1118,15 @@ module RHDL
             footer = text.match(/\bendmodule\b/m, body_start)
             break unless footer
 
-            blocks[header[1]] = text[header.begin(0)...footer.end(0)]
+            spans << {
+              name: header[1],
+              start: header.begin(0),
+              end: footer.end(0)
+            }
             idx = footer.end(0)
           end
 
-          blocks
+          spans
         end
 
         def runtime_dpram_dif_module_block(module_name)

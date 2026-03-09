@@ -34,6 +34,11 @@ RSpec.describe 'GameBoy mixed import integration', slow: true do
     Digest::SHA256.hexdigest(payload.join("\n"))
   end
 
+  def trim_ruby_heap!
+    GC.start(full_mark: true, immediate_sweep: true)
+    GC.compact if GC.respond_to?(:compact)
+  end
+
   it 'imports files.qip subset end-to-end and emits mixed import report', timeout: 1800 do
     require_reference_tree!
     require_tool!('ghdl')
@@ -97,6 +102,16 @@ RSpec.describe 'GameBoy mixed import integration', slow: true do
           RAISE_DEGRADE_OPS.include?(diag['op'].to_s)
         end
         expect(degrade_diags).to be_empty, "Raise degrade diagnostics present:\n#{degrade_diags.map { |d| d['op'] }.join("\n")}"
+
+        importer = nil
+        result = nil
+        report = nil
+        mixed = nil
+        artifacts = nil
+        components = nil
+        gb_component = nil
+        degrade_diags = nil
+        trim_ruby_heap!
       end
     end
   end
@@ -132,8 +147,15 @@ RSpec.describe 'GameBoy mixed import integration', slow: true do
 
       result_a = importer_a.run
       expect(result_a.success?).to be(true), Array(result_a.diagnostics).join("\n")
+      importer_a = nil
+      result_a = nil
+      trim_ruby_heap!
+
       result_b = importer_b.run
       expect(result_b.success?).to be(true), Array(result_b.diagnostics).join("\n")
+      importer_b = nil
+      result_b = nil
+      trim_ruby_heap!
 
       files_a = Dir.glob(File.join(out_a, '**', '*.rb')).map { |path| path.delete_prefix("#{out_a}/") }.sort
       files_b = Dir.glob(File.join(out_b, '**', '*.rb')).map { |path| path.delete_prefix("#{out_b}/") }.sort

@@ -33,28 +33,34 @@ module RHDL
               runtime_json: runtime_json,
               top: @top_name
             )
-            @nodes = resolved.fetch(:top_module)
-            @runtime_nodes = resolved.fetch(:runtime_nodes)
+            top_module = resolved.fetch(:top_module)
+            runtime_nodes = resolved.fetch(:runtime_nodes)
 
-            @input_ports = @nodes.ports.select { |port| port.direction == :in }.map { |port| port.name.to_s }
-            @output_ports = @nodes.ports.select { |port| port.direction == :out }.map { |port| port.name.to_s }
-            @signal_names = (@nodes.ports.map { |port| port.name.to_s } +
-              @nodes.nets.map { |net| net.name.to_s } +
-              @nodes.regs.map { |reg| reg.name.to_s }).uniq
+            @input_ports = top_module.ports.select { |port| port.direction == :in }.map { |port| port.name.to_s }
+            @output_ports = top_module.ports.select { |port| port.direction == :out }.map { |port| port.name.to_s }
             @port_lookup = (@input_ports + @output_ports).each_with_object({}) do |name, acc|
               acc[name] = name
               acc[name.downcase] ||= name
             end
-            @signal_lookup = @signal_names.each_with_object({}) do |name, acc|
+            @signal_lookup = (@input_ports + @output_ports).each_with_object({}) do |name, acc|
               acc[name] = name
               acc[name.downcase] ||= name
             end
             @signal_index_cache = {}
+            sim_json = RHDL::Sim::Native::IR.sim_json(runtime_nodes, backend: backend)
+            runtime_nodes = nil
+            top_module = nil
+            resolved = nil
+            trim_ruby_heap! if mlir
 
             @sim = RHDL::Sim::Native::IR::Simulator.new(
-              RHDL::Sim::Native::IR.sim_json(@runtime_nodes, backend: backend),
-              backend: backend
+              sim_json,
+              backend: backend,
+              skip_signal_widths: true,
+              retain_ir_json: false,
+              trim_batched_gameboy_state: true
             )
+            @use_batched = @sim.native? && @sim.gameboy_mode?
 
             @cycles = 0
             @rom = []
@@ -65,22 +71,35 @@ module RHDL
           def load_rom(bytes)
             bytes = bytes.bytes if bytes.is_a?(String)
             @rom = bytes.dup
+            @sim.load_rom(bytes) if @use_batched
           end
 
           def reset
             @clock_enable_phase = 0
-            poke(:reset, 1)
-            run_cycles(10)
-            poke(:reset, 0)
-            run_cycles(100)
+            if @use_batched
+              poke(%w[reset], 1)
+              @sim.run_gb_cycles(1)
+              poke(%w[reset], 0)
+              @sim.reset_lcd_state if @sim.respond_to?(:reset_lcd_state)
+            else
+              poke(:reset, 1)
+              run_cycles(10)
+              poke(:reset, 0)
+              run_cycles(100)
+            end
             poke(%w[joystick], 0xFF)
             @cycles = 0
           end
 
           def run_steps(steps)
-            steps.to_i.times do
-              run_machine_cycle
-              @cycles += 1
+            if @use_batched
+              result = @sim.run_gb_cycles(steps.to_i)
+              @cycles += result[:cycles_run].to_i
+            else
+              steps.to_i.times do
+                run_machine_cycle
+                @cycles += 1
+              end
             end
           end
 
@@ -167,6 +186,21 @@ module RHDL
             0
           end
 
+          def close
+            return false unless defined?(@sim) && @sim
+
+            sim = @sim
+            @sim = nil
+            sim.close if sim.respond_to?(:close)
+            @rom = [].freeze
+            @input_ports = [].freeze
+            @output_ports = [].freeze
+            @port_lookup = {}
+            @signal_lookup = {}
+            @signal_index_cache = {}
+            true
+          end
+
           private
 
           def resolve_nodes(component_class:, mlir:, runtime_json:, top:)
@@ -192,7 +226,14 @@ module RHDL
             end
 
             if runtime_json
-              payload = runtime_json.is_a?(String) ? JSON.parse(runtime_json, max_nesting: false) : runtime_json
+              if runtime_json.is_a?(String)
+                return {
+                  top_module: RuntimeModule.new(ports: [], nets: [], regs: []),
+                  runtime_nodes: runtime_json
+                }
+              end
+
+              payload = runtime_json
               module_payload = Array(payload['modules']).find { |mod| mod['name'].to_s == top } || Array(payload['modules']).first
               raise ArgumentError, "Runtime JSON missing module '#{top}'" unless module_payload
 
@@ -227,10 +268,12 @@ module RHDL
             @input_ports.each { |name| @sim.poke(name, 0) }
             @clock_enable_phase = 0
             poke(%w[clk_sys], 0)
-            drive_clock_enable_inputs(falling_edge: false)
             poke(%w[joystick], 0xFF)
             poke(%w[cart_oe], 1)
-            @sim.evaluate
+            unless @use_batched
+              drive_clock_enable_inputs(falling_edge: false)
+              @sim.evaluate
+            end
           end
 
           def run_machine_cycle
@@ -286,6 +329,12 @@ module RHDL
             candidates.each do |candidate|
               resolved = @port_lookup[candidate] || @port_lookup[candidate.downcase]
               return resolved if resolved
+
+              next unless @sim.respond_to?(:has_signal?) && @sim.has_signal?(candidate)
+
+              @port_lookup[candidate] = candidate
+              @port_lookup[candidate.downcase] ||= candidate
+              return candidate
             end
 
             nil
@@ -296,6 +345,12 @@ module RHDL
             candidates.each do |candidate|
               resolved = @signal_lookup[candidate] || @signal_lookup[candidate.downcase]
               return resolved if resolved
+
+              next unless @sim.respond_to?(:has_signal?) && @sim.has_signal?(candidate)
+
+              @signal_lookup[candidate] = candidate
+              @signal_lookup[candidate.downcase] ||= candidate
+              return candidate
             end
 
             nil
@@ -306,6 +361,11 @@ module RHDL
             poke(%w[ce], values[:ce])
             poke(%w[ce_n], values[:ce_n])
             poke(%w[ce_2x], values[:ce_2x])
+          end
+
+          def trim_ruby_heap!
+            GC.start(full_mark: true, immediate_sweep: true)
+            GC.compact if GC.respond_to?(:compact)
           end
         end
       end

@@ -204,7 +204,7 @@ module RHDL
         total_width = 0
         signals.reverse.each do |sig|
           val, width = resolve_value_with_width(sig)
-          result |= (val << total_width)
+          result |= ((val & MaskCache.mask(width)) << total_width)
           total_width += width
         end
         LocalProxy.new(nil, result, total_width, self)

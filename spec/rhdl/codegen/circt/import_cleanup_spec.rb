@@ -15,6 +15,37 @@ RSpec.describe RHDL::Codegen::CIRCT::ImportCleanup do
     end
   end
 
+  def imported_module_for(mlir_text, top:)
+    result = RHDL::Codegen.import_circt_mlir(mlir_text, strict: true, top: top, resolve_forward_refs: true)
+    expect(result.success?).to be(true), result.diagnostics.map(&:message).join("\n")
+    result.modules.find { |mod| mod.name.to_s == top }
+  end
+
+  def process_targets_for(mod)
+    targets = []
+    walker = lambda do |statements|
+      Array(statements).each do |statement|
+        case statement
+        when RHDL::Codegen::CIRCT::IR::SeqAssign
+          targets << statement.target.to_s
+        when RHDL::Codegen::CIRCT::IR::If
+          walker.call(statement.then_statements)
+          walker.call(statement.else_statements)
+        end
+      end
+    end
+
+    Array(mod.processes).each { |process| walker.call(process.statements) }
+    targets.uniq.sort
+  end
+
+  def assigned_signal_for(mod, target)
+    assign = mod.assigns.find { |item| item.target.to_s == target.to_s }
+    return nil unless assign&.expr.is_a?(RHDL::Codegen::CIRCT::IR::Signal)
+
+    assign.expr.name.to_s
+  end
+
   it 'removes the LLHD signal overlay from an imported register wrapper module' do
     mlir = <<~MLIR
       hw.module private @eReg_SavestateV__vhdl_c2a6c3cbd0d4(in %clk : i1, in %BUS_Din : i64, in %BUS_Adr : i10, in %BUS_wren : i1, in %BUS_rst : i1, in %Din : i61, out BUS_Dout : i64, out Dout : i61) {
@@ -49,6 +80,42 @@ RSpec.describe RHDL::Codegen::CIRCT::ImportCleanup do
     expect(result.cleaned_text).to include('seq.compreg')
     output_match = result.cleaned_text.match(/hw\.output [^,\n]+, (?<dout>%[A-Za-z0-9_]+) : i64, i61/)
     reg_match = result.cleaned_text.match(/(?<reg>%[A-Za-z0-9_]+) = seq\.compreg .* : i61/)
+    expect(output_match).not_to be_nil
+    expect(reg_match).not_to be_nil
+    expect(output_match[:dout]).to eq(reg_match[:reg])
+
+    firtool_result = firtool_accepts?(result.cleaned_text)
+    expect(firtool_result).not_to eq(false)
+  end
+
+  it 'preserves live register reads when the LLHD overlay initializer is non-zero' do
+    mlir = <<~MLIR
+      hw.module @overlay_nonzero(in %clk : i1, in %din : i8, in %rst : i1, out dout : i8) {
+        %t0 = llhd.constant_time <0ns, 0d, 1e>
+        %c5_i8 = hw.constant 5 : i8
+        %overlay = llhd.sig %c5_i8 : i8
+        %state = llhd.sig %c5_i8 : i8
+        %0 = llhd.prb %overlay : i8
+        %1 = llhd.prb %state : i8
+        llhd.drv %overlay, %1 after %t0 : i8
+        llhd.drv %overlay, %c5_i8 after %t0 : i8
+        %clk_0 = seq.to_clock %clk
+        %2 = comb.mux %rst, %c5_i8, %din : i8
+        %state_0 = seq.firreg %2 clock %clk_0 : i8
+        llhd.drv %state, %state_0 after %t0 : i8
+        llhd.drv %state, %c5_i8 after %t0 : i8
+        hw.output %0 : i8
+      }
+    MLIR
+
+    result = described_class.cleanup_imported_core_mlir(mlir, strict: true, top: 'overlay_nonzero')
+
+    expect(result).to be_success
+    expect(result.cleaned_text).not_to include('llhd.')
+    expect(result.cleaned_text).to include('seq.compreg').or include('seq.firreg')
+
+    output_match = result.cleaned_text.match(/hw\.output (?<dout>%[A-Za-z0-9_]+) : i8/)
+    reg_match = result.cleaned_text.match(/(?<reg>%[A-Za-z0-9_]+) = seq\.(?:compreg|firreg) .* : i8/)
     expect(output_match).not_to be_nil
     expect(reg_match).not_to be_nil
     expect(output_match[:dout]).to eq(reg_match[:reg])
@@ -233,8 +300,57 @@ RSpec.describe RHDL::Codegen::CIRCT::ImportCleanup do
     expect(result.cleaned_text).to include('seq.compreg')
     expect(result.cleaned_text).to include('hw.output')
 
+    imported = imported_module_for(result.cleaned_text, top: 'async_result_proc')
+    process_targets = process_targets_for(imported)
+    expect(process_targets).not_to be_empty
+    expect(assigned_signal_for(imported, 'gnt')).to be_a(String)
+    expect(process_targets).to include(assigned_signal_for(imported, 'gnt'))
+
     firtool_result = firtool_accepts?(result.cleaned_text)
     expect(firtool_result).not_to eq(false)
+  end
+
+  it 'binds resultful LLHD drive outputs to yielded values instead of sampled wait inputs' do
+    mlir = <<~MLIR
+      hw.module @result_yield_bind(in %din : i1, in %clk : i1, in %rst_l : i1, in %se : i1, in %si : i1, out q : i1) {
+        %t0 = llhd.constant_time <0ns, 1d, 0e>
+        %true = hw.constant true
+        %false = hw.constant false
+        %q_sig = llhd.sig %false : i1
+        %proc:2 = llhd.process -> i1, i1 {
+          cf.br ^bb1(%clk, %rst_l, %false, %false : i1, i1, i1, i1)
+        ^bb1(%prev_clk: i1, %prev_rst_l: i1, %value: i1, %enable: i1):
+          llhd.wait yield (%value, %enable : i1, i1), (%clk, %rst_l : i1, i1), ^bb2(%prev_clk, %prev_rst_l : i1, i1)
+        ^bb2(%seen_clk: i1, %seen_rst_l: i1):
+          %edge_clk = comb.xor bin %seen_clk, %true : i1
+          %posedge_clk = comb.and bin %edge_clk, %clk : i1
+          %rst_low = comb.xor bin %rst_l, %true : i1
+          %negedge_rst_l = comb.and bin %seen_rst_l, %rst_low : i1
+          %trigger = comb.or bin %posedge_clk, %negedge_rst_l : i1
+          cf.cond_br %trigger, ^bb3, ^bb1(%clk, %rst_l, %false, %false : i1, i1, i1, i1)
+        ^bb3:
+          %selected = comb.mux %se, %si, %din : i1
+          %next_q = comb.and %rst_l, %selected : i1
+          cf.br ^bb1(%clk, %rst_l, %next_q, %true : i1, i1, i1, i1)
+        }
+        llhd.drv %q_sig, %proc#0 after %t0 if %proc#1 : i1
+        %q_value = llhd.prb %q_sig : i1
+        hw.output %q_value : i1
+      }
+    MLIR
+
+    result = described_class.cleanup_imported_core_mlir(mlir, strict: true, top: 'result_yield_bind')
+
+    expect(result).to be_success
+    expect(result.cleaned_text).to include('comb.mux %se, %si, %din')
+    expect(result.cleaned_text).to include('comb.and %rst_l')
+    expect(result.cleaned_text).not_to include('comb.mux %rst_l, %clk')
+
+    imported = imported_module_for(result.cleaned_text, top: 'result_yield_bind')
+    process_targets = process_targets_for(imported)
+    expect(process_targets).not_to be_empty
+    expect(assigned_signal_for(imported, 'q')).to be_a(String)
+    expect(process_targets).to include(assigned_signal_for(imported, 'q'))
   end
 
   it 'leaves aggregate-only core modules untouched when no LLHD overlay is present' do

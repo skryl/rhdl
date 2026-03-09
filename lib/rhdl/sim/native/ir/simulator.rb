@@ -10,6 +10,7 @@
 # similar to the JIT and Verilator runners.
 
 require 'json'
+require 'stringio'
 require 'fiddle'
 require 'fiddle/import'
 require 'rbconfig'
@@ -132,6 +133,7 @@ module RHDL
         SIM_EXEC_REG_COUNT = 8
         SIM_EXEC_COMPILE = 9
         SIM_EXEC_IS_COMPILED = 10
+        SIM_EXEC_RELEASE_BATCHED_GAMEBOY_STATE = 11
 
         SIM_TRACE_START = 0
         SIM_TRACE_START_STREAMING = 1
@@ -220,13 +222,43 @@ module RHDL
 
             input_format_for_backend(backend, env: env)
           end
+
+          def finalizer_for(ctx_state)
+            proc do
+              next if ctx_state[:closed]
+
+              ptr = ctx_state[:ptr]
+              destroy = ctx_state[:destroy]
+              begin
+                destroy.call(ptr) if destroy && pointer_alive?(ptr)
+              rescue StandardError
+                nil
+              ensure
+                ctx_state[:closed] = true
+                ctx_state[:ptr] = nil
+              end
+            end
+          end
+
+          def pointer_alive?(ptr)
+            !ptr.nil? && (!ptr.respond_to?(:null?) || !ptr.null?)
+          end
         end
 
         # @param ir_json [String] JSON representation of the IR
         # @param backend [Symbol] :interpreter, :jit, :compiler, or :auto
         # @param input_format [Symbol, nil] :circt (nil => backend default/env)
         # @param sub_cycles [Integer] Number of sub-cycles per CPU cycle (default: 14)
-        def initialize(ir_json, backend: :interpreter, input_format: nil, sub_cycles: 14)
+        # @param skip_signal_widths [Boolean] Skip Ruby-side width extraction when callers
+        #   only use narrow signal accessors and want to avoid parsing huge CIRCT payloads.
+        # @param retain_ir_json [Boolean] Keep the full input JSON string available via
+        #   `ir_json` after native simulator creation. Disable for large one-shot inputs.
+        # @param trim_batched_gameboy_state [Boolean] Drop compiler-side runtime/IR
+        #   bookkeeping that the Game Boy batched runner does not use. Only applies
+        #   to compiler-backed Game Boy simulators.
+        def initialize(ir_json, backend: :interpreter, input_format: nil, sub_cycles: 14,
+                       skip_signal_widths: false, retain_ir_json: true,
+                       trim_batched_gameboy_state: false)
 
           @sub_cycles = sub_cycles.clamp(1, 14)
           @requested_backend = self.class.normalize_backend_name(backend)
@@ -235,16 +267,43 @@ module RHDL
           prepared = prepare_ir_json(ir_json, @input_format)
           @ir_json = prepared[:json]
           @effective_input_format = prepared[:effective_format]
-          @signal_widths_by_name, @signal_widths_by_idx = extract_signal_widths(@ir_json)
+          @signal_widths_by_name, @signal_widths_by_idx =
+            if skip_signal_widths
+              [{}, []]
+            else
+              extract_signal_widths(@ir_json)
+            end
 
           if selected
             configure_backend(selected)
             load_library
             create_simulator
             compile if @backend == :compile
+            release_batched_gameboy_state if trim_batched_gameboy_state
+            @ir_json = nil unless retain_ir_json
           else
             raise LoadError, unavailable_backend_error_message(@requested_backend)
           end
+        end
+
+        def close
+          return false unless defined?(@ctx_state) && @ctx_state
+          return false if @ctx_state[:closed]
+
+          ptr = @ctx_state[:ptr]
+          destroy = @ctx_state[:destroy]
+          @ctx_state[:closed] = true
+          @ctx_state[:ptr] = nil
+          @ctx = nil
+          ObjectSpace.undefine_finalizer(self)
+          destroy.call(ptr) if destroy && self.class.pointer_alive?(ptr)
+          true
+        end
+
+        def closed?
+          return true unless defined?(@ctx_state) && @ctx_state
+
+          @ctx_state[:closed]
         end
 
         def simulator_type
@@ -660,6 +719,13 @@ module RHDL
           }
         end
 
+        def release_batched_gameboy_state
+          return false unless native?
+          return false unless gameboy_mode?
+
+          core_exec(SIM_EXEC_RELEASE_BATCHED_GAMEBOY_STATE)[:ok]
+        end
+
         def read_vram(addr)
           bytes = runner_mem_read(RUNNER_MEM_SPACE_VRAM, addr, 1, 0)
           bytes.empty? ? 0 : (bytes[0] & 0xFF)
@@ -731,21 +797,21 @@ module RHDL
         end
 
         def core_signal(op, name: nil, idx: 0, value: 0)
-          out = Fiddle::Pointer.malloc(Fiddle::SIZEOF_LONG)
-          out[0, Fiddle::SIZEOF_LONG] = [0].pack(Fiddle::SIZEOF_LONG == 8 ? 'Q' : 'L')
+          out = scratch_ulong_ptr
+          clear_ulong_ptr!(out)
           rc = @fn_sim_signal.call(@ctx, op, name, idx, value, out)
           {
             ok: rc != 0,
-            value: out[0, Fiddle::SIZEOF_LONG].unpack1(Fiddle::SIZEOF_LONG == 8 ? 'Q' : 'L')
+            value: read_ulong_ptr(out)
           }
         end
 
         def core_signal_wide(op, name: nil, idx: 0, value: 0)
-          in_ptr = Fiddle::Pointer.malloc(16)
+          in_ptr = scratch_wide_in_ptr
           low, high = split_wide_words(value)
           in_ptr[0, 16] = [low, high].pack('QQ')
 
-          out = Fiddle::Pointer.malloc(16)
+          out = scratch_wide_out_ptr
           out[0, 16] = [0, 0].pack('QQ')
           rc = @fn_sim_signal_wide.call(@ctx, op, name, idx, in_ptr, out)
           lo, hi = out[0, 16].unpack('QQ')
@@ -756,22 +822,22 @@ module RHDL
         end
 
         def core_exec(op, arg0 = 0, arg1 = 0, error_out = nil)
-          out = Fiddle::Pointer.malloc(Fiddle::SIZEOF_LONG)
-          out[0, Fiddle::SIZEOF_LONG] = [0].pack(Fiddle::SIZEOF_LONG == 8 ? 'Q' : 'L')
+          out = scratch_ulong_ptr
+          clear_ulong_ptr!(out)
           rc = @fn_sim_exec.call(@ctx, op, arg0, arg1, out, error_out)
           {
             ok: rc != 0,
-            value: out[0, Fiddle::SIZEOF_LONG].unpack1(Fiddle::SIZEOF_LONG == 8 ? 'Q' : 'L')
+            value: read_ulong_ptr(out)
           }
         end
 
         def core_trace(op, str_arg = nil)
-          out = Fiddle::Pointer.malloc(Fiddle::SIZEOF_LONG)
-          out[0, Fiddle::SIZEOF_LONG] = [0].pack(Fiddle::SIZEOF_LONG == 8 ? 'Q' : 'L')
+          out = scratch_ulong_ptr
+          clear_ulong_ptr!(out)
           rc = @fn_sim_trace.call(@ctx, op, str_arg, out)
           {
             ok: rc != 0,
-            value: out[0, Fiddle::SIZEOF_LONG].unpack1(Fiddle::SIZEOF_LONG == 8 ? 'Q' : 'L')
+            value: read_ulong_ptr(out)
           }
         end
 
@@ -968,7 +1034,8 @@ module RHDL
           end
 
           @sim_runner_speaker_toggles = 0
-          @destructor = @fn_destroy
+          @ctx_state = { ptr: @ctx, destroy: @fn_destroy, closed: false }
+          ObjectSpace.define_finalizer(self, self.class.finalizer_for(@ctx_state))
         end
 
         def load_optional_function(symbol_name, arg_types, return_type)
@@ -1084,21 +1151,49 @@ module RHDL
         end
 
         def wide_word_by_name(name, word_idx)
-          out = Fiddle::Pointer.malloc(Fiddle::SIZEOF_LONG)
-          out[0, Fiddle::SIZEOF_LONG] = [0].pack(Fiddle::SIZEOF_LONG == 8 ? 'Q' : 'L')
+          out = scratch_ulong_ptr
+          clear_ulong_ptr!(out)
           rc = @fn_sim_peek_word_by_name.call(@ctx, name.to_s, word_idx, out)
           return 0 if rc == 0
 
-          out[0, Fiddle::SIZEOF_LONG].unpack1(Fiddle::SIZEOF_LONG == 8 ? 'Q' : 'L')
+          read_ulong_ptr(out)
         end
 
         def wide_word_by_idx(idx, word_idx)
-          out = Fiddle::Pointer.malloc(Fiddle::SIZEOF_LONG)
-          out[0, Fiddle::SIZEOF_LONG] = [0].pack(Fiddle::SIZEOF_LONG == 8 ? 'Q' : 'L')
+          out = scratch_ulong_ptr
+          clear_ulong_ptr!(out)
           rc = @fn_sim_peek_word_by_idx.call(@ctx, idx, word_idx, out)
           return 0 if rc == 0
 
-          out[0, Fiddle::SIZEOF_LONG].unpack1(Fiddle::SIZEOF_LONG == 8 ? 'Q' : 'L')
+          read_ulong_ptr(out)
+        end
+
+        def scratch_ulong_ptr
+          @scratch_ulong_ptr ||= Fiddle::Pointer.malloc(Fiddle::SIZEOF_LONG)
+        end
+
+        def clear_ulong_ptr!(ptr)
+          ptr[0, Fiddle::SIZEOF_LONG] = packed_zero_ulong
+        end
+
+        def read_ulong_ptr(ptr)
+          ptr[0, Fiddle::SIZEOF_LONG].unpack1(packed_ulong_format)
+        end
+
+        def packed_zero_ulong
+          @packed_zero_ulong ||= [0].pack(packed_ulong_format)
+        end
+
+        def packed_ulong_format
+          @packed_ulong_format ||= (Fiddle::SIZEOF_LONG == 8 ? 'Q' : 'L')
+        end
+
+        def scratch_wide_in_ptr
+          @scratch_wide_in_ptr ||= Fiddle::Pointer.malloc(16)
+        end
+
+        def scratch_wide_out_ptr
+          @scratch_wide_out_ptr ||= Fiddle::Pointer.malloc(16)
         end
       end
 
@@ -1137,7 +1232,10 @@ module RHDL
           end
 
           require_relative '../../../codegen/circt/runtime_json' unless defined?(RHDL::Codegen::CIRCT::RuntimeJSON)
-          RHDL::Codegen::CIRCT::RuntimeJSON.dump(circt_nodes_for_runtime(ir_obj))
+          nodes = circt_nodes_for_runtime(ir_obj)
+          io = StringIO.new
+          RHDL::Codegen::CIRCT::RuntimeJSON.dump_to_io(nodes, io, compact_exprs: true)
+          io.string
         end
 
         def circt_nodes_for_runtime(ir_obj)

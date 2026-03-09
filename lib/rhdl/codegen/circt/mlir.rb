@@ -1042,6 +1042,17 @@ module RHDL
             non_default = candidates.reject { |expr| zero_literal?(expr) }
             candidates = non_default unless non_default.empty?
 
+            non_literals = candidates.reject { |expr| expr.is_a?(IR::Literal) }
+            if non_literals.length == 1 && non_literals.length != candidates.length
+              preferred_width =
+                if non_literals.first.respond_to?(:width) && non_literals.first.width
+                  non_literals.first.width
+                else
+                  find_width(target_name)
+                end
+              return non_literals.first if preferred_width.to_i > 1
+            end
+
             if candidates.length > 1
               width = find_width(target_name)
               return combine_assigned_exprs(candidates, width)

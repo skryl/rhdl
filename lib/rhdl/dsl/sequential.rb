@@ -59,6 +59,13 @@ module RHDL
     module Sequential
       extend RHDL::Support::Concern
 
+      class << self
+        def active_low_reset_name?(name)
+          reset_name = name.to_s
+          reset_name.end_with?('_n', '_l')
+        end
+      end
+
       # Case expression for synthesis - maps to Verilog case
       class BehaviorCase < Behavior::BehaviorExpr
         attr_reader :selector, :cases, :default_case
@@ -242,6 +249,7 @@ module RHDL
           else
             Behavior::BehaviorLiteral.new(expr, width: width || 8)
           end
+          wrapped = Behavior::BehaviorResize.new(wrapped, width: width) if width && wrapped.width != width
           # Store as a signal proxy for later reference
           @local_vars ||= {}
           @local_vars[name] = wrapped
@@ -305,7 +313,17 @@ module RHDL
             @_prev_clk = clk_val
 
             # Handle reset - sample but mark as needing reset
-            @_needs_reset = reset && in_val(reset) == 1
+            @_needs_reset =
+              if reset
+                reset_value = in_val(reset)
+                if RHDL::DSL::Sequential.active_low_reset_name?(reset)
+                  reset_value == 0
+                else
+                  reset_value == 1
+                end
+              else
+                false
+              end
 
             if @_needs_reset
               return true

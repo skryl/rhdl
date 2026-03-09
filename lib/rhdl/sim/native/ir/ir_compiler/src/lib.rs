@@ -17,6 +17,8 @@ mod core;
 mod aot_generated;
 mod extensions;
 mod ffi;
+#[path = "../../common/signal_value.rs"]
+mod signal_value;
 mod vcd;
 
 pub use core::CoreSimulator;

@@ -121,7 +121,7 @@ impl Mos6502Extension {
             let lib = core.compiled_lib.as_ref().unwrap();
             unsafe {
                 type RunMos6502CyclesFn = unsafe extern "C" fn(
-                    *mut u64, usize, *mut u8, *const bool, usize, *mut u32
+                    *mut u128, usize, *mut u8, *const bool, usize, *mut u32
                 ) -> usize;
 
                 let func: libloading::Symbol<RunMos6502CyclesFn> =
@@ -191,7 +191,7 @@ impl Mos6502Extension {
             let lib = core.compiled_lib.as_ref().unwrap();
             unsafe {
                 type RunInstructionsFn = unsafe extern "C" fn(
-                    *mut u64, usize, *mut u8, *const bool, usize, *mut u64, usize, *mut u32
+                    *mut u128, usize, *mut u8, *const bool, usize, *mut u64, usize, *mut u32
                 ) -> usize;
 
                 let func: libloading::Symbol<RunInstructionsFn> = lib

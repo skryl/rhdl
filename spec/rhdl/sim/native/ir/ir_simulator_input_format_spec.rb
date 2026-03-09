@@ -2,6 +2,7 @@
 
 require 'spec_helper'
 require 'json'
+require 'stringio'
 require 'rhdl/codegen'
 
 module RHDL
@@ -110,7 +111,7 @@ RSpec.describe 'IR simulator input formats' do
       ].each do |backend, available|
         next unless available
 
-        circt_json = RHDL::Sim::Native::IR.sim_json(ir, format: :circt)
+        circt_json = RHDL::Sim::Native::IR.sim_json(ir, backend: backend, format: :circt)
         sim = RHDL::Sim::Native::IR::Simulator.new(
           circt_json,
           backend: backend,
@@ -125,6 +126,65 @@ RSpec.describe 'IR simulator input formats' do
           step(sim, **inputs)
           expect(sim.peek('q')).to eq(expected_q[idx])
         end
+      end
+    end
+
+    it 'runs expected counter behavior without Ruby-side signal width extraction' do
+      ir = counter_ir
+      sequence = [
+        { rst: true, en: false },
+        { rst: false, en: true },
+        { rst: false, en: true },
+        { rst: false, en: false },
+        { rst: false, en: true }
+      ]
+      expected_q = [0, 1, 2, 2, 3]
+
+      [
+        [:interpreter, RHDL::Sim::Native::IR::INTERPRETER_AVAILABLE],
+        [:jit, RHDL::Sim::Native::IR::JIT_AVAILABLE],
+        [:compiler, RHDL::Sim::Native::IR::COMPILER_AVAILABLE]
+      ].each do |backend, available|
+        next unless available
+
+        circt_json = RHDL::Sim::Native::IR.sim_json(ir, backend: backend, format: :circt)
+        sim = RHDL::Sim::Native::IR::Simulator.new(
+          circt_json,
+          backend: backend,
+          input_format: :circt,
+          skip_signal_widths: true
+        )
+        sim.reset
+
+        sequence.each_with_index do |inputs, idx|
+          step(sim, **inputs)
+          expect(sim.peek('q')).to eq(expected_q[idx])
+        end
+      end
+    end
+
+    it 'can discard retained input JSON after native initialization' do
+      ir = counter_ir
+
+      [
+        [:interpreter, RHDL::Sim::Native::IR::INTERPRETER_AVAILABLE],
+        [:jit, RHDL::Sim::Native::IR::JIT_AVAILABLE],
+        [:compiler, RHDL::Sim::Native::IR::COMPILER_AVAILABLE]
+      ].each do |backend, available|
+        next unless available
+
+        circt_json = RHDL::Sim::Native::IR.sim_json(ir, backend: backend, format: :circt)
+        sim = RHDL::Sim::Native::IR::Simulator.new(
+          circt_json,
+          backend: backend,
+          input_format: :circt,
+          retain_ir_json: false
+        )
+
+        expect(sim.ir_json).to be_nil
+        sim.reset
+        step(sim, rst: true, en: false)
+        expect(sim.peek('q')).to eq(0)
       end
     end
 
@@ -149,6 +209,44 @@ RSpec.describe 'IR simulator input formats' do
         expect(sim.input_format).to eq(:circt)
         expect(sim.effective_input_format).to eq(:circt)
       end
+    end
+
+    it 'streams compact CIRCT runtime JSON for all native backends' do
+      ir = counter_ir
+      expected = StringIO.new
+      RHDL::Codegen::CIRCT::RuntimeJSON.dump_to_io(ir, expected, compact_exprs: true)
+
+      [
+        [:interpreter, RHDL::Sim::Native::IR::INTERPRETER_AVAILABLE],
+        [:jit, RHDL::Sim::Native::IR::JIT_AVAILABLE],
+        [:compiler, RHDL::Sim::Native::IR::COMPILER_AVAILABLE]
+      ].each do |backend, available|
+        next unless available
+
+        backend_json = RHDL::Sim::Native::IR.sim_json(ir, backend: backend)
+        expect(backend_json).to eq(expected.string)
+      end
+    end
+  end
+
+  describe 'simulator lifecycle' do
+    it 'destroys the native context at most once when closed repeatedly' do
+      sim = RHDL::Sim::Native::IR::Simulator.allocate
+      ctx = Fiddle::Pointer.malloc(1)
+      destroy_calls = []
+
+      sim.instance_variable_set(:@ctx, ctx)
+      sim.instance_variable_set(:@ctx_state, {
+        ptr: ctx,
+        destroy: ->(ptr) { destroy_calls << ptr.to_i },
+        closed: false
+      })
+
+      expect(sim.close).to be(true)
+      expect(sim.close).to be(false)
+      expect(sim.closed?).to be(true)
+      expect(sim.instance_variable_get(:@ctx)).to be_nil
+      expect(destroy_calls).to eq([ctx.to_i])
     end
   end
 

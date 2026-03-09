@@ -54,6 +54,13 @@ RSpec.describe RHDL::Examples::AO486::Import::CpuTracePackage do
     end
   end
 
+  def require_ir_backend!
+    backend = AO486SpecSupport::IRBackendHelper.preferred_ir_backend
+    skip 'IR compiler/JIT backend unavailable' unless backend
+
+    backend
+  end
+
   it 'adds stable retire-trace ports to the imported ao486 package', timeout: 240 do
     require_import_tool!
     skip 'circt-opt not available' unless HdlToolchain.which('circt-opt')
@@ -163,17 +170,18 @@ RSpec.describe RHDL::Examples::AO486::Import::CpuTracePackage do
     end
   end
 
-  it 'keeps top-level trace ports aligned with internal pipeline signals on JIT runtime', timeout: 240 do
+  it 'keeps top-level trace ports aligned with internal pipeline signals on the selected IR runtime', timeout: 240 do
     require_import_tool!
     require_program_assembler!
     skip 'circt-opt not available' unless HdlToolchain.which('circt-opt')
-    skip 'IR JIT backend unavailable' unless RHDL::Sim::Native::IR::JIT_AVAILABLE
+    backend = require_ir_backend!
 
     Dir.mktmpdir('ao486_cpu_trace_runtime_out') do |out_dir|
       Dir.mktmpdir('ao486_cpu_trace_runtime_ws') do |workspace|
         result = run_importer(out_dir: out_dir, workspace: workspace)
         runtime = RHDL::Examples::AO486::Import::CpuParityRuntime.build_from_cleaned_mlir(
-          File.read(result.normalized_core_mlir_path)
+          File.read(result.normalized_core_mlir_path),
+          backend: backend
         )
         RHDL::Examples::AO486::Import::CpuParityPrograms.fetch(:prime_sieve).load_into(runtime)
         runtime.reset!

@@ -356,11 +356,11 @@ impl GameBoyExtension {
         unsafe {
             let lib = core.compiled_lib.as_ref().unwrap();
             type RunGbCyclesFn = unsafe extern "C" fn(
-                signals: *mut u64,
+                signals: *mut u128,
                 signals_len: usize,
                 n: usize,
-                old_clocks: *mut u64,
-                next_regs: *mut u64,
+                old_clocks: *mut u128,
+                next_regs: *mut u128,
                 framebuffer: *mut u8,
                 lcd_state: *mut GbLcdState,
                 rom: *const u8,
@@ -534,11 +534,11 @@ impl GameBoyExtension {
         // run_gb_cycles function
         code.push_str("#[no_mangle]\n");
         code.push_str("pub unsafe extern \"C\" fn run_gb_cycles(\n");
-        code.push_str("    signals: *mut u64,\n");
+        code.push_str("    signals: *mut u128,\n");
         code.push_str("    signals_len: usize,\n");
         code.push_str("    n: usize,\n");
-        code.push_str("    _old_clocks: *mut u64,\n");
-        code.push_str("    _next_regs: *mut u64,\n");
+        code.push_str("    _old_clocks: *mut u128,\n");
+        code.push_str("    _next_regs: *mut u128,\n");
         code.push_str("    framebuffer: *mut u8,\n");
         code.push_str("    lcd_state: *mut GbLcdState,\n");
         code.push_str("    rom: *const u8,\n");
@@ -553,8 +553,8 @@ impl GameBoyExtension {
         code.push_str("    wram_len: usize,\n");
         code.push_str(") -> GbCycleResult {\n");
         code.push_str("    let signals = std::slice::from_raw_parts_mut(signals, signals_len);\n");
-        code.push_str(&format!("    let mut old_clocks = [0u64; {}];\n", num_clocks));
-        code.push_str(&format!("    let mut next_regs = [0u64; {}];\n", num_regs.max(1)));
+        code.push_str(&format!("    let mut old_clocks = [0u128; {}];\n", num_clocks));
+        code.push_str(&format!("    let mut next_regs = [0u128; {}];\n", num_regs.max(1)));
         code.push_str("    let framebuffer = std::slice::from_raw_parts_mut(framebuffer, 160 * 144);\n");
         code.push_str("    let lcd = &mut *lcd_state;\n");
         code.push_str("    let rom = std::slice::from_raw_parts(rom, rom_len);\n");
@@ -625,7 +625,7 @@ impl GameBoyExtension {
         if cart_rd_idx != INVALID_SIGNAL_IDX {
             code.push_str(&format!("        let cart_rd = signals[{}];\n", cart_rd_idx));
         } else {
-            code.push_str("        let cart_rd = 0u64;\n");
+            code.push_str("        let cart_rd = 0u128;\n");
         }
         if ext_bus_addr_idx != INVALID_SIGNAL_IDX {
             code.push_str(&format!("        let ext_addr = signals[{}] as usize;\n", ext_bus_addr_idx));
@@ -635,13 +635,13 @@ impl GameBoyExtension {
         if ext_bus_a15_idx != INVALID_SIGNAL_IDX {
             code.push_str(&format!("        let a15 = signals[{}];\n", ext_bus_a15_idx));
         } else {
-            code.push_str("        let a15 = 0u64;\n");
+            code.push_str("        let a15 = 0u128;\n");
         }
         code.push_str("        if cart_rd != 0 {\n");
         code.push_str("            let full_addr = ext_addr | ((a15 as usize) << 15);\n");
         code.push_str("            if full_addr < rom_len {\n");
         if cart_do_idx != INVALID_SIGNAL_IDX {
-            code.push_str(&format!("                signals[{}] = rom[full_addr] as u64;\n", cart_do_idx));
+            code.push_str(&format!("                signals[{}] = rom[full_addr] as u128;\n", cart_do_idx));
         }
         code.push_str("            }\n");
         code.push_str("        }\n\n");
@@ -650,7 +650,7 @@ impl GameBoyExtension {
         if sel_boot_rom_idx != INVALID_SIGNAL_IDX {
             code.push_str(&format!("        let sel_boot_rom = signals[{}];\n", sel_boot_rom_idx));
         } else {
-            code.push_str("        let sel_boot_rom = 0u64;\n");
+            code.push_str("        let sel_boot_rom = 0u128;\n");
         }
         code.push_str("        if sel_boot_rom != 0 {\n");
         if boot_rom_addr_idx != INVALID_SIGNAL_IDX {
@@ -660,7 +660,7 @@ impl GameBoyExtension {
         }
         code.push_str("            if boot_addr < boot_rom_len {\n");
         if boot_do_idx != INVALID_SIGNAL_IDX {
-            code.push_str(&format!("                signals[{}] = boot_rom[boot_addr] as u64;\n", boot_do_idx));
+            code.push_str(&format!("                signals[{}] = boot_rom[boot_addr] as u128;\n", boot_do_idx));
         }
         code.push_str("            }\n");
         code.push_str("        }\n\n");
@@ -673,7 +673,7 @@ impl GameBoyExtension {
         }
         code.push_str("        if vram_addr_cpu < vram_len {\n");
         if vram0_q_a_idx != INVALID_SIGNAL_IDX {
-            code.push_str(&format!("            signals[{}] = vram[vram_addr_cpu] as u64;\n", vram0_q_a_idx));
+            code.push_str(&format!("            signals[{}] = vram[vram_addr_cpu] as u128;\n", vram0_q_a_idx));
         }
         code.push_str("        }\n\n");
 
@@ -685,10 +685,10 @@ impl GameBoyExtension {
         }
         code.push_str("        if vram_addr_ppu < vram_len {\n");
         if vram0_q_b_idx != INVALID_SIGNAL_IDX {
-            code.push_str(&format!("            signals[{}] = vram[vram_addr_ppu] as u64;\n", vram0_q_b_idx));
+            code.push_str(&format!("            signals[{}] = vram[vram_addr_ppu] as u128;\n", vram0_q_b_idx));
         }
         if video_unit_vram_data_idx != INVALID_SIGNAL_IDX {
-            code.push_str(&format!("            signals[{}] = vram[vram_addr_ppu] as u64;\n", video_unit_vram_data_idx));
+            code.push_str(&format!("            signals[{}] = vram[vram_addr_ppu] as u128;\n", video_unit_vram_data_idx));
         }
         code.push_str("        }\n\n");
 
@@ -700,7 +700,7 @@ impl GameBoyExtension {
         }
         code.push_str("        if zpram_addr < zpram_len {\n");
         if zpram_q_a_idx != INVALID_SIGNAL_IDX {
-            code.push_str(&format!("            signals[{}] = zpram[zpram_addr] as u64;\n", zpram_q_a_idx));
+            code.push_str(&format!("            signals[{}] = zpram[zpram_addr] as u128;\n", zpram_q_a_idx));
         }
         code.push_str("        }\n\n");
 
@@ -712,7 +712,7 @@ impl GameBoyExtension {
         }
         code.push_str("        if wram_addr < wram_len {\n");
         if wram_q_a_idx != INVALID_SIGNAL_IDX {
-            code.push_str(&format!("            signals[{}] = wram[wram_addr] as u64;\n", wram_q_a_idx));
+            code.push_str(&format!("            signals[{}] = wram[wram_addr] as u128;\n", wram_q_a_idx));
         }
         code.push_str("        }\n\n");
 
@@ -729,7 +729,7 @@ impl GameBoyExtension {
         if vram_wren_cpu_idx != INVALID_SIGNAL_IDX {
             code.push_str(&format!("        let vram_wren = signals[{}];\n", vram_wren_cpu_idx));
         } else {
-            code.push_str("        let vram_wren = 0u64;\n");
+            code.push_str("        let vram_wren = 0u128;\n");
         }
         code.push_str("        if vram_wren != 0 {\n");
         if vram_addr_cpu_idx != INVALID_SIGNAL_IDX {
@@ -748,7 +748,7 @@ impl GameBoyExtension {
         if zpram_wren_idx != INVALID_SIGNAL_IDX {
             code.push_str(&format!("        let zpram_wren = signals[{}];\n", zpram_wren_idx));
         } else {
-            code.push_str("        let zpram_wren = 0u64;\n");
+            code.push_str("        let zpram_wren = 0u128;\n");
         }
         code.push_str("        if zpram_wren != 0 {\n");
         if zpram_addr_idx != INVALID_SIGNAL_IDX {
@@ -767,7 +767,7 @@ impl GameBoyExtension {
         if wram_wren_idx != INVALID_SIGNAL_IDX {
             code.push_str(&format!("        let wram_wren = signals[{}];\n", wram_wren_idx));
         } else {
-            code.push_str("        let wram_wren = 0u64;\n");
+            code.push_str("        let wram_wren = 0u128;\n");
         }
         code.push_str("        if wram_wren != 0 {\n");
         if wram_addr_idx != INVALID_SIGNAL_IDX {
@@ -786,12 +786,12 @@ impl GameBoyExtension {
         if lcd_clkena_idx != INVALID_SIGNAL_IDX {
             code.push_str(&format!("        let lcd_clkena = signals[{}];\n", lcd_clkena_idx));
         } else {
-            code.push_str("        let lcd_clkena = 0u64;\n");
+            code.push_str("        let lcd_clkena = 0u128;\n");
         }
         if lcd_vsync_idx != INVALID_SIGNAL_IDX {
             code.push_str(&format!("        let lcd_vsync = signals[{}];\n", lcd_vsync_idx));
         } else {
-            code.push_str("        let lcd_vsync = 0u64;\n");
+            code.push_str("        let lcd_vsync = 0u128;\n");
         }
         if lcd_data_gb_idx != INVALID_SIGNAL_IDX {
             code.push_str(&format!("        let lcd_data = (signals[{}] & 0x3) as u8;\n", lcd_data_gb_idx));

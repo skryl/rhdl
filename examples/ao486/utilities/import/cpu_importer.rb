@@ -84,6 +84,14 @@ module RHDL
             defined = include_paths.flat_map { |file| extract_defined_modules(File.read(file)) }.uniq
             stub_ports = stub_ports.reject { |module_name, _ports| defined.include?(module_name) }
 
+            metadata = prepared_metadata(
+              source_root: source_tree_root,
+              staged_source_path: staged_source_path,
+              workspace: workspace,
+              include_paths: include_paths,
+              module_source_relpaths: module_source_relpaths
+            )
+
             write_stub_file(stub_path, stub_ports)
             write_wrapper_file(wrapper_path, include_paths: include_paths, stub_path: stub_path)
 
@@ -98,7 +106,7 @@ module RHDL
               stub_modules: stub_ports.keys.sort,
               module_source_relpaths: module_source_relpaths,
               command_chdir: (strategy == :tree ? workspace : nil)
-            }
+            }.merge(metadata)
           end
 
           def discover_tree_module_files(force_stub_modules:)

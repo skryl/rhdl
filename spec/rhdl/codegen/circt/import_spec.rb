@@ -907,7 +907,60 @@ RSpec.describe RHDL::Codegen::CIRCT::Import do
       result = described_class.from_mlir(mlir, strict: true)
       expect(result.success?).to be(true), result.diagnostics.map(&:message).join("\n")
       expect(result.diagnostics.any? { |diag| diag.op == 'parser' }).to be(false)
-      expect(result.modules.first.assigns.first.expr).to be_a(RHDL::Codegen::CIRCT::IR::Mux)
+      expr = result.modules.first.assigns.first.expr
+      expect(expr).to be_a(RHDL::Codegen::CIRCT::IR::Mux)
+
+      select_terminal = lambda do |node, selector_value|
+        while node.is_a?(RHDL::Codegen::CIRCT::IR::Mux)
+          condition = node.condition
+          expect(condition).to be_a(RHDL::Codegen::CIRCT::IR::BinaryOp)
+          expect(condition.left).to be_a(RHDL::Codegen::CIRCT::IR::Signal)
+          expect(condition.left.name).to eq('idx')
+          literal_value = condition.right.value
+          take_true = case condition.op
+                      when :==
+                        selector_value == literal_value
+                      when :<
+                        selector_value < literal_value
+                      else
+                        raise "unexpected selector op #{condition.op.inspect}"
+                      end
+          node = take_true ? node.when_true : node.when_false
+        end
+        node
+      end
+
+      expect(select_terminal.call(expr, 0).name).to eq('b')
+      expect(select_terminal.call(expr, 1).name).to eq('a')
+    end
+
+    it 'parses hw.aggregate_constant and hw.array_get using CIRCT index order' do
+      mlir = <<~MLIR
+        hw.module @aggregate_array_get(%idx: i2) -> (y: i8) {
+          %arr = hw.aggregate_constant [1 : i8, 2 : i8, 3 : i8, 4 : i8] : !hw.array<4xi8>
+          %sel = hw.array_get %arr[%idx] : !hw.array<4xi8>, i2
+          hw.output %sel : i8
+        }
+      MLIR
+
+      result = described_class.from_mlir(mlir, strict: true)
+      expect(result.success?).to be(true), result.diagnostics.map(&:message).join("\n")
+      expr = result.modules.first.assigns.first.expr
+
+      select_terminal = lambda do |node, selector_value|
+        while node.is_a?(RHDL::Codegen::CIRCT::IR::Mux)
+          condition = node.condition
+          literal_value = condition.right.value
+          take_true = condition.op == :< ? selector_value < literal_value : selector_value == literal_value
+          node = take_true ? node.when_true : node.when_false
+        end
+        node
+      end
+
+      expect(select_terminal.call(expr, 0).value).to eq(4)
+      expect(select_terminal.call(expr, 1).value).to eq(3)
+      expect(select_terminal.call(expr, 2).value).to eq(2)
+      expect(select_terminal.call(expr, 3).value).to eq(1)
     end
 
     it 'parses hw.bitcast int<->array forms and llhd.sig.array_get' do

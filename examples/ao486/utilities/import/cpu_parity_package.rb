@@ -25,8 +25,7 @@ module RHDL
 
             modules = Array(imported.modules).map { |mod| CpuTracePackage.dup_module(mod) }
             patch_icache_bypass!(modules)
-            patch_prefetch_fifo_passthrough!(modules)
-            patch_prefetch_startup_limit!(modules)
+            patch_prefetch_reference_flow!(modules)
             patch_fetch_threshold_logic!(modules)
 
             package = CpuTracePackage.build_from_modules(modules)
@@ -51,59 +50,112 @@ module RHDL
             inst = CpuTracePackage.find_instance!(mod, 'l1_icache_inst')
             ir = RHDL::Codegen::CIRCT::IR
 
-            ensure_reg(mod, 'parity_last_readcode_done', 1, 0)
-            rewrite_icache_partial_length_literals!(mod)
+            ensure_reg(mod, 'parity_readcode_burst_active', 1, 0)
+            ensure_reg(mod, 'parity_readcode_beat_index', 4, 0)
 
             cpu_valid_name = output_signal_name!(inst, 'CPU_VALID')
             cpu_done_name = output_signal_name!(inst, 'CPU_DONE')
             cpu_data_name = output_signal_name!(inst, 'CPU_DATA')
             mem_req_name = output_signal_name!(inst, 'MEM_REQ')
             mem_addr_name = output_signal_name!(inst, 'MEM_ADDR')
+            rst_n_expr = CpuTracePackage.signal('rst_n', 1)
+            pr_reset_expr = CpuTracePackage.signal('pr_reset', 1)
 
             cpu_req_expr = connection_expr!(inst, 'CPU_REQ')
             cpu_addr_expr = connection_expr!(inst, 'CPU_ADDR')
             prefetched_length_expr = CpuTracePackage.signal('prefetched_length', 5)
             remaining_length_expr = CpuTracePackage.signal('length', 5)
+            readcode_burst_active = CpuTracePackage.signal('parity_readcode_burst_active', 1)
+            readcode_beat_index = CpuTracePackage.signal('parity_readcode_beat_index', 4)
             has_pending_words = CpuTracePackage.binop(:!=, prefetched_length_expr, ir::Literal.new(value: 0, width: 5), 1)
             final_word = CpuTracePackage.binop(:<=, remaining_length_expr, prefetched_length_expr, 1)
-            new_readcode_word = CpuTracePackage.binop(
-              :&,
-              CpuTracePackage.signal('readcode_done', 1),
-              CpuTracePackage.binop(:^, CpuTracePackage.signal('parity_last_readcode_done', 1), ir::Literal.new(value: 1, width: 1), 1),
+            readcode_word_valid = CpuTracePackage.signal('readcode_done', 1)
+            in_cpu_window = CpuTracePackage.binop(
+              :<,
+              readcode_beat_index,
+              ir::Literal.new(value: 4, width: 4),
               1
+            )
+            cpu_visible_word = CpuTracePackage.binop(
+              :&,
+              readcode_word_valid,
+              CpuTracePackage.binop(:&, in_cpu_window, has_pending_words, 1),
+              1
+            )
+            burst_active_next = ir::Mux.new(
+              condition: CpuTracePackage.binop(
+                :|,
+                CpuTracePackage.binop(:^, rst_n_expr, ir::Literal.new(value: 1, width: 1), 1),
+                pr_reset_expr,
+                1
+              ),
+              when_true: ir::Literal.new(value: 0, width: 1),
+              when_false: ir::Mux.new(
+                condition: readcode_word_valid,
+                when_true: ir::Mux.new(
+                  condition: readcode_burst_active,
+                  when_true: ir::Mux.new(
+                    condition: CpuTracePackage.binop(:==, readcode_beat_index, ir::Literal.new(value: 7, width: 4), 1),
+                    when_true: ir::Literal.new(value: 0, width: 1),
+                    when_false: ir::Literal.new(value: 1, width: 1),
+                    width: 1
+                  ),
+                  when_false: ir::Literal.new(value: 1, width: 1),
+                  width: 1
+                ),
+                when_false: ir::Literal.new(value: 0, width: 1),
+                width: 1
+              ),
+              width: 1
+            )
+            beat_index_next = ir::Mux.new(
+              condition: CpuTracePackage.binop(
+                :|,
+                CpuTracePackage.binop(:^, rst_n_expr, ir::Literal.new(value: 1, width: 1), 1),
+                pr_reset_expr,
+                1
+              ),
+              when_true: ir::Literal.new(value: 0, width: 4),
+              when_false: ir::Mux.new(
+                condition: readcode_word_valid,
+                when_true: ir::Mux.new(
+                  condition: readcode_burst_active,
+                  when_true: ir::Mux.new(
+                    condition: CpuTracePackage.binop(:==, readcode_beat_index, ir::Literal.new(value: 7, width: 4), 1),
+                    when_true: ir::Literal.new(value: 0, width: 4),
+                    when_false: CpuTracePackage.binop(:+, readcode_beat_index, ir::Literal.new(value: 1, width: 4), 4),
+                    width: 4
+                  ),
+                  when_false: ir::Literal.new(value: 1, width: 4),
+                  width: 4
+                ),
+                when_false: ir::Literal.new(value: 0, width: 4),
+                width: 4
+              ),
+              width: 4
             )
 
             mod.instances.reject! { |entry| entry.name.to_s == 'l1_icache_inst' }
             mod.assigns << CpuTracePackage.assign(mem_req_name, cpu_req_expr)
             mod.assigns << CpuTracePackage.assign(mem_addr_name, cpu_addr_expr)
-            mod.assigns << CpuTracePackage.assign(
-              cpu_valid_name,
-              CpuTracePackage.binop(:&, new_readcode_word, has_pending_words, 1)
-            )
+            mod.assigns << CpuTracePackage.assign(cpu_valid_name, cpu_visible_word)
             mod.assigns << CpuTracePackage.assign(cpu_data_name, CpuTracePackage.signal('readcode_partial', 32))
             mod.assigns << CpuTracePackage.assign(
               cpu_done_name,
-              CpuTracePackage.binop(:&, new_readcode_word, final_word, 1)
+              CpuTracePackage.binop(
+                :|,
+                CpuTracePackage.binop(:&, cpu_visible_word, final_word, 1),
+                pr_reset_expr,
+                1
+              )
             )
             mod.processes << ir::Process.new(
-              name: 'parity_readcode_edge',
+              name: 'parity_icache_burst_window',
               clocked: true,
               clock: 'clk',
               statements: [
-                ir::SeqAssign.new(
-                  target: 'parity_last_readcode_done',
-                  expr: ir::Mux.new(
-                    condition: CpuTracePackage.binop(
-                      :|,
-                      CpuTracePackage.binop(:^, CpuTracePackage.signal('rst_n', 1), ir::Literal.new(value: 1, width: 1), 1),
-                      CpuTracePackage.signal('pr_reset', 1),
-                      1
-                    ),
-                    when_true: ir::Literal.new(value: 0, width: 1),
-                    when_false: CpuTracePackage.signal('readcode_done', 1),
-                    width: 1
-                  )
-                )
+                ir::SeqAssign.new(target: 'parity_readcode_burst_active', expr: burst_active_next),
+                ir::SeqAssign.new(target: 'parity_readcode_beat_index', expr: beat_index_next)
               ]
             )
           end
@@ -163,7 +215,7 @@ module RHDL
               ],
               width: 68
             )
-            accept_data = ir::Mux.new(
+            incoming_payload = ir::Mux.new(
               condition: limit_do,
               when_true: gp_payload,
               when_false: ir::Mux.new(
@@ -177,7 +229,7 @@ module RHDL
             accept_data = ir::Mux.new(
               condition: fifo_valid,
               when_true: fifo_data,
-              when_false: accept_data,
+              when_false: incoming_payload,
               width: 68
             )
             accept_empty = CpuTracePackage.binop(
@@ -219,7 +271,7 @@ module RHDL
                     condition: accept_do,
                     when_true: ir::Mux.new(
                       condition: any_valid,
-                      when_true: write_payload,
+                      when_true: incoming_payload,
                       when_false: fifo_data,
                       width: 68
                     ),
@@ -228,7 +280,7 @@ module RHDL
                   ),
                   when_false: ir::Mux.new(
                     condition: any_valid,
-                    when_true: write_payload,
+                    when_true: incoming_payload,
                     when_false: fifo_data,
                     width: 68
                   ),
@@ -274,6 +326,256 @@ module RHDL
 
             stmt = proc.instance_variable_get(:@statements).first
             stmt.instance_variable_set(:@expr, rewrite_prefetch_limit_expr(stmt.expr))
+          end
+
+          def patch_prefetch_reference_flow!(modules)
+            mod = CpuTracePackage.find_module!(modules, 'prefetch')
+            ir = RHDL::Codegen::CIRCT::IR
+
+            rst_n = CpuTracePackage.signal('rst_n', 1)
+            pr_reset = CpuTracePackage.signal('pr_reset', 1)
+            reset_prefetch = CpuTracePackage.signal('reset_prefetch', 1)
+            prefetch_cpl = CpuTracePackage.signal('prefetch_cpl', 2)
+            prefetch_eip = CpuTracePackage.signal('prefetch_eip', 32)
+            cs_cache = CpuTracePackage.signal('cs_cache', 64)
+            prefetched_do = CpuTracePackage.signal('prefetched_do', 1)
+            prefetched_length = CpuTracePackage.signal('prefetched_length', 5)
+            prefetched_accept_do = CpuTracePackage.signal('prefetched_accept_do', 1)
+            prefetched_accept_length = CpuTracePackage.signal('prefetched_accept_length', 4)
+            limit = CpuTracePackage.signal('limit', 32)
+            linear = CpuTracePackage.signal('linear', 32)
+            delivered_eip = CpuTracePackage.signal('delivered_eip', 32)
+            limit_signaled = CpuTracePackage.signal('limit_signaled', 1)
+            prefetched_accept_do_1 = CpuTracePackage.signal('prefetched_accept_do_1', 1)
+            prefetched_accept_length_1 = CpuTracePackage.signal('prefetched_accept_length_1', 4)
+
+            one1 = ir::Literal.new(value: 1, width: 1)
+            one32 = ir::Literal.new(value: 1, width: 32)
+            zero1 = ir::Literal.new(value: 0, width: 1)
+            zero32 = ir::Literal.new(value: 0, width: 32)
+            startup_linear = ir::Literal.new(value: 0xFFFF0, width: 32)
+            startup_limit = ir::Literal.new(value: 65_535, width: 32)
+            max_fetch_len32 = ir::Literal.new(value: 16, width: 32)
+            max_fetch_len5 = ir::Literal.new(value: 16, width: 5)
+            user_cpl = ir::Literal.new(value: 3, width: 2)
+
+            cs_base = ir::Concat.new(
+              parts: [
+                ir::Slice.new(base: cs_cache, range: 56..63, width: 8),
+                ir::Slice.new(base: cs_cache, range: 16..39, width: 24)
+              ],
+              width: 32
+            )
+            cs_limit_high = ir::Slice.new(base: cs_cache, range: 48..51, width: 4)
+            cs_limit_low = ir::Slice.new(base: cs_cache, range: 0..15, width: 16)
+            cs_limit = ir::Mux.new(
+              condition: ir::Slice.new(base: cs_cache, range: 55..55, width: 1),
+              when_true: ir::Concat.new(
+                parts: [
+                  cs_limit_high,
+                  cs_limit_low,
+                  ir::Literal.new(value: 0xFFF, width: 12)
+                ],
+                width: 32
+              ),
+              when_false: ir::Concat.new(
+                parts: [
+                  ir::Literal.new(value: 0, width: 12),
+                  cs_limit_high,
+                  cs_limit_low
+                ],
+                width: 32
+              ),
+              width: 32
+            )
+            prefetched_length_ext = ir::Concat.new(
+              parts: [
+                ir::Literal.new(value: 0, width: 27),
+                prefetched_length
+              ],
+              width: 32
+            )
+            accepted_length_ext = ir::Concat.new(
+              parts: [
+                ir::Literal.new(value: 0, width: 28),
+                prefetched_accept_length_1
+              ],
+              width: 32
+            )
+            current_length = ir::Mux.new(
+              condition: CpuTracePackage.binop(:<, limit, prefetched_length_ext, 1),
+              when_true: ir::Slice.new(base: limit, range: 0..4, width: 5),
+              when_false: prefetched_length,
+              width: 5
+            )
+            current_length_ext = ir::Concat.new(
+              parts: [
+                ir::Literal.new(value: 0, width: 27),
+                current_length
+              ],
+              width: 32
+            )
+            reset_limit = ir::Mux.new(
+              condition: CpuTracePackage.binop(:>=, cs_limit, prefetch_eip, 1),
+              when_true: CpuTracePackage.binop(
+                :+,
+                CpuTracePackage.binop(:-, cs_limit, prefetch_eip, 32),
+                one32,
+                32
+              ),
+              when_false: zero32,
+              width: 32
+            )
+            limit_next = ir::Mux.new(
+              condition: CpuTracePackage.binop(:^, rst_n, one1, 1),
+              when_true: startup_limit,
+              when_false: ir::Mux.new(
+                condition: pr_reset,
+                when_true: reset_limit,
+                when_false: ir::Mux.new(
+                  condition: reset_prefetch,
+                  when_true: reset_limit,
+                  when_false: ir::Mux.new(
+                    condition: prefetched_do,
+                    when_true: CpuTracePackage.binop(:-, limit, current_length_ext, 32),
+                    when_false: limit,
+                    width: 32
+                  ),
+                  width: 32
+                ),
+                width: 32
+              ),
+              width: 32
+            )
+            reset_linear = CpuTracePackage.binop(:+, cs_base, prefetch_eip, 32)
+            linear_reset_prefetch = ir::Mux.new(
+              condition: prefetched_accept_do_1,
+              when_true: CpuTracePackage.binop(:+, delivered_eip, accepted_length_ext, 32),
+              when_false: delivered_eip,
+              width: 32
+            )
+            linear_pr_reset = linear_reset_prefetch
+            linear_next = ir::Mux.new(
+              condition: CpuTracePackage.binop(:^, rst_n, one1, 1),
+              when_true: startup_linear,
+              when_false: ir::Mux.new(
+                condition: pr_reset,
+                when_true: linear_pr_reset,
+                when_false: ir::Mux.new(
+                  condition: reset_prefetch,
+                  when_true: linear_reset_prefetch,
+                  when_false: ir::Mux.new(
+                    condition: prefetched_do,
+                    when_true: CpuTracePackage.binop(:+, linear, current_length_ext, 32),
+                    when_false: linear,
+                    width: 32
+                  ),
+                  width: 32
+                ),
+                width: 32
+              ),
+              width: 32
+            )
+            delivered_eip_pr_reset = linear_reset_prefetch
+            delivered_eip_next = ir::Mux.new(
+              condition: CpuTracePackage.binop(:^, rst_n, one1, 1),
+              when_true: startup_linear,
+              when_false: ir::Mux.new(
+                condition: pr_reset,
+                when_true: delivered_eip_pr_reset,
+                when_false: ir::Mux.new(
+                  condition: prefetched_accept_do_1,
+                  when_true: CpuTracePackage.binop(:+, delivered_eip, accepted_length_ext, 32),
+                  when_false: delivered_eip,
+                  width: 32
+                ),
+                width: 32
+              ),
+              width: 32
+            )
+            signal_limit_do = CpuTracePackage.binop(
+              :&,
+              CpuTracePackage.binop(:==, limit, zero32, 1),
+              CpuTracePackage.binop(:^, limit_signaled, one1, 1),
+              1
+            )
+            limit_signaled_next = ir::Mux.new(
+              condition: CpuTracePackage.binop(
+                :|,
+                CpuTracePackage.binop(:^, rst_n, one1, 1),
+                pr_reset,
+                1
+              ),
+              when_true: zero1,
+              when_false: ir::Mux.new(
+                condition: signal_limit_do,
+                when_true: one1,
+                when_false: limit_signaled,
+                width: 1
+              ),
+              width: 1
+            )
+
+            mod.processes.clear
+            mod.processes.concat(
+              [
+                ir::Process.new(
+                  name: 'parity_prefetch_limit',
+                  clocked: true,
+                  clock: 'clk',
+                  statements: [ir::SeqAssign.new(target: 'limit', expr: limit_next)]
+                ),
+                ir::Process.new(
+                  name: 'parity_prefetch_accept_do',
+                  clocked: true,
+                  clock: 'clk',
+                  statements: [ir::SeqAssign.new(target: 'prefetched_accept_do_1', expr: prefetched_accept_do)]
+                ),
+                ir::Process.new(
+                  name: 'parity_prefetch_accept_length',
+                  clocked: true,
+                  clock: 'clk',
+                  statements: [ir::SeqAssign.new(target: 'prefetched_accept_length_1', expr: prefetched_accept_length)]
+                ),
+                ir::Process.new(
+                  name: 'parity_prefetch_linear',
+                  clocked: true,
+                  clock: 'clk',
+                  statements: [ir::SeqAssign.new(target: 'linear', expr: linear_next)]
+                ),
+                ir::Process.new(
+                  name: 'parity_prefetch_delivered_eip',
+                  clocked: true,
+                  clock: 'clk',
+                  statements: [ir::SeqAssign.new(target: 'delivered_eip', expr: delivered_eip_next)]
+                ),
+                ir::Process.new(
+                  name: 'parity_prefetch_limit_signaled',
+                  clocked: true,
+                  clock: 'clk',
+                  statements: [ir::SeqAssign.new(target: 'limit_signaled', expr: limit_signaled_next)]
+                )
+              ]
+            )
+
+            mod.assigns.reject! do |assign|
+              %w[prefetch_address prefetch_length prefetch_su prefetchfifo_signal_limit_do delivered_eip].include?(assign.target.to_s)
+            end
+            mod.assigns << CpuTracePackage.assign('prefetch_address', linear)
+            mod.assigns << CpuTracePackage.assign(
+              'prefetch_length',
+              ir::Mux.new(
+                condition: CpuTracePackage.binop(:>, limit, max_fetch_len32, 1),
+                when_true: max_fetch_len5,
+                when_false: ir::Slice.new(base: limit, range: 0..4, width: 5),
+                width: 5
+              )
+            )
+            mod.assigns << CpuTracePackage.assign(
+              'prefetch_su',
+              CpuTracePackage.binop(:==, prefetch_cpl, user_cpl, 1)
+            )
+            mod.assigns << CpuTracePackage.assign('prefetchfifo_signal_limit_do', signal_limit_do)
           end
 
           def patch_fetch_threshold_logic!(modules)

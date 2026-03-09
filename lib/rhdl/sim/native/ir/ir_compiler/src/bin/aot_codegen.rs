@@ -62,11 +62,11 @@ pub struct GbCycleResult {
 
 #[no_mangle]
 pub unsafe extern "C" fn run_gb_cycles(
-    _signals: *mut u64,
+    _signals: *mut u128,
     _signals_len: usize,
     _n: usize,
-    _old_clocks: *mut u64,
-    _next_regs: *mut u64,
+    _old_clocks: *mut u128,
+    _next_regs: *mut u128,
     _framebuffer: *mut u8,
     _lcd_state: *mut GbLcdState,
     _rom: *const u8,
@@ -147,7 +147,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     code.push_str("#![allow(unused_variables)]\n");
     code.push_str("#![allow(unused_mut)]\n\n");
     code.push_str("#![allow(unused_parens)]\n\n");
-    code.push_str(&core.generate_core_code());
+    let needs_tick_helpers = has_apple2 || has_gameboy || has_mos6502;
+    code.push_str(&core.generate_core_code(needs_tick_helpers));
 
     if has_apple2 {
         code.push_str(&Apple2Extension::generate_code(&core));

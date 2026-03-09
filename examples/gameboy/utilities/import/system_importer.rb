@@ -103,6 +103,8 @@ module RHDL
             @progress_callback = progress
             @import_task_class = import_task_class
             @import_strategy = normalize_strategy(import_strategy)
+            @selected_verilog_analysis_cache = {}
+            @verilog_file_analysis_cache = {}
           end
 
           def run
@@ -363,22 +365,11 @@ module RHDL
           end
 
           def selected_verilog_source_paths_for_mixed(resolved:)
-            verilog_paths = resolved.fetch(:files)
-              .select { |entry| entry.fetch(:language) == 'verilog' }
-              .map { |entry| File.expand_path(entry.fetch(:path)) }
-
-            module_to_file = module_index(verilog_paths)
-            refs = module_reference_graph(verilog_paths)
-            closure_modules = module_closure(top, refs)
-            selected = closure_modules.filter_map { |name| module_to_file[name] }.uniq
-            top_path = File.expand_path(top_file)
-            selected << top_path if File.extname(top_path).downcase.match?(/\A\.(v|sv)\z/) && File.file?(top_path)
-            selected.to_set
+            selected_verilog_analysis_for_mixed(resolved: resolved).fetch(:selected_paths)
           end
 
           def selected_module_source_relpaths_for_mixed(resolved:)
-            selected_verilog_paths = selected_verilog_source_paths_for_mixed(resolved: resolved).to_a
-            module_index(selected_verilog_paths).transform_values { |path| source_relative_path(path) }
+            selected_verilog_analysis_for_mixed(resolved: resolved).fetch(:module_source_relpaths)
           end
 
           def stage_verilog_source(path:, staged_root:)
@@ -912,7 +903,7 @@ module RHDL
           end
 
           def parse_verilog_module_names(path)
-            strip_comments(File.read(path)).scan(/\bmodule\s+([A-Za-z_][A-Za-z0-9_$]*)\b/).flatten.uniq
+            verilog_file_analysis(path).fetch(:module_names)
           end
 
           def raised_component_inventory(files_written)
@@ -1060,38 +1051,89 @@ module RHDL
 
           def module_index(files)
             files.each_with_object({}) do |path, acc|
-              text = strip_comments(File.read(path))
-              text.scan(/\bmodule\s+([A-Za-z_][A-Za-z0-9_$]*)\b/).flatten.each do |name|
+              verilog_file_analysis(path).fetch(:module_names).each do |name|
                 acc[name] ||= path
               end
             end
           end
 
           def module_reference_graph(files)
-            files.each_with_object(Hash.new { |h, k| h[k] = [] }) do |path, acc|
-              text = strip_comments(File.read(path))
-              text.scan(/\bmodule\s+([A-Za-z_][A-Za-z0-9_$]*)\b(.*?)\bendmodule\b/m) do |mod_name, body|
-                body.scan(/\b([A-Za-z_][A-Za-z0-9_$]*)\s*(?:#\s*\(.*?\))?\s+([A-Za-z_][A-Za-z0-9_$]*)\s*\(/m) do |target, _inst_name|
-                  next if INSTANCE_KEYWORDS.include?(target)
-                  next if target == 'endcase'
-
-                  acc[mod_name] << target unless acc[mod_name].include?(target)
-                end
+            graph = Hash.new { |h, k| h[k] = Set.new }
+            files.each do |path|
+              verilog_file_analysis(path).fetch(:reference_graph).each do |mod_name, targets|
+                graph[mod_name].merge(targets)
               end
             end
+            graph.transform_values(&:to_a)
           end
 
           def module_closure(start, graph)
             seen = {}
             queue = [start.to_s]
-            until queue.empty?
-              current = queue.shift
+            idx = 0
+            while idx < queue.length
+              current = queue[idx]
+              idx += 1
               next if seen[current]
 
               seen[current] = true
               Array(graph[current]).each { |child| queue << child }
             end
             seen.keys
+          end
+
+          def selected_verilog_analysis_for_mixed(resolved:)
+            verilog_paths = resolved.fetch(:files)
+              .select { |entry| entry.fetch(:language) == 'verilog' }
+              .map { |entry| File.expand_path(entry.fetch(:path)) }
+            cache_key = [top.to_s, File.expand_path(top_file), verilog_paths].freeze
+
+            @selected_verilog_analysis_cache[cache_key] ||= begin
+              module_to_file = module_index(verilog_paths)
+              refs = module_reference_graph(verilog_paths)
+              closure_modules = module_closure(top, refs)
+              selected_paths = closure_modules.filter_map { |name| module_to_file[name] }.map { |path| File.expand_path(path) }
+              top_path = File.expand_path(top_file)
+              if File.extname(top_path).downcase.match?(/\A\.(v|sv)\z/) && File.file?(top_path)
+                selected_paths << top_path
+              end
+              selected_path_set = selected_paths.to_set
+              module_source_relpaths = module_to_file.each_with_object({}) do |(module_name, path), acc|
+                expanded_path = File.expand_path(path)
+                next unless selected_path_set.include?(expanded_path)
+
+                acc[module_name] = source_relative_path(expanded_path)
+              end
+
+              {
+                selected_paths: selected_path_set,
+                module_source_relpaths: module_source_relpaths
+              }
+            end
+          end
+
+          def verilog_file_analysis(path)
+            normalized_path = File.expand_path(path)
+            @verilog_file_analysis_cache[normalized_path] ||= begin
+              stripped_text = strip_comments(File.read(normalized_path))
+              module_names = []
+              reference_graph = Hash.new { |h, k| h[k] = Set.new }
+
+              stripped_text.scan(/\bmodule\s+([A-Za-z_][A-Za-z0-9_$]*)\b(.*?)\bendmodule\b/m) do |mod_name, body|
+                module_names << mod_name
+                body.scan(/\b([A-Za-z_][A-Za-z0-9_$]*)\s*(?:#\s*\(.*?\))?\s+([A-Za-z_][A-Za-z0-9_$]*)\s*\(/m) do |target, _inst_name|
+                  next if INSTANCE_KEYWORDS.include?(target)
+                  next if target == 'endcase'
+
+                  reference_graph[mod_name] << target
+                end
+              end
+
+              {
+                module_names: module_names.uniq.freeze,
+                reference_graph: reference_graph.transform_values { |targets| targets.to_a.freeze }.freeze
+              }.freeze
+            end
           end
 
           def strip_comments(text)

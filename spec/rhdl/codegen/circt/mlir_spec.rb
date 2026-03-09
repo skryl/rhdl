@@ -34,6 +34,49 @@ RSpec.describe RHDL::Codegen::CIRCT::MLIR do
       expect([cyclic_expr, literal]).to include(selected)
     end
 
+    it 'prefers a live assigned expression over non-zero literal overlay defaults' do
+      mod = ir::ModuleOp.new(
+        name: 'overlay_live_value',
+        ports: [
+          ir::Port.new(name: :clk, direction: :in, width: 1),
+          ir::Port.new(name: :y, direction: :out, width: 8)
+        ],
+        nets: [ir::Net.new(name: :overlay, width: 8)],
+        regs: [ir::Reg.new(name: :q, width: 8)],
+        assigns: [
+          ir::Assign.new(target: :overlay, expr: ir::Signal.new(name: :q, width: 8)),
+          ir::Assign.new(target: :overlay, expr: ir::Literal.new(value: 0xA5, width: 8)),
+          ir::Assign.new(target: :y, expr: ir::Signal.new(name: :overlay, width: 8))
+        ],
+        processes: [
+          ir::Process.new(
+            name: :seq_logic,
+            clocked: true,
+            clock: :clk,
+            statements: [
+              ir::SeqAssign.new(target: :q, expr: ir::Literal.new(value: 1, width: 8))
+            ]
+          )
+        ],
+        instances: [],
+        memories: [],
+        write_ports: [],
+        sync_read_ports: [],
+        parameters: {}
+      )
+
+      mlir = described_class.generate(mod)
+      expect(mlir).not_to include('comb.or')
+
+      imported = RHDL::Codegen.import_circt_mlir(mlir, strict: true, top: 'overlay_live_value')
+      expect(imported).to be_success
+
+      output_assign = imported.modules.first.assigns.find { |assign| assign.target.to_s == 'y' }
+      expect(output_assign).not_to be_nil
+      expect(output_assign.expr).to be_a(ir::Signal)
+      expect(output_assign.expr.name.to_s).not_to eq('overlay')
+    end
+
     it 'emits hw/comb/seq operations for mixed combinational and sequential logic' do
       mod = ir::ModuleOp.new(
         name: 'demo',

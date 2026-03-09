@@ -50,6 +50,12 @@ module Sparc64ParityHelper
   QUIESCENT_INPUT_PATTERNS = [
     /\Ase\z/i,
     /\Asi\z/i,
+    /_vld\b/i,
+    /rdreq/i,
+    /wrreq/i,
+    /invreq/i,
+    /stallreq/i,
+    /quad_ld/i,
     /scan/i,
     /test/i,
     /bist/i,
@@ -69,11 +75,13 @@ module Sparc64ParityHelper
   ].freeze
   VERILATOR_DEFAULT_FLAGS = %w[
     -DFPGA_SYN
+    -DCMP_CLK_PERIOD=1333
   ].freeze
 
   module_function
 
-  MAX_IR_RUNTIME_SIGNAL_WIDTH = 64
+  MAX_COMPILER_RUNTIME_SIGNAL_WIDTH = 128
+  MAX_NATIVE_IR_RUNTIME_SIGNAL_WIDTH = 128
   COMPILER_RUNTIME_EXPORT_TIMEOUT = ENV.fetch('SPARC64_COMPILER_RUNTIME_EXPORT_TIMEOUT', 60).to_f
 
   def diagnostic_messages(diagnostics)
@@ -228,12 +236,11 @@ module Sparc64ParityHelper
   end
 
   def ir_runtime_report(component_class:, vector_plan:)
-    raise 'IR compiler backend unavailable' unless RHDL::Sim::Native::IR::COMPILER_AVAILABLE
-
     if (reason = compiler_parity_skip_reason(component_class: component_class))
       return {
         success: false,
-        error: reason
+        error: reason,
+        fallback_allowed: true
       }
     end
 
@@ -241,13 +248,15 @@ module Sparc64ParityHelper
     unless runtime_probe[:success]
       return {
         success: false,
-        error: "IR compiler runtime export failed: #{runtime_probe[:error]}"
+        error: "IR compiler runtime export failed: #{runtime_probe[:error]}",
+        fallback_allowed: true
       }
     end
 
+    backend = ir_runtime_backend(component_class: component_class, runtime_json: runtime_probe.fetch(:runtime_json))
     sim = RHDL::Sim::Native::IR::Simulator.new(
       runtime_probe.fetch(:runtime_json),
-      backend: :compiler,
+      backend: backend,
       sub_cycles: 0
     )
     outputs = component_ports(component_class).select { |port| port[:direction] == :out }
@@ -279,9 +288,64 @@ module Sparc64ParityHelper
       end
     end
 
-    { success: true, results: results }
+    { success: true, results: results, backend: backend }
   rescue StandardError => e
-    { success: false, error: "IR compiler execution failed: #{e.message}" }
+    backend_label =
+      case backend
+      when :jit then 'IR JIT'
+      else 'IR compiler'
+      end
+
+    { success: false, error: "#{backend_label} execution failed: #{e.message}", fallback_allowed: false }
+  end
+
+  def ruby_runtime_report(component_class:, vector_plan:)
+    component = component_class.new('dut')
+    outputs = component_ports(component_class).select { |port| port[:direction] == :out }
+
+    results = vector_plan.fetch(:steps).map do |step|
+      apply_component_inputs(component, step.fetch(:inputs), except: vector_plan[:clock_name])
+
+      if vector_plan[:sequential]
+        if vector_plan[:clock_name]
+          drive_component_input(component, vector_plan[:clock_name], 0)
+          component.propagate
+          drive_component_input(component, vector_plan[:clock_name], 1)
+          component.propagate
+          drive_component_input(component, vector_plan[:clock_name], 0)
+          component.propagate
+        else
+          component.propagate
+        end
+      else
+        component.propagate
+      end
+
+      outputs.each_with_object({}) do |port, acc|
+        acc[port[:name].to_sym] = normalize_value(read_component_output(component, port[:name]), port[:width])
+      end
+    end
+
+    { success: true, results: results, backend: :ruby }
+  rescue StandardError => e
+    { success: false, error: "Ruby simulation failed: #{e.class}: #{e.message}" }
+  end
+
+  def parity_runtime_report(component_class:, vector_plan:)
+    ir = ir_runtime_report(component_class: component_class, vector_plan: vector_plan)
+    return ir if ir[:success]
+    return ir unless ir[:fallback_allowed]
+
+    ruby = ruby_runtime_report(component_class: component_class, vector_plan: vector_plan)
+    return ruby.merge(native_ir_error: ir[:error]) if ruby[:success]
+
+    {
+      success: false,
+      error: [
+        ir[:error],
+        ruby[:error]
+      ].compact.join("\nRuby fallback also failed: ")
+    }
   end
 
   def verilator_runtime_report(component_class:, module_name:, verilog_files:, original_verilog_path: nil,
@@ -381,8 +445,8 @@ module Sparc64ParityHelper
   def parity_report(component_class:, module_name:, verilog_files:, base_dir:, original_verilog_path: nil,
                     staged_verilog_path: nil, include_dirs: [], extra_verilator_flags: [], vector_plan: nil)
     vector_plan ||= deterministic_vector_plan(component_class: component_class)
-    ir = ir_runtime_report(component_class: component_class, vector_plan: vector_plan)
-    return ir.merge(match: false) unless ir[:success]
+    runtime = parity_runtime_report(component_class: component_class, vector_plan: vector_plan)
+    return runtime.merge(match: false) unless runtime[:success]
 
     verilator = verilator_runtime_report(
       component_class: component_class,
@@ -395,14 +459,29 @@ module Sparc64ParityHelper
       include_dirs: include_dirs,
       extra_verilator_flags: extra_verilator_flags
     )
-    return verilator.merge(match: false, ir_results: ir[:results], vector_plan: vector_plan) unless verilator[:success]
+    return verilator.merge(
+      match: false,
+      ir_results: runtime[:results],
+      runtime_results: runtime[:results],
+      runtime_backend: runtime[:backend],
+      native_ir_error: runtime[:native_ir_error],
+      vector_plan: vector_plan
+    ) unless verilator[:success]
 
-    mismatch = first_result_mismatch(ir[:results], verilator[:results], component_ports(component_class))
+    mismatch = first_result_mismatch(
+      runtime[:results],
+      verilator[:results],
+      component_ports(component_class),
+      steps: vector_plan.fetch(:steps)
+    )
     {
       match: mismatch.nil?,
       mismatch: mismatch,
       vector_plan: vector_plan,
-      ir_results: ir[:results],
+      ir_results: runtime[:results],
+      runtime_results: runtime[:results],
+      runtime_backend: runtime[:backend],
+      native_ir_error: runtime[:native_ir_error],
       verilator_results: verilator[:results]
     }
   end
@@ -417,8 +496,25 @@ module Sparc64ParityHelper
     end.uniq { |port| port[:name] }
   end
 
+  def parity_skip_reason(component_class:)
+    return 'verilator not available' unless HdlToolchain.verilator_available?
+
+    nil
+  end
+
   def compiler_parity_skip_reason(component_class:)
-    unsupported_ports = unsupported_ir_ports(component_class)
+    unless RHDL::Sim::Native::IR::COMPILER_AVAILABLE || RHDL::Sim::Native::IR::JIT_AVAILABLE
+      return 'IR native parity backend unavailable'
+    end
+
+    runtime_probe = compiler_runtime_probe(component_class)
+    unless runtime_probe[:success]
+      return "IR native parity runtime export is not available for #{component_class}: #{runtime_probe[:error]}"
+    end
+
+    runtime_json = runtime_probe[:runtime_json]
+
+    unsupported_ports = unsupported_ir_ports(component_class, max_width: MAX_NATIVE_IR_RUNTIME_SIGNAL_WIDTH)
     unless unsupported_ports.empty?
       port_list = unsupported_ports.first(8).map do |port|
         "#{port[:name]}(#{port[:width]})"
@@ -426,30 +522,158 @@ module Sparc64ParityHelper
       suffix = unsupported_ports.length > 8 ? ', ...' : ''
       max_width = unsupported_ports.map { |port| port[:width].to_i }.max.to_i
 
-      return "IR compiler parity currently supports inspected component ports up to 64 bits; " \
+      return "IR native parity currently supports inspected component ports up to #{MAX_NATIVE_IR_RUNTIME_SIGNAL_WIDTH} bits; " \
              "#{component_class} exposes #{port_list}#{suffix} (max #{max_width})"
     end
 
-    runtime_probe = compiler_runtime_probe(component_class)
-    return nil if runtime_probe[:success]
+    unsupported_signals = unsupported_ir_internal_signals(
+      runtime_json: runtime_json,
+      max_width: MAX_NATIVE_IR_RUNTIME_SIGNAL_WIDTH
+    )
+    unless unsupported_signals.empty?
+      signal_list = unsupported_signals.first(8).map do |signal|
+        "#{signal[:name]}(#{signal[:width]})"
+      end.join(', ')
+      suffix = unsupported_signals.length > 8 ? ', ...' : ''
+      max_width = unsupported_signals.map { |signal| signal[:width].to_i }.max.to_i
 
-    "IR compiler parity runtime export is not available for #{component_class}: #{runtime_probe[:error]}"
+      return "IR native parity currently supports flattened internal signals up to #{MAX_NATIVE_IR_RUNTIME_SIGNAL_WIDTH} bits; " \
+             "#{component_class} exposes #{signal_list}#{suffix} (max #{max_width})"
+    end
+
+    backend = ir_runtime_backend(component_class: component_class, runtime_json: runtime_json)
+    return nil if backend == :compiler || backend == :jit
+
+    case backend
+    when :jit_required_for_ports
+      unsupported_ports = unsupported_ir_ports(component_class)
+      port_list = unsupported_ports.first(8).map do |port|
+        "#{port[:name]}(#{port[:width]})"
+      end.join(', ')
+      suffix = unsupported_ports.length > 8 ? ', ...' : ''
+      max_width = unsupported_ports.map { |port| port[:width].to_i }.max.to_i
+
+      "IR native parity requires the IR JIT backend for inspected component ports wider than #{MAX_COMPILER_RUNTIME_SIGNAL_WIDTH} bits; " \
+        "#{component_class} exposes #{port_list}#{suffix} (max #{max_width})"
+    when :jit_required_for_internal_signals
+      unsupported_signals = unsupported_ir_internal_signals(runtime_json: runtime_json)
+      signal_list = unsupported_signals.first(8).map do |signal|
+        "#{signal[:name]}(#{signal[:width]})"
+      end.join(', ')
+      suffix = unsupported_signals.length > 8 ? ', ...' : ''
+      max_width = unsupported_signals.map { |signal| signal[:width].to_i }.max.to_i
+
+      "IR native parity requires the IR JIT backend for flattened internal signals wider than #{MAX_COMPILER_RUNTIME_SIGNAL_WIDTH} bits; " \
+        "#{component_class} exposes #{signal_list}#{suffix} (max #{max_width})"
+    else
+      'IR native parity backend unavailable'
+    end
+
   rescue StandardError => e
     port_max_width = component_ports(component_class).map { |port| port[:width].to_i }.max.to_i
-    if port_max_width > 64
-      "IR compiler parity currently supports inspected component ports up to 64 bits; " \
+    if port_max_width > MAX_NATIVE_IR_RUNTIME_SIGNAL_WIDTH
+      "IR native parity currently supports inspected component ports up to #{MAX_NATIVE_IR_RUNTIME_SIGNAL_WIDTH} bits; " \
         "#{component_class} exposes ports up to #{port_max_width} bits"
     else
-      "IR compiler parity runtime export is not available for #{component_class}: #{e.message}"
+      "IR native parity runtime export is not available for #{component_class}: #{e.message}"
     end
   end
 
-  def unsupported_ir_ports(component_class, max_width: MAX_IR_RUNTIME_SIGNAL_WIDTH)
+  def ir_runtime_backend(component_class:, runtime_json:)
+    compiler_unsupported_ports = unsupported_ir_ports(component_class)
+    compiler_unsupported_signals = unsupported_ir_internal_signals(runtime_json: runtime_json)
+
+    if compiler_unsupported_ports.empty? && compiler_unsupported_signals.empty?
+      return :compiler if RHDL::Sim::Native::IR::COMPILER_AVAILABLE
+      return :jit if RHDL::Sim::Native::IR::JIT_AVAILABLE
+
+      return :backend_unavailable
+    end
+
+    return :jit if RHDL::Sim::Native::IR::JIT_AVAILABLE && native_ir_supported?(component_class: component_class, runtime_json: runtime_json)
+    return :jit_required_for_ports unless compiler_unsupported_ports.empty?
+    return :jit_required_for_internal_signals unless compiler_unsupported_signals.empty?
+
+    :backend_unavailable
+  end
+
+  def native_ir_supported?(component_class:, runtime_json:)
+    unsupported_ir_ports(component_class, max_width: MAX_NATIVE_IR_RUNTIME_SIGNAL_WIDTH).empty? &&
+      unsupported_ir_internal_signals(runtime_json: runtime_json, max_width: MAX_NATIVE_IR_RUNTIME_SIGNAL_WIDTH).empty?
+  end
+
+  def unsupported_ir_ports(component_class, max_width: MAX_COMPILER_RUNTIME_SIGNAL_WIDTH)
     component_ports(component_class).select { |port| port[:width].to_i > max_width.to_i }
   end
 
-  def sequential_component?(component_class)
-    component_class <= RHDL::Sim::SequentialComponent
+  def unsupported_ir_internal_signals(runtime_json:, max_width: MAX_COMPILER_RUNTIME_SIGNAL_WIDTH)
+    runtime_internal_signals(runtime_json).select { |signal| signal[:width].to_i > max_width.to_i }
+  end
+
+  def runtime_internal_signals(runtime_json)
+    runtime_module = first_runtime_module(runtime_json)
+    [
+      *runtime_signal_entries(runtime_module['nets']),
+      *runtime_signal_entries(runtime_module['regs']),
+      *runtime_memory_entries(runtime_module['memories'])
+    ].uniq { |signal| signal[:name] }
+  end
+
+  def first_runtime_module(runtime_json)
+    payload =
+      if runtime_json.is_a?(String)
+        JSON.parse(runtime_json, max_nesting: false)
+      else
+        runtime_json
+      end
+
+    modules =
+      if payload.is_a?(Hash)
+        payload['modules'] || payload[:modules]
+      else
+        []
+      end
+    Array(modules).first || {}
+  end
+
+  def runtime_signal_entries(entries)
+    Array(entries).filter_map do |entry|
+      width = (entry['width'] || entry[:width]).to_i
+      next if width <= 0
+
+      {
+        name: (entry['name'] || entry[:name]).to_s,
+        width: width
+      }
+    end
+  end
+
+  def runtime_memory_entries(entries)
+    Array(entries).filter_map do |entry|
+      width = (entry['width'] || entry[:width]).to_i
+      next if width <= 0
+
+      {
+        name: (entry['name'] || entry[:name]).to_s,
+        width: width
+      }
+    end
+  end
+
+  def sequential_component?(component_class, seen = Set.new)
+    return false unless component_class.is_a?(Class)
+
+    token = component_class.object_id
+    return false if seen.include?(token)
+
+    seen << token
+
+    return true if component_class <= RHDL::Sim::SequentialComponent
+
+    Array(component_class.respond_to?(:_instance_defs) ? component_class._instance_defs : []).any? do |instance_def|
+      child_class = instance_def[:component_class]
+      sequential_component?(child_class, seen)
+    end
   rescue StandardError
     false
   end
@@ -462,15 +686,42 @@ module Sparc64ParityHelper
 
   def detect_reset_info(input_ports)
     names = Array(input_ports).map { |port| port[:name].to_s }
-    name = RESET_CANDIDATES.find { |candidate| names.include?(candidate) } ||
-           names.find { |candidate| candidate.match?(/\A(?:rst|reset|sysrst)(?:_|$|n)/i) }
+    ranked_candidates = names.filter_map.with_index do |candidate, index|
+      score = reset_detection_score(candidate)
+      next unless score.positive?
+
+      [candidate, score, index]
+    end
+    name = ranked_candidates.max_by { |candidate, score, index| [score, -index] }&.first
     return nil unless name
 
     { name: name, active_low: active_low_reset_name?(name) }
   end
 
+  def reset_detection_score(name)
+    value = name.to_s
+    return 0 unless reset_like_input_name?(value)
+
+    score = 0
+    score += 100 if RESET_CANDIDATES.include?(value)
+    score += 80 if active_low_reset_name?(value)
+    score += 40 if value.match?(/\A(?:[ag]?rst|[ag]?reset|sysrst)(?:$|_)/i)
+    score -= 120 if value.match?(/(?:^|_)(?:en|enable)(?:$|_)/i) || value.end_with?('_en', '_enable')
+    score -= 80 if value.match?(/(?:^|_)(?:tri|scan|bist|mbist|test|jtag)(?:$|_)/i)
+    score
+  end
+
   def active_low_reset_name?(name)
-    name.to_s.match?(/(?:^|_)(?:rstn|resetn|rst_n|reset_n|reset_ni|nreset)(?:$|_)/i)
+    value = name.to_s
+    value.match?(/(?:^|_)(?:rstn|resetn|rst_n|reset_n|reset_ni|nreset)(?:$|_)/i) ||
+      value.match?(/\A(?:[ag]?rst|[ag]?reset)(?:_l|_n|n)\z/i)
+  end
+
+  def reset_like_input_name?(name)
+    value = name.to_s
+    RESET_CANDIDATES.include?(value) ||
+      value.match?(/\A(?:[ag]?rst|[ag]?reset|sysrst)(?:$|_)/i) ||
+      value.match?(/\A(?:[ag]?rst|[ag]?reset|sysrst)(?:_l|_n|n)\z/i)
   end
 
   def reset_steps(inputs, clock_name:, reset_info:, seed:)
@@ -515,6 +766,8 @@ module Sparc64ParityHelper
       width = port[:width].to_i
       if reset_info && name == reset_info[:name]
         acc[name] = reset_state == :asserted ? asserted_reset_value(reset_info) : inactive_reset_value(reset_info)
+      elsif reset_like_input_name?(name)
+        acc[name] = inactive_reset_value(name: name, active_low: active_low_reset_name?(name))
       elsif quiescent_input_name?(name)
         acc[name] = safe_default_value(name, width)
       else
@@ -539,8 +792,16 @@ module Sparc64ParityHelper
     reset_info[:active_low] ? 0 : 1
   end
 
-  def inactive_reset_value(reset_info)
-    reset_info[:active_low] ? 1 : 0
+  def inactive_reset_value(reset_info = nil, name: nil, active_low: nil)
+    if reset_info.is_a?(Hash)
+      name = reset_info[:name]
+      active_low = reset_info[:active_low]
+    elsif !reset_info.nil? && name.nil?
+      active_low = reset_info
+    end
+
+    resolved_active_low = active_low.nil? ? active_low_reset_name?(name) : active_low
+    resolved_active_low ? 1 : 0
   end
 
   def deterministic_input_value(name, width, functional_index, seed)
@@ -567,11 +828,13 @@ module Sparc64ParityHelper
     ([nibble] * digits).join.to_i(16)
   end
 
-  def first_result_mismatch(lhs, rhs, ports)
+  def first_result_mismatch(lhs, rhs, ports, steps: nil)
     return 'result count mismatch' unless lhs.length == rhs.length
 
     output_ports = Array(ports).select { |port| port[:direction] == :out }
     lhs.each_with_index do |lhs_result, idx|
+      next if Array(steps)[idx]&.fetch(:tag, nil) == :reset
+
       rhs_result = rhs[idx] || {}
       output_ports.each do |port|
         key = port[:name].to_sym
@@ -583,6 +846,33 @@ module Sparc64ParityHelper
     end
 
     nil
+  end
+
+  def apply_component_inputs(component, inputs, except: nil)
+    Array(inputs).each do |name, value|
+      next if name.to_s == except.to_s
+
+      drive_component_input(component, name, value)
+    end
+  end
+
+  def drive_component_input(component, name, value)
+    key = component_signal_key(component.inputs, name)
+    component.set_input(key, value)
+  end
+
+  def read_component_output(component, name)
+    key = component_signal_key(component.outputs, name)
+    component.get_output(key)
+  end
+
+  def component_signal_key(signal_hash, name)
+    return name if signal_hash.key?(name)
+
+    symbolized = name.to_sym
+    return symbolized if signal_hash.key?(symbolized)
+
+    raise KeyError, "unknown component signal #{name.inspect}"
   end
 
   def normalized_semantic_signature_from_verilog(verilog_source, base_dir:, stem:)
@@ -677,7 +967,7 @@ module Sparc64ParityHelper
       module_names_in_verilog_source(File.read(path))
     end.to_set
     support_stub_path = write_semantic_support_stubs(
-      source: source,
+      sources: [source, *normalized_extra_paths.map { |path| File.read(path) }],
       base_dir: base_dir,
       stem: stem,
       known_module_names: known_module_names
@@ -904,8 +1194,22 @@ module Sparc64ParityHelper
                    end
 
     index_by_staged_name = staged_order.each_with_index.to_h
+    original_name_by_sanitized_name = unique_mapping(original_order) { |name| sanitized_rhdl_identifier(name) }
+    staged_index_by_sanitized_name = unique_mapping(staged_order.each_with_index.to_a) do |(name, _)|
+      sanitized_rhdl_identifier(name)
+    end
     component_names.each_with_index.each_with_object({}) do |(name, fallback_index), mapping|
-      idx = index_by_staged_name.fetch(name, fallback_index)
+      if original_order.include?(name)
+        mapping[name] = name
+        next
+      end
+
+      if original_name_by_sanitized_name.key?(name)
+        mapping[name] = original_name_by_sanitized_name.fetch(name)
+        next
+      end
+
+      idx = index_by_staged_name[name] || staged_index_by_sanitized_name[name] || fallback_index
       mapping[name] = original_order.fetch(idx, name)
     end
   end
@@ -941,6 +1245,36 @@ module Sparc64ParityHelper
 
   def parse_module_parameter_names(verilog_source, module_name)
     module_body(verilog_source, module_name).scan(/^\s*parameter\s+([A-Za-z_][A-Za-z0-9_$]*)\s*=/).flatten.uniq
+  end
+
+  def unique_mapping(entries)
+    Array(entries)
+      .group_by { |entry| yield(entry) }
+      .each_with_object({}) do |(key, grouped_entries), acc|
+        next unless grouped_entries.one?
+
+        acc[key] = block_given? ? yield_unique_mapping_value(grouped_entries.first) : grouped_entries.first
+      end
+  end
+
+  def yield_unique_mapping_value(entry)
+    entry.is_a?(Array) ? entry.last : entry
+  end
+
+  def sanitized_rhdl_identifier(name)
+    value = name.to_s.gsub(/[^A-Za-z0-9_]/, '_')
+    value = "_#{value}" if value.empty? || value.match?(/\A\d/)
+    value = "_#{value}" if rhdl_reserved_identifier?(value)
+    value
+  end
+
+  def rhdl_reserved_identifier?(value)
+    reserved = %w[
+      BEGIN END alias and begin break case class def defined? do else elsif end ensure false for if in module
+      next nil not or redo rescue retry return self super then true undef unless until when while yield
+      __FILE__ __LINE__ __ENCODING__
+    ]
+    reserved.include?(value.to_s) || value.to_s.match?(/\A_[1-9]\d*\z/)
   end
 
   def wrapper_source(wrapper_top:, original_module_name:, component_ports:, parameter_overrides:,
@@ -999,12 +1333,11 @@ module Sparc64ParityHelper
     lines << ''
     lines << 'static void print_wide_hex(const uint32_t* words, int word_count, int width) {'
     lines << '  int digits = (width + 3) / 4;'
-    lines << '  int remaining = digits;'
     lines << '  for (int idx = word_count - 1; idx >= 0; --idx) {'
-    lines << '    int chunk_digits = remaining > 8 ? 8 : remaining;'
+    lines << '    int chunk_digits = digits - (idx * 8);'
+    lines << '    if (chunk_digits > 8) chunk_digits = 8;'
     lines << '    if (chunk_digits <= 0) chunk_digits = 1;'
     lines << '    std::printf("%0*x", chunk_digits, words[idx]);'
-    lines << '    remaining -= chunk_digits;'
     lines << '  }'
     lines << '}'
     lines << ''
@@ -1169,10 +1502,10 @@ module Sparc64ParityHelper
               Timeout::Error,
               "compiler runtime export exceeded #{COMPILER_RUNTIME_EXPORT_TIMEOUT} second timeout"
             ) do
-              component_class.to_circt_runtime_json
+              serialize_compiler_runtime_payload(component_class)
             end
           else
-            component_class.to_circt_runtime_json
+            serialize_compiler_runtime_payload(component_class)
           end
 
         {
@@ -1188,8 +1521,15 @@ module Sparc64ParityHelper
     end
   end
 
+  def serialize_compiler_runtime_payload(component_class)
+    flat_nodes = component_class.to_flat_circt_nodes
+    RHDL::Sim::Native::IR.sim_json(flat_nodes, backend: :compiler)
+  end
+
   def normalized_verilog_for_semantic_compare(verilog_source, source_path:)
-    semantic_compare_importer.send(:normalize_verilog_for_import, verilog_source.dup, source_path: source_path)
+    normalized = semantic_compare_importer.send(:normalize_verilog_for_import, verilog_source.dup, source_path: source_path)
+    normalized = rewrite_escaped_identifiers_for_semantic_compare(normalized)
+    rewrite_simple_gate_primitives_for_semantic_compare(normalized)
   end
 
   def semantic_compare_importer
@@ -1211,35 +1551,199 @@ module Sparc64ParityHelper
     strip_comments(verilog_source).scan(/\bmodule\s+([A-Za-z_][A-Za-z0-9_$]*)\b/).flatten.uniq
   end
 
-  def write_semantic_support_stubs(source:, base_dir:, stem:, known_module_names: Set.new)
+  def rewrite_simple_gate_primitives_for_semantic_compare(verilog_source)
+    verilog_source.gsub(/^(?<indent>\s*)(?<primitive>buf|not|and|nand|or|nor|xor|xnor)\s*\((?<connections>[^;]+)\)\s*;\s*$/) do
+      replacement = primitive_gate_assign_statement_for_semantic_compare(
+        Regexp.last_match[:primitive],
+        Regexp.last_match[:connections],
+        indent: Regexp.last_match[:indent]
+      )
+      replacement || Regexp.last_match[0]
+    end
+  end
+
+  def primitive_gate_assign_statement_for_semantic_compare(primitive, connection_text, indent:)
+    args = split_top_level_csv(connection_text).map(&:strip).reject(&:empty?)
+    return nil if args.length < 2
+
+    case primitive
+    when 'buf', 'not'
+      input = args.pop
+      outputs = args
+      return nil if input.nil? || outputs.empty?
+
+      outputs.map do |output|
+        expr = primitive == 'buf' ? "(#{input})" : "~(#{input})"
+        "#{indent}assign #{output} = #{expr};"
+      end.join("\n")
+    when 'and', 'nand', 'or', 'nor', 'xor', 'xnor'
+      output = args.shift
+      inputs = args
+      return nil if output.nil? || inputs.empty?
+
+      joiner = case primitive
+               when 'and', 'nand' then ' & '
+               when 'or', 'nor' then ' | '
+               when 'xor', 'xnor' then ' ^ '
+               end
+      expr = "(#{inputs.join(joiner)})"
+      expr = "~#{expr}" if %w[nand nor xnor].include?(primitive)
+      "#{indent}assign #{output} = #{expr};"
+    end
+  end
+
+  def rewrite_escaped_identifiers_for_semantic_compare(verilog_source)
+    verilog_source.gsub(/\\([^\s]+)(\s+)/) do
+      "#{sanitized_semantic_identifier(Regexp.last_match[1])}#{Regexp.last_match[2]}"
+    end
+  end
+
+  def sanitized_semantic_identifier(name)
+    value = name.to_s.gsub(/[^A-Za-z0-9_$]/, '_')
+    value = "_#{value}" if value.empty? || value.match?(/\A\d/)
+    value
+  end
+
+  def write_semantic_support_stubs(source: nil, sources: nil, base_dir:, stem:, known_module_names: Set.new)
     stub_path = File.join(base_dir, "#{stem}.semantic_support_stubs.v")
-    text = strip_comments(source)
-    defined_modules = module_names_in_verilog_source(source).to_set | known_module_names.to_set
+    source_texts = Array(sources || source).flatten.compact
+    defined_modules = source_texts.flat_map { |text| module_names_in_verilog_source(text) }.to_set | known_module_names.to_set
     module_ports = Hash.new { |h, k| h[k] = [] }
+    module_parameters = Hash.new { |h, k| h[k] = [] }
 
-    text.scan(/^\s*([A-Za-z_][A-Za-z0-9_$]*)\s*(?:#\s*(?:\([^;]*?\)|\d+))?\s+([A-Za-z_][A-Za-z0-9_$]*)\s*\((.*?)\)\s*;/m) do |target, _instance_name, connection_text|
-      next if RHDL::Examples::SPARC64::Import::SystemImporter::INSTANCE_KEYWORDS.include?(target)
-      next if target == 'endcase'
-      next if defined_modules.include?(target)
+    source_texts.each do |text|
+      semantic_support_stub_instances(text).each do |target, parameter_text, connection_text|
+        next if defined_modules.include?(target)
 
-      named_ports = connection_text.scan(/\.\s*([A-Za-z_][A-Za-z0-9_$]*)\s*\(/).flatten.uniq
-      ports = if named_ports.empty?
-                connection_text.split(',').map(&:strip).reject(&:empty?).each_index.map { |idx| "p#{idx}" }
-              else
-                named_ports
-              end
-      module_ports[target].concat(ports)
+        named_ports = connection_text.scan(/\.\s*([A-Za-z_][A-Za-z0-9_$]*)\s*\(/).flatten.uniq
+        ports = if named_ports.empty?
+                  split_top_level_csv(connection_text).map(&:strip).reject(&:empty?).each_index.map { |idx| "p#{idx}" }
+                else
+                  named_ports
+                end
+        module_ports[target].concat(ports)
+        module_parameters[target].concat(stub_parameter_names_for_instance(parameter_text))
+      end
     end
 
     body = +"`timescale 1ns / 1ps\n\n"
     module_ports.keys.sort.each do |mod_name|
       ports = module_ports.fetch(mod_name).uniq
-      body << "module #{mod_name}(#{ports.join(', ')});\n"
+      parameters = module_parameters.fetch(mod_name).uniq
+      if parameters.empty?
+        body << "module #{mod_name}(#{ports.join(', ')});\n"
+      else
+        params = parameters.map { |name| "parameter #{name} = 0" }.join(', ')
+        body << "module #{mod_name} #(#{params}) (#{ports.join(', ')});\n"
+      end
       ports.each { |port| body << "  input #{port};\n" }
       body << "endmodule\n\n"
     end
 
     File.write(stub_path, body)
     stub_path
+  end
+
+  def semantic_support_stub_instances(source)
+    text = strip_comments(source.to_s)
+    text.scan(/\bmodule\s+([A-Za-z_][A-Za-z0-9_$]*)\b(.*?)\bendmodule\b/m).flat_map do |_module_name, body|
+      instances = []
+      body.to_enum(
+        :scan,
+        /\b([A-Za-z_][A-Za-z0-9_$]*)\s*(#\s*(?:\([^;]*?\)|\d+))?\s+([A-Za-z_][A-Za-z0-9_$]*)\s*\(/m
+      ).each do
+        target = Regexp.last_match[1]
+        parameter_text = Regexp.last_match[2]
+        next if RHDL::Examples::SPARC64::Import::SystemImporter::INSTANCE_KEYWORDS.include?(target)
+        next if target == 'endcase'
+
+        connection_text = instance_connection_text(body, Regexp.last_match.end(0))
+        next unless connection_text
+
+        instances << [target, parameter_text, connection_text]
+      end
+      instances
+    end
+  end
+
+  def instance_connection_text(body, start_index)
+    depth = 1
+    cursor = start_index
+
+    while cursor < body.length
+      case body[cursor]
+      when '('
+        depth += 1
+      when ')'
+        depth -= 1
+        if depth.zero?
+          tail = body[(cursor + 1)..]
+          return body[start_index...cursor] if tail&.match?(/\A\s*;/)
+
+          return nil
+        end
+      end
+      cursor += 1
+    end
+
+    nil
+  end
+
+  def stub_parameter_names_for_instance(parameter_text)
+    text = parameter_text.to_s.sub(/\A#\s*/, '').strip
+    return [] if text.empty?
+
+    return ['P0'] if text.match?(/\A\d+\z/)
+
+    inner = if text.start_with?('(') && text.end_with?(')')
+              text[1...-1]
+            else
+              text
+            end
+    segments = split_top_level_csv(inner)
+    named = []
+    positional_count = 0
+
+    segments.each do |segment|
+      stripped = segment.strip
+      next if stripped.empty?
+
+      if (match = stripped.match(/\A\.\s*([A-Za-z_][A-Za-z0-9_$]*)\s*\(/))
+        named << match[1]
+      else
+        positional_count += 1
+      end
+    end
+
+    named.uniq + Array.new(positional_count) { |idx| "P#{idx}" }
+  end
+
+  def split_top_level_csv(text)
+    segments = []
+    current = +''
+    depth = 0
+
+    text.to_s.each_char do |char|
+      case char
+      when '(', '[', '{'
+        depth += 1
+        current << char
+      when ')', ']', '}'
+        depth -= 1 if depth.positive?
+        current << char
+      when ','
+        if depth.zero?
+          segments << current
+          current = +''
+        else
+          current << char
+        end
+      else
+        current << char
+      end
+    end
+
+    segments << current unless current.empty?
+    segments
   end
 end

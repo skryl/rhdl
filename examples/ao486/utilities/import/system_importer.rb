@@ -45,6 +45,12 @@ module RHDL
             :fallback_used,
             :attempted_strategies,
             :stub_modules,
+            :closure_modules,
+            :module_files_by_name,
+            :staged_module_files_by_name,
+            :module_source_relpaths,
+            :include_dirs,
+            :staged_include_dirs,
             keyword_init: true
           ) do
             def success?
@@ -149,7 +155,13 @@ module RHDL
                 strategy_used: strategy,
                 attempted_strategies: attempts,
                 fallback_used: strategy != import_strategy,
-                stub_modules: prepared[:stub_modules]
+                stub_modules: prepared[:stub_modules],
+                closure_modules: prepared[:closure_modules],
+                module_files_by_name: prepared[:module_files_by_name],
+                staged_module_files_by_name: prepared[:staged_module_files_by_name],
+                module_source_relpaths: prepared[:module_source_relpaths],
+                include_dirs: prepared[:include_dirs],
+                staged_include_dirs: prepared[:staged_include_dirs]
               )
             end
 
@@ -209,7 +221,13 @@ module RHDL
               strategy_used: strategy_used,
               fallback_used: strategy_used != import_strategy,
               attempted_strategies: attempts,
-              stub_modules: prepared[:stub_modules]
+              stub_modules: prepared[:stub_modules],
+              closure_modules: prepared[:closure_modules],
+              module_files_by_name: prepared[:module_files_by_name],
+              staged_module_files_by_name: prepared[:staged_module_files_by_name],
+              module_source_relpaths: prepared[:module_source_relpaths],
+              include_dirs: prepared[:include_dirs],
+              staged_include_dirs: prepared[:staged_include_dirs]
             )
           ensure
             FileUtils.rm_rf(temp_workspace) if temp_workspace && !keep_workspace
@@ -219,7 +237,9 @@ module RHDL
 
           def failed_result(diagnostics:, command_log:, workspace: nil, moore_mlir_path: nil, core_mlir_path: nil,
                             normalized_core_mlir_path: nil, strategy_requested: import_strategy, strategy_used: nil,
-                            fallback_used: false, attempted_strategies: strategy_attempts, stub_modules: [])
+                            fallback_used: false, attempted_strategies: strategy_attempts, stub_modules: [],
+                            closure_modules: [], module_files_by_name: {}, staged_module_files_by_name: {},
+                            module_source_relpaths: {}, include_dirs: [], staged_include_dirs: [])
             Result.new(
               success: false,
               output_dir: output_dir,
@@ -235,7 +255,13 @@ module RHDL
               strategy_used: strategy_used,
               fallback_used: fallback_used,
               attempted_strategies: attempted_strategies,
-              stub_modules: stub_modules
+              stub_modules: stub_modules,
+              closure_modules: closure_modules,
+              module_files_by_name: module_files_by_name,
+              staged_module_files_by_name: staged_module_files_by_name,
+              module_source_relpaths: module_source_relpaths,
+              include_dirs: include_dirs,
+              staged_include_dirs: staged_include_dirs
             )
           end
 
@@ -352,6 +378,14 @@ module RHDL
             defined = include_paths.flat_map { |file| extract_defined_modules(File.read(file)) }.uniq
             stub_ports = stub_ports.reject { |module_name, _ports| defined.include?(module_name) }
 
+            metadata = prepared_metadata(
+              source_root: source_root,
+              staged_source_path: staged_system_path,
+              workspace: workspace,
+              include_paths: include_paths,
+              module_source_relpaths: module_source_relpaths
+            )
+
             write_stub_file(stub_path, stub_ports)
             write_wrapper_file(wrapper_path, include_paths: include_paths, stub_path: stub_path)
 
@@ -366,7 +400,52 @@ module RHDL
               stub_modules: stub_ports.keys.sort,
               module_source_relpaths: module_source_relpaths,
               command_chdir: (strategy == :tree ? workspace : nil)
+            }.merge(metadata)
+          end
+
+          def prepared_metadata(source_root:, staged_source_path:, workspace:, include_paths:, module_source_relpaths:)
+            original_module_to_file, = build_module_index(source_root)
+            original_module_to_file = original_module_to_file.dup
+            original_module_to_file[top] ||= source_path if File.file?(source_path)
+
+            staged_module_to_file = {}
+            stage_root = File.join(workspace, 'tree')
+            if Dir.exist?(stage_root)
+              staged_module_to_file, = build_module_index(stage_root)
+            end
+            staged_module_to_file[top] = staged_source_path if File.file?(staged_source_path)
+
+            closure_modules = include_paths.flat_map { |path| extract_defined_modules(File.read(path)) }.uniq.sort.freeze
+
+            {
+              closure_modules: closure_modules,
+              module_files_by_name: closure_modules.each_with_object({}) do |module_name, acc|
+                path = original_module_to_file[module_name]
+                acc[module_name] = path if path
+              end.freeze,
+              staged_module_files_by_name: closure_modules.each_with_object({}) do |module_name, acc|
+                path = staged_module_to_file[module_name]
+                acc[module_name] = path if path
+              end.freeze,
+              include_dirs: import_include_dirs_for_source_root(source_root),
+              staged_include_dirs: staged_import_include_dirs(workspace)
             }
+          end
+
+          def import_include_dirs_for_source_root(source_root)
+            dirs = [source_root]
+            helper_root = helper_include_source_root(source_root)
+            dirs << helper_root if Dir.exist?(helper_root)
+            dirs.map { |dir| File.expand_path(dir) }.uniq.select { |dir| Dir.exist?(dir) }.freeze
+          end
+
+          def staged_import_include_dirs(workspace)
+            stage_root = File.join(workspace, 'tree')
+            dirs = [workspace]
+            dirs << stage_root if Dir.exist?(stage_root)
+            helper_root = helper_include_source_root(stage_root)
+            dirs << helper_root if Dir.exist?(helper_root)
+            dirs.map { |dir| File.expand_path(dir) }.uniq.select { |dir| Dir.exist?(dir) }.freeze
           end
 
           def run_import_pipeline(prepared, diagnostics:, command_log:)

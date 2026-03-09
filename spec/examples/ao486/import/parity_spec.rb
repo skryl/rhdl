@@ -277,7 +277,10 @@ RSpec.describe 'AO486 import parity (stubbed system baseline)' do
   end
 
   def run_ir_trace(normalized_mlir_path:)
-    run_ir_trace_with_backend(normalized_mlir_path: normalized_mlir_path, backend: :interpreter)
+    backend = AO486SpecSupport::IRBackendHelper.preferred_ir_backend
+    raise 'IR compiler/JIT backend unavailable' unless backend
+
+    run_ir_trace_with_backend(normalized_mlir_path: normalized_mlir_path, backend: backend)
   end
 
   def run_ir_trace_with_backend(normalized_mlir_path:, backend:)
@@ -311,19 +314,15 @@ RSpec.describe 'AO486 import parity (stubbed system baseline)' do
   end
 
   def available_ir_backends
-    backends = []
-    backends << :interpreter if RHDL::Sim::Native::IR::INTERPRETER_AVAILABLE
-    backends << :jit if RHDL::Sim::Native::IR::JIT_AVAILABLE
-    backends << :compiler if RHDL::Sim::Native::IR::COMPILER_AVAILABLE
-    backends
+    AO486SpecSupport::IRBackendHelper.preferred_ir_backends
   end
 
-  it 'matches source Verilog (Verilator) and raised RHDL across available IR backends on bounded stub-safe signals',
+  it 'matches source Verilog (Verilator) and raised RHDL on the selected IR backend for bounded stub-safe signals',
      timeout: 600 do
     skip 'circt-verilog not available' unless HdlToolchain.which('circt-verilog')
     skip 'circt-opt not available' unless HdlToolchain.which('circt-opt')
     skip 'verilator not available' unless HdlToolchain.verilator_available?
-    skip 'no IR backend available' if available_ir_backends.empty?
+    skip 'IR compiler/JIT backend unavailable' if available_ir_backends.empty?
 
     Dir.mktmpdir('ao486_parity_out') do |out_dir|
       Dir.mktmpdir('ao486_parity_ws') do |workspace|

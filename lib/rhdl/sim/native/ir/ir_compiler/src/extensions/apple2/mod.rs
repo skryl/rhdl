@@ -127,7 +127,7 @@ impl Apple2Extension {
             let lib = core.compiled_lib.as_ref().unwrap();
             unsafe {
                 type RunCpuCyclesFn = unsafe extern "C" fn(
-                    *mut u64, usize, *mut u8, usize, *const u8, usize,
+                    *mut u128, usize, *mut u8, usize, *const u8, usize,
                     usize, u8, bool, *mut u64, *mut bool, *mut bool, *mut u32
                 ) -> usize;
 

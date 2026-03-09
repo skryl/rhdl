@@ -152,6 +152,38 @@ RSpec.describe 'RHDL::Codegen CIRCT APIs' do
       expect(y0_assigns.length).to eq(1)
     end
 
+    it 'treats resultful llhd.process sensitivity loops as combinational assignments' do
+      resultful_mux_mlir = <<~MLIR
+        hw.module @top(in %in0: i1, in %in1: i1, in %sel: i1) -> (y: i1) {
+          %t0 = llhd.constant_time <0ns, 0d, 1e>
+          %true = hw.constant true
+          %false = hw.constant false
+          %y_0 = llhd.sig %false : i1
+          %proc:2 = llhd.process -> i1, i1 {
+            cf.br ^bb1(%false, %false : i1, i1)
+          ^bb1(%value: i1, %enable: i1):
+            llhd.wait yield (%value, %enable : i1, i1), (%sel, %in0, %in1 : i1, i1, i1), ^bb2
+          ^bb2:
+            %pick_in1 = comb.icmp ceq %sel, %true : i1
+            cf.cond_br %pick_in1, ^bb1(%in1, %true : i1, i1), ^bb1(%in0, %true : i1, i1)
+          }
+          llhd.drv %y_0, %proc#0 after %t0 if %proc#1 : i1
+          %y_v = llhd.prb %y_0 : i1
+          hw.output %y_v : i1
+        }
+      MLIR
+
+      result = RHDL::Codegen.import_circt_mlir(resultful_mux_mlir, strict: true, top: 'top')
+      expect(result.success?).to be(true)
+      top_mod = result.modules.find { |m| m.name == 'top' }
+      expect(top_mod).not_to be_nil
+      expect(top_mod.processes).to be_empty
+
+      y0_assign = top_mod.assigns.find { |assign| assign.target.to_s == 'y_0' }
+      expect(y0_assign).not_to be_nil
+      expect(y0_assign.expr).to be_a(RHDL::Codegen::CIRCT::IR::Mux)
+    end
+
     it 'rewrites llhd.sig.array_get drive targets back to their parent array signal' do
       array_write_mlir = <<~MLIR
         hw.module @arrw(in %clk : i1, in %in_data : i8) -> (out_data : i8) {
@@ -240,6 +272,105 @@ RSpec.describe 'RHDL::Codegen CIRCT APIs' do
       expect(out_assign.expr).to be_a(RHDL::Codegen::CIRCT::IR::Slice)
       expect(out_assign.expr.base).to be_a(RHDL::Codegen::CIRCT::IR::Signal)
       expect(out_assign.expr.base.name.to_s).to eq('arr')
+    end
+
+    it 'preserves resultful llhd.process backedge state across combinational loop iterations' do
+      loop_decode_mlir = <<~MLIR
+        hw.module @loop_decode(in %in : i2) -> (out : i4) {
+          %c-1_i4 = hw.constant -1 : i4
+          %c1_i4 = hw.constant 1 : i4
+          %c0_i2 = hw.constant 0 : i2
+          %true = hw.constant true
+          %false = hw.constant false
+          %c-1_i2 = hw.constant -1 : i2
+          %c0_i30 = hw.constant 0 : i30
+          %t0 = llhd.constant_time <0ns, 0d, 1e>
+          %c0_i4 = hw.constant 0 : i4
+          %c1_i32 = hw.constant 1 : i32
+          %c4_i32 = hw.constant 4 : i32
+          %c0_i32 = hw.constant 0 : i32
+          %out = llhd.sig %c0_i4 : i4
+          %proc:4 = llhd.process -> i32, i1, i4, i1 {
+            cf.br ^bb1(%c0_i32, %false, %c0_i4, %false : i32, i1, i4, i1)
+          ^bb1(%idx: i32, %seen: i1, %acc: i4, %en: i1):
+            llhd.wait yield (%idx, %seen, %acc, %en : i32, i1, i4, i1), (%in : i2), ^bb2
+          ^bb2:
+            cf.br ^bb3(%c0_i32, %proc#2, %false : i32, i4, i1)
+          ^bb3(%i: i32, %value: i4, %enable: i1):
+            %keep_going = comb.icmp slt %i, %c4_i32 : i32
+            cf.cond_br %keep_going, ^bb4, ^bb1(%i, %true, %value, %enable : i32, i1, i4, i1)
+          ^bb4:
+            %bit = comb.extract %i from 0 : (i32) -> i2
+            %matches = comb.icmp eq %bit, %in : i2
+            cf.cond_br %matches, ^bb5, ^bb6
+          ^bb5:
+            %hi = comb.extract %i from 2 : (i32) -> i30
+            %fits = comb.icmp eq %hi, %c0_i30 : i30
+            %shift = comb.mux %fits, %bit, %c-1_i2 : i2
+            %amount = comb.concat %c0_i2, %shift : i2, i2
+            %onehot = comb.shl %c1_i4, %amount : i4
+            %mask = comb.xor bin %onehot, %c-1_i4 : i4
+            %cleared = comb.and %value, %mask : i4
+            %next = comb.or %cleared, %onehot : i4
+            cf.br ^bb7(%next : i4)
+          ^bb6:
+            %hi_0 = comb.extract %i from 2 : (i32) -> i30
+            %fits_0 = comb.icmp eq %hi_0, %c0_i30 : i30
+            %shift_0 = comb.mux %fits_0, %bit, %c-1_i2 : i2
+            %amount_0 = comb.concat %c0_i2, %shift_0 : i2, i2
+            %onehot_0 = comb.shl %c1_i4, %amount_0 : i4
+            %mask_0 = comb.xor bin %onehot_0, %c-1_i4 : i4
+            %cleared_0 = comb.and %value, %mask_0 : i4
+            %zero = comb.shl %c0_i4, %amount_0 : i4
+            %next_0 = comb.or %cleared_0, %zero : i4
+            cf.br ^bb7(%next_0 : i4)
+          ^bb7(%merged: i4):
+            %next_idx = comb.add %i, %c1_i32 : i32
+            cf.br ^bb3(%next_idx, %merged, %true : i32, i4, i1)
+          }
+          llhd.drv %out, %proc#2 after %t0 if %proc#3 : i4
+          %out_q = llhd.prb %out : i4
+          hw.output %out_q : i4
+        }
+      MLIR
+
+      result = RHDL::Codegen.import_circt_mlir(loop_decode_mlir, strict: true, top: 'loop_decode')
+      expect(result.success?).to be(true)
+
+      mod = result.modules.find { |m| m.name == 'loop_decode' }
+      expect(mod).not_to be_nil
+
+      out_assigns = mod.assigns.select { |assign| assign.target.to_s == 'out' }
+      expect(out_assigns.length).to eq(1)
+
+      expr_signal_names = lambda do |expr|
+        case expr
+        when RHDL::Codegen::CIRCT::IR::Signal
+          [expr.name.to_s]
+        when RHDL::Codegen::CIRCT::IR::Literal
+          []
+        when RHDL::Codegen::CIRCT::IR::UnaryOp
+          expr_signal_names.call(expr.operand)
+        when RHDL::Codegen::CIRCT::IR::BinaryOp
+          expr_signal_names.call(expr.left) + expr_signal_names.call(expr.right)
+        when RHDL::Codegen::CIRCT::IR::Mux
+          expr_signal_names.call(expr.condition) +
+            expr_signal_names.call(expr.when_true) +
+            expr_signal_names.call(expr.when_false)
+        when RHDL::Codegen::CIRCT::IR::Concat
+          Array(expr.parts).flat_map { |part| expr_signal_names.call(part) }
+        when RHDL::Codegen::CIRCT::IR::Slice
+          expr_signal_names.call(expr.base)
+        when RHDL::Codegen::CIRCT::IR::Resize
+          expr_signal_names.call(expr.expr)
+        else
+          []
+        end
+      end
+
+      names = expr_signal_names.call(out_assigns.first.expr)
+      expect(names).to include('in')
+      expect(names).not_to include('out')
     end
   end
 

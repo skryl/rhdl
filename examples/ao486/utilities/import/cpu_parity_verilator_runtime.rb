@@ -342,7 +342,10 @@ module RHDL
                 };
 
                 for (int cycle = 0; cycle < max_cycles; ++cycle) {
-                  if (burst.active && burst.started) {
+                  bool deliver_read_beat =
+                    burst.active &&
+                    burst.started;
+                  if (deliver_read_beat) {
                     uint32_t addr = burst.base + static_cast<uint32_t>(burst.beat_index * 4);
                     dut->avm_readdatavalid = 1;
                     dut->avm_readdata = little_endian_word(mem, addr);
@@ -374,7 +377,7 @@ module RHDL
                   }
 
                   if (burst.active) {
-                    if (burst.started) {
+                    if (deliver_read_beat) {
                       uint32_t addr = burst.base + static_cast<uint32_t>(burst.beat_index * 4);
                       std::printf("fetch_word 0x%08X 0x%08X\\n", addr, static_cast<uint32_t>(dut->avm_readdata));
                       burst.beat_index += 1;

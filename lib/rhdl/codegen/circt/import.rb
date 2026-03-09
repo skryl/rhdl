@@ -31,13 +31,23 @@ module RHDL
         ARRAY_TYPE_PATTERN = /!hw\.array<(?<len>\d+)xi(?<width>\d+)>/
         LLHD_ARRAY_TYPE_PATTERN = /<\s*!hw\.array<(?<len>\d+)xi(?<width>\d+)>\s*>/
 
-        ArrayValue = Struct.new(:elements, :length, :element_width, keyword_init: true)
+        ArrayValue = Struct.new(:elements, :length, :element_width, keyword_init: true) do
+          def width
+            length.to_i * element_width.to_i
+          end
+        end
         ArrayMeta = Struct.new(:token, :name, :length, :element_width, keyword_init: true)
         ArrayElementRef = Struct.new(:array_token, :array_name, :length, :element_width, :index_expr, keyword_init: true)
 
         def from_mlir(text, strict: false, top: nil, extern_modules: [], resolve_forward_refs: true)
           previous_array_elements_cache = Thread.current[:rhdl_circt_import_array_elements_cache]
+          previous_literal_cache = Thread.current[:rhdl_circt_import_literal_cache]
+          previous_signal_cache = Thread.current[:rhdl_circt_import_signal_cache]
+          previous_forward_refs_seen = Thread.current[:rhdl_circt_import_forward_refs_seen]
           Thread.current[:rhdl_circt_import_array_elements_cache] = {}
+          Thread.current[:rhdl_circt_import_literal_cache] = {}
+          Thread.current[:rhdl_circt_import_signal_cache] = {}
+          Thread.current[:rhdl_circt_import_forward_refs_seen] = false
 
           diagnostics = []
           modules = []
@@ -78,6 +88,7 @@ module RHDL
 
             idx = header[:next_idx]
             body_depth = 1
+            Thread.current[:rhdl_circt_import_forward_refs_seen] = false
             while idx < lines.length && body_depth.positive?
               body_raw = lines[idx]
               body = body_raw.strip
@@ -317,7 +328,7 @@ module RHDL
               end_line: idx
             }
 
-            if resolve_forward_refs
+            if resolve_forward_refs && Thread.current[:rhdl_circt_import_forward_refs_seen]
               resolution_state = {
                 declared_names: declared_signal_names(input_ports, output_ports, nets, regs),
                 signal_memo: {},
@@ -381,6 +392,9 @@ module RHDL
           )
         ensure
           Thread.current[:rhdl_circt_import_array_elements_cache] = previous_array_elements_cache
+          Thread.current[:rhdl_circt_import_literal_cache] = previous_literal_cache
+          Thread.current[:rhdl_circt_import_signal_cache] = previous_signal_cache
+          Thread.current[:rhdl_circt_import_forward_refs_seen] = previous_forward_refs_seen
         end
 
         def op_census(text)
@@ -465,7 +479,7 @@ module RHDL
 
         def seed_value_map(input_ports)
           input_ports.each_with_object({}) do |port, map|
-            map["%#{port.name}"] = IR::Signal.new(name: port.name.to_s, width: port.width.to_i)
+            map["%#{port.name}"] = import_signal(name: port.name.to_s, width: port.width.to_i)
           end
         end
 
@@ -701,6 +715,7 @@ module RHDL
           edge_term = parse_cf_cond_br(check_block[:terminator])
           return false unless edge_term
           return false unless edge_term[:false_target] == entry_target
+          return false if edge_term[:true_target] == entry_target
 
           clock_name = infer_llhd_clock_signal(
             wait_term: wait_term,
@@ -779,6 +794,18 @@ module RHDL
           check_block = blocks[wait_term[:target]]
           return false unless check_block
 
+          edge_term = parse_cf_cond_br(check_block[:terminator])
+          clock_name =
+            if edge_term && edge_term[:false_target] == entry_target && edge_term[:true_target] != entry_target
+              inferred_clock = infer_llhd_clock_signal(
+                wait_term: wait_term,
+                wait_block: wait_block,
+                check_block: check_block,
+                value_map: value_map
+              )
+              resolve_existing_seq_clock(inferred_clock, processes)
+            end
+
           stop_env = resolve_llhd_stop_env(
             blocks: blocks,
             current_label: wait_term[:target],
@@ -794,11 +821,55 @@ module RHDL
           )
           return false if stop_env.empty?
 
+          if clock_name
+            seq_statements = build_resultful_llhd_drive_statements(
+              process_token: process_token,
+              drive_lines: drive_lines,
+              stop_block: wait_block,
+              stop_env: stop_env,
+              yield_tokens: wait_term[:yield_tokens],
+              value_map: value_map,
+              diagnostics: diagnostics,
+              line_no: line_no,
+              strict: strict
+            )
+            return false if seq_statements.empty?
+
+            target_widths = {}
+            collect_seq_targets(seq_statements).each do |target_name, expr|
+              width = process_signal_width(
+                target: target_name,
+                expr: expr,
+                input_ports: input_ports,
+                output_ports: output_ports,
+                nets: nets,
+                regs: regs
+              )
+              target_widths[target_name] = [target_widths[target_name].to_i, width].max
+            end
+
+            target_widths.each do |target, width|
+              next if process_target_declared?(target, input_ports: input_ports, output_ports: output_ports, regs: regs)
+
+              regs << IR::Reg.new(name: target, width: width)
+            end
+
+            processes << IR::Process.new(
+              name: :"llhd_proc_#{processes.length}",
+              statements: seq_statements,
+              clocked: true,
+              clock: clock_name,
+              sensitivity_list: []
+            )
+            return true
+          end
+
           result_assigns = build_resultful_llhd_assigns(
             process_token: process_token,
             drive_lines: drive_lines,
             stop_block: wait_block,
             stop_env: stop_env,
+            yield_tokens: wait_term[:yield_tokens],
             value_map: value_map,
             diagnostics: diagnostics,
             line_no: line_no,
@@ -823,10 +894,11 @@ module RHDL
                                   array_element_refs:, diagnostics:, line_no:, strict:, stack:)
           block = blocks[current_label]
           return {} unless block
-          return {} if stack.include?(current_label)
+          state_key = llhd_block_state_key(current_label: current_label, block: block, value_map: value_map)
+          return {} if stack.include?(state_key)
 
           local_map = value_map.dup
-          next_stack = stack + [current_label]
+          next_stack = stack + [state_key]
 
           Array(block[:instructions]).each do |instruction|
             parse_non_drive_process_instruction(
@@ -960,12 +1032,13 @@ module RHDL
           end
         end
 
-        def build_resultful_llhd_drive_statements(process_token:, drive_lines:, stop_block:, stop_env:, value_map:,
-                                                  diagnostics:, line_no:, strict:)
-          result_args = Array(stop_block[:args])
-          result_token_map = result_args.each_with_index.each_with_object({}) do |(arg_spec, idx), map|
-            map["#{process_token}##{idx}"] = arg_spec[:name]
-          end
+        def build_resultful_llhd_drive_statements(process_token:, drive_lines:, stop_block:, stop_env:, yield_tokens:,
+                                                  value_map:, diagnostics:, line_no:, strict:)
+          result_token_map = resultful_llhd_result_token_map(
+            process_token: process_token,
+            stop_block: stop_block,
+            yield_tokens: yield_tokens
+          )
 
           Array(drive_lines).flat_map do |line|
             parsed_drive = parse_llhd_drive(line)
@@ -1003,12 +1076,14 @@ module RHDL
           end
         end
 
-        def build_resultful_llhd_assigns(process_token:, drive_lines:, stop_block:, stop_env:, value_map:,
+        def build_resultful_llhd_assigns(process_token:, drive_lines:, stop_block:, stop_env:, yield_tokens:,
+                                         value_map:,
                                          diagnostics:, line_no:, strict:)
-          result_args = Array(stop_block[:args])
-          result_token_map = result_args.each_with_index.each_with_object({}) do |(arg_spec, idx), map|
-            map["#{process_token}##{idx}"] = arg_spec[:name]
-          end
+          result_token_map = resultful_llhd_result_token_map(
+            process_token: process_token,
+            stop_block: stop_block,
+            yield_tokens: yield_tokens
+          )
 
           Array(drive_lines).filter_map do |line|
             parsed_drive = parse_llhd_drive(line)
@@ -1053,6 +1128,22 @@ module RHDL
               op: 'llhd.drv'
             )
             nil
+          end
+        end
+
+        def resultful_llhd_result_token_map(process_token:, stop_block:, yield_tokens:)
+          stop_arg_names = Array(stop_block[:args]).map { |arg_spec| arg_spec[:name] }
+          yielded_names = Array(yield_tokens).map { |token| normalize_value_token(token) }
+
+          result_names =
+            if yielded_names.any? && yielded_names.all? { |name| stop_arg_names.include?(name) }
+              yielded_names
+            else
+              stop_arg_names
+            end
+
+          result_names.each_with_index.each_with_object({}) do |(name, idx), map|
+            map["#{process_token}##{idx}"] = name
           end
         end
 
@@ -1287,11 +1378,12 @@ module RHDL
           return [] if !stop_label.nil? && current_label == stop_label
           block = blocks[current_label]
           return [] unless block
-          return [] if stack.include?(current_label)
+          state_key = llhd_block_state_key(current_label: current_label, block: block, value_map: value_map)
+          return [] if stack.include?(state_key)
 
           local_map = value_map.dup
           statements = []
-          next_stack = stack + [current_label]
+          next_stack = stack + [state_key]
 
           Array(block[:instructions]).each do |instruction|
             parsed_drive = parse_llhd_drive(instruction)
@@ -1438,6 +1530,13 @@ module RHDL
             mapped[arg_spec[:name]] = lookup_value(value_map, arg_token, width: width)
           end
           mapped
+        end
+
+        def llhd_block_state_key(current_label:, block:, value_map:)
+          arg_state = Array(block[:args]).map do |arg_spec|
+            [arg_spec[:name], expr_signature(value_map[arg_spec[:name]])]
+          end
+          [current_label, arg_state]
         end
 
         def one_shot_llhd_init_process?(process_lines)
@@ -2056,7 +2155,9 @@ module RHDL
 
           if (m = body.match(/\A(#{SSA_TOKEN_PATTERN})\s*=\s*hw\.array_create\s+(.+)\s*:\s*i(\d+)\z/))
             element_width = m[3].to_i
-            elements = split_top_level_csv(m[2]).map { |token| lookup_value(value_map, token, width: element_width) }
+            # CIRCT prints array literals in packed/high-to-low order, while
+            # hw.array_get index 0 addresses the least-significant element.
+            elements = split_top_level_csv(m[2]).map { |token| lookup_value(value_map, token, width: element_width) }.reverse
             value_map[m[1]] = ArrayValue.new(
               elements: elements,
               length: elements.length,
@@ -2069,7 +2170,7 @@ module RHDL
             array_type = parse_array_type(m[3])
             elements = split_top_level_csv(m[2]).map do |token|
               lookup_value(value_map, token, width: array_type[:element_width])
-            end
+            end.reverse
             value_map[m[1]] = ArrayValue.new(
               elements: elements,
               length: array_type[:len],
@@ -2618,7 +2719,7 @@ module RHDL
                     return true
                   end
 
-          value_map[m[1]] = IR::Literal.new(value: literal_value, width: width)
+          value_map[m[1]] = import_literal(value: literal_value, width: width)
           true
         end
 
@@ -3328,11 +3429,32 @@ module RHDL
         def lookup_value(value_map, token, width: 1)
           token = normalize_value_token(token)
           return value_map[token] if value_map.key?(token)
-          return IR::Literal.new(value: 1, width: width) if token == 'true'
-          return IR::Literal.new(value: 0, width: width) if token == 'false'
-          return IR::Signal.new(name: token.sub('%', ''), width: width) if token.start_with?('%')
+          return import_literal(value: 1, width: width) if token == 'true'
+          return import_literal(value: 0, width: width) if token == 'false'
+          if token.start_with?('%')
+            Thread.current[:rhdl_circt_import_forward_refs_seen] = true
+            return import_signal(name: token.sub('%', ''), width: width)
+          end
 
-          IR::Literal.new(value: token.to_i, width: width)
+          import_literal(value: token.to_i, width: width)
+        end
+
+        def import_literal(value:, width:)
+          cache = Thread.current[:rhdl_circt_import_literal_cache]
+          literal_value = value.to_i
+          literal_width = width.to_i
+          return IR::Literal.new(value: literal_value, width: literal_width) unless cache
+
+          cache[[literal_value, literal_width]] ||= IR::Literal.new(value: literal_value, width: literal_width)
+        end
+
+        def import_signal(name:, width:)
+          cache = Thread.current[:rhdl_circt_import_signal_cache]
+          signal_name = name.to_s
+          signal_width = width.to_i
+          return IR::Signal.new(name: signal_name, width: signal_width) unless cache
+
+          cache[[signal_name, signal_width]] ||= IR::Signal.new(name: signal_name, width: signal_width)
         end
 
         def parse_array_type(text)
@@ -3390,7 +3512,7 @@ module RHDL
                      when ArrayValue
                        elems = value.elements.first(length)
                        if elems.length < length
-                         elems + Array.new(length - elems.length) { IR::Literal.new(value: 0, width: element_width) }
+                         elems + Array.new(length - elems.length) { import_literal(value: 0, width: element_width) }
                        else
                          elems
                        end
@@ -3411,19 +3533,19 @@ module RHDL
 
           case value
           when String, Symbol
-            IR::Signal.new(name: value.to_s, width: width)
+            import_signal(name: value.to_s, width: width)
           else
-            IR::Literal.new(value: 0, width: width)
+            import_literal(value: 0, width: width)
           end
         end
 
         def select_array_element(elements:, index_expr:, element_width:)
-          return IR::Literal.new(value: 0, width: element_width) if elements.empty?
+          return import_literal(value: 0, width: element_width) if elements.empty?
           # Large dynamic array selects (for inferred RAMs) can explode into
           # extremely large mux trees that are not loadable by Ruby parsers.
           # Keep import stable by capping expansion size.
           if elements.length > MAX_ARRAY_SELECT_ELEMENTS && !index_expr.is_a?(IR::Literal)
-            return IR::Literal.new(value: 0, width: element_width)
+            return import_literal(value: 0, width: element_width)
           end
 
           if index_expr.is_a?(IR::Literal)

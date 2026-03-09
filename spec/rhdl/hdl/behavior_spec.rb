@@ -190,6 +190,86 @@ RSpec.describe 'Behavior DSL' do
     end
   end
 
+  describe 'Concatenation masking' do
+    class BehaviorSignedLiteralConcat < RHDL::HDL::Component
+      input :head, width: 3
+      output :y, width: 8
+
+      behavior do
+        y <= cat(head, lit(-16, width: 5))
+      end
+    end
+
+    it 'masks signed literal parts to their declared width before concatenation' do
+      gate = BehaviorSignedLiteralConcat.new('signed_concat')
+
+      gate.set_input(:head, 0)
+      gate.propagate
+      expect(gate.get_output(:y)).to eq(0x10)
+
+      gate.set_input(:head, 0b111)
+      gate.propagate
+      expect(gate.get_output(:y)).to eq(0xF0)
+    end
+  end
+
+  describe 'Sequential local width masking' do
+    class BehaviorSequentialLocalWidth < RHDL::Sim::SequentialComponent
+      include RHDL::DSL::Sequential
+
+      input :clk
+      output :addr, width: 64
+      output :data, width: 64
+
+      sequential clock: :clk do
+        inc = local(:inc, addr[31..0] + lit(8, width: 32), width: 32)
+        addr <= cat(addr[63..32], inc)
+        data <= cat(inc, inc)
+      end
+    end
+
+    def clock_cycle(component)
+      component.set_input(:clk, 0)
+      component.propagate
+      component.set_input(:clk, 1)
+      component.propagate
+    end
+
+    it 'masks sequential locals to the declared width before reuse in wider expressions' do
+      component = BehaviorSequentialLocalWidth.new('seq_local_width')
+      component.write_reg(:addr, 0)
+      component.write_reg(:data, 0)
+
+      clock_cycle(component)
+
+      expect(component.get_output(:addr)).to eq(0x0000000000000008)
+      expect(component.get_output(:data)).to eq(0x0000000800000008)
+    end
+  end
+
+  describe 'Negative literal comparisons' do
+    class BehaviorNegativeLiteralCompare < RHDL::HDL::Component
+      input :sel, width: 4
+      output :y
+
+      behavior do
+        y <= mux((sel == lit(-2, width: 4)), lit(1, width: 1), lit(0, width: 1))
+      end
+    end
+
+    it 'masks negative literals before comparison during simulation' do
+      gate = BehaviorNegativeLiteralCompare.new('negative_compare')
+
+      gate.set_input(:sel, 0b1110)
+      gate.propagate
+      expect(gate.get_output(:y)).to eq(1)
+
+      gate.set_input(:sel, 0b0010)
+      gate.propagate
+      expect(gate.get_output(:y)).to eq(0)
+    end
+  end
+
   describe 'Bitwise operations on multi-bit values' do
     class Behavior8BitAnd < RHDL::HDL::Component
       input :a, width: 8
@@ -352,6 +432,94 @@ RSpec.describe 'Behavior DSL' do
       slice.propagate
       expect(slice.get_output(:low)).to eq(0x0B)
       expect(slice.get_output(:high)).to eq(0x0A)
+    end
+  end
+
+  describe 'Hierarchical sibling sequencing' do
+    class BehaviorHierarchyLeafReg < RHDL::HDL::Component
+      include RHDL::DSL::Sequential
+
+      input :clk
+      input :din
+      output :q
+
+      sequential clock: :clk do
+        q <= din
+      end
+    end
+
+    class BehaviorHierarchyProducer < RHDL::HDL::Component
+      input :clk
+      input :src
+      output :out
+
+      instance :reg, BehaviorHierarchyLeafReg
+
+      port :clk => [:reg, :clk]
+      port :src => [:reg, :din]
+      port [:reg, :q] => :out
+    end
+
+    class BehaviorHierarchyConsumer < RHDL::HDL::Component
+      input :clk
+      input :src
+      output :out
+
+      instance :reg, BehaviorHierarchyLeafReg
+
+      port :clk => [:reg, :clk]
+      port :src => [:reg, :din]
+      port [:reg, :q] => :out
+    end
+
+    class BehaviorHierarchySiblingTop < RHDL::HDL::Component
+      input :clk
+      input :src
+      output :producer_q
+      output :consumer_q
+
+      wire :producer_wire
+      wire :consumer_wire
+
+      instance :producer, BehaviorHierarchyProducer
+      instance :consumer, BehaviorHierarchyConsumer
+
+      port :clk => [:producer, :clk]
+      port :src => [:producer, :src]
+      port [:producer, :out] => :producer_wire
+
+      port :clk => [:consumer, :clk]
+      port :producer_wire => [:consumer, :src]
+      port [:consumer, :out] => :consumer_wire
+
+      behavior do
+        producer_q <= producer_wire
+        consumer_q <= consumer_wire
+      end
+    end
+
+    def tick_behavior_component(component)
+      component.set_input(:clk, 0)
+      component.propagate
+      component.set_input(:clk, 1)
+      component.propagate
+      component.set_input(:clk, 0)
+      component.propagate
+    end
+
+    it 'samples sequential descendants across sibling composites before any update' do
+      top = BehaviorHierarchySiblingTop.new('hier_top')
+
+      top.set_input(:src, 1)
+      tick_behavior_component(top)
+
+      expect(top.get_output(:producer_q)).to eq(1)
+      expect(top.get_output(:consumer_q)).to eq(0)
+
+      tick_behavior_component(top)
+
+      expect(top.get_output(:producer_q)).to eq(1)
+      expect(top.get_output(:consumer_q)).to eq(1)
     end
   end
 

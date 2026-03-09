@@ -68,21 +68,24 @@ module RHDL
                   rhdl_report
                 )
 
-                if (skip_reason = Sparc64ParityHelper.compiler_parity_skip_reason(component_class: record.component_class))
+                if (skip_reason = Sparc64ParityHelper.parity_skip_reason(component_class: record.component_class))
                   skip(skip_reason)
                 end
 
                 parity_report = Sparc64ParityHelper.parity_report(
                   component_class: record.component_class,
                   module_name: module_name,
-                  verilog_files: sparc64_runtime_session.parity_dependency_verilog_files_for(module_name),
+                  verilog_files: SourceFileDriver.parity_verilog_files_for(
+                    session: sparc64_runtime_session,
+                    module_name: module_name
+                  ),
                   original_verilog_path: record.source_path,
                   staged_verilog_path: record.staged_source_path,
                   base_dir: SourceFileDriver.parity_base_dir_for(
                     session: sparc64_runtime_session,
                     module_name: module_name
                   ),
-                  include_dirs: sparc64_runtime_session.include_dirs
+                  include_dirs: sparc64_runtime_session.staged_include_dirs
                 )
                 expect(parity_report[:match]).to be(true), SourceFileDriver.format_parity_report(
                   module_name,
@@ -122,6 +125,27 @@ module RHDL
             File.join(session.temp_root, 'checks', 'parity', module_name.to_s)
           end
 
+          def parity_verilog_files_for(session:, module_name:)
+            base_dir = parity_base_dir_for(session: session, module_name: module_name)
+            FileUtils.mkdir_p(base_dir)
+            staged_files = session.parity_dependency_verilog_files_for(module_name).map do |path|
+              session.staged_path_for_source(path)
+            end.select { |path| File.file?(path) }.uniq
+
+            importer = RHDL::Examples::SPARC64::Import::SystemImporter.new(
+              clean_output: false,
+              keep_workspace: true
+            )
+            support_stub_path = importer.send(
+              :write_hierarchy_support_stubs,
+              staged_root: base_dir,
+              staged_module_files: staged_files,
+              top_file: session.import_result&.staged_top_file || staged_files.first
+            )
+
+            [support_stub_path, *staged_files].uniq.freeze
+          end
+
           def source_digest_for(source_relative_path)
             Digest::SHA256.hexdigest(source_relative_path.to_s)[0, 16]
           end
@@ -144,10 +168,13 @@ module RHDL
           end
 
           def format_parity_report(module_name, report)
-            detail = report[:mismatch] || report[:error] || report.inspect
+            detail_lines = []
+            detail_lines << "runtime backend: #{report[:runtime_backend]}" if report[:runtime_backend]
+            detail_lines << "native IR fallback: #{report[:native_ir_error]}" if report[:native_ir_error]
+            detail_lines << (report[:mismatch] || report[:error] || report.inspect)
             [
               "behavioral parity failed for #{module_name}",
-              detail
+              detail_lines.join("\n")
             ].join("\n")
           end
 

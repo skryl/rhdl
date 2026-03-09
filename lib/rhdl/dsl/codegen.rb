@@ -510,7 +510,7 @@ module RHDL
               )
             end
 
-            if seq_ir.reset.to_s.end_with?('_n')
+            if RHDL::DSL::Sequential.active_low_reset_name?(seq_ir.reset)
               [RHDL::Codegen::CIRCT::IR::If.new(
                 condition: reset_signal,
                 then_statements: normal_statements,

@@ -34,6 +34,8 @@ module RHDL
             trace_fetch_bytes: 64,
             trace_dec_acceptable: 4,
             trace_fetch_accept_length: 4,
+            trace_prefetchfifo_accept_empty: 1,
+            trace_prefetchfifo_accept_do: 1,
             trace_arch_new_export: 1,
             trace_arch_eax: 32,
             trace_arch_ebx: 32,
@@ -186,6 +188,7 @@ module RHDL
 
           def patch_top_module!(modules)
             mod = find_module!(modules, 'ao486')
+            memory_inst = find_instance!(mod, 'memory_inst')
             pipeline_inst = find_instance!(mod, 'pipeline_inst')
 
             ensure_net(mod, 'pipeline_inst_trace_retired_1', 1)
@@ -247,6 +250,8 @@ module RHDL
             mod.assigns << assign('trace_fetch_bytes', signal('pipeline_inst_trace_fetch_bytes_64', 64))
             mod.assigns << assign('trace_dec_acceptable', signal('pipeline_inst_trace_dec_acceptable_4', 4))
             mod.assigns << assign('trace_fetch_accept_length', signal('pipeline_inst_trace_fetch_accept_length_4', 4))
+            mod.assigns << assign('trace_prefetchfifo_accept_empty', connection_signal!(memory_inst, 'prefetchfifo_accept_empty'))
+            mod.assigns << assign('trace_prefetchfifo_accept_do', connection_signal!(memory_inst, 'prefetchfifo_accept_do'))
             mod.assigns << assign('trace_arch_new_export', signal('pipeline_inst_trace_arch_new_export_1', 1))
             mod.assigns << assign('trace_arch_eax', signal('pipeline_inst_trace_arch_eax_32', 32))
             mod.assigns << assign('trace_arch_ebx', signal('pipeline_inst_trace_arch_ebx_32', 32))

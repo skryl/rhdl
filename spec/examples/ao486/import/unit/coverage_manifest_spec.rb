@@ -4,20 +4,16 @@ require 'spec_helper'
 
 require_relative 'coverage_manifest'
 
-RSpec.describe RHDL::Examples::SPARC64::Unit do
-  it 'locks the current W1 mirrored coverage baseline' do
-    expect(described_class::COVERED_SOURCE_FILE_COUNT).to eq(180)
-    expect(described_class::COVERED_MODULE_COUNT).to eq(202)
+RSpec.describe RHDL::Examples::AO486::Unit do
+  it 'locks the current AO486 CPU mirrored coverage baseline' do
+    expect(described_class::COVERED_SOURCE_FILE_COUNT).to eq(47)
+    expect(described_class::COVERED_MODULE_COUNT).to eq(47)
   end
 
   it 'keeps representative source groupings locked' do
-    expect(described_class::COVERED_SOURCE_FILES.fetch('Top/W1.v')).to eq(%w[W1])
-    expect(described_class::COVERED_SOURCE_FILES.fetch('T1-common/common/swrvr_clib.v')).to eq(
-      %w[clken_buf dff_ns dff_s dffe_s dffr_s dffre_s dffrl_async dffrl_ns dffrle_ns dffrle_s mux2ds mux3ds mux4ds sink]
-    )
-    expect(described_class::COVERED_SOURCE_FILES.fetch('T1-common/srams/bw_r_irf.v')).to eq(
-      %w[bw_r_irf bw_r_irf_core]
-    )
+    expect(described_class::COVERED_SOURCE_FILES.fetch('ao486/ao486.v')).to eq(%w[ao486])
+    expect(described_class::COVERED_SOURCE_FILES.fetch('ao486/pipeline/pipeline.v')).to eq(%w[pipeline])
+    expect(described_class::COVERED_SOURCE_FILES.fetch('cache/l1_icache.v')).to eq(%w[l1_icache])
   end
 
   it 'maps each covered source file to a mirrored spec file' do

@@ -41,19 +41,26 @@ RSpec.describe 'AO486 CPU parity-package current write-trace parity', slow: true
     ).run
   end
 
-  it 'matches JIT and Verilator on the stable write-trace byte-stream subset', timeout: 900 do
+  def require_ir_backend!
+    backend = AO486SpecSupport::IRBackendHelper.cpu_runtime_ir_backend
+    skip 'IR compiler/JIT backend unavailable' unless backend
+
+    backend
+  end
+
+  it 'matches the selected IR backend and Verilator on the stable write-trace byte-stream subset', timeout: 900 do
     require_import_tool!
     require_program_assembler!
     skip 'circt-opt not available' unless HdlToolchain.which('circt-opt')
     skip 'firtool not available' unless HdlToolchain.which('firtool')
     skip 'verilator not available' unless HdlToolchain.verilator_available?
-    skip 'IR JIT backend unavailable' unless RHDL::Sim::Native::IR::JIT_AVAILABLE
+    backend = require_ir_backend!
 
     Dir.mktmpdir('ao486_cpu_step_parity_out') do |out_dir|
       Dir.mktmpdir('ao486_cpu_step_parity_ws') do |workspace|
         result = run_importer(out_dir: out_dir, workspace: workspace)
         cleaned_mlir = File.read(result.normalized_core_mlir_path)
-        jit_runtime = RHDL::Examples::AO486::Import::CpuParityRuntime.build_from_cleaned_mlir(cleaned_mlir)
+        ir_runtime = RHDL::Examples::AO486::Import::CpuParityRuntime.build_from_cleaned_mlir(cleaned_mlir, backend: backend)
 
         Dir.mktmpdir('ao486_cpu_step_parity_vl') do |build_dir|
           verilator_runtime = RHDL::Examples::AO486::Import::CpuParityVerilatorRuntime.build_from_cleaned_mlir(
@@ -62,15 +69,15 @@ RSpec.describe 'AO486 CPU parity-package current write-trace parity', slow: true
           )
 
           stable_programs.each do |program|
-            program.load_into(jit_runtime)
-            jit_trace = flatten_step_trace(jit_runtime.run(max_cycles: program.max_cycles))
-            expect(jit_trace).not_to be_empty, "program=#{program.name}"
+            program.load_into(ir_runtime)
+            ir_trace = flatten_step_trace(ir_runtime.run(max_cycles: program.max_cycles))
+            expect(ir_trace).not_to be_empty, "program=#{program.name}"
 
             program.load_into(verilator_runtime)
             verilator_trace = flatten_step_trace(verilator_runtime.run_step_trace(max_cycles: program.max_cycles))
             expect(verilator_trace).not_to be_empty, "program=#{program.name}"
 
-            expect(verilator_trace).to eq(jit_trace), "program=#{program.name}"
+            expect(verilator_trace).to eq(ir_trace), "program=#{program.name}"
           end
         end
       end

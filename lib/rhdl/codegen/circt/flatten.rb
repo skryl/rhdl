@@ -19,68 +19,95 @@ module RHDL
                     end
 
           module_index = modules.each_with_object({}) { |mod, acc| acc[mod.name.to_s] = mod }
+          port_index = module_index.transform_values do |mod|
+            Array(mod.ports).each_with_object({}) { |port, acc| acc[port.name.to_s] = port }
+          end
           top_name = top.to_s
           top_module = module_index[top_name]
           raise KeyError, "Top module '#{top_name}' not found in CIRCT package" unless top_module
 
-          flatten_module(
+          state = {
+            ports: Array(top_module.ports).map { |port| copy_port(port) },
+            nets: [],
+            net_names: Set.new,
+            regs: [],
+            reg_names: Set.new,
+            assigns: [],
+            processes: [],
+            memories: [],
+            memory_names: Set.new,
+            write_ports: [],
+            sync_read_ports: []
+          }
+
+          flatten_into!(
             mod: top_module,
             module_index: module_index,
-            top_name: top_module.name.to_s,
-            prefix: ''
+            port_index: port_index,
+            prefix: '',
+            state: state
+          )
+
+          IR::ModuleOp.new(
+            name: top_module.name.to_s,
+            ports: state[:ports],
+            nets: state[:nets],
+            regs: state[:regs],
+            assigns: state[:assigns],
+            processes: state[:processes],
+            instances: [],
+            memories: state[:memories],
+            write_ports: state[:write_ports],
+            sync_read_ports: state[:sync_read_ports],
+            parameters: top_module.parameters || {}
           )
         end
 
-        def flatten_module(mod:, module_index:, top_name:, prefix:)
+        def flatten_into!(mod:, module_index:, port_index:, prefix:, state:)
           expr_cache = {}
-          all_ports = prefix.empty? ? mod.ports.map { |port| copy_port(port) } : []
-          all_nets = mod.nets.map { |net| prefix_net(net, prefix) }
-          all_regs = mod.regs.map { |reg| prefix_reg(reg, prefix) }
-          all_assigns = mod.assigns.map { |assign| prefix_assign(assign, prefix, expr_cache: expr_cache) }
-          all_processes = mod.processes.map { |process| prefix_process(process, prefix, expr_cache: expr_cache) }
-          all_memories = mod.memories.map { |memory| prefix_memory(memory, prefix) }
-          all_write_ports = mod.write_ports.map { |wp| prefix_write_port(wp, prefix, expr_cache: expr_cache) }
-          all_sync_read_ports = mod.sync_read_ports.map { |rp| prefix_sync_read_port(rp, prefix, expr_cache: expr_cache) }
+          Array(mod.nets).each { |net| append_net!(state, prefix_net(net, prefix)) }
+          Array(mod.regs).each { |reg| append_reg!(state, prefix_reg(reg, prefix)) }
+          Array(mod.assigns).each { |assign| append_assign!(state, prefix_assign(assign, prefix, expr_cache: expr_cache)) }
+          Array(mod.processes).each { |process| state[:processes] << prefix_process(process, prefix, expr_cache: expr_cache) }
+          Array(mod.memories).each { |memory| append_memory!(state, prefix_memory(memory, prefix)) }
+          Array(mod.write_ports).each do |write_port|
+            state[:write_ports] << prefix_write_port(write_port, prefix, expr_cache: expr_cache)
+          end
+          Array(mod.sync_read_ports).each do |read_port|
+            state[:sync_read_ports] << prefix_sync_read_port(read_port, prefix, expr_cache: expr_cache)
+          end
 
           unless prefix.empty?
-            mod.ports.each do |port|
+            Array(mod.ports).each do |port|
               next unless port.direction.to_s == 'out'
 
               prefixed_name = :"#{prefix}__#{port.name}"
-              next if all_nets.any? { |net| net.name.to_s == prefixed_name.to_s }
-              next if all_regs.any? { |reg| reg.name.to_s == prefixed_name.to_s }
-
-              all_nets << IR::Net.new(name: prefixed_name, width: port.width)
+              ensure_net_present(state, prefixed_name, port.width)
             end
           end
 
-          mod.instances.each do |inst|
+          Array(mod.instances).each do |inst|
             child_mod = module_index.fetch(inst.module_name.to_s) do
               raise KeyError, "Missing CIRCT module definition for instance target '#{inst.module_name}'"
             end
             inst_prefix = prefix.empty? ? inst.name.to_s : "#{prefix}__#{inst.name}"
 
-            child_flat = flatten_module(
+            flatten_into!(
               mod: child_mod,
               module_index: module_index,
-              top_name: top_name,
-              prefix: inst_prefix
+              port_index: port_index,
+              prefix: inst_prefix,
+              state: state
             )
 
-            all_nets.concat(child_flat.nets)
-            all_regs.concat(child_flat.regs)
-            all_assigns.concat(child_flat.assigns)
-            all_processes.concat(child_flat.processes)
-            all_memories.concat(child_flat.memories)
-            all_write_ports.concat(child_flat.write_ports)
-            all_sync_read_ports.concat(child_flat.sync_read_ports)
-
             connected_ports = Set.new
-            inst.connections.each do |conn|
+            child_ports = port_index.fetch(child_mod.name.to_s)
+
+            Array(inst.connections).each do |conn|
               port_name = conn.port_name.to_s
               connected_ports << port_name
 
-              port_def = child_mod.ports.find { |port| port.name.to_s == port_name }
+              port_def = child_ports[port_name]
               port_width = connection_width(conn, port_def)
               child_signal = "#{inst_prefix}__#{port_name}"
 
@@ -88,10 +115,10 @@ module RHDL
                 parent_target = prefixed_target_name(conn.signal, prefix)
                 next if parent_target.nil?
 
-                all_assigns << IR::Assign.new(
+                append_assign!(state, IR::Assign.new(
                   target: parent_target,
                   expr: IR::Signal.new(name: child_signal, width: port_width)
-                )
+                ))
               else
                 child_expr = prefixed_connection_expr(
                   conn.signal,
@@ -101,42 +128,28 @@ module RHDL
                 )
                 next if child_expr.nil?
 
-                all_assigns << IR::Assign.new(
+                append_assign!(state, IR::Assign.new(
                   target: child_signal,
                   expr: child_expr
-                )
+                ))
               end
 
-              ensure_net_present(all_nets, all_regs, child_signal, port_width)
+              ensure_net_present(state, child_signal, port_width)
             end
 
-            child_mod.ports.each do |port|
+            Array(child_mod.ports).each do |port|
               next if connected_ports.include?(port.name.to_s)
               next unless port.direction.to_s == 'in'
               next if port.default.nil?
 
               child_signal = "#{inst_prefix}__#{port.name}"
-              all_assigns << IR::Assign.new(
+              append_assign!(state, IR::Assign.new(
                 target: child_signal,
                 expr: IR::Literal.new(value: port.default.to_i, width: port.width.to_i)
-              )
-              ensure_net_present(all_nets, all_regs, child_signal, port.width.to_i)
+              ))
+              ensure_net_present(state, child_signal, port.width.to_i)
             end
           end
-
-          IR::ModuleOp.new(
-            name: top_name,
-            ports: all_ports,
-            nets: dedupe_by_name(all_nets),
-            regs: dedupe_by_name(all_regs),
-            assigns: all_assigns,
-            processes: all_processes,
-            instances: [],
-            memories: dedupe_by_name(all_memories),
-            write_ports: all_write_ports,
-            sync_read_ports: all_sync_read_ports,
-            parameters: mod.parameters || {}
-          )
         end
 
         def copy_port(port)
@@ -325,11 +338,44 @@ module RHDL
           width && width.positive? ? width : 1
         end
 
-        def ensure_net_present(nets, regs, name, width)
-          return if nets.any? { |net| net.name.to_s == name.to_s }
-          return if regs.any? { |reg| reg.name.to_s == name.to_s }
+        def append_net!(state, net)
+          name = net.name.to_s
+          return if state[:net_names].include?(name)
 
-          nets << IR::Net.new(name: name.to_sym, width: width.to_i)
+          state[:net_names] << name
+          state[:nets] << net
+        end
+
+        def append_reg!(state, reg)
+          name = reg.name.to_s
+          return if state[:reg_names].include?(name)
+
+          state[:reg_names] << name
+          state[:regs] << reg
+        end
+
+        def append_memory!(state, memory)
+          name = memory.name.to_s
+          return if state[:memory_names].include?(name)
+
+          state[:memory_names] << name
+          state[:memories] << memory
+        end
+
+        def append_assign!(state, assign)
+          return if assign.expr.is_a?(IR::Signal) && assign.target.to_s == assign.expr.name.to_s
+
+          state[:assigns] << assign
+        end
+
+        def ensure_net_present(state, name, width)
+          name_str = name.to_s
+          return if state[:net_names].include?(name_str)
+          return if state[:reg_names].include?(name_str)
+
+          net = IR::Net.new(name: name.to_sym, width: width.to_i)
+          state[:net_names] << name_str
+          state[:nets] << net
         end
 
         def dedupe_by_name(entries)

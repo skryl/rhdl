@@ -119,7 +119,7 @@ impl Cpu8BitExtension {
             }
 
             if self.mem_data_in_idx < core.signals.len() {
-                core.signals[self.mem_data_in_idx] = self.memory[addr] as u64;
+                core.signals[self.mem_data_in_idx] = self.memory[addr] as u128;
             }
 
             // Force rising edge and tick.

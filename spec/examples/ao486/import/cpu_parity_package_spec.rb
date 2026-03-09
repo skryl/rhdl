@@ -22,10 +22,17 @@ RSpec.describe RHDL::Examples::AO486::Import::CpuParityPackage do
     ).run
   end
 
+  def require_ir_backend!
+    backend = AO486SpecSupport::IRBackendHelper.preferred_ir_backend
+    skip 'IR compiler/JIT backend unavailable' unless backend
+
+    backend
+  end
+
   it 'builds a parity package that issues the reset-vector code fetch with cache disabled', timeout: 240 do
     require_import_tool!
     skip 'circt-opt not available' unless HdlToolchain.which('circt-opt')
-    skip 'IR JIT backend unavailable' unless RHDL::Sim::Native::IR::JIT_AVAILABLE
+    backend = require_ir_backend!
 
     Dir.mktmpdir('ao486_cpu_parity_out') do |out_dir|
       Dir.mktmpdir('ao486_cpu_parity_ws') do |workspace|
@@ -36,8 +43,8 @@ RSpec.describe RHDL::Examples::AO486::Import::CpuParityPackage do
         expect(parity[:package]).not_to be_nil
 
         flat = RHDL::Codegen::CIRCT::Flatten.to_flat_module(parity[:package], top: 'ao486')
-        ir_json = RHDL::Sim::Native::IR.sim_json(flat, backend: :jit)
-        sim = RHDL::Sim::Native::IR::Simulator.new(ir_json, backend: :jit)
+        ir_json = RHDL::Sim::Native::IR.sim_json(flat, backend: backend)
+        sim = RHDL::Sim::Native::IR::Simulator.new(ir_json, backend: backend)
 
         {
           'a20_enable' => 1,

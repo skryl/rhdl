@@ -438,7 +438,7 @@ Current blocker for Phase 3:
          - `circt_hierarchy_flatten_runtime_spec.rb`
      - the AO486 JIT/Verilator `reset_smoke` write-trace smoke is green again after widening the runtime
      - this moves the next correctness target back to the imported instruction-classification / write-control path itself, not the native IR bus-width model
-   - larger-program correctness is still blocked even though a compact correctness gate is now green:
+  - larger-program correctness is still blocked even though a compact correctness gate had previously gone green:
      - the traced CPU-top package now also exports architectural-state ports from the imported `cpu_export` path:
        - `trace_arch_new_export`
        - `trace_arch_eax`, `trace_arch_ebx`, `trace_arch_ecx`, `trace_arch_edx`
@@ -449,10 +449,55 @@ Current blocker for Phase 3:
        - after long benchmark runs they still do not reflect the expected final algorithm results
        - fetch-side and current write-trace surfaces still stop too early to observe a clean pass/fail loop for `prime_sieve`, `mandelbrot`, or `game_of_life`
      - the original larger-benchmark pass/fail-loop correctness gate was backed out to keep the suite green
-     - the shipped correctness gate now uses compact self-checking programs with exact expected fetch traces
-     - the next larger-program correctness step should build on the new architectural trace exports rather than on the still-incomplete data-memory-write or `hlt` surfaces
+    - the shipped correctness gate now uses compact self-checking programs with exact expected fetch traces
+    - the next larger-program correctness step should build on the new architectural trace exports rather than on the still-incomplete data-memory-write or `hlt` surfaces
+
+Follow-up execution note (2026-03-08):
+1. Fixed one real parity-package runtime bug in `examples/ao486/utilities/import/cpu_parity_package.rb`:
+   - the parity `icache` bypass no longer edge-detects `readcode_done`
+   - `CPU_VALID` / `CPU_DONE` now treat each `readcode_done` cycle as a per-beat memory-valid event, which matches the eight-beat Avalon code burst model
+   - this restored the exact `prime_sieve` fetch-PC trace on JIT through the full 16-group oracle, including the repeated `0x10000..0x1000C` window and the `0x10010+` tail
+2. Current compact-correctness status after that fix:
+   - `prime_sieve` exact fetch-PC correctness is green again on JIT
+   - `mandelbrot` is still red on the same surface
+   - this is not a simple cycle-budget issue: ad hoc JIT probing still returns only the first 8 fetch groups even with `max_cycles = 2000`
+   - that keeps `spec/examples/ao486/import/cpu_parity_runtime_spec.rb` and `spec/examples/ao486/import/runtime_cpu_fetch_correctness_spec.rb` red for `mandelbrot`
+3. Current mixed-backend write-trace status after that fix:
+   - direct JIT/Verilator flattened `pc -> byte` comparison is green for `reset_smoke`
+   - direct JIT/Verilator flattened `pc -> byte` comparison is green for `prime_sieve`
+   - `game_of_life` is now the remaining mixed-backend outlier on that surface:
+     - JIT length: `28`
+     - Verilator length: `25`
+     - first extra JIT byte: `[0x10009, 0x02]`
+   - this keeps the current stable-step subset partially open even though the earlier `mandelbrot` outlier on that surface is no longer the first blocker observed
+4. Arcilator status remains blocked:
+   - `prepare_arc_mlir_from_circt_mlir(...)` now succeeds for the imported AO486 CPU core
+   - direct `arcilator --observe-registers --state-file=...` on the produced `ao486_cpu.arc.mlir` still fails with the same loop-splitting error rooted in `write_inst` / `write_commands_inst`
+5. Result:
+   - Phase 3 remains `In Progress`
+   - the remaining blockers are now narrower and better classified, but exact compact-benchmark correctness and 3-way runtime parity are still not complete
 
 Next execution step:
-1. Extend correctness beyond the compact benchmark set by making the new `trace_arch_*` exports reflect trustworthy architectural state at a useful program boundary, or by identifying the actual internal register/export nets that do.
-2. Re-run the simple aligned-write and `hlt` probes on the parity path; if they become visible, promote them into focused larger-program correctness regressions.
-3. Revisit exact retired-instruction parity for the full benchmark set and the separate Arcilator blocker in `write_commands_inst`.
+1. Diagnose the `mandelbrot` stall with the exported `trace_arch_*` and write-control surfaces; it currently never fetches beyond the first 32-byte window even with a much larger cycle budget.
+2. Diagnose the current `game_of_life` JIT/Verilator flattened write-trace divergence starting at byte `[0x10009, 0x02]`.
+3. Re-run the simple aligned-write and `hlt` probes on the parity path; if they become visible, promote them into focused larger-program correctness regressions.
+4. Revisit exact retired-instruction parity for the full benchmark set and the separate Arcilator blocker in `write_commands_inst`.
+
+Follow-up execution note (2026-03-09):
+1. Fixed the parity-harness fetch regression in `examples/ao486/utilities/import/cpu_parity_package.rb`:
+   - the `icache` bypass now tracks the full 8-beat Avalon code burst separately from the 4 CPU-visible fetch words consumed by `icache`
+   - only the first 4 burst beats are surfaced as `CPU_VALID` / `CPU_DONE`; the remaining cache-line-fill beats are ignored by the bypass instead of leaking into the next fetch window
+   - this restored stable cross-backend compact fetch behavior without depending on stale tail beats from the synthetic memory harness
+2. Compact fetch/runtime status after that fix:
+   - `spec/examples/ao486/import/cpu_parity_runtime_spec.rb` is green, including the slow compact-correctness and forward-progress examples
+   - `spec/examples/ao486/import/runtime_cpu_fetch_correctness_spec.rb` is green again
+   - `spec/examples/ao486/import/runtime_cpu_fetch_parity_spec.rb` remains green
+   - `spec/examples/ao486/import/runtime_cpu_step_parity_spec.rb` remains green
+   - `spec/examples/ao486/import/cpu_parity_verilator_runtime_spec.rb` is green
+3. The compact fetch oracle is now recorded as a stable prefix surface rather than a backend-length-exact tail surface:
+   - `prime_sieve` still uses the 16-group fetch prefix through `0x1001C`
+   - `mandelbrot` and `game_of_life` currently stabilize at the first 8 groups on both IR and Verilator
+   - both backends agree exactly on those prefixes; `prime_sieve` continues with backend-matched read-ahead beyond the compact oracle window
+4. Result:
+   - the fetch-side and stable write-trace parity tests are green again
+   - Phase 3 remains `In Progress` because the broader architectural end-state / retired-instruction parity and Arcilator `write_commands_inst` blocker are still open

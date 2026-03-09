@@ -6,6 +6,7 @@ require 'json'
 require 'open3'
 require 'fileutils'
 require 'etc'
+require 'tempfile'
 
 require_relative '../../../../examples/gameboy/utilities/import/system_importer'
 require_relative '../../../../examples/gameboy/utilities/import/ir_runner'
@@ -54,8 +55,8 @@ RSpec.describe 'GameBoy mixed import runtime parity (Verilator/Arcilator/IR)', s
     path
   end
 
-  def require_ir_jit!
-    skip 'IR JIT backend unavailable' unless RHDL::Sim::Native::IR::JIT_AVAILABLE
+  def require_ir_compiler!
+    skip 'IR compiler backend unavailable' unless RHDL::Sim::Native::IR::COMPILER_AVAILABLE
   end
 
   def framebuffer_hash(framebuffer)
@@ -113,6 +114,27 @@ RSpec.describe 'GameBoy mixed import runtime parity (Verilator/Arcilator/IR)', s
   end
 
   def run_cmd!(cmd, chdir: nil)
+    Tempfile.create('gameboy_import_stdout') do |stdout_file|
+      Tempfile.create('gameboy_import_stderr') do |stderr_file|
+        options = { out: stdout_file, err: stderr_file }
+        options[:chdir] = chdir if chdir
+        ok = system(*cmd, **options)
+        return nil if ok
+
+        stdout_file.rewind
+        stderr_file.rewind
+        detail = [stdout_file.read, stderr_file.read].join("\n").lines.first(120).join
+        raise "Command failed: #{cmd.join(' ')}\n#{detail}"
+      end
+    end
+  end
+
+  def trim_ruby_heap!
+    GC.start(full_mark: true, immediate_sweep: true)
+    GC.compact if GC.respond_to?(:compact)
+  end
+
+  def run_capture_cmd!(cmd, chdir: nil)
     stdout, stderr, status =
       if chdir
         Open3.capture3(*cmd, chdir: chdir)
@@ -145,7 +167,7 @@ RSpec.describe 'GameBoy mixed import runtime parity (Verilator/Arcilator/IR)', s
 
       run_cmd!(['clang++', '-std=c++17', '-O0', '-S', '-emit-llvm', harness_path, '-o', harness_ll_path])
       run_cmd!(['llvm-link', ll_path, harness_ll_path, '-o', linked_bc_path])
-      return run_cmd!([
+      stdout, stderr, status = Open3.capture3(
         'lli',
         '--jit-kind=orc-lazy',
         "--compile-threads=#{compile_threads}",
@@ -153,12 +175,20 @@ RSpec.describe 'GameBoy mixed import runtime parity (Verilator/Arcilator/IR)', s
         linked_bc_path,
         rom_path,
         max_cycles.to_s
-      ])
+      )
+      return stdout if status.success?
+
+      detail = [stdout, stderr].join("\n").lines.first(120).join
+      raise "Command failed: lli --jit-kind=orc-lazy --compile-threads=#{compile_threads} -O0 #{linked_bc_path} #{rom_path} #{max_cycles}\n#{detail}"
     end
 
     compile_llvm_ir_object!(ll_path: ll_path, obj_path: obj_path)
     run_cmd!(['c++', '-std=c++17', '-O0', harness_path, obj_path, '-o', bin_path])
-    run_cmd!([bin_path, rom_path, max_cycles.to_s])
+    stdout, stderr, status = Open3.capture3(bin_path, rom_path, max_cycles.to_s)
+    return stdout if status.success?
+
+    detail = [stdout, stderr].join("\n").lines.first(120).join
+    raise "Command failed: #{bin_path} #{rom_path} #{max_cycles}\n#{detail}"
   end
 
   def write_verilator_trace_harness(path)
@@ -318,33 +348,43 @@ RSpec.describe 'GameBoy mixed import runtime parity (Verilator/Arcilator/IR)', s
       match = line.strip.match(/\A(\d+),(\d+)\z/)
       next unless match
 
-      [match[1].to_i, match[2].to_i]
+      pack_trace_event(match[1].to_i, match[2].to_i)
     end
+  end
+
+  def pack_trace_event(pc, opcode)
+    ((pc.to_i & 0xFFFF_FFFF) << 8) | (opcode.to_i & 0xFF)
+  end
+
+  def unpack_trace_event(event)
+    value = event.to_i
+    [value >> 8, value & 0xFF]
+  end
+
+  def trace_event_pc(event)
+    event.to_i >> 8
   end
 
   def normalize_trace(trace)
     events = Array(trace)
-    trimmed = events.drop_while { |(pc, _opcode)| pc.to_i.zero? }
+    trimmed = events.drop_while { |event| trace_event_pc(event).zero? }
     trimmed.empty? ? events : trimmed
   end
 
-  def align_trace_prefix(lhs, rhs)
+  def align_trace_prefix_offsets(lhs, rhs)
     a = Array(lhs)
     b = Array(rhs)
-    return [a, b] if a.empty? || b.empty?
+    return [0, 0] if a.empty? || b.empty?
 
-    first_match = nil
+    rhs_indices = {}
+    b.each_with_index { |event, idx| rhs_indices[event] ||= idx }
+
     a.each_with_index do |event_a, idx_a|
-      idx_b = b.index(event_a)
-      next unless idx_b
-
-      first_match = [idx_a, idx_b]
-      break
+      idx_b = rhs_indices[event_a]
+      return [idx_a, idx_b] unless idx_b.nil?
     end
 
-    return [a, b] unless first_match
-
-    [a.drop(first_match[0]), b.drop(first_match[1])]
+    [0, 0]
   end
 
   def collect_verilator_trace(staging_entry:, rom_path:, scratch_dir:)
@@ -366,7 +406,7 @@ RSpec.describe 'GameBoy mixed import runtime parity (Verilator/Arcilator/IR)', s
     ])
     run_cmd!(['make', '-C', build_dir, '-f', 'Vgb.mk', 'Vgb'])
 
-    output = run_cmd!([File.join(build_dir, 'Vgb'), rom_path, MAX_CYCLES.to_s])
+    output = run_capture_cmd!([File.join(build_dir, 'Vgb'), rom_path, MAX_CYCLES.to_s])
     {
       trace: normalize_trace(parse_trace(output)),
       video: parse_video_snapshot(output)
@@ -393,7 +433,7 @@ RSpec.describe 'GameBoy mixed import runtime parity (Verilator/Arcilator/IR)', s
   def collect_ir_trace(mlir_path: nil, runtime_json_path: nil, rom_bytes:)
     runner_args = {
       top: 'gb',
-      backend: :jit
+      backend: :compiler
     }
     if runtime_json_path
       runner_args[:runtime_json] = File.read(runtime_json_path)
@@ -401,66 +441,97 @@ RSpec.describe 'GameBoy mixed import runtime parity (Verilator/Arcilator/IR)', s
       runner_args[:mlir] = File.read(mlir_path)
     end
     runner = RHDL::Examples::GameBoy::Import::IrRunner.new(**runner_args)
-    runner.load_rom(rom_bytes)
-    runner.reset
+    begin
+      runner.load_rom(rom_bytes)
+      runner.reset
 
-    cpu_addr_candidates = %w[cpu_A_16 cpu__A cpu_addr]
-    cpu_fetch_candidates = %w[cpu_M1_n_1 cpu__M1_n cpu_m1_n]
-    bus_addr_candidates = %w[ext_bus_addr]
-    bus_a15_candidates = %w[ext_bus_a15]
-    cart_rd_candidates = %w[cart_rd]
-    use_cpu_fetch =
-      runner.signal_available?(cpu_addr_candidates) &&
-      runner.signal_available?(cpu_fetch_candidates)
-    cpu_addr_idx = runner.signal_index(cpu_addr_candidates)
-    cpu_fetch_idx = runner.signal_index(cpu_fetch_candidates)
-    bus_addr_idx = runner.signal_index(bus_addr_candidates)
-    bus_a15_idx = runner.signal_index(bus_a15_candidates)
-    cart_rd_idx = runner.signal_index(cart_rd_candidates)
+      cpu_addr_candidates = %w[cpu_A_16 cpu__A cpu_addr]
+      cpu_fetch_candidates = %w[cpu_M1_n_1 cpu__M1_n cpu_m1_n]
+      bus_addr_candidates = %w[ext_bus_addr]
+      bus_a15_candidates = %w[ext_bus_a15]
+      cart_rd_candidates = %w[cart_rd]
+      use_cpu_fetch =
+        runner.signal_available?(cpu_addr_candidates) &&
+        runner.signal_available?(cpu_fetch_candidates)
+      cpu_addr_idx = runner.signal_index(cpu_addr_candidates)
+      cpu_fetch_idx = runner.signal_index(cpu_fetch_candidates)
+      bus_addr_idx = runner.signal_index(bus_addr_candidates)
+      bus_a15_idx = runner.signal_index(bus_a15_candidates)
+      cart_rd_idx = runner.signal_index(cart_rd_candidates)
 
-    trace = []
-    last_pc = nil
-    IR_TRACE_CYCLES.times do
-      runner.run_steps(1)
-      pc =
-        if use_cpu_fetch
-          next unless (runner.peek_index(cpu_fetch_idx) & 0x1).zero?
+      trace = []
+      last_pc = nil
+      IR_TRACE_CYCLES.times do
+        runner.run_steps(1)
+        pc =
+          if use_cpu_fetch
+            next unless (runner.peek_index(cpu_fetch_idx) & 0x1).zero?
 
-          runner.peek_index(cpu_addr_idx).to_i & 0xFFFF
-        else
-          next unless (runner.peek_index(cart_rd_idx) & 0x1) == 1
+            runner.peek_index(cpu_addr_idx).to_i & 0xFFFF
+          else
+            next unless (runner.peek_index(cart_rd_idx) & 0x1) == 1
 
-          bus_addr = runner.peek_index(bus_addr_idx).to_i & 0x7FFF
-          a15 = runner.peek_index(bus_a15_idx).to_i & 0x1
-          (a15 << 15) | bus_addr
-        end
-      next if pc == last_pc
+            bus_addr = runner.peek_index(bus_addr_idx).to_i & 0x7FFF
+            a15 = runner.peek_index(bus_a15_idx).to_i & 0x1
+            (a15 << 15) | bus_addr
+          end
+        next if pc == last_pc
 
-      trace << [pc, rom_bytes.getbyte(pc) || 0]
-      last_pc = pc
+        trace << pack_trace_event(pc, rom_bytes.getbyte(pc) || 0)
+        last_pc = pc
+      end
+
+      {
+        trace: normalize_trace(trace),
+        video: build_video_snapshot(
+          framebuffer: runner.read_framebuffer,
+          frame_count: runner.frame_count,
+          cycles: IR_TRACE_CYCLES
+        )
+      }
+    ensure
+      runner.close if runner.respond_to?(:close)
     end
-
-    {
-      trace: normalize_trace(trace),
-      video: build_video_snapshot(
-        framebuffer: runner.read_framebuffer,
-        frame_count: runner.frame_count,
-        cycles: IR_TRACE_CYCLES
-      )
-    }
   end
 
   def first_mismatch(lhs, rhs)
+    first_mismatch_with_offsets(lhs, rhs, start_lhs: 0, start_rhs: 0)
+  end
+
+  def compare_trace_prefix(lhs, rhs)
+    start_lhs, start_rhs = align_trace_prefix_offsets(lhs, rhs)
+    compare_len = [
+      Array(lhs).length - start_lhs,
+      Array(rhs).length - start_rhs
+    ].min
+    mismatch = first_mismatch_with_offsets(lhs, rhs, start_lhs: start_lhs, start_rhs: start_rhs)
+    {
+      start_lhs: start_lhs,
+      start_rhs: start_rhs,
+      compare_len: compare_len,
+      mismatch: mismatch
+    }
+  end
+
+  def first_mismatch_with_offsets(lhs, rhs, start_lhs:, start_rhs:)
     limit = [lhs.length, rhs.length].min
     limit.times do |idx|
-      next if lhs[idx] == rhs[idx]
+      lhs_event = lhs[start_lhs + idx]
+      rhs_event = rhs[start_rhs + idx]
+      next if lhs_event == rhs_event
 
-      return "index=#{idx} lhs=#{lhs[idx].inspect} rhs=#{rhs[idx].inspect}"
+      return "index=#{idx} lhs=#{unpack_trace_event(lhs_event).inspect} rhs=#{unpack_trace_event(rhs_event).inspect}"
     end
 
-    return nil if lhs.length == rhs.length
+    lhs_remaining = lhs.length - start_lhs
+    rhs_remaining = rhs.length - start_rhs
+    return nil if lhs_remaining == rhs_remaining
 
-    "length mismatch lhs=#{lhs.length} rhs=#{rhs.length}"
+    "length mismatch lhs=#{lhs_remaining} rhs=#{rhs_remaining}"
+  end
+
+  def trace_sample(trace, start: 0, limit: 20)
+    Array(trace).drop(start).first(limit).map { |event| unpack_trace_event(event) }
   end
 
   def arcilator_state_offset(states, *names, preferred_type: nil)
@@ -815,7 +886,7 @@ RSpec.describe 'GameBoy mixed import runtime parity (Verilator/Arcilator/IR)', s
     %w[ghdl circt-verilog circt-opt verilator c++].each { |tool| require_tool!(tool) }
     require_llvm_codegen_tool!
     require_tool!('arcilator') unless skip_arcilator?
-    require_ir_jit!
+    require_ir_compiler!
     pop_rom_path = require_pop_rom!
 
     Dir.mktmpdir('gameboy_runtime_parity_out') do |out_dir|
@@ -826,6 +897,7 @@ RSpec.describe 'GameBoy mixed import runtime parity (Verilator/Arcilator/IR)', s
             workspace_dir: workspace,
             keep_workspace: true,
             clean_output: true,
+            emit_runtime_json: false,
             strict: true,
             progress: ->(_msg) {}
           )
@@ -839,12 +911,12 @@ RSpec.describe 'GameBoy mixed import runtime parity (Verilator/Arcilator/IR)', s
           mixed = report.fetch('mixed_import')
           pure_verilog_entry = mixed.fetch('pure_verilog_entry_path')
           normalized_verilog = mixed.fetch('normalized_verilog_path')
-          runtime_json_path = mixed.fetch('runtime_json_path')
+          imported_mlir_path = import_result.mlir_path
           workspace_normalized_verilog = mixed['workspace_normalized_verilog_path']
           pure_verilog_root = mixed.fetch('pure_verilog_root')
           expect(File.file?(pure_verilog_entry)).to be(true)
           expect(File.file?(normalized_verilog)).to be(true)
-          expect(File.file?(runtime_json_path)).to be(true)
+          expect(File.file?(imported_mlir_path)).to be(true)
           expect(File.directory?(pure_verilog_root)).to be(true)
           expect(File.file?(workspace_normalized_verilog)).to be(true) if workspace_normalized_verilog
 
@@ -853,13 +925,22 @@ RSpec.describe 'GameBoy mixed import runtime parity (Verilator/Arcilator/IR)', s
 
           rom_path = pop_rom_path
           rom_bytes = File.binread(rom_path)
+          import_strategy = import_result.strategy_used
 
           summary_lines = []
           failures = []
-          summary_lines << "Import strategy: #{import_result.strategy_used}"
+          summary_lines << "Import strategy: #{import_strategy}"
           summary_lines << "Verilog source: normalized_verilog_path=#{normalized_verilog}"
+          summary_lines << "Imported MLIR: #{imported_mlir_path}"
           summary_lines << "Workspace Verilog source: workspace_normalized_verilog_path=#{workspace_normalized_verilog}" if workspace_normalized_verilog
           summary_lines << "Pure Verilog root: #{pure_verilog_root}"
+
+          importer = nil
+          import_result = nil
+          report = nil
+          mixed = nil
+          pure_verilog_entry_text = nil
+          trim_ruby_heap!
 
           verilator = collect_verilator_trace(
             staging_entry: normalized_verilog,
@@ -868,6 +949,7 @@ RSpec.describe 'GameBoy mixed import runtime parity (Verilator/Arcilator/IR)', s
           )
           verilator_trace = verilator.fetch(:trace)
           verilator_video = verilator.fetch(:video)
+          verilator = nil
           if verilator_trace.empty?
             failures << 'Verilator trace is empty'
             summary_lines << 'Verilator: empty trace'
@@ -881,30 +963,26 @@ RSpec.describe 'GameBoy mixed import runtime parity (Verilator/Arcilator/IR)', s
             summary_lines << 'Verilator video: missing snapshot'
           end
 
-          ir = collect_ir_trace(runtime_json_path: runtime_json_path, rom_bytes: rom_bytes)
+          ir = collect_ir_trace(mlir_path: imported_mlir_path, rom_bytes: rom_bytes)
           ir_trace = ir.fetch(:trace)
           ir_video = ir.fetch(:video)
+          ir = nil
+          trim_ruby_heap!
           if ir_trace.empty?
             failures << 'Raised-RHDL IR trace is empty'
-            summary_lines << 'IR JIT: empty trace'
+            summary_lines << 'IR compiler: empty trace'
           else
-            summary_lines << "IR JIT: #{ir_trace.length} events"
-            summary_lines << "IR JIT cycle cap: #{IR_TRACE_CYCLES}" if IR_TRACE_CYCLES < MAX_CYCLES
+            summary_lines << "IR compiler: #{ir_trace.length} events"
+            summary_lines << "IR compiler cycle cap: #{IR_TRACE_CYCLES}" if IR_TRACE_CYCLES < MAX_CYCLES
           end
-          summary_lines << "IR JIT video@#{ir_video[:cycles]}: frames=#{ir_video[:frame_count]} nonzero=#{ir_video[:nonzero_pixels]} hash=#{ir_video[:hash]}"
+          summary_lines << "IR compiler video@#{ir_video[:cycles]}: frames=#{ir_video[:frame_count]} nonzero=#{ir_video[:nonzero_pixels]} hash=#{ir_video[:hash]}"
 
-          vi_verilator_trace = verilator_trace
-          vi_ir_trace = ir_trace
-          vi_verilator_trace, vi_ir_trace = align_trace_prefix(vi_verilator_trace, vi_ir_trace)
-          vi_compare_len = [vi_verilator_trace.length, vi_ir_trace.length].min
-          vi_compare_verilator_trace = vi_verilator_trace.first(vi_compare_len)
-          vi_compare_ir_trace = vi_ir_trace.first(vi_compare_len)
-          mismatch = first_mismatch(vi_compare_verilator_trace, vi_compare_ir_trace)
-          if mismatch
-            failures << "Verilator vs IR mismatch: #{mismatch}"
-            summary_lines << "Verilator vs IR: mismatch (#{mismatch})"
+          vi_compare = compare_trace_prefix(verilator_trace, ir_trace)
+          if vi_compare[:mismatch]
+            failures << "Verilator vs IR mismatch: #{vi_compare[:mismatch]}"
+            summary_lines << "Verilator vs IR: mismatch (#{vi_compare[:mismatch]})"
           else
-            summary_lines << "Verilator vs IR: OK on first #{vi_compare_len} events"
+            summary_lines << "Verilator vs IR: OK on first #{vi_compare[:compare_len]} events"
           end
 
           video_mismatch = first_video_mismatch(verilator_video, ir_video)
@@ -941,15 +1019,12 @@ RSpec.describe 'GameBoy mixed import runtime parity (Verilator/Arcilator/IR)', s
               summary_lines << 'Arcilator video: missing snapshot'
             end
 
-            va_verilator_trace = verilator_trace
-            va_arc_trace = arc_trace
-            va_verilator_trace, va_arc_trace = align_trace_prefix(va_verilator_trace, va_arc_trace)
-            mismatch_arc = first_mismatch(va_verilator_trace, va_arc_trace)
-            if mismatch_arc
-              failures << "Verilator vs Arcilator mismatch: #{mismatch_arc}"
-              summary_lines << "Verilator vs Arcilator: mismatch (#{mismatch_arc})"
+            va_compare = compare_trace_prefix(verilator_trace, arc_trace)
+            if va_compare[:mismatch]
+              failures << "Verilator vs Arcilator mismatch: #{va_compare[:mismatch]}"
+              summary_lines << "Verilator vs Arcilator: mismatch (#{va_compare[:mismatch]})"
             else
-              summary_lines << 'Verilator vs Arcilator: OK'
+              summary_lines << "Verilator vs Arcilator: OK on first #{va_compare[:compare_len]} events"
             end
 
             video_mismatch_arc = first_video_mismatch(verilator_video, arc_video)
@@ -970,9 +1045,9 @@ RSpec.describe 'GameBoy mixed import runtime parity (Verilator/Arcilator/IR)', s
                   "Failures:\n" \
                   "#{failures.map { |line| "  - #{line}" }.join("\n")}\n" \
                   "Sample traces:\n" \
-                  "  - Verilator: #{verilator_trace.first(20).inspect}\n" \
-                  "  - IR: #{ir_trace.first(20).inspect}\n" \
-                  "  - Arcilator: #{Array(arcilator[:trace]).first(20).inspect}"
+                  "  - Verilator: #{trace_sample(verilator_trace).inspect}\n" \
+                  "  - IR: #{trace_sample(ir_trace).inspect}\n" \
+                  "  - Arcilator: #{trace_sample(arcilator[:trace]).inspect}"
           end
         end
       end

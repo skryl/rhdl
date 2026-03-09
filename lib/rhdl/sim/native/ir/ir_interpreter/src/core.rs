@@ -219,6 +219,7 @@ fn extract_runtime_module(payload: Value) -> Result<Map<String, Value>, String> 
 }
 
 fn module_to_normalized_value(module_obj: Map<String, Value>) -> Result<Value, String> {
+    let expr_pool = array_field(&module_obj, "exprs");
     let mut out = Map::new();
     out.insert("name".to_string(), Value::String(value_to_string(module_obj.get("name"))));
     out.insert(
@@ -253,7 +254,7 @@ fn module_to_normalized_value(module_obj: Map<String, Value>) -> Result<Value, S
         Value::Array(
             array_field(&module_obj, "assigns")
                 .into_iter()
-                .map(|v| assign_to_normalized_value(&v))
+                .map(|v| assign_to_normalized_value(&v, &expr_pool))
                 .collect::<Result<Vec<_>, _>>()?,
         ),
     );
@@ -262,7 +263,7 @@ fn module_to_normalized_value(module_obj: Map<String, Value>) -> Result<Value, S
         Value::Array(
             array_field(&module_obj, "processes")
                 .into_iter()
-                .map(|v| process_to_normalized_value(&v))
+                .map(|v| process_to_normalized_value(&v, &expr_pool))
                 .collect::<Result<Vec<_>, _>>()?,
         ),
     );
@@ -280,7 +281,7 @@ fn module_to_normalized_value(module_obj: Map<String, Value>) -> Result<Value, S
         Value::Array(
             array_field(&module_obj, "write_ports")
                 .into_iter()
-                .map(|v| write_port_to_normalized_value(&v))
+                .map(|v| write_port_to_normalized_value(&v, &expr_pool))
                 .collect::<Result<Vec<_>, _>>()?,
         ),
     );
@@ -289,7 +290,7 @@ fn module_to_normalized_value(module_obj: Map<String, Value>) -> Result<Value, S
         Value::Array(
             array_field(&module_obj, "sync_read_ports")
                 .into_iter()
-                .map(|v| sync_read_port_to_normalized_value(&v))
+                .map(|v| sync_read_port_to_normalized_value(&v, &expr_pool))
                 .collect::<Result<Vec<_>, _>>()?,
         ),
     );
@@ -329,15 +330,15 @@ fn reg_to_normalized_value(value: &Value) -> Result<Value, String> {
     Ok(Value::Object(out))
 }
 
-fn assign_to_normalized_value(value: &Value) -> Result<Value, String> {
+fn assign_to_normalized_value(value: &Value, expr_pool: &[Value]) -> Result<Value, String> {
     let obj = as_object(value, "assign")?;
     let mut out = Map::new();
     out.insert("target".to_string(), Value::String(value_to_string(obj.get("target"))));
-    out.insert("expr".to_string(), expr_to_normalized_value(obj.get("expr"))?);
+    out.insert("expr".to_string(), expr_to_normalized_value(obj.get("expr"), expr_pool)?);
     Ok(Value::Object(out))
 }
 
-fn process_to_normalized_value(value: &Value) -> Result<Value, String> {
+fn process_to_normalized_value(value: &Value, expr_pool: &[Value]) -> Result<Value, String> {
     let obj = as_object(value, "process")?;
     let mut out = Map::new();
     out.insert("name".to_string(), Value::String(value_to_string(obj.get("name"))));
@@ -356,12 +357,12 @@ fn process_to_normalized_value(value: &Value) -> Result<Value, String> {
     out.insert("clocked".to_string(), Value::Bool(value_to_bool(obj.get("clocked"))));
     out.insert(
         "statements".to_string(),
-        Value::Array(flatten_statements(array_field(obj, "statements"))?),
+        Value::Array(flatten_statements(array_field(obj, "statements"), expr_pool)?),
     );
     Ok(Value::Object(out))
 }
 
-fn flatten_statements(statements: Vec<Value>) -> Result<Vec<Value>, String> {
+fn flatten_statements(statements: Vec<Value>, expr_pool: &[Value]) -> Result<Vec<Value>, String> {
     let mut out = Vec::new();
     for stmt in statements {
         let stmt_obj = as_object(&stmt, "statement")?;
@@ -372,18 +373,18 @@ fn flatten_statements(statements: Vec<Value>) -> Result<Vec<Value>, String> {
                     "target".to_string(),
                     Value::String(value_to_string(stmt_obj.get("target"))),
                 );
-                seq.insert("expr".to_string(), expr_to_normalized_value(stmt_obj.get("expr"))?);
+                seq.insert("expr".to_string(), expr_to_normalized_value(stmt_obj.get("expr"), expr_pool)?);
                 out.push(Value::Object(seq));
             }
-            "if" => flatten_if(stmt_obj, &mut out)?,
+            "if" => flatten_if(stmt_obj, &mut out, expr_pool)?,
             _ => {}
         }
     }
     Ok(out)
 }
 
-fn flatten_if(if_obj: &Map<String, Value>, out: &mut Vec<Value>) -> Result<(), String> {
-    let cond = expr_to_normalized_value(if_obj.get("condition"))?;
+fn flatten_if(if_obj: &Map<String, Value>, out: &mut Vec<Value>, expr_pool: &[Value]) -> Result<(), String> {
+    let cond = expr_to_normalized_value(if_obj.get("condition"), expr_pool)?;
 
     let mut then_assigns: HashMap<String, Value> = HashMap::new();
     for stmt in array_field(if_obj, "then_statements") {
@@ -392,10 +393,10 @@ fn flatten_if(if_obj: &Map<String, Value>, out: &mut Vec<Value>) -> Result<(), S
             "seq_assign" => {
                 then_assigns.insert(
                     value_to_string(obj.get("target")),
-                    expr_to_normalized_value(obj.get("expr"))?,
+                    expr_to_normalized_value(obj.get("expr"), expr_pool)?,
                 );
             }
-            "if" => flatten_if(obj, out)?,
+            "if" => flatten_if(obj, out, expr_pool)?,
             _ => {}
         }
     }
@@ -407,10 +408,10 @@ fn flatten_if(if_obj: &Map<String, Value>, out: &mut Vec<Value>) -> Result<(), S
             "seq_assign" => {
                 else_assigns.insert(
                     value_to_string(obj.get("target")),
-                    expr_to_normalized_value(obj.get("expr"))?,
+                    expr_to_normalized_value(obj.get("expr"), expr_pool)?,
                 );
             }
-            "if" => flatten_if(obj, out)?,
+            "if" => flatten_if(obj, out, expr_pool)?,
             _ => {}
         }
     }
@@ -468,7 +469,7 @@ fn memory_to_normalized_value(value: &Value) -> Result<Value, String> {
     Ok(Value::Object(out))
 }
 
-fn write_port_to_normalized_value(value: &Value) -> Result<Value, String> {
+fn write_port_to_normalized_value(value: &Value, expr_pool: &[Value]) -> Result<Value, String> {
     let obj = as_object(value, "write_port")?;
     let mut out = Map::new();
     out.insert(
@@ -479,13 +480,13 @@ fn write_port_to_normalized_value(value: &Value) -> Result<Value, String> {
         "clock".to_string(),
         Value::String(value_to_string(obj.get("clock"))),
     );
-    out.insert("addr".to_string(), expr_to_normalized_value(obj.get("addr"))?);
-    out.insert("data".to_string(), expr_to_normalized_value(obj.get("data"))?);
-    out.insert("enable".to_string(), expr_to_normalized_value(obj.get("enable"))?);
+    out.insert("addr".to_string(), expr_to_normalized_value(obj.get("addr"), expr_pool)?);
+    out.insert("data".to_string(), expr_to_normalized_value(obj.get("data"), expr_pool)?);
+    out.insert("enable".to_string(), expr_to_normalized_value(obj.get("enable"), expr_pool)?);
     Ok(Value::Object(out))
 }
 
-fn sync_read_port_to_normalized_value(value: &Value) -> Result<Value, String> {
+fn sync_read_port_to_normalized_value(value: &Value, expr_pool: &[Value]) -> Result<Value, String> {
     let obj = as_object(value, "sync_read_port")?;
     let mut out = Map::new();
     out.insert(
@@ -496,20 +497,20 @@ fn sync_read_port_to_normalized_value(value: &Value) -> Result<Value, String> {
         "clock".to_string(),
         Value::String(value_to_string(obj.get("clock"))),
     );
-    out.insert("addr".to_string(), expr_to_normalized_value(obj.get("addr"))?);
+    out.insert("addr".to_string(), expr_to_normalized_value(obj.get("addr"), expr_pool)?);
     out.insert(
         "data".to_string(),
         Value::String(value_to_string(obj.get("data"))),
     );
     if let Some(enable) = obj.get("enable") {
         if !enable.is_null() {
-            out.insert("enable".to_string(), expr_to_normalized_value(Some(enable))?);
+            out.insert("enable".to_string(), expr_to_normalized_value(Some(enable), expr_pool)?);
         }
     }
     Ok(Value::Object(out))
 }
 
-fn expr_to_normalized_value(expr: Option<&Value>) -> Result<Value, String> {
+fn expr_to_normalized_value(expr: Option<&Value>, expr_pool: &[Value]) -> Result<Value, String> {
     let Some(value) = expr else {
         return Ok(literal_expr(0, 1));
     };
@@ -526,21 +527,28 @@ fn expr_to_normalized_value(expr: Option<&Value>) -> Result<Value, String> {
             value_to_usize(obj.get("width")),
         )),
         "literal" => Ok(literal_expr_from_json(obj.get("value"), value_to_usize(obj.get("width")))),
+        "expr_ref" => {
+            let id = value_to_usize(obj.get("id"));
+            let referenced = expr_pool
+                .get(id)
+                .ok_or_else(|| format!("Expression ref id {} out of range", id))?;
+            expr_to_normalized_value(Some(referenced), expr_pool)
+        }
         "unary" => Ok(unary_expr(
             &value_to_string(obj.get("op")),
-            expr_to_normalized_value(obj.get("operand"))?,
+            expr_to_normalized_value(obj.get("operand"), expr_pool)?,
             value_to_usize(obj.get("width")),
         )),
         "binary" => Ok(binary_expr(
             &value_to_string(obj.get("op")),
-            expr_to_normalized_value(obj.get("left"))?,
-            expr_to_normalized_value(obj.get("right"))?,
+            expr_to_normalized_value(obj.get("left"), expr_pool)?,
+            expr_to_normalized_value(obj.get("right"), expr_pool)?,
             value_to_usize(obj.get("width")),
         )),
         "mux" => Ok(mux_expr(
-            expr_to_normalized_value(obj.get("condition"))?,
-            expr_to_normalized_value(obj.get("when_true"))?,
-            expr_to_normalized_value(obj.get("when_false"))?,
+            expr_to_normalized_value(obj.get("condition"), expr_pool)?,
+            expr_to_normalized_value(obj.get("when_true"), expr_pool)?,
+            expr_to_normalized_value(obj.get("when_false"), expr_pool)?,
             value_to_usize(obj.get("width")),
         )),
         "slice" => {
@@ -550,7 +558,7 @@ fn expr_to_normalized_value(expr: Option<&Value>) -> Result<Value, String> {
             let high = begin.max(end);
             let mut out = Map::new();
             out.insert("kind".to_string(), Value::String("slice".to_string()));
-            out.insert("base".to_string(), expr_to_normalized_value(obj.get("base"))?);
+            out.insert("base".to_string(), expr_to_normalized_value(obj.get("base"), expr_pool)?);
             out.insert("range_begin".to_string(), Value::from(low));
             out.insert("range_end".to_string(), Value::from(high));
             out.insert("width".to_string(), Value::from(value_to_u64(obj.get("width"))));
@@ -564,7 +572,7 @@ fn expr_to_normalized_value(expr: Option<&Value>) -> Result<Value, String> {
                 Value::Array(
                     array_field(obj, "parts")
                         .into_iter()
-                        .map(|part| expr_to_normalized_value(Some(&part)))
+                        .map(|part| expr_to_normalized_value(Some(&part), expr_pool))
                         .collect::<Result<Vec<_>, _>>()?,
                 ),
             );
@@ -574,7 +582,7 @@ fn expr_to_normalized_value(expr: Option<&Value>) -> Result<Value, String> {
         "resize" => {
             let mut out = Map::new();
             out.insert("kind".to_string(), Value::String("resize".to_string()));
-            out.insert("expr".to_string(), expr_to_normalized_value(obj.get("expr"))?);
+            out.insert("expr".to_string(), expr_to_normalized_value(obj.get("expr"), expr_pool)?);
             out.insert("width".to_string(), Value::from(value_to_u64(obj.get("width"))));
             Ok(Value::Object(out))
         }
@@ -585,21 +593,21 @@ fn expr_to_normalized_value(expr: Option<&Value>) -> Result<Value, String> {
                 "memory".to_string(),
                 Value::String(value_to_string(obj.get("memory"))),
             );
-            out.insert("addr".to_string(), expr_to_normalized_value(obj.get("addr"))?);
+            out.insert("addr".to_string(), expr_to_normalized_value(obj.get("addr"), expr_pool)?);
             out.insert("width".to_string(), Value::from(value_to_u64(obj.get("width"))));
             Ok(Value::Object(out))
         }
-        "case" => lower_case_expr(obj),
+        "case" => lower_case_expr(obj, expr_pool),
         _ => Ok(literal_expr(0, 1)),
     }
 }
 
-fn lower_case_expr(case_obj: &Map<String, Value>) -> Result<Value, String> {
-    let selector = expr_to_normalized_value(case_obj.get("selector"))?;
+fn lower_case_expr(case_obj: &Map<String, Value>, expr_pool: &[Value]) -> Result<Value, String> {
+    let selector = expr_to_normalized_value(case_obj.get("selector"), expr_pool)?;
     let width = value_to_usize(case_obj.get("width"));
     let default_expr = if let Some(default_value) = case_obj.get("default") {
         if !default_value.is_null() {
-            expr_to_normalized_value(Some(default_value))?
+            expr_to_normalized_value(Some(default_value), expr_pool)?
         } else {
             literal_expr(0, width.max(1))
         }
@@ -624,7 +632,7 @@ fn lower_case_expr(case_obj: &Map<String, Value>) -> Result<Value, String> {
                 );
                 result = mux_expr(
                     cond,
-                    expr_to_normalized_value(Some(raw_expr))?,
+                    expr_to_normalized_value(Some(raw_expr), expr_pool)?,
                     result,
                     width.max(1),
                 );
@@ -2326,4 +2334,185 @@ impl CoreSimulator {
         self.reg_count
     }
 
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    fn counter_noncompact_payload() -> String {
+        json!({
+            "circt_json_version": 1,
+            "modules": [{
+                "name": "ir_input_format_counter",
+                "ports": [
+                    { "name": "clk", "direction": "in", "width": 1, "default": serde_json::Value::Null },
+                    { "name": "rst", "direction": "in", "width": 1, "default": serde_json::Value::Null },
+                    { "name": "en", "direction": "in", "width": 1, "default": serde_json::Value::Null },
+                    { "name": "q", "direction": "out", "width": 4, "default": serde_json::Value::Null }
+                ],
+                "nets": [],
+                "regs": [{ "name": "q", "width": 4, "reset_value": 0 }],
+                "assigns": [],
+                "processes": [{
+                    "name": "seq_logic",
+                    "clocked": true,
+                    "clock": "clk",
+                    "sensitivity_list": [],
+                    "statements": [{
+                        "kind": "if",
+                        "condition": { "kind": "signal", "name": "rst", "width": 1 },
+                        "then_statements": [{
+                            "kind": "seq_assign",
+                            "target": "q",
+                            "expr": { "kind": "literal", "value": 0, "width": 4 }
+                        }],
+                        "else_statements": [{
+                            "kind": "seq_assign",
+                            "target": "q",
+                            "expr": {
+                                "kind": "mux",
+                                "condition": { "kind": "signal", "name": "en", "width": 1 },
+                                "when_true": {
+                                    "kind": "binary",
+                                    "op": "+",
+                                    "left": { "kind": "signal", "name": "q", "width": 4 },
+                                    "right": {
+                                        "kind": "resize",
+                                        "expr": { "kind": "literal", "value": 1, "width": 1 },
+                                        "width": 4
+                                    },
+                                    "width": 5
+                                },
+                                "when_false": { "kind": "signal", "name": "q", "width": 4 },
+                                "width": 5
+                            }
+                        }]
+                    }]
+                }],
+                "instances": [],
+                "memories": [],
+                "write_ports": [],
+                "sync_read_ports": [],
+                "parameters": {}
+            }]
+        }).to_string()
+    }
+
+    fn counter_compact_payload() -> String {
+        json!({
+            "circt_json_version": 1,
+            "modules": [{
+                "name": "ir_input_format_counter",
+                "ports": [
+                    { "name": "clk", "direction": "in", "width": 1, "default": serde_json::Value::Null },
+                    { "name": "rst", "direction": "in", "width": 1, "default": serde_json::Value::Null },
+                    { "name": "en", "direction": "in", "width": 1, "default": serde_json::Value::Null },
+                    { "name": "q", "direction": "out", "width": 4, "default": serde_json::Value::Null }
+                ],
+                "nets": [],
+                "regs": [{ "name": "q", "width": 4, "reset_value": 0 }],
+                "assigns": [],
+                "processes": [{
+                    "name": "seq_logic",
+                    "clocked": true,
+                    "clock": "clk",
+                    "sensitivity_list": [],
+                    "statements": [{
+                        "kind": "if",
+                        "condition": { "kind": "signal", "name": "rst", "width": 1 },
+                        "then_statements": [{
+                            "kind": "seq_assign",
+                            "target": "q",
+                            "expr": { "kind": "literal", "value": 0, "width": 4 }
+                        }],
+                        "else_statements": [{
+                            "kind": "seq_assign",
+                            "target": "q",
+                            "expr": { "kind": "expr_ref", "id": 0, "width": 5 }
+                        }]
+                    }]
+                }],
+                "instances": [],
+                "memories": [],
+                "write_ports": [],
+                "sync_read_ports": [],
+                "parameters": {},
+                "exprs": [
+                    {
+                        "kind": "mux",
+                        "condition": { "kind": "signal", "name": "en", "width": 1 },
+                        "when_true": { "kind": "expr_ref", "id": 1, "width": 5 },
+                        "when_false": { "kind": "signal", "name": "q", "width": 4 },
+                        "width": 5
+                    },
+                    {
+                        "kind": "binary",
+                        "op": "+",
+                        "left": { "kind": "signal", "name": "q", "width": 4 },
+                        "right": { "kind": "expr_ref", "id": 2, "width": 4 },
+                        "width": 5
+                    },
+                    {
+                        "kind": "resize",
+                        "expr": { "kind": "literal", "value": 1, "width": 1 },
+                        "width": 4
+                    }
+                ]
+            }]
+        }).to_string()
+    }
+
+    fn drive_counter(sim: &mut CoreSimulator) -> Vec<u64> {
+        let sequence = [
+            (true, false),
+            (false, true),
+            (false, true),
+            (false, false),
+            (false, true),
+        ];
+
+        let mut values = Vec::new();
+        for (rst, en) in sequence {
+            sim.poke("rst", if rst { 1 } else { 0 }).unwrap();
+            sim.poke("en", if en { 1 } else { 0 }).unwrap();
+            sim.poke("clk", 0).unwrap();
+            sim.evaluate();
+            sim.poke("clk", 1).unwrap();
+            sim.tick();
+            values.push(sim.peek("q").unwrap());
+        }
+        values
+    }
+
+    #[test]
+    fn compact_counter_payload_parses_to_expected_seq_expr() {
+        let compact_payload = counter_compact_payload();
+        let sim = CoreSimulator::new(&compact_payload).unwrap();
+        assert_eq!(sim.seq_exprs.len(), 1);
+
+        match &sim.seq_exprs[0] {
+            ExprDef::Mux { condition, when_true, when_false, width } => {
+                assert_eq!(*width, 4);
+                assert!(matches!(condition.as_ref(), ExprDef::Signal { name, width: 1 } if name == "rst"));
+                assert!(matches!(when_true.as_ref(), ExprDef::Literal { width: 4, .. }));
+                assert!(matches!(when_false.as_ref(), ExprDef::Mux { width: 5, .. }));
+            }
+            other => panic!("unexpected compact seq expr: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn compact_counter_payload_matches_noncompact_behavior() {
+        let expected = vec![0, 1, 2, 2, 3];
+
+        let noncompact_payload = counter_noncompact_payload();
+        let mut noncompact = CoreSimulator::new(&noncompact_payload).unwrap();
+        assert_eq!(drive_counter(&mut noncompact), expected);
+
+        let compact_payload = counter_compact_payload();
+        let mut compact = CoreSimulator::new(&compact_payload).unwrap();
+        assert_eq!(drive_counter(&mut compact), expected);
+    }
 }

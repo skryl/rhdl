@@ -173,6 +173,7 @@ module RHDL
           "T1-common/common/test_stub_bist.v" => %w[test_stub_bist],
           "T1-common/common/test_stub_scan.v" => %w[test_stub_scan],
           "T1-common/m1/m1.V" => %w[zzecc_exu_chkecc2 zzecc_sctag_ecc39],
+          "T1-common/u1/u1.V" => %w[bw_u1_aoi21_4x bw_u1_aoi22_2x bw_u1_buf_10x bw_u1_buf_1x bw_u1_buf_20x bw_u1_buf_30x bw_u1_buf_5x bw_u1_inv_10x bw_u1_inv_15x bw_u1_inv_20x bw_u1_inv_30x bw_u1_inv_8x bw_u1_minbuf_5x bw_u1_muxi21_2x bw_u1_muxi21_6x bw_u1_nand2_10x bw_u1_nand2_15x bw_u1_nand2_2x bw_u1_nand2_4x bw_u1_nand3_4x bw_u1_nor3_8x bw_u1_soffm2_4x zsoffm2_prim],
           "T1-common/srams/bw_r_irf.v" => %w[bw_r_irf bw_r_irf_core],
           "T1-common/srams/bw_r_rf32x80.v" => %w[bw_r_rf32x80],
           "T1-common/srams/bw_r_scm.v" => %w[bw_r_scm],

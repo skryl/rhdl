@@ -35,48 +35,55 @@ RSpec.describe RHDL::Examples::AO486::Import::CpuParityVerilatorRuntime do
     ).run
   end
 
-  it 'matches JIT on the named parity programs for the parity package', timeout: 600 do
+  def require_ir_backend!
+    backend = AO486SpecSupport::IRBackendHelper.cpu_runtime_ir_backend
+    skip 'IR compiler/JIT backend unavailable' unless backend
+
+    backend
+  end
+
+  it 'matches the selected IR backend on the named parity programs for the parity package', timeout: 600 do
     require_import_tool!
     require_program_assembler!
     skip 'circt-opt not available' unless HdlToolchain.which('circt-opt')
     skip 'firtool not available' unless HdlToolchain.which('firtool')
     skip 'verilator not available' unless HdlToolchain.verilator_available?
-    skip 'IR JIT backend unavailable' unless RHDL::Sim::Native::IR::JIT_AVAILABLE
+    backend = require_ir_backend!
 
     Dir.mktmpdir('ao486_cpu_parity_verilator_out') do |out_dir|
       Dir.mktmpdir('ao486_cpu_parity_verilator_ws') do |workspace|
         result = run_importer(out_dir: out_dir, workspace: workspace)
         cleaned_mlir = File.read(result.normalized_core_mlir_path)
 
-        jit_runtime = RHDL::Examples::AO486::Import::CpuParityRuntime.build_from_cleaned_mlir(cleaned_mlir)
+        ir_runtime = RHDL::Examples::AO486::Import::CpuParityRuntime.build_from_cleaned_mlir(cleaned_mlir, backend: backend)
 
         Dir.mktmpdir('ao486_cpu_parity_verilator_build') do |build_dir|
           verilator_runtime = described_class.build_from_cleaned_mlir(cleaned_mlir, work_dir: build_dir)
 
           RHDL::Examples::AO486::Import::CpuParityPrograms.all_programs.each do |program|
-            program.load_into(jit_runtime)
-            jit_trace = jit_runtime.run_fetch_pc_groups(max_cycles: program.max_cycles).map { |event| [event.pc, event.bytes] }
+            program.load_into(ir_runtime)
+            ir_trace = ir_runtime.run_fetch_pc_groups(max_cycles: program.max_cycles).map { |event| [event.pc, event.bytes] }
 
             program.load_into(verilator_runtime)
             verilator_trace = verilator_runtime.run_fetch_pc_groups(max_cycles: program.max_cycles).map { |event| [event.pc, event.bytes] }
 
             prefix = program.initial_fetch_pc_groups
-            expect(jit_trace.first(prefix.length)).to eq(prefix), "program=#{program.name}"
+            expect(ir_trace.first(prefix.length)).to eq(prefix), "program=#{program.name}"
             expect(verilator_trace.first(prefix.length)).to eq(prefix), "program=#{program.name}"
-            expect(verilator_trace).to eq(jit_trace), "program=#{program.name}"
+            expect(verilator_trace).to eq(ir_trace), "program=#{program.name}"
           end
         end
       end
     end
   end
 
-  it 'matches JIT on the current write-trace EIP+bytes sequence for reset_smoke', timeout: 600 do
+  it 'matches the selected IR backend on the current write-trace EIP+bytes sequence for reset_smoke', timeout: 600 do
     require_import_tool!
     require_program_assembler!
     skip 'circt-opt not available' unless HdlToolchain.which('circt-opt')
     skip 'firtool not available' unless HdlToolchain.which('firtool')
     skip 'verilator not available' unless HdlToolchain.verilator_available?
-    skip 'IR JIT backend unavailable' unless RHDL::Sim::Native::IR::JIT_AVAILABLE
+    backend = require_ir_backend!
 
     Dir.mktmpdir('ao486_cpu_step_verilator_out') do |out_dir|
       Dir.mktmpdir('ao486_cpu_step_verilator_ws') do |workspace|
@@ -84,10 +91,10 @@ RSpec.describe RHDL::Examples::AO486::Import::CpuParityVerilatorRuntime do
         cleaned_mlir = File.read(result.normalized_core_mlir_path)
         program = RHDL::Examples::AO486::Import::CpuParityPrograms.fetch(:reset_smoke)
 
-        jit_runtime = RHDL::Examples::AO486::Import::CpuParityRuntime.build_from_cleaned_mlir(cleaned_mlir)
-        program.load_into(jit_runtime)
-        jit_trace = jit_runtime.run(max_cycles: program.max_cycles).map { |event| [event.eip, event.bytes] }
-        expect(jit_trace).not_to be_empty
+        ir_runtime = RHDL::Examples::AO486::Import::CpuParityRuntime.build_from_cleaned_mlir(cleaned_mlir, backend: backend)
+        program.load_into(ir_runtime)
+        ir_trace = ir_runtime.run(max_cycles: program.max_cycles).map { |event| [event.eip, event.bytes] }
+        expect(ir_trace).not_to be_empty
 
         Dir.mktmpdir('ao486_cpu_step_verilator_build') do |build_dir|
           verilator_runtime = described_class.build_from_cleaned_mlir(cleaned_mlir, work_dir: build_dir)
@@ -95,19 +102,19 @@ RSpec.describe RHDL::Examples::AO486::Import::CpuParityVerilatorRuntime do
           verilator_trace = verilator_runtime.run_step_trace(max_cycles: program.max_cycles).map { |event| [event.eip, event.bytes] }
           expect(verilator_trace).not_to be_empty
 
-          expect(verilator_trace).to eq(jit_trace)
+          expect(verilator_trace).to eq(ir_trace)
         end
       end
     end
   end
 
-  it 'matches JIT on the flattened write-trace PC byte stream for the currently stable parity programs', timeout: 600 do
+  it 'matches the selected IR backend on the flattened write-trace PC byte stream for the currently stable parity programs', timeout: 600 do
     require_import_tool!
     require_program_assembler!
     skip 'circt-opt not available' unless HdlToolchain.which('circt-opt')
     skip 'firtool not available' unless HdlToolchain.which('firtool')
     skip 'verilator not available' unless HdlToolchain.verilator_available?
-    skip 'IR JIT backend unavailable' unless RHDL::Sim::Native::IR::JIT_AVAILABLE
+    backend = require_ir_backend!
 
     stable_programs = %i[reset_smoke prime_sieve game_of_life].map do |name|
       RHDL::Examples::AO486::Import::CpuParityPrograms.fetch(name)
@@ -117,21 +124,21 @@ RSpec.describe RHDL::Examples::AO486::Import::CpuParityVerilatorRuntime do
       Dir.mktmpdir('ao486_cpu_step_byte_ws') do |workspace|
         result = run_importer(out_dir: out_dir, workspace: workspace)
         cleaned_mlir = File.read(result.normalized_core_mlir_path)
-        jit_runtime = RHDL::Examples::AO486::Import::CpuParityRuntime.build_from_cleaned_mlir(cleaned_mlir)
+        ir_runtime = RHDL::Examples::AO486::Import::CpuParityRuntime.build_from_cleaned_mlir(cleaned_mlir, backend: backend)
 
         Dir.mktmpdir('ao486_cpu_step_byte_build') do |build_dir|
           verilator_runtime = described_class.build_from_cleaned_mlir(cleaned_mlir, work_dir: build_dir)
 
           stable_programs.each do |program|
-            program.load_into(jit_runtime)
-            jit_trace = flatten_step_trace(jit_runtime.run(max_cycles: program.max_cycles))
-            expect(jit_trace).not_to be_empty, "program=#{program.name}"
+            program.load_into(ir_runtime)
+            ir_trace = flatten_step_trace(ir_runtime.run(max_cycles: program.max_cycles))
+            expect(ir_trace).not_to be_empty, "program=#{program.name}"
 
             program.load_into(verilator_runtime)
             verilator_trace = flatten_step_trace(verilator_runtime.run_step_trace(max_cycles: program.max_cycles))
             expect(verilator_trace).not_to be_empty, "program=#{program.name}"
 
-            expect(verilator_trace).to eq(jit_trace), "program=#{program.name}"
+            expect(verilator_trace).to eq(ir_trace), "program=#{program.name}"
           end
         end
       end

@@ -9,10 +9,10 @@ module RHDL
       module Import
         # Runtime helper for the parity-oriented imported AO486 CPU package.
         #
-        # This runner currently targets the IR JIT backend and drives the
-        # CPU-top Avalon fetch port with a deterministic no-wait burst model.
-        # It is intentionally scoped to the parity-package flow where
-        # `cache_disable=1`.
+        # This runner prefers the IR compiler backend and falls back to JIT,
+        # while driving the CPU-top Avalon fetch port with a deterministic
+        # no-wait burst model. It is intentionally scoped to the parity-package
+        # flow where `cache_disable=1`.
         class CpuParityRuntime
           RESET_VECTOR_PHYSICAL = 0xFFFF0
           DEFAULT_FETCH_BURST_BEATS = 8
@@ -26,21 +26,35 @@ module RHDL
           FetchGroupEvent = Struct.new(:cycle, :address, :bytes, keyword_init: true)
           FetchPcGroupEvent = Struct.new(:cycle, :pc, :bytes, keyword_init: true)
 
-          def self.build_from_cleaned_mlir(mlir_text)
+          def self.preferred_backend
+            return :compiler if RHDL::Sim::Native::IR::COMPILER_AVAILABLE
+            return :jit if RHDL::Sim::Native::IR::JIT_AVAILABLE
+
+            nil
+          end
+
+          def self.build_from_cleaned_mlir(mlir_text, backend: preferred_backend)
+            raise ArgumentError, 'CpuParityRuntime requires an IR compiler or JIT backend' unless backend
+
             parity = CpuParityPackage.from_cleaned_mlir(mlir_text)
             raise ArgumentError, Array(parity[:diagnostics]).join("\n") unless parity[:success]
 
             flat = RHDL::Codegen::CIRCT::Flatten.to_flat_module(parity.fetch(:package), top: 'ao486')
-            ir_json = RHDL::Sim::Native::IR.sim_json(flat, backend: :jit)
-            sim = RHDL::Sim::Native::IR::Simulator.new(ir_json, backend: :jit)
+            ir_json = RHDL::Sim::Native::IR.sim_json(flat, backend: backend)
 
-            new(sim: sim)
+            new(
+              sim_factory: lambda {
+                RHDL::Sim::Native::IR::Simulator.new(ir_json, backend: backend)
+              }
+            )
           end
 
-          def initialize(sim:)
-            @sim = sim
+          def initialize(sim: nil, sim_factory: nil)
+            @sim_factory = sim_factory
+            @sim = sim || build_simulator!
             @memory = Hash.new(0)
             @read_burst = nil
+            @delivered_read_beat = false
             @previous_trace_key = nil
             @last_fetch_word = nil
             apply_default_inputs
@@ -61,7 +75,9 @@ module RHDL
           end
 
           def reset!
+            @sim = build_simulator!
             @read_burst = nil
+            @delivered_read_beat = false
             @previous_trace_key = nil
             @last_fetch_word = nil
             apply_default_inputs
@@ -143,6 +159,13 @@ module RHDL
 
           private
 
+          def build_simulator!
+            return @sim_factory.call if @sim_factory
+            return @sim if @sim
+
+            raise ArgumentError, 'CpuParityRuntime requires a simulator or simulator factory'
+          end
+
           def apply_default_inputs
             {
               'a20_enable' => 1,
@@ -166,7 +189,9 @@ module RHDL
           end
 
           def drive_read_data_inputs
-            if @read_burst && @read_burst[:started]
+            @delivered_read_beat = deliver_read_beat?
+
+            if @delivered_read_beat
               addr = @read_burst[:base] + (@read_burst[:beat_index] * 4)
               @last_fetch_word = { address: addr, word: little_endian_word(addr) }
               @sim.poke('avm_readdatavalid', 1)
@@ -197,7 +222,7 @@ module RHDL
           def advance_read_burst
             return unless @read_burst
 
-            if @read_burst[:started]
+            if @delivered_read_beat
               @read_burst[:beat_index] += 1
               @read_burst = nil if @read_burst[:beat_index] >= @read_burst[:beats_total]
             else
@@ -217,13 +242,18 @@ module RHDL
             }
           end
 
+          def deliver_read_beat?
+            @read_burst &&
+              @read_burst[:started]
+          end
+
           def capture_step_event(cycle)
             trace_key = [@sim.peek('trace_wr_eip'), @sim.peek('trace_wr_consumed')]
             return nil if trace_key == [0, 0]
             return nil if trace_key == @previous_trace_key
 
             retired = @sim.peek('trace_retired') == 1
-            return nil unless retired || trace_key[1] > 0
+            return nil unless retired
 
             @previous_trace_key = trace_key
             consumed = trace_key[1]

@@ -8,6 +8,21 @@ RSpec.describe RHDL::HDL::DFlipFlopAsync do
     component.propagate
   end
 
+  let(:active_low_reset_fixture) do
+    stub_const('ActiveLowResetFixture', Class.new(RHDL::Sim::SequentialComponent) do
+      include RHDL::DSL::Sequential
+
+      input :d
+      input :clk
+      input :rst_l
+      output :q
+
+      sequential clock: :clk, reset: :rst_l, reset_values: { q: 0 } do
+        q <= d
+      end
+    end)
+  end
+
   let(:dff) { RHDL::HDL::DFlipFlopAsync.new }
 
   before do
@@ -78,6 +93,26 @@ RSpec.describe RHDL::HDL::DFlipFlopAsync do
       expect(mlir).to include('%d:')
       expect(mlir).to include('%clk:')
       expect(mlir).to include('q:')
+    end
+
+    it 'treats reset names ending in _l as active-low in simulation and CIRCT lowering' do
+      component = active_low_reset_fixture.new
+      component.set_input(:rst_l, 1)
+      component.set_input(:d, 1)
+      clock_cycle(component)
+      expect(component.get_output(:q)).to eq(1)
+
+      component.set_input(:rst_l, 0)
+      component.propagate
+      expect(component.get_output(:q)).to eq(0)
+
+      ir = active_low_reset_fixture.to_flat_circt_nodes
+      process_if = ir.processes.first.statements.first
+      expect(process_if).to be_a(RHDL::Codegen::CIRCT::IR::If)
+      expect(process_if.condition).to be_a(RHDL::Codegen::CIRCT::IR::Signal)
+      expect(process_if.condition.name.to_s).to eq('rst_l')
+      expect(process_if.then_statements.first).to be_a(RHDL::Codegen::CIRCT::IR::SeqAssign)
+      expect(process_if.else_statements.first).to be_a(RHDL::Codegen::CIRCT::IR::SeqAssign)
     end
 
     context 'CIRCT firtool validation', if: HdlToolchain.firtool_available? do

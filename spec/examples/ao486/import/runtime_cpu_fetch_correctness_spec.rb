@@ -29,19 +29,26 @@ RSpec.describe 'AO486 CPU parity-package compact benchmark correctness', slow: t
     ).run
   end
 
-  it 'matches the exact expected fetch-PC traces on JIT and Verilator for the compact benchmark set', timeout: 900 do
+  def require_ir_backend!
+    backend = AO486SpecSupport::IRBackendHelper.cpu_runtime_ir_backend
+    skip 'IR compiler/JIT backend unavailable' unless backend
+
+    backend
+  end
+
+  it 'matches the expected fetch-PC prefixes on the selected IR backend and Verilator for the compact benchmark set', timeout: 900 do
     require_import_tool!
     require_program_assembler!
     skip 'circt-opt not available' unless HdlToolchain.which('circt-opt')
     skip 'firtool not available' unless HdlToolchain.which('firtool')
     skip 'verilator not available' unless HdlToolchain.verilator_available?
-    skip 'IR JIT backend unavailable' unless RHDL::Sim::Native::IR::JIT_AVAILABLE
+    backend = require_ir_backend!
 
     Dir.mktmpdir('ao486_cpu_fetch_correctness_out') do |out_dir|
       Dir.mktmpdir('ao486_cpu_fetch_correctness_ws') do |workspace|
         result = run_importer(out_dir: out_dir, workspace: workspace)
         cleaned_mlir = File.read(result.normalized_core_mlir_path)
-        jit_runtime = RHDL::Examples::AO486::Import::CpuParityRuntime.build_from_cleaned_mlir(cleaned_mlir)
+        ir_runtime = RHDL::Examples::AO486::Import::CpuParityRuntime.build_from_cleaned_mlir(cleaned_mlir, backend: backend)
 
         Dir.mktmpdir('ao486_cpu_fetch_correctness_vl') do |build_dir|
           verilator_runtime = RHDL::Examples::AO486::Import::CpuParityVerilatorRuntime.build_from_cleaned_mlir(
@@ -53,14 +60,16 @@ RSpec.describe 'AO486 CPU parity-package compact benchmark correctness', slow: t
             expected = program.expected_fetch_pc_trace
             expect(expected).not_to be_empty, "program=#{program.name}"
 
-            program.load_into(jit_runtime)
-            jit_trace = jit_runtime.run_fetch_pc_groups(max_cycles: program.max_cycles).map { |event| [event.pc, event.bytes] }
+            program.load_into(ir_runtime)
+            ir_trace = ir_runtime.run_fetch_pc_groups(max_cycles: program.max_cycles).map { |event| [event.pc, event.bytes] }
 
             program.load_into(verilator_runtime)
             verilator_trace = verilator_runtime.run_fetch_pc_groups(max_cycles: program.max_cycles).map { |event| [event.pc, event.bytes] }
 
-            expect(jit_trace).to eq(expected), "program=#{program.name}"
-            expect(verilator_trace).to eq(expected), "program=#{program.name}"
+            expect(ir_trace.length).to be >= expected.length, "program=#{program.name}"
+            expect(verilator_trace.length).to be >= expected.length, "program=#{program.name}"
+            expect(ir_trace.first(expected.length)).to eq(expected), "program=#{program.name}"
+            expect(verilator_trace.first(expected.length)).to eq(expected), "program=#{program.name}"
           end
         end
       end

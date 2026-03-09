@@ -3,6 +3,7 @@
 require 'spec_helper'
 require 'timeout'
 require 'json'
+require 'stringio'
 
 RSpec.describe RHDL::Codegen::CIRCT::RuntimeJSON do
   let(:ir) { RHDL::Codegen::CIRCT::IR }
@@ -102,6 +103,59 @@ RSpec.describe RHDL::Codegen::CIRCT::RuntimeJSON do
         ir::Assign.new(
           target: :y,
           expr: ir::Mux.new(condition: choose, when_true: upper, when_false: lower, width: 64)
+        )
+      ],
+      processes: [],
+      instances: [],
+      memories: [],
+      write_ports: [],
+      sync_read_ports: [],
+      parameters: {}
+    )
+  end
+
+  def build_hierarchical_probe_runtime_module
+    a = ir::Signal.new(name: :a, width: 64)
+    c = ir::Signal.new(name: :c, width: 64)
+    sel8 = ir::Signal.new(name: :sel8, width: 8)
+    choose = ir::Signal.new(name: :choose, width: 1)
+    bus_mux = ir::Signal.new(name: :bus_mux, width: 140)
+
+    bus0 = ir::Concat.new(
+      parts: [a, sel8, c, ir::Literal.new(value: 0, width: 4)],
+      width: 140
+    )
+    bus1 = ir::Concat.new(
+      parts: [c, sel8, a, ir::Literal.new(value: 0b1010, width: 4)],
+      width: 140
+    )
+
+    ir::ModuleOp.new(
+      name: 'runtime_hierarchical_probe',
+      ports: [
+        ir::Port.new(name: :choose, direction: :in, width: 1),
+        ir::Port.new(name: :a, direction: :in, width: 64),
+        ir::Port.new(name: :sel8, direction: :in, width: 8),
+        ir::Port.new(name: :c, direction: :in, width: 64),
+        ir::Port.new(name: :y, direction: :out, width: 1)
+      ],
+      nets: [
+        ir::Net.new(name: :bus_mux, width: 140),
+        ir::Net.new(name: :'u__probe', width: 1)
+      ],
+      regs: [],
+      assigns: [
+        ir::Assign.new(
+          target: :bus_mux,
+          expr: ir::Mux.new(condition: choose, when_true: bus1, when_false: bus0, width: 140)
+        ),
+        ir::Assign.new(
+          target: :'u__probe',
+          expr: ir::Slice.new(base: bus_mux, range: 1..1, width: 1)
+        ),
+        ir::Assign.new(
+          target: :y,
+          expr: ir::Signal.new(name: :'u__probe', width: 1)
         )
       ],
       processes: [],
@@ -281,6 +335,49 @@ RSpec.describe RHDL::Codegen::CIRCT::RuntimeJSON do
     expect(runtime_mod.fetch('assigns').length).to be > 1
   end
 
+  it 'can serialize shared runtime DAGs with compact expression refs' do
+    sel = ir::Signal.new(name: :sel, width: 1)
+    shared = ir::Mux.new(
+      condition: sel,
+      when_true: ir::BinaryOp.new(op: :+, left: ir::Signal.new(name: :a, width: 8), right: ir::Signal.new(name: :b, width: 8), width: 8),
+      when_false: ir::BinaryOp.new(op: :-, left: ir::Signal.new(name: :a, width: 8), right: ir::Signal.new(name: :b, width: 8), width: 8),
+      width: 8
+    )
+
+    mod = ir::ModuleOp.new(
+      name: 'runtime_shared_dag_compact',
+      ports: [
+        ir::Port.new(name: :sel, direction: :in, width: 1),
+        ir::Port.new(name: :a, direction: :in, width: 8),
+        ir::Port.new(name: :b, direction: :in, width: 8),
+        ir::Port.new(name: :y0, direction: :out, width: 8),
+        ir::Port.new(name: :y1, direction: :out, width: 8)
+      ],
+      nets: [],
+      regs: [],
+      assigns: [
+        ir::Assign.new(target: :y0, expr: shared),
+        ir::Assign.new(target: :y1, expr: shared)
+      ],
+      processes: [],
+      instances: [],
+      memories: [],
+      write_ports: [],
+      sync_read_ports: [],
+      parameters: {}
+    )
+
+    runtime_mod = JSON.parse(described_class.dump(mod, compact_exprs: true)).fetch('modules').fetch(0)
+
+    expect(runtime_mod.fetch('exprs')).not_to be_empty
+    expect(runtime_mod.fetch('exprs')).to include(
+      a_hash_including('kind' => 'mux')
+    )
+    assign_expr = runtime_mod.fetch('assigns').first.fetch('expr')
+    expect(assign_expr.fetch('kind')).to eq('expr_ref')
+    expect(runtime_mod.fetch('exprs').fetch(assign_expr.fetch('id')).fetch('kind')).to eq('mux')
+  end
+
   it 'dumps modules with large dead wide assign sets by pruning them before normalization' do
     mod = build_dead_wide_assign_runtime_module(dead_assign_count: 50_000)
     json = nil
@@ -316,6 +413,51 @@ RSpec.describe RHDL::Codegen::CIRCT::RuntimeJSON do
     )
   end
 
+  it 'hoists shared root expressions reused across multiple assigns before dump serialization' do
+    sel = ir::Signal.new(name: :sel, width: 1)
+    a = ir::Signal.new(name: :a, width: 8)
+    b = ir::Signal.new(name: :b, width: 8)
+    shared = ir::Mux.new(
+      condition: sel,
+      when_true: ir::BinaryOp.new(op: :+, left: a, right: b, width: 8),
+      when_false: ir::BinaryOp.new(op: :-, left: a, right: b, width: 8),
+      width: 8
+    )
+
+    mod = ir::ModuleOp.new(
+      name: 'runtime_shared_root_assign',
+      ports: [
+        ir::Port.new(name: :sel, direction: :in, width: 1),
+        ir::Port.new(name: :a, direction: :in, width: 8),
+        ir::Port.new(name: :b, direction: :in, width: 8),
+        ir::Port.new(name: :y0, direction: :out, width: 8),
+        ir::Port.new(name: :y1, direction: :out, width: 8)
+      ],
+      nets: [],
+      regs: [],
+      assigns: [
+        ir::Assign.new(target: :y0, expr: shared),
+        ir::Assign.new(target: :y1, expr: shared)
+      ],
+      processes: [],
+      instances: [],
+      memories: [],
+      write_ports: [],
+      sync_read_ports: [],
+      parameters: {}
+    )
+
+    runtime_mod = JSON.parse(described_class.dump(mod)).fetch('modules').fetch(0)
+    assigns_by_target = runtime_mod.fetch('assigns').to_h { |assign| [assign.fetch('target'), assign.fetch('expr')] }
+    y0_expr = assigns_by_target.fetch('y0')
+    y1_expr = assigns_by_target.fetch('y1')
+
+    expect(y0_expr.fetch('kind')).to eq('signal')
+    expect(y1_expr.fetch('kind')).to eq('signal')
+    expect(y0_expr.fetch('name')).to eq(y1_expr.fetch('name'))
+    expect(runtime_mod.fetch('nets').map { |net| net.fetch('name') }).to include(y0_expr.fetch('name'))
+  end
+
   it 'rewrites wide packed-bus slices into narrow runtime-safe expressions' do
     runtime_mod = described_class.normalize_modules_for_runtime([build_wide_bus_runtime_module]).first
     output_exprs = runtime_mod.assigns.to_h { |assign| [assign.target.to_s, assign.expr] }
@@ -331,6 +473,63 @@ RSpec.describe RHDL::Codegen::CIRCT::RuntimeJSON do
     expect(runtime_mod.nets).to all(satisfy { |net| net.width.to_i <= 128 })
   end
 
+  it 'treats 128-bit passthrough signals as runtime-safe and only flags truly over-wide signals' do
+    assign_map = {
+      'fit' => ir::Signal.new(name: :fit_in, width: 128),
+      'too_wide' => ir::Signal.new(name: :too_wide_in, width: 129)
+    }
+    signal_widths = {
+      'fit' => 128,
+      'fit_in' => 128,
+      'too_wide' => 129,
+      'too_wide_in' => 129
+    }
+
+    sensitive = described_class.send(
+      :runtime_sensitive_signal_names,
+      assign_map: assign_map,
+      signal_widths: signal_widths
+    )
+
+    expect(sensitive).not_to include('fit')
+    expect(sensitive).to include('too_wide')
+  end
+
+  it 'reuses cached simplifications for equivalent slice rewrites over the same wide source' do
+    packed = ir::Signal.new(name: :packed, width: 128)
+    upper = ir::Signal.new(name: :upper, width: 64)
+    lower = ir::Signal.new(name: :lower, width: 64)
+    cache = {}
+    needs_cache = {}
+    assign_map = {
+      'packed' => ir::Concat.new(parts: [upper, lower], width: 128)
+    }
+    slice_a = ir::Slice.new(base: packed, range: 95..32, width: 64)
+    slice_b = ir::Slice.new(base: packed, range: 95..32, width: 64)
+
+    result_a = described_class.send(
+      :simplify_expr_for_runtime,
+      slice_a,
+      assign_map: assign_map,
+      inlineable_names: Set['packed'],
+      cache: cache,
+      needs_cache: needs_cache,
+      runtime_sensitive_names: Set['packed']
+    )
+    result_b = described_class.send(
+      :simplify_expr_for_runtime,
+      slice_b,
+      assign_map: assign_map,
+      inlineable_names: Set['packed'],
+      cache: cache,
+      needs_cache: needs_cache,
+      runtime_sensitive_names: Set['packed']
+    )
+
+    expect(result_a).to be_a(ir::Concat)
+    expect(result_b).to equal(result_a)
+  end
+
   it 'does not hoist shared expressions wider than the native runtime ceiling' do
     runtime_mod = described_class.normalize_modules_for_runtime([build_shared_wide_subexpr_runtime_module]).first
 
@@ -338,6 +537,17 @@ RSpec.describe RHDL::Codegen::CIRCT::RuntimeJSON do
     expect(runtime_mod.assigns).to all(satisfy do |assign|
       !assign.target.to_s.include?('_rt_tmp_') || assign.expr.width.to_i <= 128
     end)
+  end
+
+  it 'preserves hierarchical intermediate probes even when wide runtime simplification inlines their consumers' do
+    runtime_mod = described_class.normalize_modules_for_runtime([build_hierarchical_probe_runtime_module]).first
+    assign_targets = runtime_mod.assigns.map { |assign| assign.target.to_s }
+    probe_assign = runtime_mod.assigns.find { |assign| assign.target.to_s == 'u__probe' }
+
+    expect(assign_targets).to include('u__probe')
+    expect(runtime_mod.nets.map { |net| net.name.to_s }).to include('u__probe')
+    expect(probe_assign).not_to be_nil
+    expect(expr_signal_names(probe_assign.expr)).not_to include('bus_mux')
   end
 
   it 'serializes wide literal and reset values beyond serde_json integer range as decimal strings' do
@@ -370,5 +580,14 @@ RSpec.describe RHDL::Codegen::CIRCT::RuntimeJSON do
     expect(runtime_mod.fetch('ports').fetch(0).fetch('default')).to eq(huge_positive.to_s)
     expect(runtime_mod.fetch('regs').fetch(0).fetch('reset_value')).to eq(huge_positive.to_s)
     expect(runtime_mod.fetch('assigns').fetch(0).fetch('expr').fetch('value')).to eq(huge_negative.to_s)
+  end
+
+  it 'can stream the runtime payload to an IO without changing JSON content' do
+    mod = build_duplicate_live_assign_runtime_module
+    io = StringIO.new
+
+    described_class.dump_to_io(mod, io)
+
+    expect(JSON.parse(io.string)).to eq(JSON.parse(described_class.dump(mod)))
   end
 end

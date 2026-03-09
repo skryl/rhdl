@@ -336,6 +336,23 @@ module RHDL
         end
       end
 
+      class BehaviorResize < BehaviorExpr
+        attr_reader :expr
+
+        def initialize(expr, width:)
+          @expr = expr.is_a?(BehaviorExpr) ? expr : BehaviorLiteral.new(expr, width: width)
+          super(width: width)
+        end
+
+        def to_ir
+          RHDL::Codegen::CIRCT::IR::Resize.new(expr: @expr.to_ir, width: @width)
+        end
+
+        def to_dsl_expr
+          @expr.to_dsl_expr
+        end
+      end
+
       # Replication in synthesis mode
       class BehaviorReplicate < BehaviorExpr
         attr_reader :expr, :times
@@ -792,14 +809,16 @@ module RHDL
         def compute_value(expr)
           case expr
           when BehaviorLiteral
-            expr.value
+            mask_value(expr.value, expr.width)
           when BehaviorLocal
             # Evaluate the underlying expression
-            compute_value(expr.expr)
+            mask_value(compute_value(expr.expr), expr.width)
+          when BehaviorResize
+            mask_value(compute_value(expr.expr), expr.width)
           when BehaviorSignalRef
             # Check output_values first so that values computed earlier in this
             # behavior block execution are visible to later assignments
-            @output_values[expr.name] || @input_values[expr.name] || 0
+            mask_value(@output_values[expr.name] || @input_values[expr.name] || 0, expr.width)
           when BehaviorBinaryOp
             compute_binary(expr.op, compute_value(expr.left), compute_value(expr.right), expr.width)
           when BehaviorUnaryOp
@@ -817,40 +836,40 @@ module RHDL
             result = 0
             offset = 0
             expr.parts.reverse.each do |part|
-              result |= (compute_value(part) << offset)
+              result |= (mask_value(compute_value(part), part.width) << offset)
               offset += part.width
             end
-            result
+            mask_value(result, expr.width)
           when BehaviorReplicate
-            base_val = compute_value(expr.expr)
+            base_val = mask_value(compute_value(expr.expr), expr.expr.width)
             result = 0
             offset = 0
             expr.times.times do
               result |= (base_val << offset)
               offset += expr.expr.width
             end
-            result
+            mask_value(result, expr.width)
           when BehaviorConditional
             cond_val = compute_value(expr.condition)
             if cond_val != 0
-              compute_value(expr.when_true_expr)
+              mask_value(compute_value(expr.when_true_expr), expr.width)
             else
-              expr.when_false_expr ? compute_value(expr.when_false_expr) : 0
+              mask_value(expr.when_false_expr ? compute_value(expr.when_false_expr) : 0, expr.width)
             end
           when BehaviorCaseSelect
             selector_val = compute_value(expr.selector)
             if expr.cases.key?(selector_val)
-              compute_value(expr.cases[selector_val])
+              mask_value(compute_value(expr.cases[selector_val]), expr.width)
             else
-              compute_value(expr.default_val)
+              mask_value(compute_value(expr.default_val), expr.width)
             end
           when BehaviorCaseExpr
-            compute_case_value(expr.ir)
+            mask_value(compute_case_value(expr.ir), expr.width)
           when BehaviorMemoryRead
             # For simulation, need component reference with memory arrays
             if @component && @component.respond_to?(:mem_read)
               addr_val = compute_value(expr.addr)
-              @component.mem_read(expr.memory_name, addr_val)
+              mask_value(@component.mem_read(expr.memory_name, addr_val), expr.width)
             else
               0  # No component reference or mem_read not available
             end
@@ -878,9 +897,9 @@ module RHDL
         def compute_value_from_ir(ir)
           case ir
           when RHDL::Codegen::CIRCT::IR::Literal
-            ir.value
+            mask_value(ir.value, ir.width)
           when RHDL::Codegen::CIRCT::IR::Signal
-            @input_values[ir.name.to_sym] || @output_values[ir.name.to_sym] || 0
+            mask_value(@input_values[ir.name.to_sym] || @output_values[ir.name.to_sym] || 0, ir.width)
           when RHDL::Codegen::CIRCT::IR::BinaryOp
             left = compute_value_from_ir(ir.left)
             right = compute_value_from_ir(ir.right)
@@ -895,14 +914,14 @@ module RHDL
           when RHDL::Codegen::CIRCT::IR::Mux
             cond = compute_value_from_ir(ir.condition)
             if cond != 0
-              compute_value_from_ir(ir.when_true)
+              mask_value(compute_value_from_ir(ir.when_true), ir.width)
             else
-              compute_value_from_ir(ir.when_false)
+              mask_value(compute_value_from_ir(ir.when_false), ir.width)
             end
           when RHDL::Codegen::CIRCT::IR::Case
-            compute_case_value(ir)
+            mask_value(compute_case_value(ir), ir.width)
           when RHDL::Codegen::CIRCT::IR::Resize
-            compute_value_from_ir(ir.expr)
+            mask_value(compute_value_from_ir(ir.expr), ir.width)
           else
             0
           end
@@ -1095,106 +1114,14 @@ module RHDL
           sequential_block_defined = respond_to?(:_sequential_block) && !_sequential_block.nil?
           if ancestors.include?(RHDL::Sim::Component) && !sequential_block_defined
             define_method(:propagate) do
-              # Two-phase propagation to handle feedback between behavior and subcomponents:
-              #
-              # Phase 1: Stabilize combinational logic
-              # - Behavior computes control signals (alu_b_sel, etc.)
-              # - Combinational subcomponents (ALU) propagate with new inputs
-              # - Repeat until stable
-              #
-              # Phase 2: Sequential components capture
-              # - With stabilized combinational values, sequential components capture
-              #
-              # This ensures registers capture the correct final value, not intermediate.
-              max_iterations = 10
-              iterations = 0
+              # Delegate hierarchical scheduling to Component#propagate_subcomponents
+              # so sibling sequential descendants sample together across module
+              # boundaries. Standalone behavior-only components still execute here.
+              super()
 
-              # Separate subcomponents into three categories:
-              # 1. combinational - no clock, pure combinational logic
-              # 2. sequential_subs - sequential with no subcomponents (simple registers)
-              # 3. hierarchical_sequential - sequential with their own subcomponents (need full propagate)
-              sequential_subs = []
-              hierarchical_sequential_subs = []
-              combinational_subs = []
-              @subcomponents&.each do |name, sub|
-                # Check class-level _sequential_block (set by sequential DSL)
-                is_sequential = sub.class.respond_to?(:_sequential_block) && sub.class._sequential_block
-                if is_sequential
-                  # Check if this sequential component has its own subcomponents
-                  has_subcomponents = sub.instance_variable_defined?(:@subcomponents) &&
-                                     sub.instance_variable_get(:@subcomponents)&.any?
-                  if has_subcomponents
-                    hierarchical_sequential_subs << [name, sub]
-                  else
-                    sequential_subs << [name, sub]
-                  end
-                else
-                  combinational_subs << [name, sub]
-                end
-              end
-
-              # Phase 1: Iterate to stabilize combinational logic
-              # Also propagate hierarchical sequential components as they need full propagate()
-              while iterations < max_iterations
-                old_values = {}
-                @internal_signals&.each do |name, wire|
-                  old_values[name] = wire.get
-                end
-
-                # Execute behavior (computes control signals like alu_b_sel)
+              if @subcomponents.empty?
                 self.class.execute_behavior_for_simulation(self)
-
-                # Propagate combinational subcomponents
-                combinational_subs.each do |name, sub|
-                  sub.propagate
-                end
-
-                # Propagate hierarchical sequential subcomponents (they handle their own internals)
-                hierarchical_sequential_subs.each do |name, sub|
-                  sub.propagate
-                end
-
-                # Execute behavior AGAIN to use fresh subcomponent outputs
-                self.class.execute_behavior_for_simulation(self)
-
-                # Check if stabilized
-                changed = false
-                @internal_signals&.each do |name, wire|
-                  if wire.get != old_values[name]
-                    changed = true
-                    break
-                  end
-                end
-
-                iterations += 1
-                break unless changed
               end
-
-              # Phase 2: Simple sequential components using Verilog-style two-phase semantics
-              # (Hierarchical sequential components already handled their internals in Phase 1)
-              # Phase 2a: ALL simple sequential components SAMPLE inputs (don't update outputs yet)
-              rising_edge_subs = []
-              sequential_subs.each do |name, sub|
-                if sub.respond_to?(:sample_inputs)
-                  is_rising = sub.sample_inputs
-                  rising_edge_subs << [name, sub] if is_rising
-                end
-              end
-
-              # Phase 2b: ALL simple sequential components UPDATE outputs (for those with rising edge)
-              rising_edge_subs.each do |name, sub|
-                sub.update_outputs if sub.respond_to?(:update_outputs)
-              end
-
-              # For simple sequential components that didn't have a rising edge, execute behavior if present
-              (sequential_subs - rising_edge_subs).each do |name, sub|
-                if sub.class.respond_to?(:behavior_defined?) && sub.class.behavior_defined?
-                  sub.execute_behavior if sub.respond_to?(:execute_behavior)
-                end
-              end
-
-              # Final behavior pass to update any signals that depend on register outputs
-              self.class.execute_behavior_for_simulation(self)
             end
           end
         end

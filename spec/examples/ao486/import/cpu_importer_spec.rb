@@ -43,6 +43,13 @@ RSpec.describe RHDL::Examples::AO486::Import::CpuImporter do
     ).run
   end
 
+  def require_ir_backend!
+    backend = AO486SpecSupport::IRBackendHelper.preferred_ir_backend
+    skip 'IR compiler/JIT backend unavailable' unless backend
+
+    backend
+  end
+
   it 'imports ao486.v through CIRCT and emits CPU artifacts needed for runtime parity', timeout: 240 do
     require_import_tool!
     skip 'circt-opt not available' unless HdlToolchain.which('circt-opt')
@@ -92,10 +99,10 @@ RSpec.describe RHDL::Examples::AO486::Import::CpuImporter do
     end
   end
 
-  it 'builds a flattened JIT runtime from the cleaned imported CPU modules', timeout: 240 do
+  it 'builds a flattened IR runtime from the cleaned imported CPU modules', timeout: 240 do
     require_import_tool!
     skip 'circt-opt not available' unless HdlToolchain.which('circt-opt')
-    skip 'IR JIT backend unavailable' unless RHDL::Sim::Native::IR::JIT_AVAILABLE
+    backend = require_ir_backend!
 
     Dir.mktmpdir('ao486_cpu_import_out') do |out_dir|
       Dir.mktmpdir('ao486_cpu_import_ws') do |workspace|
@@ -116,8 +123,8 @@ RSpec.describe RHDL::Examples::AO486::Import::CpuImporter do
         expect(duplicate_runtime_assigns).to be_empty,
           "duplicate runtime assign targets: #{duplicate_runtime_assigns.keys.first(10).join(', ')}"
 
-        ir_json = RHDL::Sim::Native::IR.sim_json(flat, backend: :jit)
-        sim = RHDL::Sim::Native::IR::Simulator.new(ir_json, backend: :jit)
+        ir_json = RHDL::Sim::Native::IR.sim_json(flat, backend: backend)
+        sim = RHDL::Sim::Native::IR::Simulator.new(ir_json, backend: backend)
 
         expect(sim.has_signal?('clk')).to be(true)
         expect(sim.has_signal?('rst_n')).to be(true)

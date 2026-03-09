@@ -2,7 +2,7 @@
 
 ## Status
 
-In Progress - 2026-03-07
+In Progress - 2026-03-09
 
 Execution notes:
 1. Phase 1 and Phase 2 infrastructure are implemented and covered with targeted specs.
@@ -23,6 +23,15 @@ Execution notes:
 16. The `dump` path now dedupes identical same-target live assigns before normalization. On `W1`, that reduces the live assign loop from 186,790 assigns to 103,084 unique assign targets; sampled and aggregate checks showed 70,122 duplicate targets with zero divergent expressions.
 17. The runtime JSON focused regressions now cover the dead-wide prune path and duplicate-live-assign collapse path, and representative parity coverage like `WB/wb_conbus_top.v` remains green after those optimizations.
 18. The remaining `Top/W1.v` board blocker is now in the normalize/serialize half of runtime export rather than live-target discovery: current direct probes show `runtime_live_assign_targets` at about 10 seconds on `W1`, but `normalize_module_for_runtime` still exceeds a 30-second cutoff and the overall board export still misses the 60-second parity-helper timeout.
+19. The mirrored SPARC64 unit suite now lives under `spec/examples/sparc64/import/unit` to align with the repository's other import-backed unit suites.
+20. `T1-common/u1/u1.V` is now part of the mirrored import/unit coverage set, and the shared staged-Verilog semantic comparer now rewrites simple gate primitives plus escaped identifiers like `\vdd!` so that source file imports from `u1.V` run green end to end.
+21. `sparc_tlu_penc64.v` now normalizes to an explicit priority chain before CIRCT import, which clears the last hard `import/unit` parity failure that surfaced after `sparc_tlu_dec64.v`.
+22. The suite no longer has a known hard parity failure in `import/unit`, and the parallel importer integration spec has additional timeout headroom for `pspec:sparc64`, but the PRD remained open because shared IR-compiler parity still pended on wide-signal coverage and board-level runtime-export timeouts such as `W1`, `S1Top`, and `bw_r_scm`.
+23. The shared IR compiler now carries runtime signal values up to 128 bits, exports the wide-signal FFI that the Ruby wrapper already expects, and preserves wide internal packed-bus slices in compiler-generated code. The former JIT-routed `import/unit` cases at 65..128 bits now resolve to `:compiler`; targeted compiler regressions and a 35-example former-JIT SPARC64 batch are green. The remaining Phase 5 blocker is now the >128-bit / board-level runtime-export path rather than the old 64-bit compiler ceiling.
+24. The latest full sequential `spec/examples/sparc64/import/unit` sweep advanced to a parity-harness red instead of a source-import parity red. Shared fixes since then now keep explicit-width sequential locals masked in simulation, keep LLHD sensitivity-loop mux cells like `dp_mux2es` combinational instead of spuriously clocking them on `sel`, and rank real reset pins like `arst_l` above reset-enable controls like `rst_tri_en` when building deterministic parity vectors. The targeted `os2wb_dual`, `sparc_exu_alu`, `swrvr_dlib`, and full `parity_helper_spec` checks are green again, but the full sequential sweep still needs another end-to-end rerun before Phase 5 can be marked green.
+25. The SPARC64 parity helper no longer goes through `to_circt_runtime_json` for native-IR runtime export. It now builds flat CIRCT nodes once and serializes them through the same compact `RHDL::Sim::Native::IR.sim_json` path used by the native IR simulator more broadly, so compiler-backed and JIT-backed SPARC64 parity runs share one standard runtime payload shape. The full `parity_helper_spec`, plus representative compiler-backed (`sparc_exu_alu`) and Ruby-fallback (`os2wb_dual`) source specs, are green on that path.
+26. A full sequential `spec/examples/sparc64/import/unit` sweep now runs to completion in 63 minutes 44 seconds with 443 examples and 1 failure. The only remaining red is `os2wb/s1_top.v`, where native-IR parity still falls back because `S1Top` runtime export exceeds the 60-second timeout and the fallback Verilator parity run then exceeds the 480-second example timeout. The suite is therefore down to a single board-level-style parity blocker rather than broad import/unit instability.
+27. The `S1Top` native-IR runtime-export blocker is now fixed in shared `RuntimeJSON` logic. The main changes were: stop using stale 64-bit simplification thresholds after the backend widened to 128 bits, cache equivalent slice rewrites across fresh `IR::Slice` objects, and push slices down through signals/concats/muxes/resizes before fully simplifying the base expression. Direct `S1Top` export probing now shows `to_flat_circt_nodes` in about `3.0s`, `runtime_live_assign_targets` in about `5.5s`, `normalize_module_for_runtime` in about `6.8s`, and compact serialization in about `2.8s`; the targeted `spec/examples/sparc64/import/unit/os2wb/s1_top_spec.rb` is green again in about `7m45s`.
 
 ## Context
 
@@ -39,7 +48,7 @@ The suite should not build a committed secondary import corpus. It should import
 
 ## Goals
 
-1. Add a SPARC64 unit suite under `spec/examples/sparc64/unit`.
+1. Add a SPARC64 unit suite under `spec/examples/sparc64/import/unit`.
 2. Mirror the original `examples/sparc64/reference` source layout in the unit spec tree.
 3. Import the default `W1` top exactly once per RSpec process into a temp workspace/output tree.
 4. Cover only modules that are both:
@@ -60,7 +69,7 @@ The suite should not build a committed secondary import corpus. It should import
 ## Public Interface / API Additions
 
 1. New unit spec tree:
-   - `spec/examples/sparc64/unit/`
+   - `spec/examples/sparc64/import/unit/`
 2. New SPARC64 spec scopes:
    - `bundle exec rake spec:sparc64`
    - `bundle exec rake pspec:sparc64`
@@ -111,7 +120,7 @@ The suite should not build a committed secondary import corpus. It should import
 
 #### Red
 
-1. Add failing checks for a mirrored spec tree under `spec/examples/sparc64/unit/...`.
+1. Add failing checks for a mirrored spec tree under `spec/examples/sparc64/import/unit/...`.
 2. Add failing checks that the checked-in spec inventory exactly matches the runtime emitted-source-backed `W1` inventory.
 
 #### Green
@@ -208,7 +217,7 @@ The suite should not build a committed secondary import corpus. It should import
 
 ## Acceptance Criteria
 
-1. `spec/examples/sparc64/unit` exists and mirrors the covered portion of the reference source tree.
+1. `spec/examples/sparc64/import/unit` exists and mirrors the covered portion of the reference source tree.
 2. The suite imports the default `W1` top once per RSpec process into temp storage and deletes that tree afterward.
 3. Coverage is limited to the modules directly emitted as source-backed imported classes from the default `W1` import.
 4. Every covered source file passes the staged-Verilog semantic-closeness gate.

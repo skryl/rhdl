@@ -15,7 +15,7 @@ RSpec.describe Sparc64UnitSupport::RuntimeImportSession do
     inventory = session.inventory_records
 
     aggregate_failures do
-      expect(session.emitted_ruby_records.length).to eq(487)
+      expect(session.emitted_ruby_records.length).to eq(488)
       expect(inventory.length).to eq(RHDL::Examples::SPARC64::Unit::COVERED_MODULE_COUNT)
       expect(session.inventory_by_source_relative_path.length).to eq(RHDL::Examples::SPARC64::Unit::COVERED_SOURCE_FILE_COUNT)
       expect(
