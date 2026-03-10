@@ -1,6 +1,8 @@
 # frozen_string_literal: true
 
 require 'fileutils'
+require 'open3'
+require 'shellwords'
 require 'tmpdir'
 require 'yaml'
 require 'json'
@@ -78,7 +80,7 @@ module RHDL
 
           attr_reader :reference_root, :top, :top_file, :output_dir, :workspace_dir, :keep_workspace,
                       :clean_output, :maintain_directory_structure, :strict, :progress_callback,
-                      :import_task_class, :import_strategy, :emit_runtime_json
+                      :import_task_class, :import_strategy, :emit_runtime_json, :patches_dir
 
           def initialize(reference_root: DEFAULT_REFERENCE_ROOT,
                          top: DEFAULT_TOP,
@@ -92,6 +94,7 @@ module RHDL
                          progress: nil,
                          import_task_class: nil,
                          import_strategy: DEFAULT_IMPORT_STRATEGY,
+                         patches_dir: nil,
                          emit_runtime_json: true)
             @reference_root = File.expand_path(reference_root)
             @top = top.to_s
@@ -105,8 +108,11 @@ module RHDL
             @progress_callback = progress
             @import_task_class = import_task_class
             @import_strategy = normalize_strategy(import_strategy)
+            @patches_dir = normalize_patches_dir(patches_dir)
             @emit_runtime_json = !!emit_runtime_json
             @resolved_include_cache = {}
+            @prepared_reference_root = nil
+            @prepared_top_file = nil
           end
 
           def run
@@ -116,7 +122,7 @@ module RHDL
             temp_workspace = workspace if workspace_dir.nil?
 
             emit_progress('resolve mixed sources from reference tree')
-            resolved = resolve_sources
+            resolved = resolve_sources(workspace: workspace)
             module_source_relpaths = resolved.fetch(:module_source_relpaths)
             module_files_by_name = resolved.fetch(:module_files_by_name)
             closure_modules = resolved.fetch(:closure_modules)
@@ -232,7 +238,8 @@ module RHDL
             FileUtils.rm_rf(temp_workspace) if defined?(temp_workspace) && temp_workspace && !keep_workspace
           end
 
-          def resolve_sources
+          def resolve_sources(workspace: nil)
+            prepare_import_source_tree!(workspace) if patches_dir
             validate_source_inputs!
 
             all_module_files = candidate_verilog_files.select { |path| module_defining_verilog_file?(path) }
@@ -248,7 +255,7 @@ module RHDL
             graph = module_reference_graph(all_module_files)
             module_files = ordered_module_paths(top, graph, module_paths)
             closure_modules = module_closure(top, graph).select { |name| module_paths.key?(name) }
-            top_path = File.expand_path(top_file)
+            top_path = File.expand_path(active_top_file)
             module_files.reject! do |path|
               File.expand_path(path) != top_path && force_stubbed_hierarchy_source?(path)
             end
@@ -260,7 +267,7 @@ module RHDL
             {
               top: {
                 name: top,
-                file: File.expand_path(top_file),
+                file: top_path,
                 language: 'verilog'
               },
               files: module_files.map { |path| { path: path, language: 'verilog', library: nil } },
@@ -273,7 +280,7 @@ module RHDL
           end
 
           def write_import_source_bundle(workspace:, resolved: nil)
-            resolved ||= resolve_sources
+            resolved ||= resolve_sources(workspace: workspace)
             staged = stage_sources(workspace: workspace, resolved: resolved)
             support_stub_path = write_hierarchy_support_stubs(
               staged_root: staged.fetch(:staged_root),
@@ -317,22 +324,22 @@ module RHDL
           end
 
           def validate_source_inputs!
-            raise ArgumentError, "SPARC64 reference tree not found: #{reference_root}" unless Dir.exist?(reference_root)
-            raise ArgumentError, "SPARC64 top source file not found: #{top_file}" unless File.file?(top_file)
+            raise ArgumentError, "SPARC64 reference tree not found: #{active_reference_root}" unless Dir.exist?(active_reference_root)
+            raise ArgumentError, "SPARC64 top source file not found: #{active_top_file}" unless File.file?(active_top_file)
           end
 
           def candidate_verilog_files
-            Dir.glob(File.join(reference_root, '**', '*')).sort.filter_map do |path|
+            Dir.glob(File.join(active_reference_root, '**', '*')).sort.filter_map do |path|
               next unless File.file?(path)
               next unless verilog_source_file?(path)
-              next if EXCLUDED_SOURCE_PATHS.include?(File.expand_path(path))
+              next if excluded_source_paths.include?(File.expand_path(path))
 
               File.expand_path(path)
             end
           end
 
           def full_reference_module_index_for_layout
-            files = Dir.glob(File.join(reference_root, '**', '*')).sort.select do |path|
+            files = Dir.glob(File.join(active_reference_root, '**', '*')).sort.select do |path|
               File.file?(path) && verilog_source_file?(path) && module_defining_verilog_file?(path)
             end
             module_index(files)
@@ -344,9 +351,9 @@ module RHDL
 
           def force_stubbed_hierarchy_source?(path)
             absolute = File.expand_path(path)
-            return true if FORCE_STUB_SOURCE_PATHS.include?(absolute)
+            return true if force_stub_source_paths.include?(absolute)
 
-            FORCE_STUB_SOURCE_PREFIXES.any? do |prefix|
+            force_stub_source_prefixes.any? do |prefix|
               absolute.start_with?("#{File.expand_path(prefix)}/")
             end
           end
@@ -369,7 +376,7 @@ module RHDL
           end
 
           def include_dirs_for_files(files)
-            include_dirs = Set.new(DEFAULT_HEADER_SEARCH_DIRS.map { |dir| File.expand_path(dir) })
+            include_dirs = Set.new(default_header_search_dirs.map { |dir| File.expand_path(dir) })
 
             files.each do |path|
               source_dir = File.dirname(path)
@@ -395,7 +402,7 @@ module RHDL
 
             paths_to_stage = resolved.fetch(:module_files)
               .concat(header_dependency_paths(resolved.fetch(:module_files)))
-              .push(File.expand_path(top_file))
+              .push(File.expand_path(active_top_file))
               .uniq
 
             paths_to_stage.each do |path|
@@ -406,7 +413,7 @@ module RHDL
 
             {
               staged_root: staged_root,
-              top_file: staged_path_for_source(top_file, staged_root: staged_root),
+              top_file: staged_path_for_source(active_top_file, staged_root: staged_root),
               files: resolved.fetch(:files).map do |entry|
                 {
                   path: staged_path_for_source(entry.fetch(:path), staged_root: staged_root),
@@ -418,10 +425,10 @@ module RHDL
             }
           end
 
-          def write_hierarchy_support_stubs(staged_root:, staged_module_files:, top_file:)
-            path = File.join(staged_root, '__rhdl_sparc64_hierarchy_stubs.v')
-            ordered_names = module_index(staged_module_files).keys.to_set
-            module_ports = Hash.new { |h, k| h[k] = [] }
+	          def write_hierarchy_support_stubs(staged_root:, staged_module_files:, top_file:)
+	            path = File.join(staged_root, '__rhdl_sparc64_hierarchy_stubs.v')
+	            ordered_names = module_index(staged_module_files).keys.to_set
+	            module_ports = Hash.new { |h, k| h[k] = [] }
 
             Array(staged_module_files).each do |source_path|
               text = strip_comments(File.read(source_path))
@@ -442,19 +449,77 @@ module RHDL
               end
             end
 
-            body = +"`timescale 1ns / 1ps\n\n"
-            module_ports.keys.sort.each do |mod_name|
-              ports = module_ports.fetch(mod_name).uniq
-              body << "module #{mod_name}(#{ports.join(', ')});\n"
-              ports.each { |port| body << "  input #{port};\n" }
-              body << "endmodule\n\n"
-            end
+	            body = +"`timescale 1ns / 1ps\n\n"
+	            module_ports.keys.sort.each do |mod_name|
+	              ports = module_ports.fetch(mod_name).uniq
+	              custom_body = hierarchy_support_stub_body(mod_name, ports)
+	              if custom_body
+	                body << custom_body
+	                body << "\n\n"
+	                next
+	              end
 
-            File.write(path, body)
-            path
-          end
+	              body << "module #{mod_name}(#{ports.join(', ')});\n"
+	              ports.each { |port| body << "  input #{port};\n" }
+	              body << "endmodule\n\n"
+	            end
 
-          def header_dependency_paths(files)
+	            File.write(path, body)
+	            path
+	          end
+
+	          def hierarchy_support_stub_body(mod_name, _ports)
+	            case mod_name
+	            when 'pcx_fifo'
+	              <<~VERILOG
+	                module pcx_fifo(aclr, clock, data, rdreq, wrreq, empty, q);
+	                  input aclr;
+	                  input clock;
+	                  input [129:0] data;
+	                  input rdreq;
+	                  input wrreq;
+	                  output empty;
+	                  output [129:0] q;
+
+	                  reg [129:0] mem[0:3];
+	                  reg [1:0] rd_ptr;
+	                  reg [1:0] wr_ptr;
+	                  reg [2:0] count;
+
+	                  wire read_now;
+	                  wire write_now;
+
+	                  assign read_now = rdreq && (count != 0);
+	                  assign write_now = wrreq && (read_now || (count < 4));
+	                  assign empty = (count == 0);
+	                  assign q = empty ? 130'b0 : mem[rd_ptr];
+
+	                  always @(posedge clock or posedge aclr) begin
+	                    if (aclr) begin
+	                      rd_ptr <= 2'b00;
+	                      wr_ptr <= 2'b00;
+	                      count <= 3'b000;
+	                    end else begin
+	                      if (write_now) begin
+	                        mem[wr_ptr] <= data;
+	                        wr_ptr <= wr_ptr + 2'b01;
+	                      end
+	                      if (read_now) begin
+	                        rd_ptr <= rd_ptr + 2'b01;
+	                      end
+	                      case ({write_now, read_now})
+	                      2'b10: count <= count + 3'b001;
+	                      2'b01: count <= count - 3'b001;
+	                      default: count <= count;
+	                      endcase
+	                    end
+	                  end
+	                endmodule
+	              VERILOG
+	            end
+	          end
+
+	          def header_dependency_paths(files)
             queue = Array(files).map { |path| File.expand_path(path) }
             visited = Set.new
             headers = Set.new
@@ -609,13 +674,13 @@ module RHDL
           def resolve_include_path(include_name)
             return @resolved_include_cache[include_name] if @resolved_include_cache.key?(include_name)
 
-            matches = Dir.glob(File.join(reference_root, '**', include_name)).sort.select { |path| File.file?(path) }
+            matches = Dir.glob(File.join(active_reference_root, '**', include_name)).sort.select { |path| File.file?(path) }
             @resolved_include_cache[include_name] = case matches.length
                                                     when 0 then nil
                                                     when 1 then File.expand_path(matches.first)
                                                     else
                                                       raise ArgumentError,
-                                                            "Ambiguous include '#{include_name}' under #{reference_root}: #{matches.map { |path| source_relative_path(path) }.join(', ')}"
+                                                            "Ambiguous include '#{include_name}' under #{active_reference_root}: #{matches.map { |path| source_relative_path(path) }.join(', ')}"
                                                     end
           end
 
@@ -795,12 +860,148 @@ module RHDL
           end
 
           def source_relative_path(path)
-            root = File.expand_path(reference_root)
+            root = File.expand_path(active_reference_root)
             absolute = File.expand_path(path)
             prefix = "#{root}/"
             return absolute.delete_prefix(prefix) if absolute.start_with?(prefix)
 
             File.basename(absolute)
+          end
+
+          def active_reference_root
+            @prepared_reference_root || reference_root
+          end
+
+          def active_top_file
+            @prepared_top_file || top_file
+          end
+
+          def prepare_import_source_tree!(workspace)
+            raise ArgumentError, 'workspace is required when patches_dir is set' if workspace.to_s.strip.empty?
+
+            staged_root = File.join(File.expand_path(workspace), 'patched_reference')
+            return staged_root if @prepared_reference_root == staged_root && Dir.exist?(staged_root)
+
+            copy_directory_contents(reference_root, staged_root)
+            normalize_text_line_endings!(staged_root)
+
+            patch_series_files(patches_dir).each do |patch_path|
+              emit_progress("apply patch #{File.basename(patch_path)}")
+              apply_patch_file!(staged_root, patch_path)
+            end
+
+            @prepared_reference_root = staged_root
+            @prepared_top_file = File.join(staged_root, path_relative_to_root(top_file, reference_root))
+            @resolved_include_cache = {}
+            staged_root
+          end
+
+          def apply_patch_file!(root, patch_path)
+            check_result = run_command(['patch', '--dry-run', '-p1', '-i', patch_path], chdir: root)
+            unless check_result[:success]
+              raise RuntimeError,
+                    "Failed to validate SPARC64 patch #{File.basename(patch_path)}:\n#{check_result[:stderr]}"
+            end
+
+            apply_result = run_command(['patch', '-p1', '-i', patch_path], chdir: root)
+            return if apply_result[:success]
+
+            raise RuntimeError,
+                  "Failed to apply SPARC64 patch #{File.basename(patch_path)}:\n#{apply_result[:stderr]}"
+          end
+
+          def run_command(cmd, chdir: nil)
+            stdout, stderr, status = if chdir
+              Open3.capture3(*cmd, chdir: chdir)
+            else
+              Open3.capture3(*cmd)
+            end
+            {
+              success: status.success?,
+              stdout: stdout,
+              stderr: stderr,
+              status: status.exitstatus,
+              command: cmd.map { |arg| Shellwords.escape(arg.to_s) }.join(' ')
+            }
+          end
+
+          def patch_series_files(root)
+            Dir.glob(File.join(root, '**', '*'))
+               .select { |path| File.file?(path) && %w[.patch .diff].include?(File.extname(path)) }
+               .sort
+          end
+
+          def copy_directory_contents(source_dir, destination_dir)
+            FileUtils.rm_rf(destination_dir) if File.exist?(destination_dir)
+            FileUtils.mkdir_p(destination_dir)
+            Dir.children(source_dir).sort.each do |entry|
+              next if entry == '.git'
+
+              FileUtils.cp_r(File.join(source_dir, entry), destination_dir)
+            end
+          end
+
+          def normalize_text_line_endings!(root)
+            Dir.glob(File.join(root, '**', '*')).each do |path|
+              next unless File.file?(path)
+              next if binary_file?(path)
+
+              data = File.binread(path)
+              next unless data.include?("\r\n")
+
+              File.binwrite(path, data.gsub("\r\n", "\n"))
+            end
+          end
+
+          def binary_file?(path)
+            File.binread(path, 1024).include?("\0")
+          rescue StandardError
+            true
+          end
+
+          def path_relative_to_root(path, root)
+            expanded_path = File.expand_path(path)
+            expanded_root = File.expand_path(root)
+            prefix = "#{expanded_root}/"
+            return expanded_path.delete_prefix(prefix) if expanded_path.start_with?(prefix)
+
+            File.basename(expanded_path)
+          end
+
+          def normalize_patches_dir(value)
+            return nil if value.nil? || value.to_s.strip.empty?
+
+            expanded = File.expand_path(value)
+            raise ArgumentError, "patches_dir not found: #{expanded}" unless Dir.exist?(expanded)
+
+            expanded
+          end
+
+          def default_header_search_dirs
+            DEFAULT_HEADER_SEARCH_DIRS.map { |path| remap_default_reference_path(path) }
+          end
+
+          def excluded_source_paths
+            EXCLUDED_SOURCE_PATHS.map { |path| remap_default_reference_path(path) }
+          end
+
+          def force_stub_source_prefixes
+            FORCE_STUB_SOURCE_PREFIXES.map { |path| remap_default_reference_path(path) }
+          end
+
+          def force_stub_source_paths
+            FORCE_STUB_SOURCE_PATHS.map { |path| remap_default_reference_path(path) }
+          end
+
+          def remap_default_reference_path(path)
+            absolute = File.expand_path(path)
+            default_root = File.expand_path(DEFAULT_REFERENCE_ROOT)
+            active_root = File.expand_path(active_reference_root)
+            prefix = "#{default_root}/"
+            return absolute unless active_root != default_root
+            return absolute unless absolute.start_with?(prefix)
+
+            File.join(active_root, absolute.delete_prefix(prefix))
           end
 
           def underscore_module_name(name)

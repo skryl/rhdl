@@ -22,6 +22,7 @@ RSpec.describe RHDL::Examples::GameBoy::CLI do
       expect(stdout.string).to include('--[no-]keep-structure')
       expect(stdout.string).to include('--keep-workspace')
       expect(stdout.string).to include('--[no-]clean')
+      expect(stdout.string).to include('--[no-]auto-stub-modules')
       expect(stdout.string).to include('--[no-]strict')
     end
 
@@ -121,6 +122,7 @@ RSpec.describe RHDL::Examples::GameBoy::CLI do
           '--top', 'gb_top',
           '--strategy', 'mixed',
           '--no-keep-structure',
+          '--auto-stub-modules',
           '--reference-root', 'examples/gameboy/reference',
           '--keep-workspace'
         ],
@@ -137,11 +139,51 @@ RSpec.describe RHDL::Examples::GameBoy::CLI do
       expect(fake_importer_class.last_kwargs[:strict]).to eq(false)
       expect(fake_importer_class.last_kwargs[:import_strategy]).to eq(:mixed)
       expect(fake_importer_class.last_kwargs[:maintain_directory_structure]).to eq(false)
+      expect(fake_importer_class.last_kwargs[:auto_stub_modules]).to eq(true)
       expect(fake_importer_class.last_kwargs[:qip_path]).to eq(File.expand_path('examples/gameboy/reference/files.qip', Dir.pwd))
       expect(fake_importer_class.last_kwargs[:top_file]).to eq(File.expand_path('examples/gameboy/reference/rtl/gb.v', Dir.pwd))
       expect(fake_importer_class.last_kwargs[:top]).to eq('gb_top')
       expect(fake_importer_class.last_kwargs[:reference_root]).to eq(File.expand_path('examples/gameboy/reference', Dir.pwd))
       expect(fake_importer_class.last_kwargs[:keep_workspace]).to eq(true)
+    end
+
+    it 'can explicitly disable importer auto stubs' do
+      result_class = Struct.new(:success, :diagnostics, :output_dir, :files_written, :report_path, keyword_init: true) do
+        def success?
+          !!success
+        end
+      end
+
+      fake_importer_class = Class.new do
+        class << self
+          attr_accessor :last_kwargs
+        end
+
+        def initialize(**kwargs)
+          self.class.last_kwargs = kwargs
+        end
+
+        def run
+          self.class.const_get(:RESULT_CLASS).new(
+            success: true,
+            diagnostics: [],
+            output_dir: '/tmp/custom_gameboy_import',
+            files_written: [],
+            report_path: '/tmp/custom_gameboy_import/import_report.json'
+          )
+        end
+      end
+      fake_importer_class.const_set(:RESULT_CLASS, result_class)
+
+      status = described_class.run(
+        %w[import --no-auto-stub-modules],
+        out: stdout,
+        err: stderr,
+        importer_class: fake_importer_class
+      )
+
+      expect(status).to eq(0)
+      expect(fake_importer_class.last_kwargs[:auto_stub_modules]).to eq(false)
     end
 
     it 'prints diagnostics and exits non-zero when import fails' do

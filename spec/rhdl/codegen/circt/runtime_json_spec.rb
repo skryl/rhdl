@@ -378,6 +378,45 @@ RSpec.describe RHDL::Codegen::CIRCT::RuntimeJSON do
     expect(runtime_mod.fetch('exprs').fetch(assign_expr.fetch('id')).fetch('kind')).to eq('mux')
   end
 
+  it 'streams the same compact payload as dump(compact_exprs: true)' do
+    sel = ir::Signal.new(name: :sel, width: 1)
+    shared = ir::Mux.new(
+      condition: sel,
+      when_true: ir::BinaryOp.new(op: :+, left: ir::Signal.new(name: :a, width: 8), right: ir::Signal.new(name: :b, width: 8), width: 8),
+      when_false: ir::BinaryOp.new(op: :-, left: ir::Signal.new(name: :a, width: 8), right: ir::Signal.new(name: :b, width: 8), width: 8),
+      width: 8
+    )
+
+    mod = ir::ModuleOp.new(
+      name: 'runtime_shared_dag_compact_streamed',
+      ports: [
+        ir::Port.new(name: :sel, direction: :in, width: 1),
+        ir::Port.new(name: :a, direction: :in, width: 8),
+        ir::Port.new(name: :b, direction: :in, width: 8),
+        ir::Port.new(name: :y0, direction: :out, width: 8),
+        ir::Port.new(name: :y1, direction: :out, width: 8)
+      ],
+      nets: [],
+      regs: [],
+      assigns: [
+        ir::Assign.new(target: :y0, expr: shared),
+        ir::Assign.new(target: :y1, expr: shared)
+      ],
+      processes: [],
+      instances: [],
+      memories: [],
+      write_ports: [],
+      sync_read_ports: [],
+      parameters: {}
+    )
+
+    expected = JSON.parse(described_class.dump(mod, compact_exprs: true))
+    io = StringIO.new
+    described_class.dump_to_io(mod, io, compact_exprs: true)
+
+    expect(JSON.parse(io.string)).to eq(expected)
+  end
+
   it 'dumps modules with large dead wide assign sets by pruning them before normalization' do
     mod = build_dead_wide_assign_runtime_module(dead_assign_count: 50_000)
     json = nil

@@ -22,6 +22,8 @@ module RHDL
           DEFAULT_OUTPUT_DIR = File.expand_path('../../import', __dir__)
           DEFAULT_IMPORT_STRATEGY = :mixed
           VALID_IMPORT_STRATEGIES = %i[mixed].freeze
+          DEFAULT_AUTO_STUB_MODULES = false
+          AUTO_STUB_SIMULATION_SAFE = :simulation_safe
           DEFAULT_VHDL_STANDARD = '08'
           DEFAULT_VHDL_ANALYZE_ARGS = %w[-fsynopsys].freeze
           DEFAULT_VHDL_SYNTH_ARGS = %w[-fsynopsys].freeze
@@ -40,6 +42,19 @@ module RHDL
             'VERILOG_FILE' => 'verilog',
             'SYSTEMVERILOG_FILE' => 'verilog',
             'VHDL_FILE' => 'vhdl'
+          }.freeze
+
+          AUTO_STUB_PROFILES = {
+            AUTO_STUB_SIMULATION_SAFE => [
+              {
+                name: 'gb_savestates',
+                outputs: {
+                  'reset_out' => { signal: 'reset_in' }
+                }
+              },
+              'gb_statemanager__vhdl_2e2d161b9c1b',
+              'sprites_extra'
+            ].freeze
           }.freeze
 
           INSTANCE_KEYWORDS = %w[
@@ -64,6 +79,7 @@ module RHDL
             :fallback_used,
             :attempted_strategies,
             :source_verilog_path,
+            :stub_modules,
             keyword_init: true
           ) do
             def success?
@@ -73,7 +89,8 @@ module RHDL
 
           attr_reader :reference_root, :qip_path, :top, :top_file, :output_dir, :workspace_dir,
                       :keep_workspace, :clean_output, :strict, :progress_callback, :import_task_class,
-                      :import_strategy, :maintain_directory_structure, :emit_runtime_json
+                      :import_strategy, :maintain_directory_structure, :emit_runtime_json, :stub_modules,
+                      :auto_stub_modules
 
           def initialize(reference_root: DEFAULT_REFERENCE_ROOT,
                          qip_path: DEFAULT_QIP_PATH,
@@ -85,6 +102,8 @@ module RHDL
                          clean_output: true,
                          maintain_directory_structure: true,
                          emit_runtime_json: true,
+                         auto_stub_modules: DEFAULT_AUTO_STUB_MODULES,
+                         stub_modules: [],
                          strict: true,
                          progress: nil,
                          import_task_class: nil,
@@ -99,6 +118,8 @@ module RHDL
             @clean_output = clean_output
             @maintain_directory_structure = maintain_directory_structure
             @emit_runtime_json = emit_runtime_json
+            @auto_stub_modules = normalize_auto_stub_modules(auto_stub_modules)
+            @stub_modules = Array(stub_modules)
             @strict = strict
             @progress_callback = progress
             @import_task_class = import_task_class
@@ -183,7 +204,8 @@ module RHDL
                 attempted_strategies: [:mixed],
                 source_verilog_path: artifacts['workspace_normalized_verilog_path'] ||
                   artifacts['pure_verilog_entry_path'] ||
-                  artifacts['normalized_verilog_path']
+                  artifacts['normalized_verilog_path'],
+                stub_modules: normalized_stub_module_names
               )
             end
 
@@ -201,7 +223,8 @@ module RHDL
               strategy_used: nil,
               fallback_used: false,
               attempted_strategies: [:mixed],
-              source_verilog_path: nil
+              source_verilog_path: nil,
+              stub_modules: normalized_stub_module_names
             )
           rescue StandardError, SystemStackError => e
             diagnostics << e.message
@@ -219,7 +242,8 @@ module RHDL
               strategy_used: nil,
               fallback_used: false,
               attempted_strategies: [:mixed],
-              source_verilog_path: nil
+              source_verilog_path: nil,
+              stub_modules: normalized_stub_module_names
             )
           ensure
             FileUtils.rm_rf(temp_workspace) if defined?(temp_workspace) && temp_workspace && !keep_workspace
@@ -645,7 +669,8 @@ module RHDL
               strict: strict,
               raise_to_dsl: true,
               format_output: false,
-              emit_runtime_json: emit_runtime_json
+              emit_runtime_json: emit_runtime_json,
+              stub_modules: effective_stub_modules
             }
             options[:manifest] = manifest_path if manifest_path
             options[:input] = input_path if input_path
@@ -670,6 +695,10 @@ module RHDL
             }
           end
 
+          def effective_stub_modules
+            merge_stub_module_entries(auto_stub_module_entries, Array(stub_modules))
+          end
+
           def diagnostics_from_report(report_path)
             return [[], []] unless File.file?(report_path)
 
@@ -687,6 +716,66 @@ module RHDL
             JSON.parse(File.read(report_path))
           rescue JSON::ParserError
             {}
+          end
+
+          def normalized_stub_module_names
+            Array(effective_stub_modules).filter_map do |entry|
+              case entry
+              when String, Symbol
+                name = entry.to_s.strip
+                name unless name.empty?
+              when Hash
+                name = (entry[:name] || entry['name'] || entry[:module] || entry['module']).to_s.strip
+                name unless name.empty?
+              end
+            end.uniq.sort
+          end
+
+          def auto_stub_module_entries
+            return [] unless auto_stub_modules
+
+            profile = AUTO_STUB_PROFILES.fetch(auto_stub_modules)
+            profile.map { |entry| deep_clone_stub_entry(entry) }
+          end
+
+          def normalize_auto_stub_modules(value)
+            case value
+            when nil, false
+              false
+            when true
+              AUTO_STUB_SIMULATION_SAFE
+            when String, Symbol
+              normalized = value.to_sym
+              return normalized if AUTO_STUB_PROFILES.key?(normalized)
+
+              raise ArgumentError, "Unknown GameBoy importer auto-stub profile: #{value.inspect}"
+            else
+              raise ArgumentError, "Unsupported GameBoy importer auto-stub setting: #{value.inspect}"
+            end
+          end
+
+          def merge_stub_module_entries(*collections)
+            collections.flatten(1).each_with_object({}) do |entry, acc|
+              name = stub_module_name(entry)
+              next if name.nil? || name.empty?
+
+              acc[name] = deep_clone_stub_entry(entry)
+            end.values
+          end
+
+          def stub_module_name(entry)
+            case entry
+            when String, Symbol
+              entry.to_s.strip
+            when Hash
+              (entry[:name] || entry['name'] || entry[:module] || entry['module']).to_s.strip
+            else
+              nil
+            end
+          end
+
+          def deep_clone_stub_entry(entry)
+            Marshal.load(Marshal.dump(entry))
           end
 
           def stage_workspace_artifacts(workspace:, artifacts:, report_path:)

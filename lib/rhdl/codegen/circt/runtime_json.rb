@@ -2840,7 +2840,7 @@ module RHDL
         end
 
         def write_compact_runtime_payload(io, nodes_or_package)
-          modules = normalized_runtime_modules_from_input(nodes_or_package)
+          modules = normalized_runtime_modules_from_input(nodes_or_package, compact_exprs: true)
           io.write('{"circt_json_version":1,"dialects":["hw","comb","seq"],"modules":[')
           modules.each_with_index do |mod, index|
             io.write(',') if index.positive?

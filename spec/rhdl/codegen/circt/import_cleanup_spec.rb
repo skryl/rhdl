@@ -21,6 +21,12 @@ RSpec.describe RHDL::Codegen::CIRCT::ImportCleanup do
     result.modules.find { |mod| mod.name.to_s == top }
   end
 
+  def imported_modules_for(mlir_text, top:)
+    result = RHDL::Codegen.import_circt_mlir(mlir_text, strict: true, top: top, resolve_forward_refs: true)
+    expect(result.success?).to be(true), result.diagnostics.map(&:message).join("\n")
+    result.modules.each_with_object({}) { |mod, acc| acc[mod.name.to_s] = mod }
+  end
+
   def process_targets_for(mod)
     targets = []
     walker = lambda do |statements|
@@ -368,5 +374,67 @@ RSpec.describe RHDL::Codegen::CIRCT::ImportCleanup do
 
     expect(result).to be_success
     expect(result.cleaned_text).to eq(mlir)
+  end
+
+  it 'stubs selected clean core modules even when no LLHD overlay is present' do
+    mlir = <<~MLIR
+      hw.module @child(in %reset_in : i1, in %din : i8, out reset_out : i1, out dout : i8) {
+        %false = hw.constant false
+        %c1_i8 = hw.constant 1 : i8
+        hw.output %false, %c1_i8 : i1, i8
+      }
+
+      hw.module @top(in %reset_in : i1, in %din : i8, out reset_out : i1, out dout : i8) {
+        %child_reset, %child_dout = hw.instance "u_child" @child(reset_in: %reset_in : i1, din: %din : i8) -> (reset_out: i1, dout: i8)
+        hw.output %child_reset, %child_dout : i1, i8
+      }
+    MLIR
+
+    result = described_class.cleanup_imported_core_mlir(
+      mlir,
+      strict: true,
+      top: 'top',
+      stub_modules: [
+        {
+          name: 'child',
+          outputs: {
+            'reset_out' => { signal: 'reset_in' },
+            'dout' => { value: 5 }
+          }
+        }
+      ]
+    )
+
+    expect(result).to be_success
+    expect(result.stubbed_modules).to eq(['child'])
+
+    modules = imported_modules_for(result.cleaned_text, top: 'top')
+    child = modules.fetch('child')
+    expect(assigned_signal_for(child, 'reset_out')).to eq('reset_in')
+    dout_assign = child.assigns.find { |assign| assign.target.to_s == 'dout' }
+    expect(dout_assign&.expr).to be_a(RHDL::Codegen::CIRCT::IR::Literal)
+    expect(dout_assign.expr.value).to eq(5)
+
+    firtool_result = firtool_accepts?(result.cleaned_text)
+    expect(firtool_result).not_to eq(false)
+  end
+
+  it 'fails when a requested stub module is missing from the imported package' do
+    mlir = <<~MLIR
+      hw.module @top(in %a : i1, out y : i1) {
+        hw.output %a : i1
+      }
+    MLIR
+
+    result = described_class.cleanup_imported_core_mlir(
+      mlir,
+      strict: true,
+      top: 'top',
+      stub_modules: ['missing_child']
+    )
+
+    expect(result.success?).to be(false)
+    expect(result.import_result.diagnostics.map(&:op)).to include('import.stub')
+    expect(result.import_result.diagnostics.map(&:message).join("\n")).to include('missing_child')
   end
 end

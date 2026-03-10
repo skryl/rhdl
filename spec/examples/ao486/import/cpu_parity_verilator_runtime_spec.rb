@@ -6,14 +6,19 @@ require 'fileutils'
 
 require_relative '../../../../examples/ao486/utilities/import/cpu_importer'
 require_relative '../../../../examples/ao486/utilities/import/cpu_parity_programs'
+require_relative '../../../../examples/ao486/utilities/import/cpu_parity_arcilator_runtime'
 require_relative '../../../../examples/ao486/utilities/import/cpu_parity_runtime'
 require_relative '../../../../examples/ao486/utilities/import/cpu_parity_verilator_runtime'
 
-RSpec.describe RHDL::Examples::AO486::Import::CpuParityVerilatorRuntime do
+RSpec.describe 'AO486 CPU parity runtime across IR, Verilator, and Arcilator' do
   def flatten_step_trace(trace)
     trace.flat_map do |event|
       Array(event.bytes).each_with_index.map { |byte, idx| [event.eip + idx, byte] }
     end
+  end
+
+  def normalize_memory(memory)
+    memory.to_h.sort.to_h
   end
 
   def require_import_tool!
@@ -24,6 +29,14 @@ RSpec.describe RHDL::Examples::AO486::Import::CpuParityVerilatorRuntime do
   def require_program_assembler!
     skip 'llvm-mc not available' unless HdlToolchain.which('llvm-mc')
     skip 'llvm-objcopy not available' unless HdlToolchain.which('llvm-objcopy')
+  end
+
+  def require_arcilator_toolchain!
+    skip 'arcilator not available' unless HdlToolchain.which('arcilator')
+    return if (HdlToolchain.which('clang') || HdlToolchain.which('llc')) && HdlToolchain.which('c++')
+    return if HdlToolchain.which('lli') && HdlToolchain.which('llvm-link') && HdlToolchain.which('clang++')
+
+    skip 'Neither clang/llc+c++ nor lli/llvm-link/clang++ is available for the Arcilator harness'
   end
 
   def run_importer(out_dir:, workspace:)
@@ -42,9 +55,10 @@ RSpec.describe RHDL::Examples::AO486::Import::CpuParityVerilatorRuntime do
     backend
   end
 
-  it 'matches the selected IR backend on the named parity programs for the parity package', timeout: 600 do
+  it 'matches the selected IR backend, Verilator, and Arcilator on the named parity programs for the parity package', timeout: 600 do
     require_import_tool!
     require_program_assembler!
+    require_arcilator_toolchain!
     skip 'circt-opt not available' unless HdlToolchain.which('circt-opt')
     skip 'firtool not available' unless HdlToolchain.which('firtool')
     skip 'verilator not available' unless HdlToolchain.verilator_available?
@@ -58,7 +72,14 @@ RSpec.describe RHDL::Examples::AO486::Import::CpuParityVerilatorRuntime do
         ir_runtime = RHDL::Examples::AO486::Import::CpuParityRuntime.build_from_cleaned_mlir(cleaned_mlir, backend: backend)
 
         Dir.mktmpdir('ao486_cpu_parity_verilator_build') do |build_dir|
-          verilator_runtime = described_class.build_from_cleaned_mlir(cleaned_mlir, work_dir: build_dir)
+          verilator_runtime = RHDL::Examples::AO486::Import::CpuParityVerilatorRuntime.build_from_cleaned_mlir(
+            cleaned_mlir,
+            work_dir: File.join(build_dir, 'verilator')
+          )
+          arcilator_runtime = RHDL::Examples::AO486::Import::CpuParityArcilatorRuntime.build_from_cleaned_mlir(
+            cleaned_mlir,
+            work_dir: File.join(build_dir, 'arcilator')
+          )
 
           RHDL::Examples::AO486::Import::CpuParityPrograms.all_programs.each do |program|
             program.load_into(ir_runtime)
@@ -67,19 +88,25 @@ RSpec.describe RHDL::Examples::AO486::Import::CpuParityVerilatorRuntime do
             program.load_into(verilator_runtime)
             verilator_trace = verilator_runtime.run_fetch_pc_groups(max_cycles: program.max_cycles).map { |event| [event.pc, event.bytes] }
 
+            program.load_into(arcilator_runtime)
+            arcilator_trace = arcilator_runtime.run_fetch_pc_groups(max_cycles: program.max_cycles).map { |event| [event.pc, event.bytes] }
+
             prefix = program.initial_fetch_pc_groups
             expect(ir_trace.first(prefix.length)).to eq(prefix), "program=#{program.name}"
             expect(verilator_trace.first(prefix.length)).to eq(prefix), "program=#{program.name}"
+            expect(arcilator_trace.first(prefix.length)).to eq(prefix), "program=#{program.name}"
             expect(verilator_trace).to eq(ir_trace), "program=#{program.name}"
+            expect(arcilator_trace).to eq(ir_trace), "program=#{program.name}"
           end
         end
       end
     end
   end
 
-  it 'matches the selected IR backend on the current write-trace EIP+bytes sequence for reset_smoke', timeout: 600 do
+  it 'matches the selected IR backend, Verilator, and Arcilator on the current write-trace EIP+bytes sequence for reset_smoke', timeout: 600 do
     require_import_tool!
     require_program_assembler!
+    require_arcilator_toolchain!
     skip 'circt-opt not available' unless HdlToolchain.which('circt-opt')
     skip 'firtool not available' unless HdlToolchain.which('firtool')
     skip 'verilator not available' unless HdlToolchain.verilator_available?
@@ -97,28 +124,39 @@ RSpec.describe RHDL::Examples::AO486::Import::CpuParityVerilatorRuntime do
         expect(ir_trace).not_to be_empty
 
         Dir.mktmpdir('ao486_cpu_step_verilator_build') do |build_dir|
-          verilator_runtime = described_class.build_from_cleaned_mlir(cleaned_mlir, work_dir: build_dir)
+          verilator_runtime = RHDL::Examples::AO486::Import::CpuParityVerilatorRuntime.build_from_cleaned_mlir(
+            cleaned_mlir,
+            work_dir: File.join(build_dir, 'verilator')
+          )
           program.load_into(verilator_runtime)
           verilator_trace = verilator_runtime.run_step_trace(max_cycles: program.max_cycles).map { |event| [event.eip, event.bytes] }
           expect(verilator_trace).not_to be_empty
 
+          arcilator_runtime = RHDL::Examples::AO486::Import::CpuParityArcilatorRuntime.build_from_cleaned_mlir(
+            cleaned_mlir,
+            work_dir: File.join(build_dir, 'arcilator')
+          )
+          program.load_into(arcilator_runtime)
+          arcilator_trace = arcilator_runtime.run_step_trace(max_cycles: program.max_cycles).map { |event| [event.eip, event.bytes] }
+          expect(arcilator_trace).not_to be_empty
+
           expect(verilator_trace).to eq(ir_trace)
+          expect(arcilator_trace).to eq(ir_trace)
         end
       end
     end
   end
 
-  it 'matches the selected IR backend on the flattened write-trace PC byte stream for the currently stable parity programs', timeout: 600 do
+  it 'matches the selected IR backend, Verilator, and Arcilator on the flattened write-trace PC byte stream for the named parity programs', timeout: 600 do
     require_import_tool!
     require_program_assembler!
+    require_arcilator_toolchain!
     skip 'circt-opt not available' unless HdlToolchain.which('circt-opt')
     skip 'firtool not available' unless HdlToolchain.which('firtool')
     skip 'verilator not available' unless HdlToolchain.verilator_available?
     backend = require_ir_backend!
 
-    stable_programs = %i[reset_smoke prime_sieve game_of_life].map do |name|
-      RHDL::Examples::AO486::Import::CpuParityPrograms.fetch(name)
-    end
+    parity_programs = RHDL::Examples::AO486::Import::CpuParityPrograms.all_programs
 
     Dir.mktmpdir('ao486_cpu_step_byte_out') do |out_dir|
       Dir.mktmpdir('ao486_cpu_step_byte_ws') do |workspace|
@@ -127,9 +165,16 @@ RSpec.describe RHDL::Examples::AO486::Import::CpuParityVerilatorRuntime do
         ir_runtime = RHDL::Examples::AO486::Import::CpuParityRuntime.build_from_cleaned_mlir(cleaned_mlir, backend: backend)
 
         Dir.mktmpdir('ao486_cpu_step_byte_build') do |build_dir|
-          verilator_runtime = described_class.build_from_cleaned_mlir(cleaned_mlir, work_dir: build_dir)
+          verilator_runtime = RHDL::Examples::AO486::Import::CpuParityVerilatorRuntime.build_from_cleaned_mlir(
+            cleaned_mlir,
+            work_dir: File.join(build_dir, 'verilator')
+          )
+          arcilator_runtime = RHDL::Examples::AO486::Import::CpuParityArcilatorRuntime.build_from_cleaned_mlir(
+            cleaned_mlir,
+            work_dir: File.join(build_dir, 'arcilator')
+          )
 
-          stable_programs.each do |program|
+          parity_programs.each do |program|
             program.load_into(ir_runtime)
             ir_trace = flatten_step_trace(ir_runtime.run(max_cycles: program.max_cycles))
             expect(ir_trace).not_to be_empty, "program=#{program.name}"
@@ -138,11 +183,63 @@ RSpec.describe RHDL::Examples::AO486::Import::CpuParityVerilatorRuntime do
             verilator_trace = flatten_step_trace(verilator_runtime.run_step_trace(max_cycles: program.max_cycles))
             expect(verilator_trace).not_to be_empty, "program=#{program.name}"
 
+            program.load_into(arcilator_runtime)
+            arcilator_trace = flatten_step_trace(arcilator_runtime.run_step_trace(max_cycles: program.max_cycles))
+            expect(arcilator_trace).not_to be_empty, "program=#{program.name}"
+
             expect(verilator_trace).to eq(ir_trace), "program=#{program.name}"
+            expect(arcilator_trace).to eq(ir_trace), "program=#{program.name}"
           end
         end
       end
     end
   end
 
+  it 'matches the selected IR backend, Verilator, and Arcilator on the final memory image for the compact benchmark set', timeout: 600 do
+    require_import_tool!
+    require_program_assembler!
+    require_arcilator_toolchain!
+    skip 'circt-opt not available' unless HdlToolchain.which('circt-opt')
+    skip 'firtool not available' unless HdlToolchain.which('firtool')
+    skip 'verilator not available' unless HdlToolchain.verilator_available?
+    backend = require_ir_backend!
+
+    benchmark_programs = RHDL::Examples::AO486::Import::CpuParityPrograms.benchmark_programs
+
+    Dir.mktmpdir('ao486_cpu_memory_out') do |out_dir|
+      Dir.mktmpdir('ao486_cpu_memory_ws') do |workspace|
+        result = run_importer(out_dir: out_dir, workspace: workspace)
+        cleaned_mlir = File.read(result.normalized_core_mlir_path)
+        ir_runtime = RHDL::Examples::AO486::Import::CpuParityRuntime.build_from_cleaned_mlir(cleaned_mlir, backend: backend)
+
+        Dir.mktmpdir('ao486_cpu_memory_build') do |build_dir|
+          verilator_runtime = RHDL::Examples::AO486::Import::CpuParityVerilatorRuntime.build_from_cleaned_mlir(
+            cleaned_mlir,
+            work_dir: File.join(build_dir, 'verilator')
+          )
+          arcilator_runtime = RHDL::Examples::AO486::Import::CpuParityArcilatorRuntime.build_from_cleaned_mlir(
+            cleaned_mlir,
+            work_dir: File.join(build_dir, 'arcilator')
+          )
+
+          benchmark_programs.each do |program|
+            program.load_into(ir_runtime)
+            ir_runtime.run(max_cycles: program.max_cycles)
+            ir_memory = normalize_memory(ir_runtime.memory)
+
+            program.load_into(verilator_runtime)
+            verilator_runtime.run_final_state(max_cycles: program.max_cycles)
+            verilator_memory = normalize_memory(verilator_runtime.memory)
+
+            program.load_into(arcilator_runtime)
+            arcilator_runtime.run_final_state(max_cycles: program.max_cycles)
+            arcilator_memory = normalize_memory(arcilator_runtime.memory)
+
+            expect(verilator_memory).to eq(ir_memory), "program=#{program.name}"
+            expect(arcilator_memory).to eq(ir_memory), "program=#{program.name}"
+          end
+        end
+      end
+    end
+  end
 end

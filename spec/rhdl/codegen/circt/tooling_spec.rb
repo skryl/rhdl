@@ -252,10 +252,89 @@ RSpec.describe RHDL::Codegen::CIRCT::Tooling do
         expect(result[:success]).to be(true), result.dig(:arc, :stderr).to_s
         expect(result.fetch(:unsupported_modules)).to be_empty
         expect(result.fetch(:transformed_modules)).to eq(['dff'])
+        expect(result.dig(:flatten, :success)).to be(true), result.dig(:flatten, :stderr).to_s
         expect(File.basename(result.fetch(:hwseq_mlir_path))).to eq('dff.hwseq.mlir')
+        expect(File.basename(result.fetch(:flattened_hwseq_mlir_path))).to eq('dff.flattened.hwseq.mlir')
         expect(File.read(result.fetch(:hwseq_mlir_path))).not_to include('llhd.')
+        expect(File.read(result.fetch(:flattened_hwseq_mlir_path))).not_to include('llhd.')
         expect(File.exist?(result.fetch(:arc_mlir_path))).to be(true)
         expect(File.read(result.fetch(:arc_mlir_path))).not_to include('llhd.')
+      end
+    end
+
+    it 'applies requested module stubs before ARC preparation' do
+      skip 'circt-opt not available' unless HdlToolchain.which('circt-opt')
+
+      Dir.mktmpdir('tooling_prepare_arc_circt_stubbed') do |dir|
+        mlir_path = File.join(dir, 'stubbed.mlir')
+        File.write(mlir_path, <<~MLIR)
+          hw.module @child(in %reset_in : i1, in %din : i8, out reset_out : i1, out dout : i8) {
+            %false = hw.constant false
+            %c1_i8 = hw.constant 1 : i8
+            hw.output %false, %c1_i8 : i1, i8
+          }
+
+          hw.module @top(in %reset_in : i1, in %din : i8, out reset_out : i1, out dout : i8) {
+            %child_reset, %child_dout = hw.instance "u_child" @child(reset_in: %reset_in : i1, din: %din : i8) -> (reset_out: i1, dout: i8)
+            hw.output %child_reset, %child_dout : i1, i8
+          }
+        MLIR
+
+        result = described_class.prepare_arc_mlir_from_circt_mlir(
+          mlir_path: mlir_path,
+          work_dir: File.join(dir, 'work'),
+          base_name: 'stubbed',
+          top: 'top',
+          strict: true,
+          stub_modules: [
+            {
+              name: 'child',
+              outputs: {
+                'reset_out' => { signal: 'reset_in' },
+                'dout' => 9
+              }
+            }
+          ]
+        )
+
+        expect(result[:success]).to be(true), result.dig(:arc, :stderr).to_s
+        hwseq_result = RHDL::Codegen.import_circt_mlir(
+          File.read(result.fetch(:hwseq_mlir_path)),
+          strict: true,
+          top: 'top',
+          resolve_forward_refs: true
+        )
+        expect(hwseq_result.success?).to be(true), hwseq_result.diagnostics.map(&:message).join("\n")
+        child = hwseq_result.modules.find { |mod| mod.name.to_s == 'child' }
+        expect(child).not_to be_nil
+        expect(child.assigns.find { |assign| assign.target.to_s == 'reset_out' }&.expr).to be_a(RHDL::Codegen::CIRCT::IR::Signal)
+        expect(child.assigns.find { |assign| assign.target.to_s == 'reset_out' }&.expr&.name).to eq('reset_in')
+        expect(child.assigns.find { |assign| assign.target.to_s == 'dout' }&.expr).to be_a(RHDL::Codegen::CIRCT::IR::Literal)
+        expect(child.assigns.find { |assign| assign.target.to_s == 'dout' }&.expr&.value).to eq(9)
+      end
+    end
+
+    it 'emits ARC MLIR that arcilator can lower on a simple design' do
+      skip 'circt-opt or arcilator not available' unless HdlToolchain.which('circt-opt') && HdlToolchain.which('arcilator')
+
+      Dir.mktmpdir('tooling_prepare_arc_circt_arcilator') do |dir|
+        mlir_path = File.join(dir, 'dff.normalized.llhd.mlir')
+        File.write(mlir_path, simple_dff_llhd)
+
+        result = described_class.prepare_arc_mlir_from_circt_mlir(
+          mlir_path: mlir_path,
+          work_dir: File.join(dir, 'work'),
+          base_name: 'dff'
+        )
+
+        expect(result[:success]).to be(true), result.dig(:arc, :stderr).to_s
+
+        ll_path = File.join(dir, 'work', 'dff.ll')
+        state_path = File.join(dir, 'work', 'dff.state.json')
+        command = ['arcilator', result.fetch(:arc_mlir_path), '--state-file=' + state_path, '-o', ll_path]
+        expect(system(*command)).to be(true), "arcilator failed for #{result.fetch(:arc_mlir_path)}"
+        expect(File.exist?(ll_path)).to be(true)
+        expect(File.exist?(state_path)).to be(true)
       end
     end
 

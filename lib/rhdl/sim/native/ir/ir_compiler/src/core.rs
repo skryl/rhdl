@@ -1773,8 +1773,12 @@ impl CoreSimulator {
         // Compact CIRCT payloads already carry an explicit shared-expression
         // pool. Splitting large evaluate blocks into chunks duplicates those
         // expr-ref definitions across chunk functions and explodes the emitted
-        // Rust source for large imports like AO486.
-        if flat_assign_indices.len() > CHUNKED_EVALUATE_ASSIGN_THRESHOLD {
+        // Rust source for large imports like AO486 and SPARC64 imports.
+        //
+        // Keep chunking only for cores that also need the generated tick-helper
+        // surface. Plain compiled cores use the runtime tick path and benefit
+        // more from a smaller single evaluate body than from chunking.
+        if include_tick_helpers && flat_assign_indices.len() > CHUNKED_EVALUATE_ASSIGN_THRESHOLD {
             self.generate_chunked_evaluate_inline(&mut code, &flat_assign_indices);
         } else {
             // Generate evaluate function (inline for performance)

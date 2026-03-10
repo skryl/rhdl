@@ -65,7 +65,7 @@ module RHDL
 
           attr_reader :source_path, :output_dir, :top, :keep_workspace, :workspace_dir, :clean_output,
                       :import_strategy, :fallback_to_stubbed, :maintain_directory_structure, :strict,
-                      :format_output,
+                      :format_output, :patches_dir,
                       :progress_callback
 
           def initialize(source_path: DEFAULT_SOURCE_PATH,
@@ -77,6 +77,7 @@ module RHDL
                          import_strategy: DEFAULT_IMPORT_STRATEGY,
                          fallback_to_stubbed: true,
                          maintain_directory_structure: true,
+                         patches_dir: nil,
                          format_output: false,
                          strict: true,
                          progress: nil)
@@ -91,6 +92,7 @@ module RHDL
             @import_strategy = normalize_import_strategy(import_strategy)
             @fallback_to_stubbed = fallback_to_stubbed
             @maintain_directory_structure = maintain_directory_structure
+            @patches_dir = normalize_patches_dir(patches_dir)
             @format_output = format_output
             @strict = strict
             @progress_callback = progress
@@ -118,6 +120,19 @@ module RHDL
             workspace = workspace_dir || Dir.mktmpdir('rhdl_ao486_import')
             temp_workspace = workspace if workspace_dir.nil?
             emit_progress("workspace ready: #{workspace}")
+
+            source_prep = prepare_import_source_tree(
+              workspace,
+              diagnostics: diagnostics,
+              command_log: command_log
+            )
+            unless source_prep[:success]
+              return failed_result(
+                diagnostics: diagnostics,
+                command_log: command_log,
+                workspace: workspace
+              )
+            end
 
             attempts = strategy_attempts
             strategy_used = nil
@@ -341,6 +356,8 @@ module RHDL
           def prepare_workspace(workspace, strategy:, force_stub_modules: TREE_FORCE_STUB_MODULES)
             FileUtils.mkdir_p(workspace)
             force_stub_modules = Array(force_stub_modules).map(&:to_s).uniq
+            current_source_root = import_source_search_root
+            current_source_path = import_source_path
 
             basename = artifact_basename
             staged_system_path = File.join(workspace, "#{basename}.v")
@@ -350,12 +367,12 @@ module RHDL
             core_mlir_path = File.join(workspace, "#{basename}.#{strategy}.core.mlir")
             normalized_core_mlir_path = File.join(workspace, "#{basename}.#{strategy}.normalized.core.mlir")
 
-            FileUtils.cp(source_path, staged_system_path)
+            FileUtils.cp(current_source_path, staged_system_path)
             normalize_staged_source!(staged_system_path)
 
             include_paths = [staged_system_path]
             stub_ports = {}
-            module_to_file, = build_module_index(source_root)
+            module_to_file, = build_module_index(current_source_root)
             module_source_relpaths = module_to_file.transform_values { |path| source_relative_path(path) }
 
             if strategy == :tree
@@ -379,7 +396,7 @@ module RHDL
             stub_ports = stub_ports.reject { |module_name, _ports| defined.include?(module_name) }
 
             metadata = prepared_metadata(
-              source_root: source_root,
+              source_root: current_source_root,
               staged_source_path: staged_system_path,
               workspace: workspace,
               include_paths: include_paths,
@@ -544,7 +561,7 @@ module RHDL
           end
 
           def discover_tree_module_files(force_stub_modules:)
-            root = source_root
+            root = import_source_search_root
             module_to_file, module_to_body = build_module_index(root)
             force_stub_modules = Array(force_stub_modules).map(&:to_s).uniq
 
@@ -569,7 +586,7 @@ module RHDL
               end
             end
 
-            source_expanded = File.expand_path(source_path)
+            source_expanded = File.expand_path(import_source_path)
             needed_files.compact.uniq.sort.reject { |path| File.expand_path(path) == source_expanded }
           end
 
@@ -678,7 +695,7 @@ module RHDL
           end
 
           def stage_tree_module_files(workspace, force_stub_modules:)
-            root = source_root
+            root = import_source_search_root
             stage_root = File.join(workspace, 'tree')
 
             staged = discover_tree_module_files(force_stub_modules: force_stub_modules).map do |src|
@@ -863,7 +880,7 @@ module RHDL
           end
 
           def source_relative_path(path)
-            root = File.expand_path(source_root)
+            root = File.expand_path(import_source_search_root)
             absolute = File.expand_path(path)
             prefix = "#{root}/"
             return absolute.delete_prefix(prefix) if absolute.start_with?(prefix)
@@ -875,8 +892,90 @@ module RHDL
             top.to_s
           end
 
+          def import_source_path
+            @prepared_source_path || source_path
+          end
+
+          def import_source_search_root
+            @prepared_source_search_root || source_search_root
+          end
+
+          def source_search_root
+            source_root
+          end
+
           def source_root
             File.expand_path(File.dirname(source_path))
+          end
+
+          def prepare_import_source_tree(workspace, diagnostics:, command_log:)
+            @prepared_source_search_root = source_search_root
+            @prepared_source_path = source_path
+            return { success: true, patch_files: [] } unless patches_dir
+
+            unless tool_available?('git')
+              diagnostics << 'Required tool not found: git'
+              return { success: false, patch_files: [] }
+            end
+
+            staged_root = File.join(workspace, 'patched_source')
+            copy_directory_contents(source_search_root, staged_root)
+
+            patch_files = patch_series_files(patches_dir)
+            relative_source_path = path_relative_to_root(source_path, source_search_root)
+
+            patch_files.each do |patch_path|
+              emit_progress("apply patch #{File.basename(patch_path)}")
+
+              check_cmd = ['git', 'apply', '--check', patch_path]
+              check_result = run_command(check_cmd, chdir: staged_root)
+              command_log << check_result[:command]
+              append_diagnostics(diagnostics, check_result[:stderr], max_lines: 60)
+              return { success: false, patch_files: patch_files } unless check_result[:success]
+
+              apply_cmd = ['git', 'apply', patch_path]
+              apply_result = run_command(apply_cmd, chdir: staged_root)
+              command_log << apply_result[:command]
+              append_diagnostics(diagnostics, apply_result[:stderr], max_lines: 60)
+              return { success: false, patch_files: patch_files } unless apply_result[:success]
+            end
+
+            @prepared_source_search_root = staged_root
+            @prepared_source_path = File.join(staged_root, relative_source_path)
+
+            { success: true, patch_files: patch_files }
+          end
+
+          def patch_series_files(root)
+            Dir.glob(File.join(root, '**', '*'))
+               .select { |path| File.file?(path) && %w[.patch .diff].include?(File.extname(path)) }
+               .sort
+          end
+
+          def copy_directory_contents(source_dir, destination_dir)
+            FileUtils.rm_rf(destination_dir) if File.exist?(destination_dir)
+            FileUtils.mkdir_p(destination_dir)
+            Dir.children(source_dir).sort.each do |entry|
+              FileUtils.cp_r(File.join(source_dir, entry), destination_dir)
+            end
+          end
+
+          def path_relative_to_root(path, root)
+            expanded_path = File.expand_path(path)
+            expanded_root = File.expand_path(root)
+            prefix = "#{expanded_root}/"
+            return expanded_path.delete_prefix(prefix) if expanded_path.start_with?(prefix)
+
+            File.basename(expanded_path)
+          end
+
+          def normalize_patches_dir(value)
+            return nil if value.nil? || value.to_s.strip.empty?
+
+            expanded = File.expand_path(value)
+            raise ArgumentError, "patches_dir not found: #{expanded}" unless Dir.exist?(expanded)
+
+            expanded
           end
 
           def helper_include_source_root(root)

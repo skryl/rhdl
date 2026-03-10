@@ -29,7 +29,6 @@ RSpec.describe 'GameBoy mixed import runtime parity (Verilator/Arcilator/IR)', s
     -Wno-UNOPTFLAT
     -Wno-CASEINCOMPLETE
   ].freeze
-
   def require_reference_tree!
     root = RHDL::Examples::GameBoy::Import::SystemImporter::DEFAULT_REFERENCE_ROOT
     qip = RHDL::Examples::GameBoy::Import::SystemImporter::DEFAULT_QIP_PATH
@@ -39,6 +38,12 @@ RSpec.describe 'GameBoy mixed import runtime parity (Verilator/Arcilator/IR)', s
 
   def require_tool!(cmd)
     skip "#{cmd} not available" unless HdlToolchain.which(cmd)
+  end
+
+  def require_non_verilator_parity_enabled!
+    return if ENV['RHDL_ENABLE_NON_VERILATOR_GAMEBOY_PARITY'] == '1'
+
+    skip 'Non-Verilator Game Boy parity backends are opt-in; set RHDL_ENABLE_NON_VERILATOR_GAMEBOY_PARITY=1 to run this spec'
   end
 
   def require_llvm_codegen_tool!
@@ -109,6 +114,32 @@ RSpec.describe 'GameBoy mixed import runtime parity (Verilator/Arcilator/IR)', s
     nil
   end
 
+  def record_trace_comparison!(summary_lines:, failures:, lhs_name:, lhs_trace:, rhs_name:, rhs_trace:)
+    compare = compare_trace_prefix(lhs_trace, rhs_trace)
+    if compare[:mismatch]
+      failures << "#{lhs_name} vs #{rhs_name} mismatch: #{compare[:mismatch]}"
+      summary_lines << "#{lhs_name} vs #{rhs_name}: mismatch (#{compare[:mismatch]})"
+    else
+      summary_lines << "#{lhs_name} vs #{rhs_name}: OK on first #{compare[:compare_len]} events"
+    end
+  end
+
+  def record_video_comparison!(summary_lines:, failures:, lhs_name:, lhs_video:, rhs_name:, rhs_video:)
+    mismatch = first_video_mismatch(lhs_video, rhs_video)
+    if mismatch
+      failures << "#{lhs_name} vs #{rhs_name} video mismatch: #{mismatch}"
+      summary_lines << "#{lhs_name} vs #{rhs_name} video: mismatch (#{mismatch})"
+    else
+      summary_lines << "#{lhs_name} vs #{rhs_name} video: OK"
+    end
+  end
+
+  def announce_parity_phase!(label)
+    return unless ENV['RHDL_IMPORT_PARITY_PROGRESS'] == '1'
+
+    warn("[gameboy/import/runtime_parity_3way] #{label}")
+  end
+
   def skip_arcilator?
     ENV['RHDL_SKIP_ARCILATOR'] == '1'
   end
@@ -148,10 +179,10 @@ RSpec.describe 'GameBoy mixed import runtime parity (Verilator/Arcilator/IR)', s
   end
 
   def compile_llvm_ir_object!(ll_path:, obj_path:)
-    if HdlToolchain.which('clang')
-      run_cmd!(['clang', '-c', '-O0', '-fPIC', ll_path, '-o', obj_path])
-    else
+    if HdlToolchain.which('llc')
       run_cmd!(['llc', '-filetype=obj', '-O0', '-relocation-model=pic', ll_path, '-o', obj_path])
+    else
+      run_cmd!(['clang', '-c', '-O0', '-fPIC', ll_path, '-o', obj_path])
     end
   end
 
@@ -159,8 +190,12 @@ RSpec.describe 'GameBoy mixed import runtime parity (Verilator/Arcilator/IR)', s
     HdlToolchain.which('lli') && HdlToolchain.which('llvm-link') && HdlToolchain.which('clang++')
   end
 
+  def prefer_lli_for_arc_harness?
+    ENV['RHDL_USE_LLI_FOR_ARC_HARNESS'] == '1' && llvm_lli_available?
+  end
+
   def run_llvm_ir_harness!(ll_path:, harness_path:, obj_path:, bin_path:, rom_path:, max_cycles:)
-    if llvm_lli_available?
+    if prefer_lli_for_arc_harness?
       harness_ll_path = harness_path.sub(/\.cpp\z/, '.harness.ll')
       linked_bc_path = harness_path.sub(/\.cpp\z/, '.bc')
       compile_threads = [Etc.nprocessors, 8].compact.min
@@ -773,8 +808,6 @@ RSpec.describe 'GameBoy mixed import runtime parity (Verilator/Arcilator/IR)', s
         'arcilator',
         mlir_path,
         '--observe-ports',
-        '--observe-wires',
-        '--observe-registers',
         '--split-funcs-threshold=2000',
         "--state-file=#{state_path}",
         '-o', ll_path
@@ -839,20 +872,21 @@ RSpec.describe 'GameBoy mixed import runtime parity (Verilator/Arcilator/IR)', s
     end
   end
 
-  def build_arc_mlir_from_pure_verilog(staging_entry:, scratch_dir:)
+  def build_arc_mlir_from_imported_mlir(imported_mlir_path:, scratch_dir:)
     FileUtils.mkdir_p(scratch_dir)
-    result = RHDL::Codegen::CIRCT::Tooling.prepare_arc_mlir_from_verilog(
-      verilog_path: staging_entry,
-      work_dir: scratch_dir
+    result = RHDL::Codegen::CIRCT::Tooling.prepare_arc_mlir_from_circt_mlir(
+      mlir_path: imported_mlir_path,
+      work_dir: scratch_dir,
+      base_name: 'imported_gb',
+      top: 'gb',
+      strict: true
     )
     return [result.fetch(:arc_mlir_path), nil] if result[:success]
 
     error_lines = []
-    error_lines << "Pure Verilog -> CIRCT ARC lowering failed"
-    if result[:import] && !result[:import][:success]
-      error_lines << "import: #{result[:import][:stderr]}"
-    elsif result[:normalize] && !result[:normalize][:success]
-      error_lines << "normalize: #{result[:normalize][:stderr]}"
+    error_lines << 'Imported CIRCT MLIR -> CIRCT ARC lowering failed'
+    if result[:transform] && !result[:transform][:success]
+      error_lines << "transform: #{result[:transform][:stderr]}"
     elsif result[:arc] && !result[:arc][:success]
       error_lines << "arc: #{result[:arc][:stderr]}"
     end
@@ -867,9 +901,9 @@ RSpec.describe 'GameBoy mixed import runtime parity (Verilator/Arcilator/IR)', s
     [nil, error_lines.join("\n")]
   end
 
-  def collect_arcilator_trace(staging_entry:, rom_path:, scratch_dir:)
-    arc_mlir, lower_error = build_arc_mlir_from_pure_verilog(
-      staging_entry: staging_entry,
+  def collect_arcilator_trace(imported_mlir_path:, rom_path:, scratch_dir:)
+    arc_mlir, lower_error = build_arc_mlir_from_imported_mlir(
+      imported_mlir_path: imported_mlir_path,
       scratch_dir: File.join(scratch_dir, 'lower')
     )
     return { trace: nil, error: lower_error } unless arc_mlir
@@ -882,6 +916,7 @@ RSpec.describe 'GameBoy mixed import runtime parity (Verilator/Arcilator/IR)', s
   end
 
   it 'matches PC/opcode progression across pure Verilog, CIRCT, and raised RHDL', timeout: 3600 do
+    require_non_verilator_parity_enabled!
     require_reference_tree!
     %w[ghdl circt-verilog circt-opt verilator c++].each { |tool| require_tool!(tool) }
     require_llvm_codegen_tool!
@@ -898,6 +933,7 @@ RSpec.describe 'GameBoy mixed import runtime parity (Verilator/Arcilator/IR)', s
             keep_workspace: true,
             clean_output: true,
             emit_runtime_json: false,
+            auto_stub_modules: :simulation_safe,
             strict: true,
             progress: ->(_msg) {}
           )
@@ -929,7 +965,9 @@ RSpec.describe 'GameBoy mixed import runtime parity (Verilator/Arcilator/IR)', s
 
           summary_lines = []
           failures = []
+          summary_lines << 'Backend order: Verilator -> Arcilator -> IR compiler'
           summary_lines << "Import strategy: #{import_strategy}"
+          summary_lines << "Importer stubs: #{import_result.stub_modules.join(', ')}"
           summary_lines << "Verilog source: normalized_verilog_path=#{normalized_verilog}"
           summary_lines << "Imported MLIR: #{imported_mlir_path}"
           summary_lines << "Workspace Verilog source: workspace_normalized_verilog_path=#{workspace_normalized_verilog}" if workspace_normalized_verilog
@@ -942,6 +980,7 @@ RSpec.describe 'GameBoy mixed import runtime parity (Verilator/Arcilator/IR)', s
           pure_verilog_entry_text = nil
           trim_ruby_heap!
 
+          announce_parity_phase!('collecting Verilator trace')
           verilator = collect_verilator_trace(
             staging_entry: normalized_verilog,
             rom_path: rom_path,
@@ -963,46 +1002,19 @@ RSpec.describe 'GameBoy mixed import runtime parity (Verilator/Arcilator/IR)', s
             summary_lines << 'Verilator video: missing snapshot'
           end
 
-          ir = collect_ir_trace(mlir_path: imported_mlir_path, rom_bytes: rom_bytes)
-          ir_trace = ir.fetch(:trace)
-          ir_video = ir.fetch(:video)
-          ir = nil
-          trim_ruby_heap!
-          if ir_trace.empty?
-            failures << 'Raised-RHDL IR trace is empty'
-            summary_lines << 'IR compiler: empty trace'
-          else
-            summary_lines << "IR compiler: #{ir_trace.length} events"
-            summary_lines << "IR compiler cycle cap: #{IR_TRACE_CYCLES}" if IR_TRACE_CYCLES < MAX_CYCLES
-          end
-          summary_lines << "IR compiler video@#{ir_video[:cycles]}: frames=#{ir_video[:frame_count]} nonzero=#{ir_video[:nonzero_pixels]} hash=#{ir_video[:hash]}"
-
-          vi_compare = compare_trace_prefix(verilator_trace, ir_trace)
-          if vi_compare[:mismatch]
-            failures << "Verilator vs IR mismatch: #{vi_compare[:mismatch]}"
-            summary_lines << "Verilator vs IR: mismatch (#{vi_compare[:mismatch]})"
-          else
-            summary_lines << "Verilator vs IR: OK on first #{vi_compare[:compare_len]} events"
-          end
-
-          video_mismatch = first_video_mismatch(verilator_video, ir_video)
-          if video_mismatch
-            failures << "Verilator vs IR video mismatch: #{video_mismatch}"
-            summary_lines << "Verilator vs IR video: mismatch (#{video_mismatch})"
-          else
-            summary_lines << 'Verilator vs IR video: OK'
-          end
-
+          announce_parity_phase!('collecting Arcilator trace')
           arcilator = if skip_arcilator?
                         { trace: nil, video: nil, error: 'skipped via RHDL_SKIP_ARCILATOR=1' }
                       else
                         collect_arcilator_trace(
-                          staging_entry: normalized_verilog,
+                          imported_mlir_path: imported_mlir_path,
                           rom_path: rom_path,
                           scratch_dir: File.join(scratch, 'arcilator')
                         )
                       end
 
+          arc_trace = nil
+          arc_video = nil
           if arcilator[:trace]
             arc_trace = arcilator.fetch(:trace)
             arc_video = arcilator.fetch(:video)
@@ -1019,23 +1031,77 @@ RSpec.describe 'GameBoy mixed import runtime parity (Verilator/Arcilator/IR)', s
               summary_lines << 'Arcilator video: missing snapshot'
             end
 
-            va_compare = compare_trace_prefix(verilator_trace, arc_trace)
-            if va_compare[:mismatch]
-              failures << "Verilator vs Arcilator mismatch: #{va_compare[:mismatch]}"
-              summary_lines << "Verilator vs Arcilator: mismatch (#{va_compare[:mismatch]})"
-            else
-              summary_lines << "Verilator vs Arcilator: OK on first #{va_compare[:compare_len]} events"
-            end
-
-            video_mismatch_arc = first_video_mismatch(verilator_video, arc_video)
-            if video_mismatch_arc
-              failures << "Verilator vs Arcilator video mismatch: #{video_mismatch_arc}"
-              summary_lines << "Verilator vs Arcilator video: mismatch (#{video_mismatch_arc})"
-            else
-              summary_lines << 'Verilator vs Arcilator video: OK'
-            end
+            record_trace_comparison!(
+              summary_lines: summary_lines,
+              failures: failures,
+              lhs_name: 'Verilator',
+              lhs_trace: verilator_trace,
+              rhs_name: 'Arcilator',
+              rhs_trace: arc_trace
+            )
+            record_video_comparison!(
+              summary_lines: summary_lines,
+              failures: failures,
+              lhs_name: 'Verilator',
+              lhs_video: verilator_video,
+              rhs_name: 'Arcilator',
+              rhs_video: arc_video
+            )
           else
             summary_lines << "Arcilator unavailable: #{arcilator[:error]}"
+          end
+
+          trim_ruby_heap!
+
+          announce_parity_phase!('collecting IR compiler trace')
+          ir = collect_ir_trace(mlir_path: imported_mlir_path, rom_bytes: rom_bytes)
+          ir_trace = ir.fetch(:trace)
+          ir_video = ir.fetch(:video)
+          ir = nil
+          trim_ruby_heap!
+          if ir_trace.empty?
+            failures << 'Raised-RHDL IR trace is empty'
+            summary_lines << 'IR compiler: empty trace'
+          else
+            summary_lines << "IR compiler: #{ir_trace.length} events"
+            summary_lines << "IR compiler cycle cap: #{IR_TRACE_CYCLES}" if IR_TRACE_CYCLES < MAX_CYCLES
+          end
+          summary_lines << "IR compiler video@#{ir_video[:cycles]}: frames=#{ir_video[:frame_count]} nonzero=#{ir_video[:nonzero_pixels]} hash=#{ir_video[:hash]}"
+
+          record_trace_comparison!(
+            summary_lines: summary_lines,
+            failures: failures,
+            lhs_name: 'Verilator',
+            lhs_trace: verilator_trace,
+            rhs_name: 'IR',
+            rhs_trace: ir_trace
+          )
+          record_video_comparison!(
+            summary_lines: summary_lines,
+            failures: failures,
+            lhs_name: 'Verilator',
+            lhs_video: verilator_video,
+            rhs_name: 'IR',
+            rhs_video: ir_video
+          )
+
+          if arc_trace
+            record_trace_comparison!(
+              summary_lines: summary_lines,
+              failures: failures,
+              lhs_name: 'Arcilator',
+              lhs_trace: arc_trace,
+              rhs_name: 'IR',
+              rhs_trace: ir_trace
+            )
+            record_video_comparison!(
+              summary_lines: summary_lines,
+              failures: failures,
+              lhs_name: 'Arcilator',
+              lhs_video: arc_video,
+              rhs_name: 'IR',
+              rhs_video: ir_video
+            )
           end
 
           if failures.any?

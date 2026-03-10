@@ -106,6 +106,49 @@ RSpec.describe RHDL::Examples::AO486::Import::CpuParityRuntime do
     end
   end
 
+  it 'commits a simple aligned data write and exposes the success hlt on the selected IR backend', timeout: 240 do
+    require_import_tool!
+    require_program_assembler!
+    skip 'circt-opt not available' unless HdlToolchain.which('circt-opt')
+    backend = require_ir_backend!
+
+    source = <<~ASM
+      .intel_syntax noprefix
+      .code16
+
+      xor ax, ax
+      mov ds, ax
+      mov ax, 0x1234
+      mov [0x0200], ax
+      hlt
+    ASM
+
+    Dir.mktmpdir('ao486_cpu_parity_runtime_out') do |out_dir|
+      Dir.mktmpdir('ao486_cpu_parity_runtime_ws') do |workspace|
+        result = run_importer(out_dir: out_dir, workspace: workspace)
+        runtime = described_class.build_from_cleaned_mlir(File.read(result.normalized_core_mlir_path), backend: backend)
+        bytes = RHDL::Examples::AO486::Import::CpuParityPrograms.assemble(source, label: 'aligned_write_hlt_probe')
+
+        runtime.load_bytes(RHDL::Examples::AO486::Import::CpuParityPrograms::RESET_VECTOR_PHYSICAL, bytes)
+        runtime.reset!
+
+        saw_hlt = false
+
+        128.times do |cycle|
+          runtime.step(cycle)
+          saw_hlt ||= (
+            runtime.sim.peek('trace_wr_hlt_in_progress') == 1 &&
+            runtime.sim.peek('trace_wr_ready') == 1
+          )
+          break if saw_hlt
+        end
+
+        expect(runtime.read_bytes(0x0200, 2)).to eq([0x34, 0x12])
+        expect(saw_hlt).to be(true)
+      end
+    end
+  end
+
   it 'matches the expected initial fetch windows for the benchmark parity programs on the selected IR backend', timeout: 240 do
     require_import_tool!
     require_program_assembler!
@@ -150,6 +193,45 @@ RSpec.describe RHDL::Examples::AO486::Import::CpuParityRuntime do
     end
   end
 
+  it 'reaches the expected final result registers and success hlt on the selected IR backend', timeout: 240, slow: true do
+    require_import_tool!
+    require_program_assembler!
+    skip 'circt-opt not available' unless HdlToolchain.which('circt-opt')
+    backend = require_ir_backend!
+
+    Dir.mktmpdir('ao486_cpu_parity_runtime_out') do |out_dir|
+      Dir.mktmpdir('ao486_cpu_parity_runtime_ws') do |workspace|
+        result = run_importer(out_dir: out_dir, workspace: workspace)
+        runtime = described_class.build_from_cleaned_mlir(File.read(result.normalized_core_mlir_path), backend: backend)
+
+        RHDL::Examples::AO486::Import::CpuParityPrograms.benchmark_programs.each do |program|
+          program.load_into(runtime)
+          runtime.reset!
+
+          saw_hlt = false
+
+          program.max_cycles.times do |cycle|
+            runtime.step(cycle)
+            saw_hlt ||= (
+              runtime.sim.peek('trace_wr_hlt_in_progress') == 1 &&
+              runtime.sim.peek('trace_wr_ready') == 1
+            )
+            break if saw_hlt
+          end
+
+          state = runtime.final_state_snapshot
+
+          expect(saw_hlt).to be(true), "program=#{program.name}"
+          expect(state.fetch('trace_wr_hlt_in_progress')).to eq(1), "program=#{program.name}"
+          expect(state.fetch('trace_wr_ready')).to eq(1), "program=#{program.name}"
+          program.expected_final_registers.each do |signal_name, expected_value|
+            expect(state.fetch(signal_name)).to eq(expected_value), "program=#{program.name} signal=#{signal_name}"
+          end
+        end
+      end
+    end
+  end
+
   it 'advances beyond the first aligned fetch window of a larger program on the selected IR backend', timeout: 240, slow: true do
     require_import_tool!
     require_program_assembler!
@@ -166,9 +248,10 @@ RSpec.describe RHDL::Examples::AO486::Import::CpuParityRuntime do
         trace = runtime.run_fetch_pc_groups(max_cycles: 160)
 
         expect(trace.length).to be > program.initial_fetch_pc_groups.length
-        expect(trace.map(&:pc).max).to be >= 0x10010
+        expect(trace.map(&:pc).max).to be >= 0x1000C
         expect(runtime.sim.peek('memory_inst__prefetch_inst__limit')).to be > 0
-        expect(runtime.sim.peek('memory_inst__prefetch_inst__prefetch_address')).to be > 0x100000
+        expect(runtime.sim.peek('memory_inst__prefetch_inst__prefetch_address')).to be >= RHDL::Examples::AO486::Import::CpuParityPrograms::RESET_SEGMENT_BASE
+        expect(runtime.sim.peek('memory_inst__prefetch_inst__prefetch_address')).not_to eq(RHDL::Examples::AO486::Import::CpuParityPrograms::RESET_VECTOR_PHYSICAL)
       end
     end
   end

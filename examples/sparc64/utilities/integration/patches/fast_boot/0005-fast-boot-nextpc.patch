@@ -1,0 +1,30 @@
+diff --git a/T1-CPU/ifu/sparc_ifu_fdp.v b/T1-CPU/ifu/sparc_ifu_fdp.v
+--- a/T1-CPU/ifu/sparc_ifu_fdp.v
++++ b/T1-CPU/ifu/sparc_ifu_fdp.v
+@@ -258,6 +258,7 @@
+                 pc_f;
+ 
+    wire [48:0]  nextpc_nosw_bf,         // next pc if no switch
++	            nextpc_nosw_raw_bf,     // raw next pc before fast boot override
+ 		            am_mask;
+    
+    // trap PCs and rollback PCs
+@@ -585,7 +586,7 @@
+ 
+    // can reduce this to a 2:1 mux since reset pc is not used any more and
+    // pc_f is not needed.
+-   dp_mux3ds #(49) pcp4_mux(.dout  (nextpc_nosw_bf),
++   dp_mux3ds #(49) pcp4_mux(.dout  (nextpc_nosw_raw_bf),
+ 			  .in0   (pcinc_f),
+ 			  .in1   (thr_trappc_bf),
+ 			  .in2   ({fcl_fdp_pcoor_f, pc_f[47:0]}),
+@@ -593,6 +594,9 @@
+ 			  .sel1_l (fcl_fdp_noswpc_sel_tnpc_l_bf),
+ 			  .sel2_l (fcl_fdp_noswpc_sel_old_l_bf));
+ 
++   assign nextpc_nosw_bf[48:0] = (pc_f[47:0] == 48'b0) ?
++                                  49'h0_0000_0000_4000 :
++                                  nextpc_nosw_raw_bf[48:0];
+ 
+    // next S stage thread pc mux per thread
+    // Use advtpcs signal which works for stall (Aug '01)

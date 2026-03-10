@@ -120,7 +120,7 @@ RSpec.describe RHDL::CLI::Tasks::ImportTask do
       }
     end
 
-    expect { task.run }.to output(/Skip imported CIRCT core cleanup \(no cleanup markers found\)/).to_stdout
+    expect { task.run }.to output(/Skip imported CIRCT core cleanup \(no cleanup markers or stub modules requested\)/).to_stdout
     expect(File.read(core_mlir)).not_to include('llhd.')
   end
 
@@ -344,6 +344,50 @@ RSpec.describe RHDL::CLI::Tasks::ImportTask do
     expect { passing_task.run }.not_to raise_error
     passing = JSON.parse(File.read(passing_report))
     expect(passing.fetch('success')).to be(true)
+    expect(File.exist?(File.join(tmp_dir, 'top.rb'))).to be(true)
+  end
+
+  it 'stubs selected CIRCT modules before raise and records them in the report' do
+    mlir_file = File.join(tmp_dir, 'stubbed.mlir')
+    report_path = File.join(tmp_dir, 'stubbed_report.json')
+    File.write(mlir_file, <<~MLIR)
+      hw.module @child(in %reset_in : i1, in %din : i8, out reset_out : i1, out dout : i8) {
+        %false = hw.constant false
+        %c1_i8 = hw.constant 1 : i8
+        hw.output %false, %c1_i8 : i1, i8
+      }
+
+      hw.module @top(in %reset_in : i1, in %din : i8, out reset_out : i1, out dout : i8) {
+        %child_reset, %child_dout = hw.instance "u_child" @child(reset_in: %reset_in : i1, din: %din : i8) -> (reset_out: i1, dout: i8)
+        hw.output %child_reset, %child_dout : i1, i8
+      }
+    MLIR
+
+    task = described_class.new(
+      mode: :circt,
+      input: mlir_file,
+      out: tmp_dir,
+      top: 'top',
+      strict: true,
+      report: report_path,
+      stub_modules: [
+        {
+          name: 'child',
+          outputs: {
+            'reset_out' => { signal: 'reset_in' },
+            'dout' => 7
+          }
+        }
+      ]
+    )
+
+    expect { task.run }.not_to raise_error
+    report = JSON.parse(File.read(report_path))
+    expect(report.fetch('success')).to be(true)
+    expect(report.fetch('stub_modules')).to eq(['child'])
+    child_entry = report.fetch('modules').find { |entry| entry.fetch('name') == 'child' }
+    expect(child_entry.fetch('stubbed')).to be(true)
+    expect(File.exist?(File.join(tmp_dir, 'child.rb'))).to be(true)
     expect(File.exist?(File.join(tmp_dir, 'top.rb'))).to be(true)
   end
 

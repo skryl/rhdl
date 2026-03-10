@@ -18,6 +18,24 @@ module RHDL
           DEFAULT_FETCH_BURST_BEATS = 8
           DEFAULT_MAX_CYCLES = 200
           STARTUP_CS_BASE = 0xF0000
+          FINAL_STATE_SIGNALS = %w[
+            trace_arch_new_export
+            trace_arch_eax
+            trace_arch_ebx
+            trace_arch_ecx
+            trace_arch_edx
+            trace_arch_esi
+            trace_arch_edi
+            trace_arch_esp
+            trace_arch_ebp
+            trace_arch_eip
+            trace_wr_eip
+            trace_wr_consumed
+            trace_wr_hlt_in_progress
+            trace_wr_finished
+            trace_wr_ready
+            trace_retired
+          ].freeze
 
           attr_reader :sim, :memory
 
@@ -155,6 +173,12 @@ module RHDL
                 bytes: event.bytes
               )
             end.compact
+          end
+
+          def final_state_snapshot
+            FINAL_STATE_SIGNALS.each_with_object({}) do |name, state|
+              state[name] = @sim.peek(name)
+            end
           end
 
           private

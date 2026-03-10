@@ -25,6 +25,7 @@ module RHDL
 
             modules = Array(imported.modules).map { |mod| CpuTracePackage.dup_module(mod) }
             patch_icache_bypass!(modules)
+            patch_prefetch_fifo_register_model!(modules)
             patch_prefetch_reference_flow!(modules)
             patch_fetch_threshold_logic!(modules)
 
@@ -68,7 +69,6 @@ module RHDL
             readcode_burst_active = CpuTracePackage.signal('parity_readcode_burst_active', 1)
             readcode_beat_index = CpuTracePackage.signal('parity_readcode_beat_index', 4)
             has_pending_words = CpuTracePackage.binop(:!=, prefetched_length_expr, ir::Literal.new(value: 0, width: 5), 1)
-            final_word = CpuTracePackage.binop(:<=, remaining_length_expr, prefetched_length_expr, 1)
             readcode_word_valid = CpuTracePackage.signal('readcode_done', 1)
             in_cpu_window = CpuTracePackage.binop(
               :<,
@@ -79,7 +79,18 @@ module RHDL
             cpu_visible_word = CpuTracePackage.binop(
               :&,
               readcode_word_valid,
-              CpuTracePackage.binop(:&, in_cpu_window, has_pending_words, 1),
+              CpuTracePackage.binop(
+                :&,
+                CpuTracePackage.binop(:&, in_cpu_window, has_pending_words, 1),
+                CpuTracePackage.binop(:^, pr_reset_expr, ir::Literal.new(value: 1, width: 1), 1),
+                1
+              ),
+              1
+            )
+            cpu_window_complete = CpuTracePackage.binop(
+              :&,
+              cpu_visible_word,
+              CpuTracePackage.binop(:==, readcode_beat_index, ir::Literal.new(value: 3, width: 4), 1),
               1
             )
             burst_active_next = ir::Mux.new(
@@ -144,7 +155,7 @@ module RHDL
               cpu_done_name,
               CpuTracePackage.binop(
                 :|,
-                CpuTracePackage.binop(:&, cpu_visible_word, final_word, 1),
+                cpu_window_complete,
                 pr_reset_expr,
                 1
               )
@@ -316,6 +327,201 @@ module RHDL
             )
           end
 
+          def patch_prefetch_fifo_register_model!(modules)
+            mod = CpuTracePackage.find_module!(modules, 'prefetch_fifo')
+            ir = RHDL::Codegen::CIRCT::IR
+
+            mod.instances.clear
+            mod.assigns.clear
+            mod.processes.clear
+
+            8.times do |index|
+              ensure_reg(mod, "parity_fifo_entry_#{index}", 36, 0)
+            end
+            ensure_reg(mod, 'parity_fifo_used', 5, 0)
+
+            rst_n = CpuTracePackage.signal('rst_n', 1)
+            pr_reset = CpuTracePackage.signal('pr_reset', 1)
+            limit_do = CpuTracePackage.signal('prefetchfifo_signal_limit_do', 1)
+            pf_do = CpuTracePackage.signal('prefetchfifo_signal_pf_do', 1)
+            write_do = CpuTracePackage.signal('prefetchfifo_write_do', 1)
+            write_data = CpuTracePackage.signal('prefetchfifo_write_data', 36)
+            accept_do = CpuTracePackage.signal('prefetchfifo_accept_do', 1)
+            fifo_used = CpuTracePackage.signal('parity_fifo_used', 5)
+            fifo_entries = 8.times.map { |index| CpuTracePackage.signal("parity_fifo_entry_#{index}", 36) }
+
+            one1 = ir::Literal.new(value: 1, width: 1)
+            zero1 = ir::Literal.new(value: 0, width: 1)
+            zero5 = ir::Literal.new(value: 0, width: 5)
+            one5 = ir::Literal.new(value: 1, width: 5)
+            eight5 = ir::Literal.new(value: 8, width: 5)
+            zero32 = ir::Literal.new(value: 0, width: 32)
+            zero36 = ir::Literal.new(value: 0, width: 36)
+
+            empty = CpuTracePackage.binop(:==, fifo_used, zero5, 1)
+            not_empty = CpuTracePackage.binop(:^, empty, one1, 1)
+            full = CpuTracePackage.binop(:>=, fifo_used, eight5, 1)
+            bypass = CpuTracePackage.binop(:&, write_do, empty, 1)
+            accept_empty = CpuTracePackage.binop(:&, empty, CpuTracePackage.binop(:^, bypass, one1, 1), 1)
+            effective_rd = CpuTracePackage.binop(:&, accept_do, not_empty, 1)
+            raw_wrreq = CpuTracePackage.binop(
+              :|,
+              CpuTracePackage.binop(
+                :|,
+                CpuTracePackage.binop(
+                  :&,
+                  write_do,
+                  CpuTracePackage.binop(
+                    :|,
+                    not_empty,
+                    CpuTracePackage.binop(:^, accept_do, one1, 1),
+                    1
+                  ),
+                  1
+                ),
+                limit_do,
+                1
+              ),
+              pf_do,
+              1
+            )
+            effective_wr = CpuTracePackage.binop(
+              :&,
+              raw_wrreq,
+              CpuTracePackage.binop(
+                :|,
+                CpuTracePackage.binop(:^, full, one1, 1),
+                effective_rd,
+                1
+              ),
+              1
+            )
+            used_minus_one = CpuTracePackage.binop(:-, fifo_used, one5, 5)
+            used_plus_one = CpuTracePackage.binop(:+, fifo_used, one5, 5)
+            append_index = ir::Mux.new(
+              condition: effective_rd,
+              when_true: used_minus_one,
+              when_false: fifo_used,
+              width: 5
+            )
+            incoming_payload = ir::Mux.new(
+              condition: limit_do,
+              when_true: ir::Concat.new(
+                parts: [
+                  ir::Literal.new(value: 15, width: 4),
+                  zero32
+                ],
+                width: 36
+              ),
+              when_false: ir::Mux.new(
+                condition: pf_do,
+                when_true: ir::Concat.new(
+                  parts: [
+                    ir::Literal.new(value: 14, width: 4),
+                    zero32
+                  ],
+                  width: 36
+                ),
+                when_false: write_data,
+                width: 36
+              ),
+              width: 36
+            )
+
+            entry0_payload = ir::Concat.new(
+              parts: [
+                ir::Slice.new(base: fifo_entries.first, range: 32..35, width: 4),
+                zero32,
+                ir::Slice.new(base: fifo_entries.first, range: 0..31, width: 32)
+              ],
+              width: 68
+            )
+            bypass_payload = ir::Concat.new(
+              parts: [
+                ir::Slice.new(base: write_data, range: 32..35, width: 4),
+                zero32,
+                ir::Slice.new(base: write_data, range: 0..31, width: 32)
+              ],
+              width: 68
+            )
+
+            mod.assigns << CpuTracePackage.assign('prefetchfifo_used', fifo_used)
+            mod.assigns << CpuTracePackage.assign(
+              'prefetchfifo_accept_data',
+              ir::Mux.new(
+                condition: bypass,
+                when_true: bypass_payload,
+                when_false: entry0_payload,
+                width: 68
+              )
+            )
+            mod.assigns << CpuTracePackage.assign('prefetchfifo_accept_empty', accept_empty)
+
+            reset_fifo = CpuTracePackage.binop(
+              :|,
+              CpuTracePackage.binop(:^, rst_n, one1, 1),
+              pr_reset,
+              1
+            )
+            next_used = ir::Mux.new(
+              condition: reset_fifo,
+              when_true: zero5,
+              when_false: ir::Mux.new(
+                condition: effective_rd,
+                when_true: ir::Mux.new(
+                  condition: effective_wr,
+                  when_true: fifo_used,
+                  when_false: used_minus_one,
+                  width: 5
+                ),
+                when_false: ir::Mux.new(
+                  condition: effective_wr,
+                  when_true: used_plus_one,
+                  when_false: fifo_used,
+                  width: 5
+                ),
+                width: 5
+              ),
+              width: 5
+            )
+
+            statements = [ir::SeqAssign.new(target: 'parity_fifo_used', expr: next_used)]
+            fifo_entries.each_with_index do |entry, index|
+              shifted_entry = fifo_entries[index + 1] || zero36
+              base_entry = ir::Mux.new(
+                condition: effective_rd,
+                when_true: shifted_entry,
+                when_false: entry,
+                width: 36
+              )
+              append_here = CpuTracePackage.binop(
+                :&,
+                effective_wr,
+                CpuTracePackage.binop(:==, append_index, ir::Literal.new(value: index, width: 5), 1),
+                1
+              )
+              next_entry = ir::Mux.new(
+                condition: reset_fifo,
+                when_true: zero36,
+                when_false: ir::Mux.new(
+                  condition: append_here,
+                  when_true: incoming_payload,
+                  when_false: base_entry,
+                  width: 36
+                ),
+                width: 36
+              )
+              statements << ir::SeqAssign.new(target: "parity_fifo_entry_#{index}", expr: next_entry)
+            end
+
+            mod.processes << ir::Process.new(
+              name: 'parity_prefetch_fifo_register_model',
+              clocked: true,
+              clock: 'clk',
+              statements: statements
+            )
+          end
+
           def patch_prefetch_startup_limit!(modules)
             mod = CpuTracePackage.find_module!(modules, 'prefetch')
             proc = mod.processes.find do |entry|
@@ -352,7 +558,9 @@ module RHDL
             one1 = ir::Literal.new(value: 1, width: 1)
             one32 = ir::Literal.new(value: 1, width: 32)
             zero1 = ir::Literal.new(value: 0, width: 1)
+            zero16 = ir::Literal.new(value: 0, width: 16)
             zero32 = ir::Literal.new(value: 0, width: 32)
+            segment_base32 = ir::Literal.new(value: 0xF0000, width: 32)
             startup_linear = ir::Literal.new(value: 0xFFFF0, width: 32)
             startup_limit = ir::Literal.new(value: 65_535, width: 32)
             max_fetch_len32 = ir::Literal.new(value: 16, width: 32)
@@ -415,6 +623,52 @@ module RHDL
               ],
               width: 32
             )
+            wrapped_prefetch_linear = CpuTracePackage.binop(
+              :+,
+              segment_base32,
+              ir::Concat.new(
+                parts: [
+                  zero16,
+                  ir::Slice.new(base: prefetch_eip, range: 0..15, width: 16)
+                ],
+                width: 32
+              ),
+              32
+            )
+            wrapped_delivered_accept = CpuTracePackage.binop(
+              :+,
+              segment_base32,
+              ir::Concat.new(
+                parts: [
+                  zero16,
+                  CpuTracePackage.binop(
+                    :+,
+                    ir::Slice.new(base: delivered_eip, range: 0..15, width: 16),
+                    ir::Slice.new(base: accepted_length_ext, range: 0..15, width: 16),
+                    16
+                  )
+                ],
+                width: 32
+              ),
+              32
+            )
+            wrapped_linear_advance = CpuTracePackage.binop(
+              :+,
+              segment_base32,
+              ir::Concat.new(
+                parts: [
+                  zero16,
+                  CpuTracePackage.binop(
+                    :+,
+                    ir::Slice.new(base: linear, range: 0..15, width: 16),
+                    ir::Slice.new(base: current_length_ext, range: 0..15, width: 16),
+                    16
+                  )
+                ],
+                width: 32
+              ),
+              32
+            )
             reset_limit = ir::Mux.new(
               condition: CpuTracePackage.binop(:>=, cs_limit, prefetch_eip, 1),
               when_true: CpuTracePackage.binop(
@@ -447,26 +701,18 @@ module RHDL
               ),
               width: 32
             )
-            reset_linear = CpuTracePackage.binop(:+, cs_base, prefetch_eip, 32)
-            linear_reset_prefetch = ir::Mux.new(
-              condition: prefetched_accept_do_1,
-              when_true: CpuTracePackage.binop(:+, delivered_eip, accepted_length_ext, 32),
-              when_false: delivered_eip,
-              width: 32
-            )
-            linear_pr_reset = linear_reset_prefetch
             linear_next = ir::Mux.new(
               condition: CpuTracePackage.binop(:^, rst_n, one1, 1),
               when_true: startup_linear,
               when_false: ir::Mux.new(
                 condition: pr_reset,
-                when_true: linear_pr_reset,
+                when_true: wrapped_prefetch_linear,
                 when_false: ir::Mux.new(
                   condition: reset_prefetch,
-                  when_true: linear_reset_prefetch,
+                  when_true: wrapped_prefetch_linear,
                   when_false: ir::Mux.new(
                     condition: prefetched_do,
-                    when_true: CpuTracePackage.binop(:+, linear, current_length_ext, 32),
+                    when_true: wrapped_linear_advance,
                     when_false: linear,
                     width: 32
                   ),
@@ -476,17 +722,21 @@ module RHDL
               ),
               width: 32
             )
-            delivered_eip_pr_reset = linear_reset_prefetch
             delivered_eip_next = ir::Mux.new(
               condition: CpuTracePackage.binop(:^, rst_n, one1, 1),
               when_true: startup_linear,
               when_false: ir::Mux.new(
                 condition: pr_reset,
-                when_true: delivered_eip_pr_reset,
+                when_true: wrapped_prefetch_linear,
                 when_false: ir::Mux.new(
-                  condition: prefetched_accept_do_1,
-                  when_true: CpuTracePackage.binop(:+, delivered_eip, accepted_length_ext, 32),
-                  when_false: delivered_eip,
+                  condition: reset_prefetch,
+                  when_true: wrapped_prefetch_linear,
+                  when_false: ir::Mux.new(
+                    condition: prefetched_accept_do_1,
+                    when_true: wrapped_delivered_accept,
+                    when_false: delivered_eip,
+                    width: 32
+                  ),
                   width: 32
                 ),
                 width: 32
@@ -599,22 +849,34 @@ module RHDL
               CpuTracePackage.binop(:<, fetch_len, ir::Literal.new(value: 9, width: 4), 1),
               1
             )
-            fetch_valid_expr = ir::Mux.new(
-              condition: normal_data,
+            remaining_bytes = ir::Mux.new(
+              condition: CpuTracePackage.binop(:<, fetch_count, fetch_len, 1),
               when_true: CpuTracePackage.binop(:-, fetch_len, fetch_count, 4),
               when_false: zero4,
               width: 4
             )
+            fetch_valid_expr = ir::Mux.new(
+              condition: normal_data,
+              when_true: remaining_bytes,
+              when_false: zero4,
+              width: 4
+            )
+            fetch_has_data = CpuTracePackage.binop(
+              :&,
+              normal_data,
+              CpuTracePackage.binop(:!=, fetch_valid_expr, zero4, 1),
+              1
+            )
             accept_do_expr = CpuTracePackage.binop(
               :&,
               CpuTracePackage.binop(:>=, dec_acceptable, fetch_valid_expr, 1),
-              normal_data,
+              fetch_has_data,
               1
             )
             partial_expr = CpuTracePackage.binop(
               :&,
               CpuTracePackage.binop(:<, dec_acceptable, fetch_valid_expr, 1),
-              normal_data,
+              fetch_has_data,
               1
             )
 

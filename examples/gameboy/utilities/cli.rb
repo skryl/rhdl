@@ -64,6 +64,7 @@ module RHDL
             maintain_directory_structure: true,
             keep_workspace: false,
             clean_output: true,
+            auto_stub_modules: false,
             strict: true,
             help: false
           }
@@ -101,6 +102,10 @@ module RHDL
                     'Clean output directory contents before write (default: true)') do |v|
               options[:clean_output] = v
             end
+            opts.on('--[no-]auto-stub-modules',
+                    'Apply the simulation-safe Game Boy stub profile (savestate/extra-sprite disabled paths)') do |v|
+              options[:auto_stub_modules] = v
+            end
             opts.on('--[no-]strict', 'Treat import issues as failures (default: true)') { |v| options[:strict] = v }
             opts.on('-h', '--help', 'Show this help') do
               out.puts opts
@@ -123,6 +128,7 @@ module RHDL
             workspace_dir: expand_path(options[:workspace_dir]),
             keep_workspace: options[:keep_workspace],
             clean_output: options[:clean_output],
+            auto_stub_modules: options[:auto_stub_modules],
             maintain_directory_structure: options[:maintain_directory_structure],
             strict: options[:strict],
             import_strategy: options[:import_strategy],

@@ -40,10 +40,48 @@ RSpec.describe 'rhdl examples ao486 command' do
 
     expect(status.success?).to be(true)
     expect(stderr).not_to include('Unknown examples ao486 subcommand')
+    expect(stdout).to include('Usage: rhdl examples ao486 [options]')
+    expect(stdout).to include('Default mode:')
+    expect(stdout).to include('Run options:')
+    expect(stdout).to include('--mode ir|verilator|arcilator')
+    expect(stdout).to include('--sim compile')
+    expect(stdout).to include('--bios')
+    expect(stdout).to include('--dos')
+    expect(stdout).to include('--headless')
+    expect(stdout).to include('--cycles N')
+    expect(stdout).to include('--speed CYCLES')
+    expect(stdout).to include('-d, --debug')
     expect(stdout).to include('Subcommands:')
     expect(stdout).to include('import')
     expect(stdout).to include('parity')
     expect(stdout).to include('verify')
+  end
+
+  it 'treats unknown flags as run-mode parser errors instead of unknown subcommands' do
+    _stdout, stderr, status = run_cli('examples', 'ao486', '--nope')
+
+    expect(status.success?).to be(false)
+    expect(stderr).not_to include('Unknown examples ao486 subcommand')
+    expect(stderr).to include('Error: invalid option: --nope')
+  end
+
+  it 'parses run-mode help without requiring a subcommand' do
+    stdout, stderr, status = run_cli('examples', 'ao486', '--mode', 'ir', '--help')
+
+    expect(status.success?).to be(true)
+    expect(stderr).not_to include('Unknown examples ao486 subcommand')
+    expect(stdout).to include('Run the AO486 CPU-top environment.')
+    expect(stdout).to include('--bios')
+    expect(stdout).to include('--dos')
+    expect(stdout).to include('--speed CYCLES')
+    expect(stdout).to include('-d, --debug')
+  end
+
+  it 'rejects unexpected positional arguments in default run mode' do
+    _stdout, stderr, status = run_cli('examples', 'ao486', '--bios', 'extra_arg')
+
+    expect(status.success?).to be(false)
+    expect(stderr).to include('Unexpected arguments: extra_arg')
   end
 
   it 'shows import-specific help' do
@@ -52,10 +90,12 @@ RSpec.describe 'rhdl examples ao486 command' do
     expect(status.success?).to be(true)
     expect(stderr).not_to include('Unknown examples ao486 subcommand')
     expect(stdout).to include('Usage: rhdl examples ao486 import')
+    expect(stdout).to include('rtl/ao486/ao486.v')
     expect(stdout).to include('--source FILE')
     expect(stdout).to include('--out DIR')
     expect(stdout).to include('--workspace DIR')
     expect(stdout).to include('--report FILE')
+    expect(stdout).to include('default: ao486')
     expect(stdout).to include('--strategy STRATEGY')
     expect(stdout).to include('--[no-]fallback')
     expect(stdout).to include('--[no-]keep-structure')
@@ -85,10 +125,10 @@ RSpec.describe 'rhdl examples ao486 command' do
     expect(stderr).to include('Missing required option: --out DIR')
   end
 
-  it 'fails cleanly for unknown examples ao486 subcommand' do
+  it 'fails cleanly for unknown explicit examples ao486 subcommand after a real subcommand token' do
     _stdout, stderr, status = run_cli('examples', 'ao486', 'unknown_subcommand')
 
     expect(status.success?).to be(false)
-    expect(stderr).to include('Unknown examples ao486 subcommand')
+    expect(stderr).to include('Unexpected arguments: unknown_subcommand')
   end
 end

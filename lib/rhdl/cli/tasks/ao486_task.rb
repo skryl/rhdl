@@ -7,10 +7,12 @@ module RHDL
     module Tasks
       # Task for AO486 CIRCT import + bounded parity verification workflows.
       class AO486Task
-        DEFAULT_IMPORT_SPEC = 'spec/examples/ao486/import/system_importer_spec.rb'
+        DEFAULT_IMPORT_SPEC = 'spec/examples/ao486/import/cpu_importer_spec.rb'
         DEFAULT_PARITY_SPEC = 'spec/examples/ao486/import/parity_spec.rb'
         DEFAULT_IMPORT_PATH_SPEC = 'spec/rhdl/import/import_paths_spec.rb'
         DEFAULT_CLI_IMPORT_STRATEGY = :tree
+        DEFAULT_RUN_MODE = :ir
+        DEFAULT_RUN_SIM = :compile
 
         attr_reader :options
 
@@ -22,6 +24,8 @@ module RHDL
           action = (options[:action] || :import).to_sym
 
           case action
+          when :run
+            run_default
           when :import
             run_import
           when :parity
@@ -34,6 +38,21 @@ module RHDL
         end
 
         private
+
+        def run_default
+          runner = headless_runner_class.new(
+            mode: options[:mode] || DEFAULT_RUN_MODE,
+            sim: options[:sim] || DEFAULT_RUN_SIM,
+            debug: options.fetch(:debug, false),
+            speed: options[:speed],
+            headless: options.fetch(:headless, false),
+            cycles: options[:cycles]
+          )
+
+          runner.load_bios if options[:bios]
+          runner.load_dos if options[:dos]
+          runner.run
+        end
 
         def run_import
           output_dir = options[:output_dir]
@@ -50,10 +69,10 @@ module RHDL
             workspace_dir: options[:workspace_dir],
             clean_output: options.fetch(:clean_output, true),
             import_strategy: options[:import_strategy] || DEFAULT_CLI_IMPORT_STRATEGY,
-            fallback_to_stubbed: options.fetch(:fallback_to_stubbed, true),
+            fallback_to_stubbed: options.fetch(:fallback_to_stubbed, false),
             maintain_directory_structure: options.fetch(:maintain_directory_structure, true),
             format_output: options.fetch(:format_output, false),
-            strict: options.fetch(:strict, true),
+            strict: options.fetch(:strict, false),
             progress: progress
           )
 
@@ -124,11 +143,18 @@ module RHDL
           options[:spec_runner] || lambda { |cmd| system(*cmd) }
         end
 
-        def importer_class
-        return options[:importer_class] if options[:importer_class]
+        def headless_runner_class
+          return options[:headless_runner_class] if options[:headless_runner_class]
 
-        require_relative '../../../../examples/ao486/utilities/import/system_importer'
-        RHDL::Examples::AO486::Import::SystemImporter
+          require_relative '../../../../examples/ao486/utilities/runners/headless_runner'
+          RHDL::Examples::AO486::HeadlessRunner
+        end
+
+        def importer_class
+          return options[:importer_class] if options[:importer_class]
+
+          require_relative '../../../../examples/ao486/utilities/import/cpu_importer'
+          RHDL::Examples::AO486::Import::CpuImporter
         end
 
         def write_report(result, serialized_raise: nil, missing_ops_summary: nil, strict_gate_passed: nil)

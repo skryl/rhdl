@@ -16,6 +16,7 @@ module RHDL
         DEFAULT_VERILOG_EXPORT_TOOL = 'firtool'
         DEFAULT_FIRTOOL_LOWERING_OPTIONS = 'disallowMuxInlining,disallowPortDeclSharing,disallowLocalVariables,locationInfoStyle=none,omitVersionComment'
         DEFAULT_VHDL_IMPORT_TOOL = 'ghdl'
+        DEFAULT_ARC_FLATTEN_PIPELINE = 'builtin.module(hw-flatten-modules{hw-inline-public hw-inline-with-state})'
 
         def circt_verilog_import_args(extra_args: [])
           args = Array(extra_args).dup
@@ -60,7 +61,7 @@ module RHDL
           failed_result(tool: tool, out_path: out_path, cmd: cmd, stderr: "Tool not found: #{tool}")
         end
 
-        def prepare_arc_mlir_from_verilog(verilog_path:, work_dir:, tool: DEFAULT_VERILOG_IMPORT_TOOL)
+        def prepare_arc_mlir_from_verilog(verilog_path:, work_dir:, tool: DEFAULT_VERILOG_IMPORT_TOOL, stub_modules: [])
           FileUtils.mkdir_p(work_dir)
 
           moore_mlir_path = File.join(work_dir, 'import.core.mlir')
@@ -79,7 +80,8 @@ module RHDL
             prepared = prepare_arc_mlir_from_circt_mlir(
               mlir_path: moore_mlir_path,
               work_dir: work_dir,
-              base_name: 'import'
+              base_name: 'import',
+              stub_modules: stub_modules
             )
 
             return {
@@ -87,10 +89,12 @@ module RHDL
               import: import,
               normalize: prepared[:normalize],
               transform: prepared[:transform],
+              flatten: prepared[:flatten],
               arc: prepared[:arc],
               moore_mlir_path: moore_mlir_path,
               normalized_llhd_mlir_path: prepared[:normalized_llhd_mlir_path],
               hwseq_mlir_path: prepared[:hwseq_mlir_path],
+              flattened_hwseq_mlir_path: prepared[:flattened_hwseq_mlir_path],
               arc_mlir_path: prepared[:arc_mlir_path],
               transformed_modules: prepared[:transformed_modules],
               unsupported_modules: prepared[:unsupported_modules]
@@ -126,7 +130,8 @@ module RHDL
           prepared = prepare_arc_mlir_from_circt_mlir(
             mlir_path: normalized_llhd_mlir_path,
             work_dir: work_dir,
-            base_name: 'import'
+            base_name: 'import',
+            stub_modules: stub_modules
           )
           prepared.merge(
             import: import,
@@ -136,11 +141,12 @@ module RHDL
           )
         end
 
-        def prepare_arc_mlir_from_circt_mlir(mlir_path:, work_dir:, base_name: 'import', top: nil, strict: false, extern_modules: [])
+        def prepare_arc_mlir_from_circt_mlir(mlir_path:, work_dir:, base_name: 'import', top: nil, strict: false, extern_modules: [], stub_modules: [])
           FileUtils.mkdir_p(work_dir)
 
           input_copy_path = File.join(work_dir, "#{base_name}.normalized.llhd.mlir")
           hwseq_mlir_path = File.join(work_dir, "#{base_name}.hwseq.mlir")
+          flattened_hwseq_mlir_path = File.join(work_dir, "#{base_name}.flattened.hwseq.mlir")
           arc_mlir_path = File.join(work_dir, "#{base_name}.arc.mlir")
 
           text = File.read(mlir_path)
@@ -150,25 +156,57 @@ module RHDL
             File.read(input_copy_path),
             top: top,
             strict: strict,
-            extern_modules: extern_modules
+            extern_modules: extern_modules,
+            stub_modules: stub_modules
           )
           File.write(input_copy_path, cleaned_text)
 
           transform = prepare_hwseq_from_circt_mlir_text(cleaned_text)
           File.write(hwseq_mlir_path, transform.fetch(:output_text))
 
-          arc = if transform.fetch(:unsupported_modules).empty?
+          flatten = if transform.fetch(:unsupported_modules).empty?
+                      run_external_command(
+                        tool: 'circt-opt',
+                        cmd: [
+                          'circt-opt',
+                          hwseq_mlir_path,
+                          "--pass-pipeline=#{DEFAULT_ARC_FLATTEN_PIPELINE}",
+                          '-o',
+                          flattened_hwseq_mlir_path
+                        ],
+                        out_path: flattened_hwseq_mlir_path
+                      )
+                    else
+                      failed_result(
+                        tool: 'circt-opt',
+                        out_path: flattened_hwseq_mlir_path,
+                        cmd: [
+                          'circt-opt',
+                          hwseq_mlir_path,
+                          "--pass-pipeline=#{DEFAULT_ARC_FLATTEN_PIPELINE}",
+                          '-o',
+                          flattened_hwseq_mlir_path
+                        ],
+                        stderr: format_unsupported_modules(transform.fetch(:unsupported_modules))
+                      )
+                    end
+
+          arc = if transform.fetch(:unsupported_modules).empty? && flatten[:success]
                   run_external_command(
                     tool: 'circt-opt',
-                    cmd: ['circt-opt', '--convert-to-arcs', hwseq_mlir_path, '-o', arc_mlir_path],
+                    cmd: ['circt-opt', flattened_hwseq_mlir_path, '--convert-to-arcs', '-o', arc_mlir_path],
                     out_path: arc_mlir_path
                   )
                 else
                   failed_result(
                     tool: 'circt-opt',
                     out_path: arc_mlir_path,
-                    cmd: ['circt-opt', '--convert-to-arcs', hwseq_mlir_path, '-o', arc_mlir_path],
-                    stderr: format_unsupported_modules(transform.fetch(:unsupported_modules))
+                    cmd: ['circt-opt', flattened_hwseq_mlir_path, '--convert-to-arcs', '-o', arc_mlir_path],
+                    stderr: if transform.fetch(:unsupported_modules).empty?
+                              flatten[:stderr]
+                            else
+                              format_unsupported_modules(transform.fetch(:unsupported_modules))
+                            end
                   )
                 end
 
@@ -177,10 +215,12 @@ module RHDL
             import: nil,
             normalize: nil,
             transform: transform,
+            flatten: flatten,
             arc: arc,
             moore_mlir_path: nil,
             normalized_llhd_mlir_path: input_copy_path,
             hwseq_mlir_path: hwseq_mlir_path,
+            flattened_hwseq_mlir_path: flatten[:success] ? flattened_hwseq_mlir_path : nil,
             arc_mlir_path: arc[:success] ? arc_mlir_path : nil,
             transformed_modules: transform.fetch(:transformed_modules),
             unsupported_modules: transform.fetch(:unsupported_modules)
@@ -293,10 +333,12 @@ module RHDL
               transformed_modules: [],
               unsupported_modules: []
             },
+            flatten: nil,
             arc: nil,
             moore_mlir_path: import && import[:output_path],
             normalized_llhd_mlir_path: normalize && normalize[:output_path],
             hwseq_mlir_path: File.join(work_dir, 'import.hwseq.mlir'),
+            flattened_hwseq_mlir_path: nil,
             arc_mlir_path: nil,
             transformed_modules: [],
             unsupported_modules: []
@@ -314,15 +356,16 @@ module RHDL
           ArcPrepare.transform_normalized_llhd(text)
         end
 
-        def cleanup_imported_core_mlir_text(text, top:, strict:, extern_modules:)
-          needs_cleanup = text.include?('llhd.')
+        def cleanup_imported_core_mlir_text(text, top:, strict:, extern_modules:, stub_modules:)
+          needs_cleanup = text.include?('llhd.') || Array(stub_modules).any?
           return text unless needs_cleanup
 
           cleanup = RHDL::Codegen::CIRCT::ImportCleanup.cleanup_imported_core_mlir(
             text,
             strict: strict,
             top: top,
-            extern_modules: Array(extern_modules).map(&:to_s)
+            extern_modules: Array(extern_modules).map(&:to_s),
+            stub_modules: stub_modules
           )
           raise RuntimeError, 'Imported CIRCT core cleanup failed during ARC preparation' unless cleanup.success?
 

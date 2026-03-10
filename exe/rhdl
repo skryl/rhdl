@@ -399,7 +399,7 @@ def show_examples_help
         rhdl examples apple2 --mode netlist --sim jit --demo
         rhdl examples gameboy --demo
         rhdl examples riscv --xv6
-        rhdl examples ao486 import --out examples/ao486/hdl
+        rhdl examples ao486 import --out examples/ao486/import
         rhdl examples sparc64 import
 
     Run 'rhdl examples <subcommand> --help' for more information.

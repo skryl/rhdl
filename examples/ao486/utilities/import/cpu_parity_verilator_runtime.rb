@@ -115,6 +115,19 @@ module RHDL
             parse_step_trace(stdout)
           end
 
+          def run_final_state(max_cycles: DEFAULT_MAX_CYCLES)
+            raise 'Verilator binary not built' unless @binary_path && File.exist?(@binary_path)
+
+            memory_path = File.join(@work_dir, 'memory_init.txt')
+            write_memory_file(memory_path)
+
+            stdout, stderr, status = Open3.capture3(@binary_path, memory_path, max_cycles.to_i.to_s)
+            raise "Verilator parity runtime failed:\n#{stdout}\n#{stderr}" unless status.success?
+
+            @memory = read_memory_file(memory_path)
+            parse_final_state(stdout)
+          end
+
           private
 
           def build!(mlir_text)
@@ -210,6 +223,15 @@ module RHDL
                 consumed: consumed,
                 bytes: read_bytes(CpuParityRuntime::STARTUP_CS_BASE + start_eip, consumed)
               )
+            end
+          end
+
+          def parse_final_state(stdout)
+            stdout.lines.each_with_object({}) do |line, state|
+              match = line.to_s.strip.match(/\Afinal_state ([A-Za-z0-9_]+) 0x([0-9A-Fa-f]+)\z/)
+              next unless match
+
+              state[match[1]] = match[2].to_i(16)
             end
           end
 
@@ -390,6 +412,22 @@ module RHDL
                 }
 
                 save_memory(argv[1], mem);
+                std::printf("final_state trace_arch_new_export 0x%08X\\n", static_cast<uint32_t>(dut->trace_arch_new_export));
+                std::printf("final_state trace_arch_eax 0x%08X\\n", static_cast<uint32_t>(dut->trace_arch_eax));
+                std::printf("final_state trace_arch_ebx 0x%08X\\n", static_cast<uint32_t>(dut->trace_arch_ebx));
+                std::printf("final_state trace_arch_ecx 0x%08X\\n", static_cast<uint32_t>(dut->trace_arch_ecx));
+                std::printf("final_state trace_arch_edx 0x%08X\\n", static_cast<uint32_t>(dut->trace_arch_edx));
+                std::printf("final_state trace_arch_esi 0x%08X\\n", static_cast<uint32_t>(dut->trace_arch_esi));
+                std::printf("final_state trace_arch_edi 0x%08X\\n", static_cast<uint32_t>(dut->trace_arch_edi));
+                std::printf("final_state trace_arch_esp 0x%08X\\n", static_cast<uint32_t>(dut->trace_arch_esp));
+                std::printf("final_state trace_arch_ebp 0x%08X\\n", static_cast<uint32_t>(dut->trace_arch_ebp));
+                std::printf("final_state trace_arch_eip 0x%08X\\n", static_cast<uint32_t>(dut->trace_arch_eip));
+                std::printf("final_state trace_wr_eip 0x%08X\\n", static_cast<uint32_t>(dut->trace_wr_eip));
+                std::printf("final_state trace_wr_consumed 0x%08X\\n", static_cast<uint32_t>(dut->trace_wr_consumed));
+                std::printf("final_state trace_wr_hlt_in_progress 0x%08X\\n", static_cast<uint32_t>(dut->trace_wr_hlt_in_progress));
+                std::printf("final_state trace_wr_finished 0x%08X\\n", static_cast<uint32_t>(dut->trace_wr_finished));
+                std::printf("final_state trace_wr_ready 0x%08X\\n", static_cast<uint32_t>(dut->trace_wr_ready));
+                std::printf("final_state trace_retired 0x%08X\\n", static_cast<uint32_t>(dut->trace_retired));
                 dut->final();
                 delete dut;
                 return 0;

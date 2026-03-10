@@ -170,7 +170,7 @@ module RHDL
             raise "Built library not found at #{src_path}"
           end
 
-          FileUtils.cp(src_path, dst_path)
+          FileUtils.cp(src_path, dst_path) unless same_file_path?(src_path, dst_path)
 
           puts "  Built: #{dst_path}"
         end
@@ -219,6 +219,14 @@ module RHDL
           const_parts = ext[:check_const].split('::')
           const_parts.reduce(Object) { |mod, name| mod.const_get(name) }
         rescue LoadError, NameError
+          false
+        end
+
+        def same_file_path?(src_path, dst_path)
+          return false unless File.exist?(src_path) && File.exist?(dst_path)
+
+          File.identical?(src_path, dst_path)
+        rescue Errno::ENOENT
           false
         end
 

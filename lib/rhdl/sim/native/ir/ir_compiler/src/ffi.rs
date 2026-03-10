@@ -12,10 +12,15 @@ use std::slice;
 
 use crate::core::CoreSimulator;
 use crate::extensions::{
-    Apple2Extension, Cpu8BitExtension, GameBoyExtension, Mos6502Extension, RiscvExtension,
+    Ao486Extension, Apple2Extension, Cpu8BitExtension, GameBoyExtension, Mos6502Extension,
+    RiscvExtension,
 };
 use crate::signal_value::{SignalValue, SignalValue128};
 use crate::vcd::{TraceMode, VcdTracer};
+#[path = "extensions/sparc64/mod.rs"]
+mod sparc64_extension;
+
+use sparc64_extension::Sparc64Extension;
 
 // ============================================================================
 // Simulator Context
@@ -23,12 +28,14 @@ use crate::vcd::{TraceMode, VcdTracer};
 
 /// Opaque simulator context passed to all FFI functions
 pub struct IrSimContext {
+    pub ao486: Option<Ao486Extension>,
     pub core: CoreSimulator,
     pub apple2: Option<Apple2Extension>,
     pub cpu8bit: Option<Cpu8BitExtension>,
     pub gameboy: Option<GameBoyExtension>,
     pub mos6502: Option<Mos6502Extension>,
     pub riscv: Option<RiscvExtension>,
+    pub sparc64: Option<Sparc64Extension>,
     pub tracer: VcdTracer,
     pub tracer_initialized: bool,
 }
@@ -69,13 +76,40 @@ impl IrSimContext {
             None
         };
 
+        let ao486 = if riscv.is_none()
+            && apple2.is_none()
+            && gameboy.is_none()
+            && cpu8bit.is_none()
+            && mos6502.is_none()
+            && Ao486Extension::is_ao486_ir(&core.name_to_idx)
+        {
+            Some(Ao486Extension::new(&core))
+        } else {
+            None
+        };
+
+        let sparc64 = if riscv.is_none()
+            && apple2.is_none()
+            && gameboy.is_none()
+            && cpu8bit.is_none()
+            && mos6502.is_none()
+            && ao486.is_none()
+            && Sparc64Extension::is_sparc64_ir(&core.name_to_idx)
+        {
+            Some(Sparc64Extension::new(&core))
+        } else {
+            None
+        };
+
         Ok(Self {
+            ao486,
             core,
             apple2,
             cpu8bit,
             gameboy,
             mos6502,
             riscv,
+            sparc64,
             tracer: VcdTracer::new(),
             tracer_initialized: false,
         })
@@ -110,9 +144,13 @@ impl IrSimContext {
     }
 
     fn generate_code(&self) -> String {
-        // The compiled simulator API always exposes generic evaluate/tick
-        // entrypoints, even for cores without example-specific extensions.
-        let needs_tick_helpers = true;
+        // The compiled simulator always needs the generated combinational
+        // evaluator, but the large generic tick-helper surface is only used by
+        // extensions that emit direct calls into those helpers. Plain cores,
+        // including SPARC64, drive sequential behavior through CoreSimulator's
+        // runtime tick path and do not need the generated tick symbols.
+        let needs_tick_helpers =
+            self.apple2.is_some() || self.gameboy.is_some() || self.mos6502.is_some();
         let mut code = self.core.generate_core_code(needs_tick_helpers);
 
         if self.apple2.is_some() {
@@ -144,7 +182,8 @@ impl IrSimContext {
         {
             let needs_tick_helpers =
                 self.apple2.is_some() || self.gameboy.is_some() || self.mos6502.is_some();
-            if self.core.should_use_runtime_only_compile(needs_tick_helpers) {
+            let allow_runtime_only_fallback = self.sparc64.is_none();
+            if allow_runtime_only_fallback && self.core.should_use_runtime_only_compile(needs_tick_helpers) {
                 self.core.enable_runtime_only_compile();
                 return Ok(true);
             }
@@ -171,6 +210,10 @@ pub const RUNNER_KIND_GAMEBOY: c_int = 3;
 pub const RUNNER_KIND_CPU8BIT: c_int = 4;
 /// RISC-V CPU extension
 pub const RUNNER_KIND_RISCV: c_int = 5;
+/// SPARC64 `s1_top` extension
+pub const RUNNER_KIND_SPARC64: c_int = 6;
+/// AO486 CPU-top extension
+pub const RUNNER_KIND_AO486: c_int = 7;
 
 pub const RUNNER_MEM_OP_LOAD: c_uint = 0;
 pub const RUNNER_MEM_OP_READ: c_uint = 1;
@@ -280,6 +323,10 @@ unsafe fn runner_kind_impl(ctx: *const IrSimContext) -> c_int {
         RUNNER_KIND_CPU8BIT
     } else if ctx.riscv.is_some() {
         RUNNER_KIND_RISCV
+    } else if ctx.ao486.is_some() {
+        RUNNER_KIND_AO486
+    } else if ctx.sparc64.is_some() {
+        RUNNER_KIND_SPARC64
     } else {
         RUNNER_KIND_NONE
     }
@@ -349,6 +396,20 @@ unsafe fn runner_load_main_impl(
 
     if let Some(ref mut riscv) = ctx.riscv {
         return riscv.load_main(bytes, offset, is_rom);
+    }
+
+    if let Some(ref mut ao486) = ctx.ao486 {
+        if is_rom {
+            return ao486.load_rom(bytes, offset);
+        }
+        return ao486.load_memory(bytes, offset);
+    }
+
+    if let Some(ref mut sparc64) = ctx.sparc64 {
+        if is_rom {
+            return sparc64.load_rom(bytes, offset);
+        }
+        return sparc64.load_memory(bytes, offset);
     }
 
     0
@@ -429,6 +490,16 @@ unsafe fn runner_read_main_impl(
         return riscv.read_main(start, out, mapped);
     }
 
+    if let Some(ref ao486) = ctx.ao486 {
+        let out = slice::from_raw_parts_mut(out_data, len);
+        return ao486.read_memory(start, out, mapped);
+    }
+
+    if let Some(ref sparc64) = ctx.sparc64 {
+        let out = slice::from_raw_parts_mut(out_data, len);
+        return sparc64.read_memory(start, out, mapped);
+    }
+
     0
 }
 
@@ -493,6 +564,14 @@ unsafe fn runner_write_main_impl(
         return riscv.write_main(start, bytes, mapped);
     }
 
+    if let Some(ref mut ao486) = ctx.ao486 {
+        return ao486.write_memory(start, bytes, mapped);
+    }
+
+    if let Some(ref mut sparc64) = ctx.sparc64 {
+        return sparc64.write_memory(start, bytes, mapped);
+    }
+
     0
 }
 
@@ -536,6 +615,16 @@ unsafe fn runner_read_rom_impl(
     if let Some(ref riscv) = ctx.riscv {
         let out = slice::from_raw_parts_mut(out_data, len);
         return riscv.read_rom(start, out);
+    }
+
+    if let Some(ref ao486) = ctx.ao486 {
+        let out = slice::from_raw_parts_mut(out_data, len);
+        return ao486.read_rom(start, out);
+    }
+
+    if let Some(ref sparc64) = ctx.sparc64 {
+        let out = slice::from_raw_parts_mut(out_data, len);
+        return sparc64.read_rom(start, out);
     }
 
     0
@@ -761,6 +850,10 @@ unsafe fn runner_read_disk_impl(
         let out = slice::from_raw_parts_mut(out_data, len);
         return riscv.read_disk(start, out);
     }
+    if let Some(ref ao486) = ctx.ao486 {
+        let out = slice::from_raw_parts_mut(out_data, len);
+        return ao486.read_disk(start, out);
+    }
     0
 }
 
@@ -777,6 +870,10 @@ unsafe fn runner_write_disk_impl(
     if let Some(ref mut riscv) = ctx.riscv {
         let bytes = slice::from_raw_parts(data, len);
         return riscv.write_disk(start, bytes);
+    }
+    if let Some(ref mut ao486) = ctx.ao486 {
+        let bytes = slice::from_raw_parts(data, len);
+        return ao486.write_disk(start, bytes);
     }
     0
 }
@@ -923,6 +1020,18 @@ unsafe fn runner_run_impl(
         return 1;
     }
 
+    if let Some(ref mut ao486) = ctx.ao486 {
+        let cycles_run = ao486.run_cycles(&mut ctx.core, cycles);
+        write_runner_run_result(result_out, false, false, cycles_run, 0, 0);
+        return 1;
+    }
+
+    if let Some(ref mut sparc64) = ctx.sparc64 {
+        let cycles_run = sparc64.run_cycles(&mut ctx.core, cycles);
+        write_runner_run_result(result_out, false, false, cycles_run, 0, 0);
+        return 1;
+    }
+
     for _ in 0..cycles {
         ctx.core.tick();
     }
@@ -946,6 +1055,8 @@ pub unsafe extern "C" fn runner_get_caps(
         || kind == RUNNER_KIND_GAMEBOY
         || kind == RUNNER_KIND_CPU8BIT
         || kind == RUNNER_KIND_RISCV
+        || kind == RUNNER_KIND_AO486
+        || kind == RUNNER_KIND_SPARC64
     {
         mem_spaces |= bit(RUNNER_MEM_SPACE_MAIN) | bit(RUNNER_MEM_SPACE_ROM);
     }
@@ -956,9 +1067,11 @@ pub unsafe extern "C" fn runner_get_caps(
             | bit(RUNNER_MEM_SPACE_WRAM)
             | bit(RUNNER_MEM_SPACE_FRAMEBUFFER);
     }
+    if kind == RUNNER_KIND_RISCV || kind == RUNNER_KIND_AO486 {
+        mem_spaces |= bit(RUNNER_MEM_SPACE_DISK);
+    }
     if kind == RUNNER_KIND_RISCV {
-        mem_spaces |= bit(RUNNER_MEM_SPACE_DISK)
-            | bit(RUNNER_MEM_SPACE_UART_TX)
+        mem_spaces |= bit(RUNNER_MEM_SPACE_UART_TX)
             | bit(RUNNER_MEM_SPACE_UART_RX);
     }
 
@@ -1706,6 +1819,12 @@ unsafe fn ir_sim_reset(ctx: *mut IrSimContext) {
         if let Some(ref mut riscv) = ctx.riscv {
             riscv.reset_core(&mut ctx.core);
         }
+        if let Some(ref mut ao486) = ctx.ao486 {
+            ao486.reset_core(&mut ctx.core);
+        }
+        if let Some(ref mut sparc64) = ctx.sparc64 {
+            sparc64.reset_core(&mut ctx.core);
+        }
     }
 }
 
@@ -1887,6 +2006,30 @@ unsafe fn ir_sim_trace_take_live_vcd(ctx: *mut IrSimContext) -> *mut c_char {
     CString::new(chunk).unwrap().into_raw()
 }
 
+unsafe fn ir_sim_sparc64_wishbone_trace(ctx: *const IrSimContext) -> *mut c_char {
+    if ctx.is_null() {
+        return ptr::null_mut();
+    }
+    let text = (*ctx)
+        .sparc64
+        .as_ref()
+        .map(|ext| ext.trace_json())
+        .unwrap_or_else(|| "[]".to_string());
+    CString::new(text).unwrap().into_raw()
+}
+
+unsafe fn ir_sim_sparc64_unmapped_accesses(ctx: *const IrSimContext) -> *mut c_char {
+    if ctx.is_null() {
+        return ptr::null_mut();
+    }
+    let text = (*ctx)
+        .sparc64
+        .as_ref()
+        .map(|ext| ext.unmapped_accesses_json())
+        .unwrap_or_else(|| "[]".to_string());
+    CString::new(text).unwrap().into_raw()
+}
+
 /// Save VCD output to a file
 /// Returns 0 on success, -1 on error
 unsafe fn ir_sim_trace_save_vcd(
@@ -2024,6 +2167,8 @@ pub const SIM_BLOB_OUTPUT_NAMES: c_uint = 1;
 pub const SIM_BLOB_TRACE_TO_VCD: c_uint = 2;
 pub const SIM_BLOB_TRACE_TAKE_LIVE_VCD: c_uint = 3;
 pub const SIM_BLOB_GENERATED_CODE: c_uint = 4;
+pub const SIM_BLOB_SPARC64_WISHBONE_TRACE: c_uint = 5;
+pub const SIM_BLOB_SPARC64_UNMAPPED_ACCESSES: c_uint = 6;
 
 #[inline]
 unsafe fn write_out_ulong(out: *mut c_ulong, value: c_ulong) {
@@ -2345,6 +2490,12 @@ pub unsafe extern "C" fn sim_blob(
         SIM_BLOB_TRACE_TO_VCD => take_owned_c_string(ir_sim_trace_to_vcd(ctx as *const IrSimContext)),
         SIM_BLOB_TRACE_TAKE_LIVE_VCD => take_owned_c_string(ir_sim_trace_take_live_vcd(ctx)),
         SIM_BLOB_GENERATED_CODE => take_owned_c_string(ir_sim_generated_code(ctx as *const IrSimContext)),
+        SIM_BLOB_SPARC64_WISHBONE_TRACE => {
+            take_owned_c_string(ir_sim_sparc64_wishbone_trace(ctx as *const IrSimContext))
+        }
+        SIM_BLOB_SPARC64_UNMAPPED_ACCESSES => {
+            take_owned_c_string(ir_sim_sparc64_unmapped_accesses(ctx as *const IrSimContext))
+        }
         _ => None,
     };
 

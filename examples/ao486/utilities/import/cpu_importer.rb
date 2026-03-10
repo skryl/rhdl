@@ -24,6 +24,7 @@ module RHDL
                          import_strategy: DEFAULT_IMPORT_STRATEGY,
                          fallback_to_stubbed: false,
                          maintain_directory_structure: true,
+                         patches_dir: nil,
                          format_output: false,
                          strict: false,
                          progress: nil)
@@ -37,6 +38,7 @@ module RHDL
               import_strategy: import_strategy,
               fallback_to_stubbed: fallback_to_stubbed,
               maintain_directory_structure: maintain_directory_structure,
+              patches_dir: patches_dir,
               format_output: format_output,
               strict: strict,
               progress: progress
@@ -48,20 +50,22 @@ module RHDL
           def prepare_workspace(workspace, strategy:, force_stub_modules: TREE_FORCE_STUB_MODULES)
             FileUtils.mkdir_p(workspace)
             force_stub_modules = Array(force_stub_modules).map(&:to_s).uniq
+            current_source_root = import_source_search_root
+            current_source_path = import_source_path
 
-            staged_source_path = File.join(workspace, File.basename(source_path))
+            staged_source_path = File.join(workspace, File.basename(current_source_path))
             stub_path = File.join(workspace, "stubs.#{strategy}.v")
             wrapper_path = File.join(workspace, "import_all.#{strategy}.sv")
             moore_mlir_path = File.join(workspace, "#{top}.#{strategy}.moore.mlir")
             core_mlir_path = File.join(workspace, "#{top}.#{strategy}.core.mlir")
             normalized_core_mlir_path = File.join(workspace, "#{top}.#{strategy}.normalized.core.mlir")
 
-            FileUtils.cp(source_path, staged_source_path)
+            FileUtils.cp(current_source_path, staged_source_path)
             normalize_source_file!(staged_source_path)
 
             include_paths = [staged_source_path]
             stub_ports = {}
-            module_to_file, = build_module_index(source_tree_root)
+            module_to_file, = build_module_index(current_source_root)
             module_source_relpaths = module_to_file.transform_values { |path| source_relative_path(path) }
 
             if strategy == :tree
@@ -85,7 +89,7 @@ module RHDL
             stub_ports = stub_ports.reject { |module_name, _ports| defined.include?(module_name) }
 
             metadata = prepared_metadata(
-              source_root: source_tree_root,
+              source_root: current_source_root,
               staged_source_path: staged_source_path,
               workspace: workspace,
               include_paths: include_paths,
@@ -110,7 +114,8 @@ module RHDL
           end
 
           def discover_tree_module_files(force_stub_modules:)
-            module_to_file, module_to_body = build_module_index(source_tree_root)
+            current_source_root = import_source_search_root
+            module_to_file, module_to_body = build_module_index(current_source_root)
             force_stub_modules = Array(force_stub_modules).map(&:to_s).uniq
 
             needed_files = []
@@ -134,12 +139,12 @@ module RHDL
               end
             end
 
-            source_expanded = File.expand_path(source_path)
+            source_expanded = File.expand_path(import_source_path)
             needed_files.compact.uniq.sort.reject { |path| File.expand_path(path) == source_expanded }
           end
 
           def stage_tree_module_files(workspace, force_stub_modules:)
-            source_root = source_tree_root
+            source_root = import_source_search_root
             stage_root = File.join(workspace, 'tree')
 
             staged = discover_tree_module_files(force_stub_modules: force_stub_modules).map do |src|
@@ -158,7 +163,7 @@ module RHDL
           end
 
           def source_relative_path(path)
-            root = source_tree_root
+            root = import_source_search_root
             absolute = File.expand_path(path)
             prefix = "#{root}/"
             return absolute.delete_prefix(prefix) if absolute.start_with?(prefix)
@@ -166,8 +171,8 @@ module RHDL
             File.basename(absolute)
           end
 
-          def source_tree_root
-            File.expand_path(DEFAULT_SOURCE_ROOT)
+          def source_search_root
+            File.expand_path('..', File.dirname(source_path))
           end
 
           def normalize_source_file!(path)

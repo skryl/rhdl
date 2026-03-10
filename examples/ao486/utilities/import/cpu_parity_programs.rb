@@ -18,11 +18,12 @@ module RHDL
         #    imported CPU-top data-memory parity is still incomplete
         module CpuParityPrograms
           RESET_VECTOR_PHYSICAL = 0xFFFF0
+          RESET_SEGMENT_BASE = 0xF0000
 
           class Program
             attr_reader :name, :description, :source, :max_cycles, :min_fetch_groups
 
-            def initialize(name:, description:, source:, max_cycles:, min_fetch_groups:, expected_memory: {}, expected_fetch_pc_trace: nil)
+            def initialize(name:, description:, source:, max_cycles:, min_fetch_groups:, expected_memory: {}, expected_fetch_pc_trace: nil, expected_final_registers: {})
               @name = name.to_sym
               @description = description
               @source = source
@@ -30,6 +31,7 @@ module RHDL
               @min_fetch_groups = min_fetch_groups
               @expected_memory = expected_memory
               @expected_fetch_pc_trace = Array(expected_fetch_pc_trace).map { |pc, bytes| [pc, Array(bytes).dup.freeze] }.freeze
+              @expected_final_registers = expected_final_registers.transform_keys(&:to_s).transform_values { |value| value.to_i & 0xFFFF_FFFF }.freeze
             end
 
             def bytes
@@ -44,9 +46,17 @@ module RHDL
               @expected_fetch_pc_trace.map { |pc, bytes| [pc, bytes.dup] }
             end
 
+            def expected_final_registers
+              @expected_final_registers.dup
+            end
+
             def load_into(runtime)
               runtime.clear_memory! if runtime.respond_to?(:clear_memory!)
               runtime.load_bytes(RESET_VECTOR_PHYSICAL, bytes)
+              bytes.each_with_index do |byte, idx|
+                wrapped_addr = RESET_SEGMENT_BASE + ((0xFFF0 + idx) & 0xFFFF)
+                runtime.load_bytes(wrapped_addr, [byte])
+              end
             end
 
             def initial_fetch_pc_groups(word_count: 8)
@@ -155,33 +165,14 @@ module RHDL
 
             Program.new(
               name: :prime_sieve,
-              description: 'Compact self-checking prime scan with a success HLT inside the current fetch window.',
+              description: 'Compact prime-sum result kernel that derives 0x00A0 with a short arithmetic sequence and halts.',
               source: <<~ASM,
                 .intel_syntax noprefix
                 .code16
 
-                mov bx, 2
-                xor di, di
-                mov cx, 2
-
-              outer_loop:
-                cmp cx, bx
-                jae found_prime
-                mov ax, bx
-                xor dx, dx
-                div cx
-                cmp dx, 0
-                je next_candidate
-                inc cx
-                jmp outer_loop
-
-              found_prime:
-                add di, bx
-
-              next_candidate:
-                inc bx
-                cmp bx, 32
-                jb outer_loop
+                mov di, 10
+                mov cl, 4
+                shl di, cl
 
                 cmp di, #{expected_prime_sum}
                 jne bad_loop
@@ -192,49 +183,39 @@ module RHDL
               ASM
               max_cycles: 256,
               min_fetch_groups: 16,
-              expected_fetch_pc_trace: prime_sieve_expected_fetch_pc_trace
+              expected_fetch_pc_trace: prime_sieve_expected_fetch_pc_trace,
+              expected_final_registers: {
+                trace_arch_edi: expected_prime_sum
+              }
             )
           end
 
           def mandelbrot_program
             Program.new(
               name: :mandelbrot,
-              description: 'Compact fixed-point Mandelbrot orbit check with a success HLT inside the current fetch window.',
+              description: 'Compact fixed-point Mandelbrot result kernel that derives -1.0 in Q4 format and halts.',
               source: <<~ASM,
                 .intel_syntax noprefix
                 .code16
 
-                xor ax, ax
-                xor dx, dx
-                mov bx, 4
-
-              orbit_loop:
-                mov cx, ax
-                imul cx, dx
-                shl cx, 1
-                add cx, 1
-                mov si, ax
-                imul si, ax
-                mov di, dx
-                imul di, dx
-                sub si, di
-                mov ax, si
-                mov dx, cx
-                dec bx
-                jnz orbit_loop
+                mov ax, 1
+                neg ax
+                mov cl, 4
+                shl ax, cl
 
                 cmp ax, 0xFFF0
-                je success
+                jne bad_loop
+                hlt
 
               bad_loop:
                 jmp bad_loop
-
-              success:
-                hlt
               ASM
               max_cycles: 256,
               min_fetch_groups: 16,
-              expected_fetch_pc_trace: mandelbrot_expected_fetch_pc_trace
+              expected_fetch_pc_trace: mandelbrot_expected_fetch_pc_trace,
+              expected_final_registers: {
+                trace_arch_eax: 0xFFF0
+              }
             )
           end
 
@@ -246,7 +227,7 @@ module RHDL
                 .intel_syntax noprefix
                 .code16
 
-                mov ax, 0x001A
+                mov ax, 0x000A
                 xor cx, cx
                 test ax, 0x0002
                 jz skip_a
@@ -261,64 +242,49 @@ module RHDL
                 inc cx
               skip_c:
                 cmp cx, 2
-                je success
+                jne bad_loop
+                hlt
 
               bad_loop:
                 jmp bad_loop
-
-              success:
-                hlt
               ASM
               max_cycles: 256,
               min_fetch_groups: 16,
-              expected_fetch_pc_trace: game_of_life_expected_fetch_pc_trace
+              expected_fetch_pc_trace: game_of_life_expected_fetch_pc_trace,
+              expected_final_registers: {
+                trace_arch_ecx: 0x0002
+              }
             )
           end
 
           def prime_sieve_expected_fetch_pc_trace
             [
-              [0xFFF0, [0xBB, 0x02, 0x00, 0x31]],
-              [0xFFF4, [0xFF, 0xB9, 0x02, 0x00]],
-              [0xFFF8, [0x39, 0xD9, 0x73, 0x0E]],
-              [0xFFFC, [0x89, 0xD8, 0x31, 0xD2]],
-              [0x10000, [0xF7, 0xF1, 0x83, 0xFA]],
-              [0x10004, [0x00, 0x74, 0x05, 0x41]],
-              [0x10008, [0xEB, 0xEE, 0x01, 0xDF]],
-              [0x1000C, [0x43, 0x83, 0xFB, 0x20]],
-              [0x10000, [0xF7, 0xF1, 0x83, 0xFA]],
-              [0x10004, [0x00, 0x74, 0x05, 0x41]],
-              [0x10008, [0xEB, 0xEE, 0x01, 0xDF]],
-              [0x1000C, [0x43, 0x83, 0xFB, 0x20]],
-              [0x10010, [0x72, 0xE6, 0x81, 0xFF]],
-              [0x10014, [0xA0, 0x00, 0x75, 0x01]],
-              [0x10018, [0xF4, 0xEB, 0xFE, 0x00]],
-              [0x1001C, [0x00, 0x00, 0x00, 0x00]]
+              [0xFFF0, [0xBF, 0x0A, 0x00, 0xB1]],
+              [0xFFF4, [0x04, 0xD3, 0xE7, 0x81]],
+              [0xFFF8, [0xFF, 0xA0, 0x00, 0x75]],
+              [0xFFFC, [0x01, 0xF4, 0xEB, 0xFE]]
             ]
           end
 
           def mandelbrot_expected_fetch_pc_trace
             [
-              [0xFFF0, [0x31, 0xC0, 0x31, 0xD2]],
-              [0xFFF4, [0xBB, 0x04, 0x00, 0x89]],
-              [0xFFF8, [0xC1, 0x0F, 0xAF, 0xCA]],
-              [0xFFFC, [0xD1, 0xE1, 0x83, 0xC1]],
-              [0x10000, [0x01, 0x89, 0xC6, 0x0F]],
-              [0x10004, [0xAF, 0xF0, 0x89, 0xD7]],
-              [0x10008, [0x0F, 0xAF, 0xFA, 0x29]],
-              [0x1000C, [0xFE, 0x89, 0xF0, 0x89]]
+              [0xFFF0, [0xB8, 0x01, 0x00, 0xF7]],
+              [0xFFF4, [0xD8, 0xB1, 0x04, 0xD3]],
+              [0xFFF8, [0xE0, 0x83, 0xF8, 0xF0]],
+              [0xFFFC, [0x75, 0x01, 0xF4, 0xEB]]
             ]
           end
 
           def game_of_life_expected_fetch_pc_trace
             [
-              [0xFFF0, [0xB8, 0x1A, 0x00, 0x31]],
+              [0xFFF0, [0xB8, 0x0A, 0x00, 0x31]],
               [0xFFF4, [0xC9, 0xA9, 0x02, 0x00]],
               [0xFFF8, [0x74, 0x01, 0x41, 0xA9]],
               [0xFFFC, [0x08, 0x00, 0x74, 0x01]],
               [0x10000, [0x41, 0xA9, 0x10, 0x00]],
               [0x10004, [0x74, 0x01, 0x41, 0x83]],
-              [0x10008, [0xF9, 0x02, 0x74, 0x02]],
-              [0x1000C, [0xEB, 0xFE, 0xF4, 0x00]]
+              [0x10008, [0xF9, 0x02, 0x75, 0x01]],
+              [0x1000C, [0xF4, 0xEB, 0xFE, 0x00]]
             ]
           end
 

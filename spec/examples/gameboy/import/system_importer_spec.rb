@@ -14,10 +14,12 @@ RSpec.describe RHDL::Examples::GameBoy::Import::SystemImporter do
     skip 'GameBoy files.qip not available' unless File.file?(described_class::DEFAULT_QIP_PATH)
   end
 
-  def new_importer(output_dir:, maintain_directory_structure: true)
+  def new_importer(output_dir:, maintain_directory_structure: true, stub_modules: [], auto_stub_modules: false)
     described_class.new(
       output_dir: output_dir,
       maintain_directory_structure: maintain_directory_structure,
+      auto_stub_modules: auto_stub_modules,
+      stub_modules: stub_modules,
       clean_output: false,
       keep_workspace: true,
       progress: ->(_msg) {}
@@ -153,6 +155,160 @@ RSpec.describe RHDL::Examples::GameBoy::Import::SystemImporter do
           expect(manifest.fetch('files').length).to eq(26)
           expect(result.files_written).to include(File.join(out_dir, 'generated_component.rb'))
           expect(File.file?(result.report_path)).to be(true)
+        end
+      end
+    end
+
+    it 'threads stub_modules through to the shared import task and result metadata' do
+      require_reference_tree!
+
+      fake_task_class = Class.new do
+        class << self
+          attr_accessor :last_options
+        end
+
+        def initialize(options)
+          self.class.last_options = options
+          @options = options
+        end
+
+        def run
+          FileUtils.mkdir_p(@options.fetch(:out))
+          File.write(File.join(@options.fetch(:out), 'generated_component.rb'), "# generated\n")
+          File.write(@options.fetch(:report), "{}\n")
+        end
+      end
+
+      stub_spec = [
+        {
+          name: 'gb_savestates',
+          outputs: {
+            'reset_out' => { signal: 'reset_in' }
+          }
+        }
+      ]
+
+      Dir.mktmpdir('gameboy_import_stubbed_out') do |out_dir|
+        Dir.mktmpdir('gameboy_import_stubbed_ws') do |workspace|
+          importer = described_class.new(
+            output_dir: out_dir,
+            workspace_dir: workspace,
+            keep_workspace: true,
+            clean_output: true,
+            stub_modules: stub_spec,
+            progress: ->(_msg) {},
+            import_task_class: fake_task_class
+          )
+
+          result = importer.run
+          expect(result.success?).to be(true)
+          expect(fake_task_class.last_options.fetch(:stub_modules)).to eq(stub_spec)
+          expect(result.stub_modules).to eq(['gb_savestates'])
+        end
+      end
+    end
+
+    it 'threads simulation-safe auto stubs through when requested' do
+      require_reference_tree!
+
+      fake_task_class = Class.new do
+        class << self
+          attr_accessor :last_options
+        end
+
+        def initialize(options)
+          self.class.last_options = options
+          @options = options
+        end
+
+        def run
+          FileUtils.mkdir_p(@options.fetch(:out))
+          File.write(File.join(@options.fetch(:out), 'generated_component.rb'), "# generated\n")
+          File.write(@options.fetch(:report), "{}\n")
+        end
+      end
+
+      Dir.mktmpdir('gameboy_import_auto_stubbed_out') do |out_dir|
+        Dir.mktmpdir('gameboy_import_auto_stubbed_ws') do |workspace|
+          importer = described_class.new(
+            output_dir: out_dir,
+            workspace_dir: workspace,
+            keep_workspace: true,
+            clean_output: true,
+            auto_stub_modules: :simulation_safe,
+            progress: ->(_msg) {},
+            import_task_class: fake_task_class
+          )
+
+          result = importer.run
+          expect(result.success?).to be(true)
+          expect(fake_task_class.last_options.fetch(:stub_modules)).to eq(
+            described_class::AUTO_STUB_PROFILES.fetch(:simulation_safe)
+          )
+          expect(result.stub_modules).to eq(
+            %w[gb_savestates gb_statemanager__vhdl_2e2d161b9c1b sprites_extra]
+          )
+        end
+      end
+    end
+
+    it 'merges explicit stub overrides on top of the auto-stub profile by module name' do
+      require_reference_tree!
+
+      fake_task_class = Class.new do
+        class << self
+          attr_accessor :last_options
+        end
+
+        def initialize(options)
+          self.class.last_options = options
+          @options = options
+        end
+
+        def run
+          FileUtils.mkdir_p(@options.fetch(:out))
+          File.write(File.join(@options.fetch(:out), 'generated_component.rb'), "# generated\n")
+          File.write(@options.fetch(:report), "{}\n")
+        end
+      end
+
+      custom_stub_spec = [
+        {
+          name: 'gb_savestates',
+          outputs: {
+            'reset_out' => { signal: 'reset_in' },
+            'load_done' => 1
+          }
+        },
+        'custom_stubbed_leaf'
+      ]
+
+      Dir.mktmpdir('gameboy_import_auto_stub_override_out') do |out_dir|
+        Dir.mktmpdir('gameboy_import_auto_stub_override_ws') do |workspace|
+          importer = described_class.new(
+            output_dir: out_dir,
+            workspace_dir: workspace,
+            keep_workspace: true,
+            clean_output: true,
+            auto_stub_modules: true,
+            stub_modules: custom_stub_spec,
+            progress: ->(_msg) {},
+            import_task_class: fake_task_class
+          )
+
+          result = importer.run
+          expect(result.success?).to be(true)
+          expect(fake_task_class.last_options.fetch(:stub_modules)).to eq(
+            [
+              custom_stub_spec.first,
+              'gb_statemanager__vhdl_2e2d161b9c1b',
+              'sprites_extra',
+              'custom_stubbed_leaf'
+            ]
+          )
+          expect(result.stub_modules).to eq(
+            %w[custom_stubbed_leaf gb_savestates gb_statemanager__vhdl_2e2d161b9c1b sprites_extra]
+          )
         end
       end
     end

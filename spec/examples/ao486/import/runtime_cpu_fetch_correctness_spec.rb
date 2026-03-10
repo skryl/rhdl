@@ -6,6 +6,7 @@ require 'fileutils'
 
 require_relative '../../../../examples/ao486/utilities/import/cpu_importer'
 require_relative '../../../../examples/ao486/utilities/import/cpu_parity_programs'
+require_relative '../../../../examples/ao486/utilities/import/cpu_parity_arcilator_runtime'
 require_relative '../../../../examples/ao486/utilities/import/cpu_parity_runtime'
 require_relative '../../../../examples/ao486/utilities/import/cpu_parity_verilator_runtime'
 
@@ -18,6 +19,14 @@ RSpec.describe 'AO486 CPU parity-package compact benchmark correctness', slow: t
   def require_program_assembler!
     skip 'llvm-mc not available' unless HdlToolchain.which('llvm-mc')
     skip 'llvm-objcopy not available' unless HdlToolchain.which('llvm-objcopy')
+  end
+
+  def require_arcilator_toolchain!
+    skip 'arcilator not available' unless HdlToolchain.which('arcilator')
+    return if (HdlToolchain.which('clang') || HdlToolchain.which('llc')) && HdlToolchain.which('c++')
+    return if HdlToolchain.which('lli') && HdlToolchain.which('llvm-link') && HdlToolchain.which('clang++')
+
+    skip 'Neither clang/llc+c++ nor lli/llvm-link/clang++ is available for the Arcilator harness'
   end
 
   def run_importer(out_dir:, workspace:)
@@ -36,9 +45,10 @@ RSpec.describe 'AO486 CPU parity-package compact benchmark correctness', slow: t
     backend
   end
 
-  it 'matches the expected fetch-PC prefixes on the selected IR backend and Verilator for the compact benchmark set', timeout: 900 do
+  it 'matches the expected fetch-PC prefixes on the selected IR backend, Verilator, and Arcilator for the compact benchmark set', timeout: 1200 do
     require_import_tool!
     require_program_assembler!
+    require_arcilator_toolchain!
     skip 'circt-opt not available' unless HdlToolchain.which('circt-opt')
     skip 'firtool not available' unless HdlToolchain.which('firtool')
     skip 'verilator not available' unless HdlToolchain.verilator_available?
@@ -53,7 +63,11 @@ RSpec.describe 'AO486 CPU parity-package compact benchmark correctness', slow: t
         Dir.mktmpdir('ao486_cpu_fetch_correctness_vl') do |build_dir|
           verilator_runtime = RHDL::Examples::AO486::Import::CpuParityVerilatorRuntime.build_from_cleaned_mlir(
             cleaned_mlir,
-            work_dir: build_dir
+            work_dir: File.join(build_dir, 'verilator')
+          )
+          arcilator_runtime = RHDL::Examples::AO486::Import::CpuParityArcilatorRuntime.build_from_cleaned_mlir(
+            cleaned_mlir,
+            work_dir: File.join(build_dir, 'arcilator')
           )
 
           RHDL::Examples::AO486::Import::CpuParityPrograms.benchmark_programs.each do |program|
@@ -66,10 +80,15 @@ RSpec.describe 'AO486 CPU parity-package compact benchmark correctness', slow: t
             program.load_into(verilator_runtime)
             verilator_trace = verilator_runtime.run_fetch_pc_groups(max_cycles: program.max_cycles).map { |event| [event.pc, event.bytes] }
 
+            program.load_into(arcilator_runtime)
+            arcilator_trace = arcilator_runtime.run_fetch_pc_groups(max_cycles: program.max_cycles).map { |event| [event.pc, event.bytes] }
+
             expect(ir_trace.length).to be >= expected.length, "program=#{program.name}"
             expect(verilator_trace.length).to be >= expected.length, "program=#{program.name}"
+            expect(arcilator_trace.length).to be >= expected.length, "program=#{program.name}"
             expect(ir_trace.first(expected.length)).to eq(expected), "program=#{program.name}"
             expect(verilator_trace.first(expected.length)).to eq(expected), "program=#{program.name}"
+            expect(arcilator_trace.first(expected.length)).to eq(expected), "program=#{program.name}"
           end
         end
       end

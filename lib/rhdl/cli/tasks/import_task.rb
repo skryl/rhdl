@@ -7,6 +7,7 @@ require 'json'
 require 'yaml'
 require 'pathname'
 require 'open3'
+require 'set'
 
 module RHDL
   module CLI
@@ -162,6 +163,11 @@ module RHDL
             return
           end
 
+          cleanup_imported_core_mlir!(
+            mlir_out: input,
+            top_name: options[:top]
+          )
+
           run_raise_flow(mlir_out: input, out_dir: out_dir)
         end
 
@@ -170,6 +176,7 @@ module RHDL
           normalize_llhd_mlir_if_needed!(mlir_out: mlir_out)
           strict = options.fetch(:strict, true)
           extern_modules = Array(options[:extern_modules]).map(&:to_s)
+          stub_modules = requested_stub_module_names
           top_name = top_override || options[:top]
           artifact_paths = (artifact_paths || {}).dup
           mixed_provenance = mixed_provenance&.dup
@@ -230,6 +237,7 @@ module RHDL
               out_dir: out_dir,
               strict: strict,
               extern_modules: extern_modules,
+              stub_modules: stub_modules,
               top_name: top_name,
               import_result: import_result,
               raise_result: raise_result,
@@ -254,7 +262,7 @@ module RHDL
           end
         end
 
-        def write_report(out_dir:, strict:, extern_modules:, top_name:, import_result:, raise_result:, raise_diagnostics: nil,
+        def write_report(out_dir:, strict:, extern_modules:, stub_modules:, top_name:, import_result:, raise_result:, raise_diagnostics: nil,
                          raise_success: nil, mixed_provenance: nil, artifact_paths: nil)
           raise_diagnostics ||= Array(raise_result.diagnostics)
           raise_success = raise_result.success? if raise_success.nil?
@@ -263,11 +271,13 @@ module RHDL
             mixed_provenance: mixed_provenance,
             files_written: Array(raise_result.files_written)
           )
+          stub_set = stub_modules.to_set
           report = {
             success: import_result.success? && raise_success,
             strict: strict,
             top: top_name,
             extern_modules: extern_modules,
+            stub_modules: stub_modules,
             module_count: import_result.modules.length,
             raised_files: Array(raise_result.files_written).sort,
             op_census: import_result.op_census,
@@ -285,6 +295,7 @@ module RHDL
                   sequential: !!dsl_features[:sequential],
                   memory: !!dsl_features[:memory]
                 },
+                stubbed: stub_set.include?(mod_name),
                 import_errors: module_diags.count { |diag| diag.severity.to_s == 'error' },
                 import_warnings: module_diags.count { |diag| diag.severity.to_s == 'warning' },
                 import_diagnostics: module_diags.map { |diag| diagnostic_to_hash(diag) }
@@ -1219,8 +1230,9 @@ module RHDL
           return nil unless File.file?(mlir_out)
 
           text = File.read(mlir_out)
-          unless needs_imported_core_cleanup?(text)
-            puts 'Import step: Skip imported CIRCT core cleanup (no cleanup markers found)'
+          stub_modules = options[:stub_modules]
+          unless needs_imported_core_cleanup?(text, stub_modules: stub_modules)
+            puts 'Import step: Skip imported CIRCT core cleanup (no cleanup markers or stub modules requested)'
             return nil
           end
 
@@ -1229,7 +1241,8 @@ module RHDL
               text,
               strict: options.fetch(:strict, true),
               top: top_name,
-              extern_modules: Array(options[:extern_modules]).map(&:to_s)
+              extern_modules: Array(options[:extern_modules]).map(&:to_s),
+              stub_modules: stub_modules
             )
           end
           emit_diagnostics(cleanup.import_result.diagnostics)
@@ -1242,8 +1255,21 @@ module RHDL
           cleanup.import_result
         end
 
-        def needs_imported_core_cleanup?(text)
-          text.include?('llhd.')
+        def needs_imported_core_cleanup?(text, stub_modules: nil)
+          text.include?('llhd.') || requested_stub_module_names(stub_modules).any?
+        end
+
+        def requested_stub_module_names(stub_modules = options[:stub_modules])
+          Array(stub_modules).filter_map do |entry|
+            case entry
+            when String, Symbol
+              name = entry.to_s.strip
+              name unless name.empty?
+            when Hash
+              name = (entry[:name] || entry['name'] || entry[:module] || entry['module']).to_s.strip
+              name unless name.empty?
+            end
+          end.uniq.sort
         end
 
         def postprocess_generated_vhdl_verilog!(entity:, out_path:, module_name: nil)

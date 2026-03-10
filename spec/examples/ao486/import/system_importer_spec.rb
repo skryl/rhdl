@@ -24,15 +24,28 @@ RSpec.describe RHDL::Examples::AO486::Import::SystemImporter do
   end
 
   def run_importer(out_dir:, workspace:, import_strategy: :stubbed, fallback_to_stubbed: true,
-                   maintain_directory_structure: true)
+                   maintain_directory_structure: true, patches_dir: nil)
     described_class.new(
       output_dir: out_dir,
       workspace_dir: workspace,
       keep_workspace: true,
       import_strategy: import_strategy,
       fallback_to_stubbed: fallback_to_stubbed,
-      maintain_directory_structure: maintain_directory_structure
+      maintain_directory_structure: maintain_directory_structure,
+      patches_dir: patches_dir
     ).run
+  end
+
+  def write_unified_patch(path, relpath:, removal:, addition:)
+    File.write(path, <<~PATCH)
+      diff --git a/#{relpath} b/#{relpath}
+      --- a/#{relpath}
+      +++ b/#{relpath}
+      @@ -1,2 +1,2 @@
+      -#{removal}
+      +#{addition}
+       endmodule
+    PATCH
   end
 
   it 'rejects unknown import strategies' do
@@ -45,6 +58,60 @@ RSpec.describe RHDL::Examples::AO486::Import::SystemImporter do
     expect do
       described_class.new(output_dir: nil)
     end.to raise_error(ArgumentError, /output_dir is required/)
+  end
+
+  it 'rejects a missing patches_dir' do
+    expect do
+      described_class.new(output_dir: '/tmp/rhdl_ao486_out', patches_dir: '/tmp/does_not_exist')
+    end.to raise_error(ArgumentError, /patches_dir not found/)
+  end
+
+  it 'applies an opt-in patch series to a staged source copy only' do
+    skip 'git not available' unless HdlToolchain.which('git')
+
+    Dir.mktmpdir('ao486_import_patch_root') do |root|
+      rtl_root = File.join(root, 'rtl')
+      FileUtils.mkdir_p(rtl_root)
+
+      source_path = File.join(rtl_root, 'system.v')
+      File.write(source_path, "module system;\nendmodule\n")
+
+      patches_dir = File.join(root, 'patches')
+      FileUtils.mkdir_p(patches_dir)
+      write_unified_patch(
+        File.join(patches_dir, '0001-system.patch'),
+        relpath: 'system.v',
+        removal: 'module system;',
+        addition: 'module system; wire patched_system;'
+      )
+      write_unified_patch(
+        File.join(patches_dir, '0002-system.patch'),
+        relpath: 'system.v',
+        removal: 'module system; wire patched_system;',
+        addition: 'module system; wire patched_system; wire patched_again;'
+      )
+
+      workspace = File.join(root, 'workspace')
+      importer = described_class.new(
+        source_path: source_path,
+        output_dir: File.join(root, 'out'),
+        workspace_dir: workspace,
+        keep_workspace: true,
+        patches_dir: patches_dir
+      )
+
+      diagnostics = []
+      command_log = []
+      prepared_source = importer.send(:prepare_import_source_tree, workspace, diagnostics: diagnostics, command_log: command_log)
+      expect(prepared_source[:success]).to be(true), diagnostics.join("\n")
+
+      prepared = importer.send(:prepare_workspace, workspace, strategy: :stubbed)
+      expect(File.read(source_path)).to eq("module system;\nendmodule\n")
+      expect(File.read(prepared[:staged_system_path])).to include('patched_system')
+      expect(File.read(prepared[:staged_system_path])).to include('patched_again')
+      expect(command_log.any? { |cmd| cmd.include?('git apply --check') }).to be(true)
+      expect(command_log.any? { |cmd| cmd.include?('git apply') && !cmd.include?('--check') }).to be(true)
+    end
   end
 
   it 'cleans all existing output directory contents' do

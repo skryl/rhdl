@@ -85,11 +85,13 @@ module RHDL
         end
 
         def compile_backend(verilog_file:, wrapper_file:, log_file: File.join(build_dir, 'build.log'))
-          case backend
-          when :verilator
-            compile_verilator(verilog_file: verilog_file, wrapper_file: wrapper_file, log_file: log_file)
-          else
-            raise ArgumentError, "Unsupported Verilog simulator backend: #{backend.inspect}"
+          with_build_lock do
+            case backend
+            when :verilator
+              compile_verilator(verilog_file: verilog_file, wrapper_file: wrapper_file, log_file: log_file)
+            else
+              raise ArgumentError, "Unsupported Verilog simulator backend: #{backend.inspect}"
+            end
           end
         end
 
@@ -115,6 +117,7 @@ module RHDL
           lib_path = shared_library_path
           lib_name = File.basename(lib_path)
           makefile_name = "#{verilator_prefix}.mk"
+          clean_verilator_obj_dir!
 
           verilate_cmd = [
             'verilator',
@@ -148,6 +151,15 @@ module RHDL
           end
 
           ensure_verilator_library_fresh
+        end
+
+        def clean_verilator_obj_dir!
+          Dir.glob(File.join(obj_dir, '*'), File::FNM_DOTMATCH).each do |path|
+            basename = File.basename(path)
+            next if ['.', '..'].include?(basename)
+
+            FileUtils.rm_rf(path)
+          end
         end
 
         def ensure_verilator_library_fresh
@@ -228,6 +240,16 @@ module RHDL
         def command_available?(cmd)
           ENV['PATH'].split(File::PATH_SEPARATOR).any? do |path|
             File.executable?(File.join(path, cmd))
+          end
+        end
+
+        def with_build_lock
+          FileUtils.mkdir_p(build_dir)
+          File.open(File.join(build_dir, '.verilator_build.lock'), File::RDWR | File::CREAT, 0o644) do |lock|
+            lock.flock(File::LOCK_EX)
+            yield
+          ensure
+            lock.flock(File::LOCK_UN) rescue nil
           end
         end
       end

@@ -549,7 +549,7 @@ end
 
 # AO486 CIRCT import/parity tasks
 namespace :ao486 do
-  desc "Import AO486 rtl/system.v via CIRCT and raise DSL to output_dir (required arg)"
+  desc "Import AO486 rtl/ao486/ao486.v via CIRCT and raise DSL to output_dir (required arg)"
   task :import, [:output_dir, :workspace_dir, :strategy, :fallback, :maintain_directory_structure, :clean] do |_t, args|
     load_ao486_tasks
     if args[:output_dir].to_s.strip.empty?
@@ -558,10 +558,10 @@ namespace :ao486 do
 
     import_strategy = args[:strategy]&.to_sym || RHDL::CLI::Tasks::AO486Task::DEFAULT_CLI_IMPORT_STRATEGY
     fallback_to_stubbed = if args[:fallback].nil?
-      true
-    else
-      !%w[0 false no off].include?(args[:fallback].to_s.strip.downcase)
-    end
+                            false
+                          else
+                            !%w[0 false no off].include?(args[:fallback].to_s.strip.downcase)
+                          end
     maintain_directory_structure = if args[:maintain_directory_structure].nil?
                                      true
                                    else

@@ -16,10 +16,8 @@ RSpec.describe 'AO486 CPU parity-package current write-trace parity', slow: true
     end
   end
 
-  def stable_programs
-    %i[reset_smoke prime_sieve game_of_life].map do |name|
-      RHDL::Examples::AO486::Import::CpuParityPrograms.fetch(name)
-    end
+  def parity_programs
+    RHDL::Examples::AO486::Import::CpuParityPrograms.all_programs
   end
 
   def require_import_tool!
@@ -48,7 +46,7 @@ RSpec.describe 'AO486 CPU parity-package current write-trace parity', slow: true
     backend
   end
 
-  it 'matches the selected IR backend and Verilator on the stable write-trace byte-stream subset', timeout: 900 do
+  it 'matches the selected IR backend and Verilator on the write-trace byte-stream surface for the named parity programs', timeout: 900 do
     require_import_tool!
     require_program_assembler!
     skip 'circt-opt not available' unless HdlToolchain.which('circt-opt')
@@ -68,7 +66,7 @@ RSpec.describe 'AO486 CPU parity-package current write-trace parity', slow: true
             work_dir: build_dir
           )
 
-          stable_programs.each do |program|
+          parity_programs.each do |program|
             program.load_into(ir_runtime)
             ir_trace = flatten_step_trace(ir_runtime.run(max_cycles: program.max_cycles))
             expect(ir_trace).not_to be_empty, "program=#{program.name}"

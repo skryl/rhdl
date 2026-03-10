@@ -1,5 +1,6 @@
 ## Status
 Completed (2026-03-06)
+Follow-up update - the original imported-design `ir_compiler` behavioral gate was later replaced in the default Game Boy import test flow by a Verilator-only parity check across three artifacts: staged source Verilog, normalized imported Verilog, and Verilog regenerated from raised RHDL. The imported compiler-backed gate remained operationally too expensive for routine local validation, so the default slow spec boundary was narrowed on March 9, 2026.
 
 ## Context
 Game Boy mixed HDL import coverage does not yet have the same end-to-end validation shape as AO486:

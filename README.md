@@ -683,11 +683,11 @@ bundle exec rake native:build          # Build native extensions
 bundle exec rake native:check          # Check extension availability
 
 # AO486 import/parity workflow (CLI)
-bundle exec rhdl examples ao486 import --out examples/ao486/hdl # Import rtl/system.v via CIRCT and regenerate examples/ao486/hdl
-bundle exec rhdl examples ao486 import --out examples/ao486/hdl --strategy stubbed # Force the older top-level stubbed baseline import
-bundle exec rhdl examples ao486 import --out examples/ao486/hdl --strategy tree --no-fallback --report tmp/ao486_import_report.json # Emit AO486 import report JSON without fallback
-bundle exec rhdl examples ao486 import --out examples/ao486/hdl --no-keep-structure # Keep flat output layout
-bundle exec rhdl examples ao486 import --out examples/ao486/hdl --no-strict # Keep output/report even if AO486 strict gate would fail
+bundle exec rhdl examples ao486 import --out examples/ao486/import # Import rtl/ao486/ao486.v via CIRCT and regenerate examples/ao486/import
+bundle exec rhdl examples ao486 import --out examples/ao486/import --strategy stubbed # Force a stubbed CPU-top baseline import
+bundle exec rhdl examples ao486 import --out examples/ao486/import --report tmp/ao486_import_report.json # Emit AO486 import report JSON for the default CPU-top tree import
+bundle exec rhdl examples ao486 import --out examples/ao486/import --no-keep-structure # Keep flat output layout
+bundle exec rhdl examples ao486 import --out examples/ao486/import --strict # Require the AO486 strict gate to pass
 bundle exec rhdl examples ao486 parity # Run bounded Verilog (Verilator) vs raised RHDL (IR) parity harness
 bundle exec rhdl examples ao486 verify # Run AO486 importer + parity + import-path verification specs
 
@@ -698,11 +698,12 @@ bundle exec rhdl examples sparc64 import --top sparc --top-file examples/sparc64
 
 # Game Boy import workflow
 bundle exec rhdl examples gameboy import # Import the Game Boy reference HDL and regenerate examples/gameboy/import
+bundle exec rhdl examples gameboy import --auto-stub-modules # Import with simulation-safe stubs for wrapper-disabled subsystems
 bundle exec ruby examples/gameboy/bin/gb import --workspace tmp/gameboy_ws --keep-workspace --no-strict # Keep import artifacts for debugging and allow non-strict import
 
 # AO486 import/parity workflow
-bundle exec rake "ao486:import[examples/ao486/hdl]" # Import rtl/system.v via CIRCT and regenerate examples/ao486/hdl
-bundle exec rake "ao486:import[examples/ao486/hdl,,stubbed,true]" # Same import with an explicit stubbed baseline override
+bundle exec rake "ao486:import[examples/ao486/import]" # Import rtl/ao486/ao486.v via CIRCT and regenerate examples/ao486/import
+bundle exec rake "ao486:import[examples/ao486/import,,stubbed,true]" # Same import with an explicit stubbed baseline override
 bundle exec rake ao486:parity          # Run bounded Verilog (Verilator) vs raised RHDL (IR) parity harness
 bundle exec rake ao486:verify          # Run AO486 importer + parity + import-path verification specs
 

@@ -43,12 +43,16 @@ bundle exec ruby examples/gameboy/bin/gb import --no-keep-structure
 # Keep the import workspace for debugging
 bundle exec ruby examples/gameboy/bin/gb import --workspace tmp/gameboy_ws --keep-workspace
 
+# Import with the simulation-safe stub profile used by runtime parity flows
+bundle exec ruby examples/gameboy/bin/gb import --auto-stub-modules
+
 # Allow the importer to write output/report artifacts without strict failure
 bundle exec ruby examples/gameboy/bin/gb import --no-strict
 ```
 
 The import command regenerates `examples/gameboy/import` by default and writes an import report to `examples/gameboy/import/import_report.json`.
 By default it preserves the original source directory structure in the raised RHDL output; use `--no-keep-structure` to keep the raised files flat.
+`--auto-stub-modules` opt-ins to the simulation-safe stub profile for wrapper-disabled subsystems (`gb_savestates`, `gb_statemanager`, `sprites_extra`). Leave it off for raw import/equivalence workflows.
 
 To run the imported Game Boy design through the same staged Verilator path used by the parity tests:
 

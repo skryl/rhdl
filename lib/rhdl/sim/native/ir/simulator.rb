@@ -66,6 +66,8 @@ module RHDL
         RUNNER_KIND_GAMEBOY = 3
         RUNNER_KIND_CPU8BIT = 4
         RUNNER_KIND_RISCV = 5
+        RUNNER_KIND_SPARC64 = 6
+        RUNNER_KIND_AO486 = 7
 
         RUNNER_MEM_OP_LOAD = 0
         RUNNER_MEM_OP_READ = 1
@@ -156,6 +158,8 @@ module RHDL
         SIM_BLOB_TRACE_TO_VCD = 2
         SIM_BLOB_TRACE_TAKE_LIVE_VCD = 3
         SIM_BLOB_GENERATED_CODE = 4
+        SIM_BLOB_SPARC64_WISHBONE_TRACE = 5
+        SIM_BLOB_SPARC64_UNMAPPED_ACCESSES = 6
 
         BACKEND_CONFIGS = {
           interpreter: {
@@ -527,6 +531,8 @@ module RHDL
           when RUNNER_KIND_GAMEBOY then :gameboy
           when RUNNER_KIND_CPU8BIT then :cpu8bit
           when RUNNER_KIND_RISCV then :riscv
+          when RUNNER_KIND_SPARC64 then :sparc64
+          when RUNNER_KIND_AO486 then :ao486
           else nil
           end
         end
@@ -557,6 +563,20 @@ module RHDL
 
           flags = mapped ? RUNNER_MEM_FLAG_MAPPED : 0
           runner_mem(RUNNER_MEM_OP_WRITE, RUNNER_MEM_SPACE_MAIN, offset, data, flags)
+        end
+
+        def runner_load_disk(data, offset = 0)
+          data = data.pack('C*') if data.is_a?(Array)
+          return false if data.nil? || data.bytesize.zero?
+
+          runner_mem(RUNNER_MEM_OP_LOAD, RUNNER_MEM_SPACE_DISK, offset, data, 0) > 0
+        end
+
+        def runner_read_disk(offset, length)
+          length = [length.to_i, 0].max
+          return [] if length.zero?
+
+          runner_mem_read(RUNNER_MEM_SPACE_DISK, offset, length, 0)
         end
 
         def runner_run_cycles(n, key_data = 0, key_ready = false)
@@ -607,6 +627,24 @@ module RHDL
         def runner_speaker_toggles
           return runner_probe(RUNNER_PROBE_SPEAKER_TOGGLES) if runner_kind == :mos6502
           @sim_runner_speaker_toggles || 0
+        end
+
+        def runner_sparc64_wishbone_trace
+          return [] unless runner_kind == :sparc64
+
+          parse_runner_json_blob(SIM_BLOB_SPARC64_WISHBONE_TRACE).map do |event|
+            event[:op] = event[:op].to_sym if event[:op].is_a?(String)
+            event
+          end
+        end
+
+        def runner_sparc64_unmapped_accesses
+          return [] unless runner_kind == :sparc64
+
+          parse_runner_json_blob(SIM_BLOB_SPARC64_UNMAPPED_ACCESSES).map do |fault|
+            fault[:op] = fault[:op].to_sym if fault[:op].is_a?(String)
+            fault
+          end
         end
 
         def runner_reset_speaker_toggles
@@ -678,16 +716,12 @@ module RHDL
 
         def runner_riscv_load_disk(data, offset = 0)
           return false unless riscv_mode?
-          data = data.pack('C*') if data.is_a?(Array)
-          return false if data.nil? || data.bytesize.zero?
-          runner_mem(RUNNER_MEM_OP_LOAD, RUNNER_MEM_SPACE_DISK, offset, data, 0) > 0
+          runner_load_disk(data, offset)
         end
 
         def runner_riscv_read_disk(offset, length)
           return [] unless riscv_mode?
-          length = [length.to_i, 0].max
-          return [] if length.zero?
-          runner_mem_read(RUNNER_MEM_SPACE_DISK, offset, length, 0)
+          runner_read_disk(offset, length)
         end
 
         # ====================================================================
@@ -848,6 +882,16 @@ module RHDL
           actual = @fn_sim_blob.call(@ctx, op, buf, len)
           return '' if actual.nil? || actual.to_i <= 0
           buf[0, actual]
+        end
+
+        def parse_runner_json_blob(op)
+          payload = core_blob(op)
+          return [] if payload.nil? || payload.empty?
+
+          parsed = JSON.parse(payload, symbolize_names: true)
+          parsed.is_a?(Array) ? parsed : []
+        rescue JSON::ParserError
+          []
         end
 
         def runner_mem(op, space, offset, data, flags)

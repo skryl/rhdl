@@ -387,6 +387,9 @@ rhdl examples gameboy --demo
 # Import the reference design into examples/gameboy/import
 rhdl examples gameboy import
 
+# Import with the simulation-safe Game Boy stub profile
+rhdl examples gameboy import --auto-stub-modules
+
 # Keep the mixed-import workspace for debugging
 rhdl examples gameboy import --workspace tmp/gameboy_ws --keep-workspace
 
@@ -407,6 +410,7 @@ rhdl examples gameboy import --no-strict
 | `--strategy STRATEGY` | Import strategy (default: `mixed`) |
 | `--keep-workspace` | Keep workspace artifacts after import |
 | `--[no-]clean` | Clean existing output directory contents before writing (default: enabled) |
+| `--[no-]auto-stub-modules` | Apply the simulation-safe Game Boy stub profile for wrapper-disabled subsystems |
 | `--[no-]strict` | Treat import issues as failures (default: enabled) |
 
 ---
@@ -425,30 +429,30 @@ rhdl examples ao486 <subcommand> [options]
 
 | Subcommand | Description |
 |------------|-------------|
-| `import` | Import `examples/ao486/reference/rtl/system.v` via CIRCT and regenerate raised DSL |
+| `import` | Import `examples/ao486/reference/rtl/ao486/ao486.v` via CIRCT and regenerate raised DSL |
 | `parity` | Run bounded Verilog (Verilator) vs raised RHDL parity harness |
 | `verify` | Run importer + parity + CIRCT import-path verification specs |
 
 ### Examples
 
 ```bash
-# Regenerate examples/ao486/hdl from rtl/system.v
-rhdl examples ao486 import --out examples/ao486/hdl
+# Regenerate examples/ao486/import from rtl/ao486/ao486.v
+rhdl examples ao486 import --out examples/ao486/import
 
-# Force the older top-level stubbed baseline import
-rhdl examples ao486 import --out examples/ao486/hdl --strategy stubbed
+# Force a stubbed CPU-top baseline import
+rhdl examples ao486 import --out examples/ao486/import --strategy stubbed
 
 # Keep flat output (disable directory mirroring)
-rhdl examples ao486 import --out examples/ao486/hdl --no-keep-structure
+rhdl examples ao486 import --out examples/ao486/import --no-keep-structure
 
 # Keep intermediate CIRCT/import workspace artifacts for debugging
-rhdl examples ao486 import --out examples/ao486/hdl --workspace tmp/ao486_ws --keep-workspace
+rhdl examples ao486 import --out examples/ao486/import --workspace tmp/ao486_ws --keep-workspace
 
-# Emit import diagnostics/report JSON without fallback
-rhdl examples ao486 import --out examples/ao486/hdl --strategy tree --no-fallback --report tmp/ao486_report.json
+# Emit import diagnostics/report JSON for the default CPU-top tree import
+rhdl examples ao486 import --out examples/ao486/import --report tmp/ao486_report.json
 
-# Allow the import report/output to be written without AO486 strict-gate failure
-rhdl examples ao486 import --out examples/ao486/hdl --no-strict
+# Require the AO486 strict gate to pass
+rhdl examples ao486 import --out examples/ao486/import --strict
 
 # Run bounded parity checks
 rhdl examples ao486 parity
@@ -461,15 +465,15 @@ rhdl examples ao486 verify
 
 | Option | Description |
 |--------|-------------|
-| `--source FILE` | Override source Verilog path (default: `examples/ao486/reference/rtl/system.v`) |
+| `--source FILE` | Override source Verilog path (default: `examples/ao486/reference/rtl/ao486/ao486.v`) |
 | `--out DIR` | Output directory for raised DSL (required) |
 | `--workspace DIR` | Workspace directory for intermediate artifacts |
 | `--report FILE` | Write AO486 import report JSON to this path |
-| `--top NAME` | Top module name override (default: `system`) |
+| `--top NAME` | Top module name override (default: `ao486`) |
 | `--strategy STRATEGY` | Import strategy: `tree` (default) or `stubbed` (force top-level baseline) |
-| `--[no-]fallback` | For `tree` strategy, fallback to `stubbed` if CIRCT import fails (default: enabled) |
+| `--[no-]fallback` | For `tree` strategy, fallback to `stubbed` if CIRCT import fails (default: disabled) |
 | `--[no-]keep-structure` | Keep source Verilog directory structure in output DSL paths (default: enabled) |
-| `--[no-]strict` | Treat importer/raise issues as failures and keep AO486 strict gate enabled (default: enabled) |
+| `--[no-]strict` | Treat importer/raise issues as failures and keep AO486 strict gate enabled (default: disabled) |
 | `--keep-workspace` | Keep workspace artifacts after import |
 | `--[no-]clean` | Clean existing output directory contents before writing (default: enabled) |
 

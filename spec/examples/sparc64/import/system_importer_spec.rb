@@ -32,8 +32,10 @@ RSpec.describe RHDL::Examples::SPARC64::Import::SystemImporter do
     lines.join("\n")
   end
 
-  def new_importer(output_dir:, workspace_dir:, maintain_directory_structure: true, top: nil, top_file: nil)
+  def new_importer(output_dir:, workspace_dir:, maintain_directory_structure: true, top: nil, top_file: nil, reference_root: nil,
+                   patches_dir: nil)
     described_class.new(
+      reference_root: reference_root || described_class::DEFAULT_REFERENCE_ROOT,
       output_dir: output_dir,
       workspace_dir: workspace_dir,
       keep_workspace: true,
@@ -41,6 +43,7 @@ RSpec.describe RHDL::Examples::SPARC64::Import::SystemImporter do
       maintain_directory_structure: maintain_directory_structure,
       top: top || described_class::DEFAULT_TOP,
       top_file: top_file || described_class::DEFAULT_TOP_FILE,
+      patches_dir: patches_dir,
       progress: ->(_msg) {}
     )
   end
@@ -86,7 +89,7 @@ RSpec.describe RHDL::Examples::SPARC64::Import::SystemImporter do
           result = new_importer(output_dir: out_dir, workspace_dir: workspace).run
 
           expect(result.success?).to be(true), diagnostic_summary(result)
-          expect(Array(result.diagnostics)).to eq([])
+          expect(Array(result.diagnostics)).to eq(['SPARC64 runtime primitive patch applied for dffrl_async'])
           expect(Array(result.raise_diagnostics)).to eq([])
           expect(result.staged_root).to eq(File.join(workspace, 'mixed_sources'))
           expect(result.staged_top_file).to eq(File.join(workspace, 'mixed_sources', 'Top', 'W1.v'))
@@ -130,6 +133,209 @@ RSpec.describe RHDL::Examples::SPARC64::Import::SystemImporter do
           report = JSON.parse(File.read(result.report_path))
           expect(Array(report['import_diagnostics'])).to eq([])
           expect(Array(report['raise_diagnostics'])).to eq([])
+        end
+      end
+    end
+  end
+
+  describe 'patch directory support' do
+    it 'rejects a missing patches_dir' do
+      expect do
+        described_class.new(output_dir: '/tmp/rhdl_sparc64_out', patches_dir: '/tmp/does_not_exist')
+      end.to raise_error(ArgumentError, /patches_dir not found/)
+    end
+
+    it 'applies patches_dir before staging mixed-source inputs' do
+      Dir.mktmpdir('sparc64_patch_root') do |reference_root|
+        Dir.mktmpdir('sparc64_patch_out') do |out_dir|
+          Dir.mktmpdir('sparc64_patch_ws') do |workspace|
+            FileUtils.mkdir_p(File.join(reference_root, 'Top'))
+            FileUtils.mkdir_p(File.join(reference_root, 'T1-common', 'include'))
+
+            File.write(
+              File.join(reference_root, 'Top', 'W1.v'),
+              <<~VERILOG
+                module W1(
+                  output wire out
+                );
+                  leaf leaf_inst(
+                    .out(out)
+                  );
+                endmodule
+              VERILOG
+            )
+            File.write(
+              File.join(reference_root, 'leaf.v'),
+              <<~VERILOG
+                module leaf(
+                  output wire out
+                );
+                  assign out = 1'b0;
+                endmodule
+              VERILOG
+            )
+
+            patches_dir = File.join(reference_root, 'patches')
+            FileUtils.mkdir_p(patches_dir)
+            File.write(
+              File.join(patches_dir, '0001-leaf.patch'),
+              <<~PATCH
+                diff --git a/leaf.v b/leaf.v
+                --- a/leaf.v
+                +++ b/leaf.v
+                @@ -1,5 +1,5 @@
+                 module leaf(
+                   output wire out
+                 );
+                -  assign out = 1'b0;
+                +  assign out = 1'b1;
+                 endmodule
+              PATCH
+            )
+
+            importer = new_importer(
+              reference_root: reference_root,
+              output_dir: out_dir,
+              workspace_dir: workspace,
+              top: 'W1',
+              top_file: File.join(reference_root, 'Top', 'W1.v'),
+              patches_dir: patches_dir
+            )
+
+            resolved = importer.resolve_sources(workspace: workspace)
+            bundle = importer.write_import_source_bundle(workspace: workspace, resolved: resolved)
+
+            expect(resolved[:module_files_by_name].fetch('leaf')).to eq(File.join(workspace, 'patched_reference', 'leaf.v'))
+            expect(File.read(File.join(bundle.fetch(:staged_root), 'leaf.v'))).to include("assign out = 1'b1;")
+          end
+        end
+      end
+    end
+
+    it 'applies patches_dir when the importer workspace lives under the main repo root' do
+      Dir.mktmpdir('sparc64_patch_repo_root') do |reference_root|
+        Dir.mktmpdir('sparc64_patch_repo_out') do |out_dir|
+          repo_tmp_root = File.expand_path('../../../../tmp', __dir__)
+          FileUtils.mkdir_p(repo_tmp_root)
+
+          Dir.mktmpdir('sparc64_patch_repo_ws', repo_tmp_root) do |workspace|
+            FileUtils.mkdir_p(File.join(reference_root, 'Top'))
+            FileUtils.mkdir_p(File.join(reference_root, 'T1-common', 'include'))
+
+            File.write(
+              File.join(reference_root, 'Top', 'W1.v'),
+              <<~VERILOG
+                module W1(
+                  output wire out
+                );
+                  leaf leaf_inst(
+                    .out(out)
+                  );
+                endmodule
+              VERILOG
+            )
+            File.write(
+              File.join(reference_root, 'leaf.v'),
+              <<~VERILOG
+                module leaf(
+                  output wire out
+                );
+                  assign out = 1'b0;
+                endmodule
+              VERILOG
+            )
+
+            patches_dir = File.join(reference_root, 'patches')
+            FileUtils.mkdir_p(patches_dir)
+            File.write(
+              File.join(patches_dir, '0001-leaf.patch'),
+              <<~PATCH
+                diff --git a/leaf.v b/leaf.v
+                --- a/leaf.v
+                +++ b/leaf.v
+                @@ -1,5 +1,5 @@
+                 module leaf(
+                   output wire out
+                 );
+                -  assign out = 1'b0;
+                +  assign out = 1'b1;
+                 endmodule
+              PATCH
+            )
+
+            importer = new_importer(
+              reference_root: reference_root,
+              output_dir: out_dir,
+              workspace_dir: workspace,
+              top: 'W1',
+              top_file: File.join(reference_root, 'Top', 'W1.v'),
+              patches_dir: patches_dir
+            )
+
+            resolved = importer.resolve_sources(workspace: workspace)
+            bundle = importer.write_import_source_bundle(workspace: workspace, resolved: resolved)
+
+            expect(resolved[:module_files_by_name].fetch('leaf')).to eq(File.join(workspace, 'patched_reference', 'leaf.v'))
+            expect(File.read(File.join(bundle.fetch(:staged_root), 'leaf.v'))).to include("assign out = 1'b1;")
+          end
+        end
+      end
+    end
+
+    it 'keeps a patched top file on its relative path without staging a duplicate basename copy' do
+      Dir.mktmpdir('sparc64_patch_top_root') do |reference_root|
+        Dir.mktmpdir('sparc64_patch_top_out') do |out_dir|
+          Dir.mktmpdir('sparc64_patch_top_ws') do |workspace|
+            FileUtils.mkdir_p(File.join(reference_root, 'os2wb'))
+            FileUtils.mkdir_p(File.join(reference_root, 'patches'))
+
+            File.write(
+              File.join(reference_root, 'os2wb', 's1_top.v'),
+              <<~VERILOG
+                module s1_top(
+                  output wire out
+                );
+                  assign out = 1'b0;
+                endmodule
+              VERILOG
+            )
+
+            File.write(
+              File.join(reference_root, 'patches', '0001-top.patch'),
+              <<~PATCH
+                diff --git a/os2wb/s1_top.v b/os2wb/s1_top.v
+                --- a/os2wb/s1_top.v
+                +++ b/os2wb/s1_top.v
+                @@ -1,5 +1,5 @@
+                 module s1_top(
+                   output wire out
+                 );
+                -  assign out = 1'b0;
+                +  assign out = 1'b1;
+                 endmodule
+              PATCH
+            )
+
+            importer = new_importer(
+              reference_root: reference_root,
+              output_dir: out_dir,
+              workspace_dir: workspace,
+              top: 's1_top',
+              top_file: File.join(reference_root, 'os2wb', 's1_top.v'),
+              patches_dir: File.join(reference_root, 'patches')
+            )
+
+            resolved = importer.resolve_sources(workspace: workspace)
+            bundle = importer.write_import_source_bundle(workspace: workspace, resolved: resolved)
+
+            expect(resolved[:top][:file]).to eq(File.join(workspace, 'patched_reference', 'os2wb', 's1_top.v'))
+            expect(bundle.fetch(:staged_top_file)).to eq(File.join(workspace, 'mixed_sources', 'os2wb', 's1_top.v'))
+            expect(File.read(bundle.fetch(:staged_top_file))).to include("assign out = 1'b1;")
+            expect(File).not_to exist(File.join(workspace, 'mixed_sources', 's1_top.v'))
+            expect(
+              bundle.fetch(:tool_args).count { |path| path.end_with?('/os2wb/s1_top.v') || path.end_with?('/s1_top.v') }
+            ).to eq(0)
+          end
         end
       end
     end

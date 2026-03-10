@@ -45,9 +45,80 @@ RSpec.describe RHDL::CLI::Tasks::AO486Task do
     end
   end
 
+  class FakeHeadlessRunner
+    class << self
+      attr_accessor :last_init_kwargs, :instance
+    end
+
+    attr_reader :calls
+
+    def initialize(**kwargs)
+      self.class.last_init_kwargs = kwargs
+      @calls = []
+      self.class.instance = self
+    end
+
+    def load_bios
+      @calls << :load_bios
+    end
+
+    def load_dos
+      @calls << :load_dos
+    end
+
+    def run
+      @calls << :run
+      :runner_state
+    end
+  end
+
   before do
     FakeImporter.last_init_kwargs = nil
     FakeImporter.next_result = nil
+    FakeHeadlessRunner.last_init_kwargs = nil
+    FakeHeadlessRunner.instance = nil
+  end
+
+  it 'runs default action through the AO486 headless runner surface' do
+    task = described_class.new(
+      action: :run,
+      mode: :verilator,
+      sim: :compile,
+      bios: true,
+      dos: true,
+      debug: true,
+      speed: 12_345,
+      headless: true,
+      cycles: 678,
+      headless_runner_class: FakeHeadlessRunner
+    )
+
+    expect(task.run).to eq(:runner_state)
+    expect(FakeHeadlessRunner.last_init_kwargs).to include(
+      mode: :verilator,
+      sim: :compile,
+      debug: true,
+      speed: 12_345,
+      headless: true,
+      cycles: 678
+    )
+    expect(FakeHeadlessRunner.instance.calls).to eq(%i[load_bios load_dos run])
+  end
+
+  it 'does not load optional software artifacts unless requested' do
+    task = described_class.new(
+      action: :run,
+      headless_runner_class: FakeHeadlessRunner
+    )
+
+    task.run
+    expect(FakeHeadlessRunner.last_init_kwargs).to include(
+      mode: described_class::DEFAULT_RUN_MODE,
+      sim: described_class::DEFAULT_RUN_SIM,
+      debug: false,
+      headless: false
+    )
+    expect(FakeHeadlessRunner.instance.calls).to eq([:run])
   end
 
   it 'runs import action and prints summary on success' do
@@ -77,10 +148,10 @@ RSpec.describe RHDL::CLI::Tasks::AO486Task do
     expect(FakeImporter.last_init_kwargs[:top]).to eq(FakeImporter::DEFAULT_TOP)
     expect(FakeImporter.last_init_kwargs[:clean_output]).to eq(true)
     expect(FakeImporter.last_init_kwargs[:import_strategy]).to eq(:tree)
-    expect(FakeImporter.last_init_kwargs[:fallback_to_stubbed]).to eq(true)
+    expect(FakeImporter.last_init_kwargs[:fallback_to_stubbed]).to eq(false)
     expect(FakeImporter.last_init_kwargs[:maintain_directory_structure]).to eq(true)
     expect(FakeImporter.last_init_kwargs[:format_output]).to eq(false)
-    expect(FakeImporter.last_init_kwargs[:strict]).to eq(true)
+    expect(FakeImporter.last_init_kwargs[:strict]).to eq(false)
     expect(FakeImporter.last_init_kwargs[:progress]).to respond_to(:call)
   end
 
@@ -271,7 +342,7 @@ RSpec.describe RHDL::CLI::Tasks::AO486Task do
 
     task.run
     joined = captured.join(' ')
-    expect(joined).to include('spec/examples/ao486/import/system_importer_spec.rb')
+    expect(joined).to include('spec/examples/ao486/import/cpu_importer_spec.rb')
     expect(joined).to include('spec/examples/ao486/import/parity_spec.rb')
     expect(joined).to include('spec/rhdl/import/import_paths_spec.rb')
   end
