@@ -191,9 +191,6 @@ RSpec.describe '8-bit CPU arcilator_gpu complex parity' do
         opt_clean -purge
         abc -liberty "#{aigpdk_nomem_lib}"
         opt_clean -purge
-        techmap
-        abc -liberty "#{aigpdk_nomem_lib}"
-        opt_clean -purge
         write_verilog "#{netlist_path}"
       YOSYS
       File.write(yosys_script_path, yosys_script)

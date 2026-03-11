@@ -200,6 +200,7 @@ module RHDL
         def load_shared_library
           super
           load_optional_metrics_symbols
+          validate_sim_context!
         end
 
         def load_optional_metrics_symbols
@@ -387,8 +388,10 @@ module RHDL
 
         def build_config_signature
           {
-            'format' => 3,
+            'format' => 4,
             'arc_to_gpu_profile' => @arc_to_gpu_profile.to_s,
+            'build_dir' => build_dir,
+            'shared_lib_path' => shared_lib_path,
             'arc_to_gpu_env' => ARC_TO_GPU_BUILD_ENV_VARS.to_h { |name| [name, ENV[name].to_s] }
           }
         end
@@ -403,6 +406,7 @@ module RHDL
 
         def compile_metal_shader(metal_source_file:, metal_air_file:, metal_lib_file:, log_file:)
           module_cache_dir = File.join(build_dir, 'clang_module_cache')
+          FileUtils.rm_rf(module_cache_dir)
           FileUtils.mkdir_p(module_cache_dir)
           run_or_raise(
             [
@@ -465,6 +469,14 @@ module RHDL
           return 'no log output' unless File.exist?(log_file)
 
           File.readlines(log_file).last(count).join.strip
+        end
+
+        def validate_sim_context!
+          return unless !@sim_ctx || (@sim_ctx.respond_to?(:to_i) && @sim_ctx.to_i.zero?)
+
+          raise LoadError,
+            'ArcilatorGPU simulation context initialization failed (sim_create returned null). ' \
+            'Check the generated Metal library path and GPU toolchain compatibility.'
         end
 
         def cpp_ident(name)
@@ -579,6 +591,7 @@ module RHDL
             #import <Foundation/Foundation.h>
             #import <Metal/Metal.h>
             #include <CoreFoundation/CoreFoundation.h>
+            #include <dlfcn.h>
             #include <cstdint>
             #include <cstring>
             #include <cstdlib>
@@ -592,7 +605,8 @@ module RHDL
             static const uint32_t PC_SLOT_WIDTH = #{pc_width}u;
             static const int32_t REGFILE_BASE_SLOT = #{regfile_base_slot};
             static const uint32_t REGFILE_LENGTH = #{regfile_length}u;
-            static NSString* const kMetallibPath = @#{metallib_path.dump};
+            static NSString* const kMetallibFilename = @#{File.basename(metallib_path).dump};
+            static NSString* const kMetallibFallbackPath = @#{metallib_path.dump};
             static NSString* const kKernelName = @#{kernel_name.dump};
             using RhdlStateScalar = #{state_scalar_cpp_type};
 
@@ -637,6 +651,19 @@ module RHDL
                 ((uint32_t)mem[(a + 1u) & mask] << 8u) |
                 ((uint32_t)mem[(a + 2u) & mask] << 16u) |
                 ((uint32_t)mem[(a + 3u) & mask] << 24u);
+            }
+
+            static NSString* resolveMetallibPath() {
+              Dl_info info;
+              if (dladdr((const void*)&resolveMetallibPath, &info) != 0 && info.dli_fname) {
+                NSString* dylibPath = [NSString stringWithUTF8String:info.dli_fname];
+                NSString* candidate = [[dylibPath stringByDeletingLastPathComponent]
+                  stringByAppendingPathComponent:kMetallibFilename];
+                if ([[NSFileManager defaultManager] fileExistsAtPath:candidate]) {
+                  return candidate;
+                }
+              }
+              return kMetallibFallbackPath;
             }
 
             @interface #{objc_sim_class} : NSObject
@@ -698,7 +725,12 @@ module RHDL
               NSURL* libURL = [NSURL fileURLWithPath:metallibPath];
               self.library = [self.device newLibraryWithURL:libURL error:&error];
               if (!self.library) {
-                fprintf(stderr, "[riscv-arcilator-gpu] failed to load metallib: %s\\n", error.localizedDescription.UTF8String);
+                fprintf(
+                  stderr,
+                  "[riscv-arcilator-gpu] failed to load metallib %s: %s\\n",
+                  metallibPath.UTF8String,
+                  error.localizedDescription.UTF8String
+                );
                 return nil;
               }
 
@@ -873,7 +905,7 @@ module RHDL
                 uint32_t resolvedInstanceCount = resolve_instance_count();
                 SimContext* ctx = new SimContext();
                 ctx->sim = [[#{objc_sim_class} alloc]
-                  initWithMetallibPath:kMetallibPath
+                  initWithMetallibPath:resolveMetallibPath()
                            kernelName:kKernelName
                            stateCount:STATE_COUNT
                      stateScalarBytes:STATE_SCALAR_BYTES

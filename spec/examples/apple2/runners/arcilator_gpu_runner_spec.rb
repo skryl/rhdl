@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require 'spec_helper'
+require 'tmpdir'
 require_relative '../../../../examples/apple2/utilities/runners/arcilator_gpu_runner'
 
 RSpec.describe RHDL::Examples::Apple2::ArcilatorGpuRunner do
@@ -50,6 +51,37 @@ RSpec.describe RHDL::Examples::Apple2::ArcilatorGpuRunner do
         simulator_type: :hdl_arcilator_gpu,
         native: true
       )
+    end
+  end
+
+  describe '#build_arcilator_gpu_simulation' do
+    it 'clears the clang module cache before compiling the Metal shader' do
+      Dir.mktmpdir('apple2-arcilator-gpu-runner-spec') do |dir|
+        runner = described_class.allocate
+        runner.instance_variable_set(:@instance_count, 1)
+
+        allow(runner).to receive(:build_dir).and_return(dir)
+        allow(runner).to receive(:shared_lib_path).and_return(File.join(dir, 'libapple2_arcilator_gpu_sim.dylib'))
+        allow(runner).to receive(:export_firrtl)
+        allow(runner).to receive(:write_wrapper)
+        allow(runner).to receive(:link_shared_library)
+        allow(runner).to receive(:load_shared_library) do
+          runner.instance_variable_set(:@sim_ctx, Object.new)
+        end
+        allow(runner).to receive(:run_or_raise)
+        allow(RHDL::Codegen::FIRRTL::ArcToGpuLowering).to receive(:lower)
+        allow(FileUtils).to receive(:mkdir_p).and_call_original
+        allow(FileUtils).to receive(:rm_rf).and_call_original
+
+        module_cache_dir = File.join(dir, 'clang_module_cache')
+        FileUtils.mkdir_p(module_cache_dir)
+        File.write(File.join(module_cache_dir, 'stale.pcm'), 'stale')
+
+        runner.send(:build_arcilator_gpu_simulation)
+
+        expect(FileUtils).to have_received(:rm_rf).with(module_cache_dir)
+        expect(File.exist?(File.join(module_cache_dir, 'stale.pcm'))).to be(false)
+      end
     end
   end
 end

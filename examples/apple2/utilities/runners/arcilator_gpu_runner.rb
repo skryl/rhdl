@@ -155,6 +155,7 @@ module RHDL
           )
 
           module_cache_dir = File.join(build_dir, 'clang_module_cache')
+          FileUtils.rm_rf(module_cache_dir)
           FileUtils.mkdir_p(module_cache_dir)
           run_or_raise(
             [

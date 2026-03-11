@@ -56,6 +56,7 @@ lib/rhdl/codegen/ir/sim/ir_compiler/*.json
 # HDL build artifacts (Verilator/Arcilator for example systems)
 .hdl_build/
 /examples/8bit/.gem_metal_cpu8bit/
+/examples/apple2/.gem_metal_apple2/
 /examples/riscv/.gem_metal_riscv/
 
 # Submodule trees

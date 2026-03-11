@@ -89,32 +89,6 @@ RSpec.describe 'Rakefile interface' do
       Rake::Task['bench:native'].invoke('cpu8bit')
     end
 
-    it 'bench:native :gem_metal_cpu8bit scope invokes BenchmarkTask with type: :gem_metal_cpu8bit and cycles' do
-      task_instance = instance_double(RHDL::CLI::Tasks::BenchmarkTask)
-      allow(task_instance).to receive(:run)
-
-      expect(RHDL::CLI::Tasks::BenchmarkTask).to receive(:new) do |opts|
-        expect(opts[:type]).to eq(:gem_metal_cpu8bit)
-        expect(opts[:cycles]).to be_a(Integer)
-        task_instance
-      end
-
-      Rake::Task['bench:native'].invoke('gem_metal_cpu8bit')
-    end
-
-    it 'bench:native :gem_metal_apple2 scope invokes BenchmarkTask with type: :gem_metal_apple2 and cycles' do
-      task_instance = instance_double(RHDL::CLI::Tasks::BenchmarkTask)
-      allow(task_instance).to receive(:run)
-
-      expect(RHDL::CLI::Tasks::BenchmarkTask).to receive(:new) do |opts|
-        expect(opts[:type]).to eq(:gem_metal_apple2)
-        expect(opts[:cycles]).to be_a(Integer)
-        task_instance
-      end
-
-      Rake::Task['bench:native'].invoke('gem_metal_apple2')
-    end
-
     it 'bench:web scope riscv invokes BenchmarkTask with type: :web_riscv and cycles' do
       task_instance = instance_double(RHDL::CLI::Tasks::BenchmarkTask)
       allow(task_instance).to receive(:run)

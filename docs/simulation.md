@@ -644,7 +644,9 @@ RHDL_BENCH_LANES=128 RHDL_BENCH_CYCLES=1000000 rake bench:native[gates]
 
 # 8-bit CPU FastHarness benchmark
 rake bench:native[cpu8bit]
-rake bench:native[cpu8bit,5000000]  # 5M cycles
+rake bench:native[cpu8bit,5000000]  # 5M cycles, includes GemMetal by default
+RHDL_BENCH_BACKENDS=gem_metal rake bench:native[cpu8bit,5000000]  # GemMetal only
+RHDL_CPU8BIT_ARCILATOR_GPU_INSTANCES=8 rake bench:native[cpu8bit,5000000]  # ArcilatorGPU throughput mode
 
 # MOS6502 CPU benchmark
 rake bench:native[mos6502]
@@ -652,7 +654,13 @@ rake bench:native[mos6502,5000000]  # 5M cycles
 
 # Apple II full system benchmark
 rake bench:native[apple2]
-rake bench:native[apple2,2000000]  # 2M cycles
+rake bench:native[apple2,2000000]  # 2M cycles, includes GemMetal by default
+RHDL_BENCH_BACKENDS=gem_metal rake bench:native[apple2,2000000]  # GemMetal only
+
+# RISC-V single-cycle benchmark
+rake bench:native[riscv]
+rake bench:native[riscv,500000]  # includes GemMetal by default
+RHDL_BENCH_BACKENDS=gem_metal rake bench:native[riscv,500000]  # GemMetal only
 
 # Legacy alias removed (use bench scopes)
 
@@ -666,6 +674,8 @@ rake spec:bench[mos6502,20] # MOS6502 tests
 rake spec:bench:timing      # Per-file timing
 rake spec:bench:quick       # Category summary
 ```
+
+GemMetal is part of the default native backend set for CPU8bit, Apple II, and RISC-V. Set `RHDL_BENCH_BACKENDS` to restrict the runners; `gem` remains an alias for `gem_metal`. On RISC-V, the GemMetal path benchmarks an MMU-off synthesized core netlist via `metal_dummy_test`; it does not load xv6 images.
 
 ### Programmatic Benchmarking
 

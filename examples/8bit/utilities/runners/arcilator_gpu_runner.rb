@@ -19,6 +19,7 @@ module RHDL
       #   -> clang/llc object -> C++ shim .so/.dylib -> Fiddle
       class ArcilatorGpuRunner
         BUILD_DIR = File.expand_path('../../.arcilator_gpu_build', __dir__)
+        MAX_INSTANCE_COUNT = 1024
 
         REQUIRED_TOOLS = %w[firtool arcilator mlir-opt spirv-cross].freeze
         GPU_OPTION_PATTERNS = [
@@ -43,7 +44,7 @@ module RHDL
           zero_flag_out
         ].freeze
 
-        attr_reader :backend
+        attr_reader :backend, :instance_count
 
         def self.status
           missing_tools = REQUIRED_TOOLS.reject { |tool| command_available?(tool) }
@@ -102,8 +103,9 @@ module RHDL
           []
         end
 
-        def initialize
+        def initialize(instances: nil)
           @backend = :arcilator_gpu
+          @instance_count = normalize_instance_count(instances)
           @gpu_info = self.class.ensure_available!
           @gpu_option_tokens = @gpu_info[:gpu_option_tokens]
           build_simulation
@@ -121,6 +123,10 @@ module RHDL
 
         def runner_kind
           :cpu8bit
+        end
+
+        def runner_parallel_instances
+          @instance_count
         end
 
         def evaluate
@@ -212,6 +218,13 @@ module RHDL
           self.class.command_available?(tool)
         end
 
+        def normalize_instance_count(instances)
+          raw = instances || ENV['RHDL_CPU8BIT_ARCILATOR_GPU_INSTANCES'] || ENV['RHDL_BENCH_ARCILATOR_GPU_INSTANCES']
+          value = raw.to_i
+          value = 1 if value <= 0
+          [value, MAX_INSTANCE_COUNT].min
+        end
+
         def build_simulation
           FileUtils.mkdir_p(BUILD_DIR)
 
@@ -221,15 +234,30 @@ module RHDL
           state_file = File.join(BUILD_DIR, 'cpu8bit_state.json')
           obj_file = File.join(BUILD_DIR, 'cpu8bit_arcgpu.o')
           wrapper_file = File.join(BUILD_DIR, 'cpu8bit_arcgpu_wrapper.cpp')
+          runner_file = __FILE__
 
-          needs_rebuild = !File.exist?(shared_lib_path)
+          firrtl_changed = write_file_if_changed(
+            fir_file,
+            RHDL::Codegen::CIRCT::FIRRTL.generate(RHDL::HDL::CPU::CPU.to_flat_ir(top_name: 'cpu8bit'))
+          )
 
-          if needs_rebuild
-            export_firrtl(fir_file)
+          codegen_needed = firrtl_changed
+          codegen_needed ||= !File.exist?(mlir_file) || !File.exist?(ll_file) || !File.exist?(state_file) || !File.exist?(obj_file)
+          codegen_needed ||= File.exist?(obj_file) && File.mtime(runner_file) > File.mtime(obj_file)
+
+          if codegen_needed
             compile_with_arcilator(fir_file, mlir_file, ll_file, state_file, obj_file)
-            write_wrapper(wrapper_file, state_file)
-            link_shared_library(wrapper_file, obj_file, shared_lib_path)
           end
+
+          wrapper_changed = write_wrapper(wrapper_file, state_file)
+
+          needs_link = !File.exist?(shared_lib_path)
+          needs_link ||= codegen_needed || wrapper_changed
+          needs_link ||= File.mtime(obj_file) > File.mtime(shared_lib_path) if File.exist?(shared_lib_path)
+          needs_link ||= File.mtime(wrapper_file) > File.mtime(shared_lib_path) if File.exist?(shared_lib_path)
+          needs_link ||= File.mtime(runner_file) > File.mtime(shared_lib_path) if File.exist?(shared_lib_path)
+
+          link_shared_library(wrapper_file, obj_file, shared_lib_path) if needs_link
         end
 
         def export_firrtl(path)
@@ -325,7 +353,9 @@ module RHDL
           raise LoadError, "Missing required CPU8bit signals in arcilator state: #{missing.join(', ')}" unless missing.empty?
 
           defines = []
+          defines << "#define MAX_INSTANCE_COUNT #{MAX_INSTANCE_COUNT}"
           defines << "#define STATE_SIZE #{mod.fetch('numStateBytes')}"
+          defines << '#define MEMORY_SIZE 65536'
           offsets.each do |name, offset|
             defines << "#define #{offset_define(name)} #{offset}"
           end
@@ -346,14 +376,16 @@ module RHDL
             #include <cstdint>
             #include <cstring>
             #include <cstdlib>
+            #include <cstddef>
 
             extern "C" void #{mod.fetch('name')}_eval(void* state);
 
             #{defines.join("\n")}
 
             struct SimContext {
-              uint8_t state[STATE_SIZE];
-              uint8_t memory[65536];
+              unsigned int instance_count;
+              uint8_t* states;
+              uint8_t* memories;
             };
 
             static inline void set_u8(uint8_t* s, int o, uint8_t v) { s[o] = v; }
@@ -364,45 +396,69 @@ module RHDL
             static inline uint32_t get_u32(uint8_t* s, int o) { uint32_t v; memcpy(&v, &s[o], 4); return v; }
             static inline void set_bit(uint8_t* s, int o, uint8_t v) { s[o] = v & 1; }
             static inline uint8_t get_bit(uint8_t* s, int o) { return s[o] & 1; }
+            static inline unsigned int clamp_instance_count(unsigned int requested) {
+              if (requested == 0) return 1;
+              if (requested > MAX_INSTANCE_COUNT) return MAX_INSTANCE_COUNT;
+              return requested;
+            }
+            static inline uint8_t* state_for(SimContext* ctx, unsigned int instance_index) {
+              return ctx->states + (static_cast<size_t>(instance_index) * STATE_SIZE);
+            }
+            static inline uint8_t* memory_for(SimContext* ctx, unsigned int instance_index) {
+              return ctx->memories + (static_cast<size_t>(instance_index) * MEMORY_SIZE);
+            }
 
             extern "C" {
-            void* sim_create(void) {
+            void* sim_create(unsigned int requested_instances) {
               SimContext* ctx = new SimContext();
-              memset(ctx->state, 0, sizeof(ctx->state));
-              memset(ctx->memory, 0, sizeof(ctx->memory));
-              set_bit(ctx->state, OFF_CLK, 0);
-              set_bit(ctx->state, OFF_RST, 1);
-              #{mod.fetch('name')}_eval(ctx->state);
+              ctx->instance_count = clamp_instance_count(requested_instances);
+              ctx->states = new uint8_t[static_cast<size_t>(ctx->instance_count) * STATE_SIZE];
+              ctx->memories = new uint8_t[static_cast<size_t>(ctx->instance_count) * MEMORY_SIZE];
+              for (unsigned int inst_i = 0; inst_i < ctx->instance_count; ++inst_i) {
+                uint8_t* state = state_for(ctx, inst_i);
+                uint8_t* memory = memory_for(ctx, inst_i);
+                memset(state, 0, STATE_SIZE);
+                memset(memory, 0, MEMORY_SIZE);
+                set_bit(state, OFF_CLK, 0);
+                set_bit(state, OFF_RST, 1);
+                #{mod.fetch('name')}_eval(state);
+              }
               return ctx;
             }
 
             void sim_destroy(void* sim) {
-              delete static_cast<SimContext*>(sim);
+              SimContext* ctx = static_cast<SimContext*>(sim);
+              if (!ctx) return;
+              delete[] ctx->states;
+              delete[] ctx->memories;
+              delete ctx;
             }
 
             void sim_eval(void* sim) {
               SimContext* ctx = static_cast<SimContext*>(sim);
-              #{mod.fetch('name')}_eval(ctx->state);
+              for (unsigned int inst_i = 0; inst_i < ctx->instance_count; ++inst_i) {
+                #{mod.fetch('name')}_eval(state_for(ctx, inst_i));
+              }
             }
 
-            static inline unsigned int run_cycles_internal(SimContext* ctx, unsigned int n) {
+            static inline unsigned int run_cycles_internal(uint8_t* state, uint8_t* memory, unsigned int n) {
               for (unsigned int i = 0; i < n; ++i) {
-                if (get_bit(ctx->state, OFF_HALTED)) {
+                if (get_bit(state, OFF_HALTED)) {
                   return i;
                 }
 
-                set_bit(ctx->state, OFF_CLK, 0);
-                #{mod.fetch('name')}_eval(ctx->state);
+                set_bit(state, OFF_CLK, 0);
+                #{mod.fetch('name')}_eval(state);
 
-                uint16_t addr = get_u16(ctx->state, OFF_MEM_ADDR) & 0xFFFF;
-                if (get_bit(ctx->state, OFF_MEM_WRITE_EN)) {
-                  ctx->memory[addr] = get_u8(ctx->state, OFF_MEM_DATA_OUT);
+                uint16_t addr = get_u16(state, OFF_MEM_ADDR) & 0xFFFF;
+                if (get_bit(state, OFF_MEM_WRITE_EN)) {
+                  memory[addr] = get_u8(state, OFF_MEM_DATA_OUT);
                 }
-                set_u8(ctx->state, OFF_MEM_DATA_IN, ctx->memory[addr]);
+                set_u8(state, OFF_MEM_DATA_IN, memory[addr]);
 
-                set_bit(ctx->state, OFF_CLK, 1);
-                #{mod.fetch('name')}_eval(ctx->state);
-                if (get_bit(ctx->state, OFF_HALTED)) {
+                set_bit(state, OFF_CLK, 1);
+                #{mod.fetch('name')}_eval(state);
+                if (get_bit(state, OFF_HALTED)) {
                   return i + 1;
                 }
               }
@@ -411,55 +467,74 @@ module RHDL
 
             void sim_reset(void* sim) {
               SimContext* ctx = static_cast<SimContext*>(sim);
-              set_bit(ctx->state, OFF_RST, 1);
-              run_cycles_internal(ctx, 1);
-              set_bit(ctx->state, OFF_RST, 0);
-              #{mod.fetch('name')}_eval(ctx->state);
+              for (unsigned int inst_i = 0; inst_i < ctx->instance_count; ++inst_i) {
+                uint8_t* state = state_for(ctx, inst_i);
+                set_bit(state, OFF_RST, 1);
+                run_cycles_internal(state, memory_for(ctx, inst_i), 1);
+                set_bit(state, OFF_RST, 0);
+                #{mod.fetch('name')}_eval(state);
+              }
             }
 
             void sim_poke(void* sim, const char* name, unsigned int value) {
               SimContext* ctx = static_cast<SimContext*>(sim);
-              #{poke_cases.join("\n  else ")}
+              for (unsigned int inst_i = 0; inst_i < ctx->instance_count; ++inst_i) {
+                uint8_t* state = state_for(ctx, inst_i);
+                #{poke_cases.join("\n    else ")}
+              }
             }
 
             unsigned int sim_peek(void* sim, const char* name) {
               SimContext* ctx = static_cast<SimContext*>(sim);
+              uint8_t* state = state_for(ctx, 0);
               #{peek_cases.join("\n  ")}
               return 0;
             }
 
             unsigned int sim_runner_load_memory(void* sim, const unsigned char* data, unsigned int len, unsigned int offset) {
               SimContext* ctx = static_cast<SimContext*>(sim);
-              unsigned int loaded = 0;
-              for (unsigned int i = 0; i < len; ++i) {
-                unsigned int addr = (offset + i) & 0xFFFF;
-                ctx->memory[addr] = data[i];
-                loaded++;
+              for (unsigned int inst_i = 0; inst_i < ctx->instance_count; ++inst_i) {
+                uint8_t* memory = memory_for(ctx, inst_i);
+                for (unsigned int i = 0; i < len; ++i) {
+                  unsigned int addr = (offset + i) & 0xFFFF;
+                  memory[addr] = data[i];
+                }
               }
-              return loaded;
+              return len;
             }
 
             unsigned int sim_runner_read_memory(void* sim, unsigned int offset, unsigned int len, unsigned char* out) {
               SimContext* ctx = static_cast<SimContext*>(sim);
+              uint8_t* memory = memory_for(ctx, 0);
               for (unsigned int i = 0; i < len; ++i) {
                 unsigned int addr = (offset + i) & 0xFFFF;
-                out[i] = ctx->memory[addr];
+                out[i] = memory[addr];
               }
               return len;
             }
 
             unsigned int sim_runner_write_memory(void* sim, unsigned int offset, const unsigned char* data, unsigned int len) {
               SimContext* ctx = static_cast<SimContext*>(sim);
-              for (unsigned int i = 0; i < len; ++i) {
-                unsigned int addr = (offset + i) & 0xFFFF;
-                ctx->memory[addr] = data[i];
+              for (unsigned int inst_i = 0; inst_i < ctx->instance_count; ++inst_i) {
+                uint8_t* memory = memory_for(ctx, inst_i);
+                for (unsigned int i = 0; i < len; ++i) {
+                  unsigned int addr = (offset + i) & 0xFFFF;
+                  memory[addr] = data[i];
+                }
               }
               return len;
             }
 
             unsigned int sim_runner_run_cycles(void* sim, unsigned int n) {
               SimContext* ctx = static_cast<SimContext*>(sim);
-              return run_cycles_internal(ctx, n);
+              unsigned int completed = n;
+              for (unsigned int inst_i = 0; inst_i < ctx->instance_count; ++inst_i) {
+                unsigned int inst_completed = run_cycles_internal(state_for(ctx, inst_i), memory_for(ctx, inst_i), n);
+                if (inst_i == 0 || inst_completed < completed) {
+                  completed = inst_completed;
+                }
+              }
+              return completed;
             }
             }
           CPP
@@ -473,31 +548,31 @@ module RHDL
 
         def setter_expr(offset_macro, width_bits, source_value)
           if width_bits <= 1
-            "set_bit(ctx->state, #{offset_macro}, #{source_value})"
+            "set_bit(state, #{offset_macro}, #{source_value})"
           elsif width_bits <= 8
-            "set_u8(ctx->state, #{offset_macro}, static_cast<uint8_t>(#{source_value}))"
+            "set_u8(state, #{offset_macro}, static_cast<uint8_t>(#{source_value}))"
           elsif width_bits <= 16
-            "set_u16(ctx->state, #{offset_macro}, static_cast<uint16_t>(#{source_value}))"
+            "set_u16(state, #{offset_macro}, static_cast<uint16_t>(#{source_value}))"
           else
-            "set_u32(ctx->state, #{offset_macro}, static_cast<uint32_t>(#{source_value}))"
+            "set_u32(state, #{offset_macro}, static_cast<uint32_t>(#{source_value}))"
           end
         end
 
         def getter_expr(offset_macro, width_bits)
           if width_bits <= 1
-            "get_bit(ctx->state, #{offset_macro})"
+            "get_bit(state, #{offset_macro})"
           elsif width_bits <= 8
-            "get_u8(ctx->state, #{offset_macro})"
+            "get_u8(state, #{offset_macro})"
           elsif width_bits <= 16
-            "get_u16(ctx->state, #{offset_macro})"
+            "get_u16(state, #{offset_macro})"
           else
-            "get_u32(ctx->state, #{offset_macro})"
+            "get_u32(state, #{offset_macro})"
           end
         end
 
         def load_library
           @lib = Fiddle.dlopen(shared_lib_path)
-          @fn_sim_create = Fiddle::Function.new(@lib['sim_create'], [], Fiddle::TYPE_VOIDP)
+          @fn_sim_create = Fiddle::Function.new(@lib['sim_create'], [Fiddle::TYPE_UINT], Fiddle::TYPE_VOIDP)
           @fn_sim_destroy = Fiddle::Function.new(@lib['sim_destroy'], [Fiddle::TYPE_VOIDP], Fiddle::TYPE_VOID)
           @fn_sim_eval = Fiddle::Function.new(@lib['sim_eval'], [Fiddle::TYPE_VOIDP], Fiddle::TYPE_VOID)
           @fn_sim_reset = Fiddle::Function.new(@lib['sim_reset'], [Fiddle::TYPE_VOIDP], Fiddle::TYPE_VOID)
@@ -524,7 +599,9 @@ module RHDL
             Fiddle::TYPE_UINT
           )
 
-          @ctx = @fn_sim_create.call
+          @ctx = @fn_sim_create.call(@instance_count)
+          raise LoadError, 'CPU8bit ArcilatorGPU simulation context initialization failed' if !@ctx || @ctx.to_i.zero?
+
           ObjectSpace.define_finalizer(self, self.class.finalizer(@fn_sim_destroy, @ctx))
         end
 
@@ -552,6 +629,15 @@ module RHDL
           else
             Array(data).pack('C*')
           end
+        end
+
+        def write_file_if_changed(path, content)
+          if File.exist?(path) && File.read(path) == content
+            return false
+          end
+
+          File.write(path, content)
+          true
         end
 
         def last_log_lines(path, count: 8)

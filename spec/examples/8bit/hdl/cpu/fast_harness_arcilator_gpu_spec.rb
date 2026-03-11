@@ -11,6 +11,7 @@ RSpec.describe RHDL::HDL::CPU::FastHarness do
       backend: :arcilator_gpu,
       runner_mode?: true,
       runner_kind: :cpu8bit,
+      runner_parallel_instances: 1,
       poke: true,
       evaluate: true
     )
@@ -75,5 +76,12 @@ RSpec.describe RHDL::HDL::CPU::FastHarness do
     harness = described_class.new(nil, sim: :arcilator_gpu)
     expect(harness.run_cycles(64, batch_size: 16)).to eq(0)
     expect(harness.halted).to be(true)
+  end
+
+  it 'reports runner parallel instances in arcilator_gpu mode' do
+    allow(sim).to receive(:runner_parallel_instances).and_return(8)
+
+    harness = described_class.new(nil, sim: :arcilator_gpu)
+    expect(harness.parallel_instances).to eq(8)
   end
 end
