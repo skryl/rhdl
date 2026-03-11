@@ -50,6 +50,8 @@ const POST_INIT_IVT_START_EIP: u64 = 0x8BF3;
 const POST_INIT_IVT_END_EIP: u64 = 0x8C03;
 const POST_INIT_IVT_RETURN_START_EIP: u64 = 0xE0CC;
 const POST_INIT_IVT_RETURN_END_EIP: u64 = 0xE0D4;
+const DOS_POST_INIT_HELPER_START_EIP: u64 = 0x1080;
+const DOS_POST_INIT_HELPER_END_EIP: u64 = 0x10EE;
 const POST_INIT_IVT_VECTOR_COUNT: usize = 120;
 const POST_INIT_IVT_DEFAULT_SEGMENT: u16 = 0xF000;
 const POST_INIT_IVT_DEFAULT_HANDLER: u16 = 0xFF53;
@@ -237,6 +239,7 @@ pub struct Ao486Extension {
     dos_int1a_result_dx: u16,
     dos_int1a_result_flags: u8,
     keyboard_queue: VecDeque<u16>,
+    keyboard_scan_queue: VecDeque<u8>,
     text_dirty: bool,
     prev_io_read_do: bool,
     prev_io_write_do: bool,
@@ -353,6 +356,7 @@ impl Ao486Extension {
             dos_int1a_result_dx: 0,
             dos_int1a_result_flags: 0,
             keyboard_queue: VecDeque::new(),
+            keyboard_scan_queue: VecDeque::new(),
             text_dirty: false,
             prev_io_read_do: false,
             prev_io_write_do: false,
@@ -466,6 +470,7 @@ impl Ao486Extension {
         self.dos_int1a_result_dx = 0;
         self.dos_int1a_result_flags = 0;
         self.keyboard_queue.clear();
+        self.keyboard_scan_queue.clear();
         self.text_dirty = false;
         self.prev_io_read_do = false;
         self.prev_io_write_do = false;
@@ -600,6 +605,10 @@ impl Ao486Extension {
 
     pub fn dos_int13_dx_probe(&self) -> u64 {
         self.dos_int13_dx as u64
+    }
+
+    pub fn dos_int13_es_probe(&self) -> u64 {
+        self.dos_int13_es as u64
     }
 
     pub fn dos_int10_state_probe(&self) -> u64 {
@@ -940,6 +949,8 @@ impl Ao486Extension {
                 let value = self.signal(core, idx) as u64;
                 if (POST_INIT_IVT_START_EIP..=POST_INIT_IVT_END_EIP).contains(&value)
                     || (POST_INIT_IVT_RETURN_START_EIP..=POST_INIT_IVT_RETURN_END_EIP).contains(&value)
+                    || (DOS_POST_INIT_HELPER_START_EIP..=DOS_POST_INIT_HELPER_END_EIP)
+                        .contains(&value)
                 {
                     Some(value)
                 } else {
@@ -951,6 +962,8 @@ impl Ao486Extension {
                     let value = self.signal(core, idx) as u64;
                     if (POST_INIT_IVT_START_EIP..=POST_INIT_IVT_END_EIP).contains(&value)
                         || (POST_INIT_IVT_RETURN_START_EIP..=POST_INIT_IVT_RETURN_END_EIP).contains(&value)
+                        || (DOS_POST_INIT_HELPER_START_EIP..=DOS_POST_INIT_HELPER_END_EIP)
+                            .contains(&value)
                     {
                         Some(value)
                     } else {
@@ -1011,6 +1024,9 @@ impl Ao486Extension {
         self.pic_slave_mask = 0x9F;
         self.pic_master_pending = 0;
         self.pic_master_in_service = 0;
+        self.pit_control = 0x36;
+        self.pit_low_byte = None;
+        self.set_pit_reload(0);
         self.post_init_ivt_seeded = true;
     }
 
@@ -1037,13 +1053,13 @@ impl Ao486Extension {
 
     fn read_io_byte(&mut self, address: u16) -> u8 {
         match address {
-            0x0060 => 0x00,
+            0x0060 => self.read_keyboard_data_port(),
             0x0061 => 0x20,
             // Match the reference ps2 RTL reset state:
             // bit4=1 (keyboard inhibit), bit3=1 (last write was command),
             // bit2=0 (system flag cleared), bit1=0 (input buffer empty),
-            // bit0=0 (output buffer empty).
-            0x0064 => 0x18,
+            // bit0 reflects whether a queued key is waiting on port 0x60.
+            0x0064 => self.keyboard_status_port(),
             0x0070 => self.cmos_index & 0x7F,
             0x0071 => self.cmos[(self.cmos_index & 0x7F) as usize],
             0x0020 => self.pic_master_pending,
@@ -1192,15 +1208,27 @@ impl Ao486Extension {
 
     fn execute_dos_int13_request(&mut self) {
         let function = ((self.dos_int13_ax >> 8) & 0x00FF) as u8;
+        let drive = self.normalize_dos_floppy_drive((self.dos_int13_dx & 0x00FF) as u8);
         self.dos_int13_result_bx = self.dos_int13_bx;
         self.dos_int13_result_cx = self.dos_int13_cx;
         self.dos_int13_result_dx = self.dos_int13_dx;
         self.dos_int13_result_flags = 0;
         match function {
             0x00 => {
+                let Some(drive) = drive else {
+                    self.dos_int13_result_ax = 0x0100;
+                    self.dos_int13_result_flags = 1;
+                    self.write_bios_diskette_result_bytes(0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00);
+                    return;
+                };
+
                 self.dos_int13_result_ax = 0;
                 self.dos_int13_result_flags = 0;
-                self.memory.insert(0x0441, 0);
+                self.write_bios_diskette_result_bytes(0x00, 0x20, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00);
+                self.write_bios_floppy_current_cylinder(drive, 0);
+                self.fdc_current_cylinder = 0;
+                self.fdc_last_st0 = 0x20;
+                self.fdc_last_pcn = 0;
             }
             0x01 => {
                 self.dos_int13_result_ax = self.execute_dos_int13_read_status();
@@ -1236,8 +1264,8 @@ impl Ao486Extension {
         let buffer = ((self.dos_int13_es as usize) << 4).saturating_add(self.dos_int13_bx as usize);
         let cl = (self.dos_int13_cx & 0x00FF) as u8;
         let ch = ((self.dos_int13_cx >> 8) & 0x00FF) as u8;
-        let Some(_drive) = self.normalize_dos_floppy_drive((self.dos_int13_dx & 0x00FF) as u8) else {
-            self.memory.insert(0x0441, 0x01);
+        let Some(drive) = self.normalize_dos_floppy_drive((self.dos_int13_dx & 0x00FF) as u8) else {
+            self.write_bios_diskette_result_bytes(0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00);
             self.dos_int13_result_flags = 1;
             return 0x0100;
         };
@@ -1255,7 +1283,7 @@ impl Ao486Extension {
         // boot media instead of spinning on a synthetic "drive not ready"
         // error.
         if count == 0 || head >= FLOPPY_HEADS || sector == 0 || sector > FLOPPY_SECTORS_PER_TRACK {
-            self.memory.insert(0x0441, 0x01);
+            self.write_bios_diskette_result_bytes(0x01, 0x00, 0x00, 0x00, cylinder as u8, head as u8, sector as u8, 0);
             self.dos_int13_result_flags = 1;
             return 0x0100;
         }
@@ -1269,11 +1297,40 @@ impl Ao486Extension {
             self.memory.insert((buffer + index) as u64, value);
         }
 
-        self.memory.insert(0x0441, 0x00);
-        self.memory.insert(0x0494, cylinder as u8);
+        let end_sector = sector.saturating_add(count.saturating_sub(1)) as u8;
+        let st0 = 0x20 | ((head as u8) & 0x01);
+        self.write_bios_diskette_result_bytes(0x00, st0, 0x00, 0x00, cylinder as u8, head as u8, end_sector, 0x02);
+        self.write_bios_floppy_current_cylinder(drive, cylinder as u8);
         self.fdc_current_cylinder = cylinder as u8;
+        self.fdc_last_st0 = st0;
+        self.fdc_last_pcn = self.fdc_current_cylinder;
         self.dos_int13_result_flags = 0;
         count as u16
+    }
+
+    fn write_bios_diskette_result_bytes(
+        &mut self,
+        status: u8,
+        st0: u8,
+        st1: u8,
+        st2: u8,
+        cylinder: u8,
+        head: u8,
+        sector: u8,
+        size_code: u8,
+    ) {
+        self.memory.insert(0x0441, status);
+        self.memory.insert(0x0442, st0);
+        self.memory.insert(0x0443, st1);
+        self.memory.insert(0x0444, st2);
+        self.memory.insert(0x0445, cylinder);
+        self.memory.insert(0x0446, head);
+        self.memory.insert(0x0447, sector);
+        self.memory.insert(0x0448, size_code);
+    }
+
+    fn write_bios_floppy_current_cylinder(&mut self, drive: u8, cylinder: u8) {
+        self.memory.insert(0x0494 + drive as u64, cylinder);
     }
 
     fn execute_dos_int13_get_parameters(&mut self) -> u16 {
@@ -1423,7 +1480,7 @@ impl Ao486Extension {
         let function = ((self.dos_int16_ax >> 8) & 0x00FF) as u8;
         match function {
             0x00 | 0x10 => {
-                if let Some(key) = self.keyboard_queue.pop_front() {
+                if let Some(key) = self.pop_keyboard_word() {
                     self.dos_int16_result_ax = key;
                     self.dos_int16_result_flags = 1;
                 }
@@ -1740,7 +1797,31 @@ impl Ao486Extension {
             return false;
         };
         self.keyboard_queue.push_back(key);
+        self.keyboard_scan_queue.push_back((key >> 8) as u8);
+        self.raise_irq(1);
         true
+    }
+
+    fn pop_keyboard_word(&mut self) -> Option<u16> {
+        let word = self.keyboard_queue.pop_front()?;
+        self.keyboard_scan_queue.pop_front();
+        Some(word)
+    }
+
+    fn read_keyboard_data_port(&mut self) -> u8 {
+        let Some(scan) = self.keyboard_scan_queue.pop_front() else {
+            return 0x00;
+        };
+        self.keyboard_queue.pop_front();
+        scan
+    }
+
+    fn keyboard_status_port(&self) -> u8 {
+        if self.keyboard_scan_queue.is_empty() {
+            0x18
+        } else {
+            0x19
+        }
     }
 
     fn ascii_to_bios_key(&self, byte: u8) -> Option<u16> {

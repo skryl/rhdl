@@ -95,6 +95,14 @@ where
     parse_signed_signal_value(&value).map_err(D::Error::custom)
 }
 
+pub fn deserialize_integer_text<'de, D>(deserializer: D) -> Result<String, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let value = Value::deserialize(deserializer)?;
+    integer_text(&value).map_err(D::Error::custom)
+}
+
 pub fn parse_signal_value(value: &Value) -> Result<SignalValue, String> {
     let text = integer_text(value)?;
     if let Some(stripped) = text.strip_prefix('-') {

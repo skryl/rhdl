@@ -60,6 +60,24 @@ Each program must live in DRAM, execute through the real `s1_top` Wishbone maste
 7. The current IR-side blocker is no longer just cold compile latency:
    - compiler-backed `S1Top` currently fails before simulation starts because the imported design still contains real over-`128`-bit state, starting with `145`-bit CPX literals in `os2wb` and reaching widths of `1440` bits in LSU paths
    - `IrRunner` now raises that blocker explicitly instead of surfacing a later compact-JSON parse failure
+7a. The raw-width blocker was narrower than it looked:
+   - `IrRunner` was checking the raw flattened CIRCT IR, but the actual compiler input first goes through runtime normalization with `compact_exprs: true`
+   - after that normalization, the imported `S1Top` runtime payload still contains over-`128`-bit state but no longer contains non-zero over-`128`-bit literals
+   - the runner width gate has now been aligned with that normalized runtime payload, and the focused SPARC64 runner spec covering a raw-overwide-but-runtime-safe slice/mux path is green
+7b. The current IR-side functional blocker is now post-reset runtime behavior:
+   - on the compiler backend `:auto` path, the imported `S1Top` now releases the reset chain correctly (`cluster_grst_l`, `ifu__grst_l`, and `rstff_q` all go high)
+   - however by cycle `500` the IR run still shows zero acknowledged Wishbone traffic and zero mailbox progress, while the staged Verilator run has already emitted `122` acknowledged low-address writes starting at cycle `134`
+   - normalized runtime expressions for `os2wb_inst__cpx1_ready`, `os2wb_inst__wb_cycle`, and `os2wb_inst__wb_addr` are not constant-folded to zero and stay within the native `128`-bit ceiling (`max_width: 124`), so the remaining blocker now points at runtime evaluation of bridge/local state rather than exporter literal lowering
+7c. Runtime primitive semantics and stale generated bridge wiring have been tightened on the checked-in import tree:
+   - the imported `T1-common/u1` cell shims for `buf`, `minbuf`, `inv`, `nand`, `nor`, `aoi`, `muxi`, and `soffm2` now implement real compiler-backed runtime behavior, with focused runtime specs green
+   - the most obvious stale importer-output bridge bugs in `lsu_qctl1`, `sparc_ifu_ifqctl`, and `sparc_ifu_fcl` have been patched away from hardwired zero outputs, with focused wiring regressions green
+   - despite those fixes, the checked-in import tree still shows zero acknowledged Wishbone traffic and zero mailbox progress by cycle `200` on compiler-backed `prime_sieve`
+7d. A cleaner fresh-import-tree path is now partially unblocked:
+   - compiler runtime-only support now parses and evaluates over-`128`-bit negative literals from runtime JSON, covered by a focused compiler spec
+   - after that fix, the fresh importer-generated `S1Top` no longer dies on overwide literal parsing, but it still fails before simulation because the compiler runtime-only path rejects over-`128`-bit memories
+   - the remaining fresh-tree blocker is narrow and concrete: two `130`-bit FIFO memories in `os2wb`
+     - `cpu__os2wb_inst__pcx_fifo_inst__mem`
+     - `cpu__os2wb_inst__pcx_fifo_inst1__mem`
 8. Cold compile latency remains a secondary IR-side issue for imported `S1Top`:
    - compiler codegen was reduced from roughly `70 MB / 1.13M` lines to roughly `48 MB / 840k` lines by removing dead generic tick-helper emission and chunked evaluate duplication for large plain cores
    - a cold `rustc` compile for that generated unit still runs for multiple minutes, so the compiler-backed integration path is not yet practical for the slow suite without further work

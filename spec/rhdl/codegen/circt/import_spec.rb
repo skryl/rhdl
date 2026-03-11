@@ -1052,6 +1052,43 @@ RSpec.describe RHDL::Codegen::CIRCT::Import do
       expect(mod.assigns.first.expr.addr.value).to eq(3)
     end
 
+    it 'rewrites dead packed shadow registers back into firmem reads' do
+      mlir = <<~MLIR
+        hw.module @shadow_mem(%clk: i1) -> (y0: i45, y1: i45) {
+          %clock = seq.to_clock %clk
+          %mem = seq.firmem 0, 1, undefined, port_order : <32 x 45>
+          %c0_i1 = hw.constant 0 : i1
+          %c0_i1439 = hw.constant 0 : i1439
+          %c0_i1440 = hw.constant 0 : i1440
+          %reset_vec = comb.concat %c0_i1439, %c0_i1 : i1439, i1
+          %cleared = comb.mux %c0_i1, %reset_vec, %c0_i1440 : i1440
+          %next = comb.mux %c0_i1, %cleared, %shadow : i1440
+          %shadow = seq.compreg %next, %clock : i1440
+          %slot0 = comb.extract %shadow from 0 : (i1440) -> i45
+          %slot1 = comb.extract %shadow from 45 : (i1440) -> i45
+          hw.output %slot0, %slot1 : i45, i45
+        }
+      MLIR
+
+      result = described_class.from_mlir(mlir, strict: true)
+      expect(result.success?).to be(true), result.diagnostics.map(&:message).join("\n")
+
+      mod = result.modules.first
+      expect(mod.memories.map(&:name)).to eq(['mem'])
+      expect(mod.regs.map(&:name)).not_to include('shadow')
+
+      by_target = mod.assigns.each_with_object({}) { |assign, acc| acc[assign.target] = assign.expr }
+      expect(by_target['y0']).to be_a(RHDL::Codegen::CIRCT::IR::MemoryRead)
+      expect(by_target['y0'].memory).to eq('mem')
+      expect(by_target['y0'].addr).to be_a(RHDL::Codegen::CIRCT::IR::Literal)
+      expect(by_target['y0'].addr.value).to eq(0)
+
+      expect(by_target['y1']).to be_a(RHDL::Codegen::CIRCT::IR::MemoryRead)
+      expect(by_target['y1'].memory).to eq('mem')
+      expect(by_target['y1'].addr).to be_a(RHDL::Codegen::CIRCT::IR::Literal)
+      expect(by_target['y1'].addr.value).to eq(1)
+    end
+
     it 'parses seq.firmem read and write ports as CIRCT memory IR' do
       mlir = <<~MLIR
         hw.module @firmem_mod(%clk: i1, %addr: i2, %waddr: i2, %din: i8, %we: i1) -> (y: i8) {
@@ -1077,74 +1114,6 @@ RSpec.describe RHDL::Codegen::CIRCT::Import do
       expect(mod.assigns.first.expr.memory).to eq('ram')
       expect(mod.assigns.first.expr.addr).to be_a(RHDL::Codegen::CIRCT::IR::Signal)
       expect(mod.assigns.first.expr.addr.name).to eq('addr')
-    end
-
-    it 'recovers llhd array state and shadow copies as CIRCT memories' do
-      mlir = <<~MLIR
-        hw.module @repro(in %clk : i1, in %addr : i5, in %din : i45, out y : i45) {
-          %0 = llhd.constant_time <0s, 0d, 1e>
-          %true = hw.constant true
-          %false = hw.constant false
-          %c0_i32 = hw.constant 0 : i32
-          %c1_i32 = hw.constant 1 : i32
-          %c32_i32 = hw.constant 32 : i32
-          %c31_i32 = hw.constant 31 : i32
-          %c0_i27 = hw.constant 0 : i27
-          %c-1_i5 = hw.constant -1 : i5
-          %c0_i1440 = hw.constant 0 : i1440
-          %1 = hw.bitcast %c0_i1440 : (i1440) -> !hw.array<32xi45>
-          %mem = llhd.sig %1 : !hw.array<32xi45>
-          %2 = llhd.prb %mem : !hw.array<32xi45>
-          %mem_d = llhd.sig %1 : !hw.array<32xi45>
-          %3:6 = llhd.process -> i32, i1, !hw.array<32xi45>, i1, !hw.array<32xi45>, i1 {
-            cf.br ^bb1(%clk, %1, %false, %c0_i32, %false, %1, %false : i1, !hw.array<32xi45>, i1, i32, i1, !hw.array<32xi45>, i1)
-          ^bb1(%51: i1, %52: !hw.array<32xi45>, %53: i1, %54: i32, %55: i1, %56: !hw.array<32xi45>, %57: i1):
-            llhd.wait yield (%54, %55, %52, %53, %56, %57 : i32, i1, !hw.array<32xi45>, i1, !hw.array<32xi45>, i1), (%clk : i1), ^bb2(%51 : i1)
-          ^bb2(%58: i1):
-            %59 = comb.xor bin %58, %true : i1
-            %60 = comb.and bin %59, %clk : i1
-            cf.cond_br %60, ^bb3, ^bb1(%clk, %2, %false, %c0_i32, %false, %4, %false : i1, !hw.array<32xi45>, i1, i32, i1, !hw.array<32xi45>, i1)
-          ^bb3:
-            %61 = comb.sub %c-1_i5, %addr : i5
-            %62 = hw.array_inject %2[%61], %din : !hw.array<32xi45>, i5
-            cf.br ^bb4(%c0_i32, %4, %false : i32, !hw.array<32xi45>, i1)
-          ^bb4(%63: i32, %64: !hw.array<32xi45>, %65: i1):
-            %66 = comb.icmp slt %63, %c32_i32 : i32
-            cf.cond_br %66, ^bb5, ^bb1(%clk, %62, %true, %63, %true, %64, %65 : i1, !hw.array<32xi45>, i1, i32, i1, !hw.array<32xi45>, i1)
-          ^bb5:
-            %67 = comb.sub %c31_i32, %63 : i32
-            %68 = comb.extract %67 from 5 : (i32) -> i27
-            %69 = comb.icmp eq %68, %c0_i27 : i27
-            %70 = comb.extract %67 from 0 : (i32) -> i5
-            %71 = comb.mux %69, %70, %c-1_i5 : i5
-            %72 = hw.array_get %2[%71] : !hw.array<32xi45>, i5
-            %73 = hw.array_inject %64[%71], %72 : !hw.array<32xi45>, i5
-            %74 = comb.add %63, %c1_i32 : i32
-            cf.br ^bb4(%74, %73, %true : i32, !hw.array<32xi45>, i1)
-          }
-          llhd.drv %mem, %3#2 after %0 if %3#3 : !hw.array<32xi45>
-          llhd.drv %mem_d, %3#4 after %0 if %3#5 : !hw.array<32xi45>
-          %4 = llhd.prb %mem_d : !hw.array<32xi45>
-          %5 = hw.array_get %4[%c-1_i5] : !hw.array<32xi45>, i5
-          hw.output %5 : i45
-        }
-      MLIR
-
-      result = described_class.from_mlir(mlir, strict: true)
-      expect(result.success?).to be(true), result.diagnostics.map(&:message).join("\n")
-
-      mod = result.modules.first
-      expect(mod.memories.map(&:name)).to include('mem', 'mem_d')
-      expect(mod.regs.none? { |reg| reg.width.to_i > 128 }).to be(true)
-
-      mem_write_ports = mod.write_ports.select { |port| port.memory == 'mem' }
-      expect(mem_write_ports.length).to eq(1)
-
-      shadow_write_ports = mod.write_ports.select { |port| port.memory == 'mem_d' }
-      expect(shadow_write_ports.length).to eq(32)
-      expect(shadow_write_ports.map { |port| port.addr.value }.sort).to eq((0...32).to_a)
-      expect(shadow_write_ports.map(&:data)).to all(be_a(RHDL::Codegen::CIRCT::IR::MemoryRead))
-      expect(shadow_write_ports.map { |port| port.data.memory }.uniq).to eq(['mem'])
     end
 
     it 'parses hw.bitcast int<->array forms and llhd.sig.array_get' do

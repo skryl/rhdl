@@ -121,6 +121,7 @@ module RHDL
         RUNNER_PROBE_AO486_DOS_INT13_BX = 26
         RUNNER_PROBE_AO486_DOS_INT13_CX = 27
         RUNNER_PROBE_AO486_DOS_INT13_DX = 28
+        RUNNER_PROBE_AO486_DOS_INT13_ES = 29
 
         SIM_CAP_SIGNAL_INDEX = 1 << 0
         SIM_CAP_FORCED_CLOCK = 1 << 1
@@ -771,7 +772,8 @@ module RHDL
           unpack_ao486_dos_state(runner_probe(RUNNER_PROBE_AO486_DOS_INT13_STATE), with_flags: true).merge(
             bx: runner_probe(RUNNER_PROBE_AO486_DOS_INT13_BX).to_i & 0xFFFF,
             cx: runner_probe(RUNNER_PROBE_AO486_DOS_INT13_CX).to_i & 0xFFFF,
-            dx: runner_probe(RUNNER_PROBE_AO486_DOS_INT13_DX).to_i & 0xFFFF
+            dx: runner_probe(RUNNER_PROBE_AO486_DOS_INT13_DX).to_i & 0xFFFF,
+            es: runner_probe(RUNNER_PROBE_AO486_DOS_INT13_ES).to_i & 0xFFFF
           )
         end
 

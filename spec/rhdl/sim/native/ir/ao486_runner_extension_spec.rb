@@ -59,6 +59,10 @@ RSpec.describe 'IR compiler AO486 runner extension' do
     RHDL::Sim::Native::IR.sim_json(build_io_read_harness_package(address: address), backend: :compiler)
   end
 
+  def io_read_once_harness_json(address: 0x61)
+    RHDL::Sim::Native::IR.sim_json(build_io_read_once_harness_package(address: address), backend: :compiler)
+  end
+
   def irq_harness_json
     RHDL::Sim::Native::IR.sim_json(build_irq_harness_package, backend: :compiler)
   end
@@ -257,6 +261,72 @@ RSpec.describe 'IR compiler AO486 runner extension' do
                     condition: io_read_done,
                     when_true: io_read_data,
                     when_false: latched_word,
+                    width: 32
+                  )
+                ),
+                ir::SeqAssign.new(
+                  target: :latched_done,
+                  expr: ir::Mux.new(
+                    condition: io_read_done,
+                    when_true: ir::Literal.new(value: 1, width: 1),
+                    when_false: latched_done,
+                    width: 1
+                  )
+                )
+              ]
+            )
+          ],
+          instances: [],
+          memories: [],
+          write_ports: [],
+          sync_read_ports: [],
+          parameters: {}
+        )
+      ]
+    )
+  end
+
+  def build_io_read_once_harness_package(address: 0x61)
+    latched_word = ir::Signal.new(name: :latched_word, width: 32)
+    latched_done = ir::Signal.new(name: :latched_done, width: 1)
+    io_read_data = ir::Signal.new(name: :io_read_data, width: 32)
+    io_read_done = ir::Signal.new(name: :io_read_done, width: 1)
+
+    ir::Package.new(
+      modules: [
+        ir::ModuleOp.new(
+          name: 'ao486',
+          ports: required_ir_ports + [
+            ir::Port.new(name: :observed_word, direction: :out, width: 32),
+            ir::Port.new(name: :observed_done, direction: :out, width: 1)
+          ],
+          nets: [],
+          regs: [
+            ir::Reg.new(name: :latched_word, width: 32, reset_value: 0),
+            ir::Reg.new(name: :latched_done, width: 1, reset_value: 0)
+          ],
+          assigns: io_read_harness_assigns(address: address) + [
+            ir::Assign.new(target: :observed_word, expr: latched_word),
+            ir::Assign.new(target: :observed_done, expr: latched_done)
+          ],
+          processes: [
+            ir::Process.new(
+              name: 'capture_first_io_read',
+              clocked: true,
+              clock: :clk,
+              sensitivity_list: [],
+              statements: [
+                ir::SeqAssign.new(
+                  target: :latched_word,
+                  expr: ir::Mux.new(
+                    condition: latched_done,
+                    when_true: latched_word,
+                    when_false: ir::Mux.new(
+                      condition: io_read_done,
+                      when_true: io_read_data,
+                      when_false: latched_word,
+                      width: 32
+                    ),
                     width: 32
                   )
                 ),
@@ -1811,6 +1881,41 @@ RSpec.describe 'IR compiler AO486 runner extension' do
     expect(sim.runner_ao486_last_io_write).to be_nil
   end
 
+  it 'reports a queued PS/2 output-buffer-ready status through IO port 0x64' do
+    sim = RHDL::Sim::Native::IR::Simulator.new(
+      io_read_harness_json(address: 0x64),
+      backend: :compiler,
+      skip_signal_widths: true,
+      retain_ir_json: false
+    )
+
+    expect(sim.runner_kind).to eq(:ao486)
+
+    result = sim.runner_run_cycles(3, 'd'.ord, true)
+
+    expect(result[:cycles_run]).to eq(3)
+    expect(sim.peek('observed_word')).to eq(0x19)
+    expect(sim.runner_ao486_last_io_read).to eq({ address: 0x64, length: 1 })
+  end
+
+  it 'returns a queued PS/2 scan code through IO port 0x60' do
+    sim = RHDL::Sim::Native::IR::Simulator.new(
+      io_read_once_harness_json(address: 0x60),
+      backend: :compiler,
+      skip_signal_widths: true,
+      retain_ir_json: false
+    )
+
+    expect(sim.runner_kind).to eq(:ao486)
+
+    result = sim.runner_run_cycles(3, 'd'.ord, true)
+
+    expect(result[:cycles_run]).to eq(3)
+    expect(sim.peek('observed_done')).to eq(1)
+    expect(sim.peek('observed_word')).to eq(0x20)
+    expect(sim.runner_ao486_last_io_read).to eq({ address: 0x60, length: 1 })
+  end
+
   it 'surfaces timer IRQs after PIT/PIC programming through the runner ABI' do
     sim = RHDL::Sim::Native::IR::Simulator.new(
       irq_harness_json,
@@ -1873,9 +1978,39 @@ RSpec.describe 'IR compiler AO486 runner extension' do
     expect(sim.peek('observed_flags')).to eq(0)
     expect(sim.runner_ao486_last_io_write).to eq({ address: 0x0EDA, length: 1, data: 0x0000_0000 })
     expect(sim.runner_ao486_dos_int13_state).to eq(
-      { ax: 0x0201, bx: 0x0000, cx: 0x0002, dx: 0x0000, result_ax: 0x0001, flags: 0 }
+      { ax: 0x0201, bx: 0x0000, cx: 0x0002, dx: 0x0000, es: 0x0060, result_ax: 0x0001, flags: 0 }
     )
     expect(sim.runner_read_memory(0x0600, 16, mapped: false)).to eq(stage_sector.first(16))
+  end
+
+  it 'records BIOS-compatible diskette controller result bytes for private INT 13h reads' do
+    sim = RHDL::Sim::Native::IR::Simulator.new(
+      dos_int13_harness_json(ax: 0x0202, bx: 0x0100, cx: 0x0205, es: 0x0080, dx: 0x0100),
+      backend: :compiler,
+      skip_signal_widths: true,
+      retain_ir_json: false
+    )
+
+    expect(sim.runner_kind).to eq(:ao486)
+
+    lba = ((2 * 2 + 1) * 18) + (0x05 - 1)
+    disk_image = Array.new((lba + 2) * 512, 0)
+    first_sector = Array.new(512) { |idx| (0x20 + idx) & 0xFF }
+    second_sector = Array.new(512) { |idx| (0x60 + idx) & 0xFF }
+    disk_image[lba * 512, 512] = first_sector
+    disk_image[(lba + 1) * 512, 512] = second_sector
+    expect(sim.runner_load_disk(disk_image, 0)).to be(true)
+
+    result = sim.runner_run_cycles(40)
+
+    expect(result[:cycles_run]).to eq(40)
+    expect(sim.peek('observed_done')).to eq(1)
+    expect(sim.peek('observed_word')).to eq(0x0002)
+    expect(sim.peek('observed_flags')).to eq(0)
+    expect(sim.runner_read_memory(0x0441, 8, mapped: false)).to eq([0x00, 0x21, 0x00, 0x00, 0x02, 0x01, 0x06, 0x02])
+    expect(sim.runner_read_memory(0x0494, 1, mapped: false)).to eq([0x02])
+    expect(sim.runner_read_memory(0x0900, 16, mapped: false)).to eq(first_sector.first(16))
+    expect(sim.runner_read_memory(0x0B00, 16, mapped: false)).to eq(second_sector.first(16))
   end
 
   it 'ignores CL high cylinder bits on floppy DOS bridge reads used by the FreeDOS loader trace' do

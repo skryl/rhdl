@@ -17,6 +17,7 @@ mod core;
 mod aot_generated;
 mod extensions;
 mod ffi;
+mod runtime_value;
 #[path = "../../common/signal_value.rs"]
 mod signal_value;
 mod vcd;

@@ -102,6 +102,23 @@ RSpec.describe RHDL::Examples::AO486::IrRunner, timeout: 30 do
     expect(runner.read_bytes(described_class::DOS_DISKETTE_PARAM_VECTOR_ADDR, 4, mapped: false)).to eq([0xDE, 0xEF, 0x00, 0xF0])
   end
 
+  it 'starts the BIOS timer tick path during the DOS shortcut handoff', slow: true, timeout: 180 do
+    skip 'IR Compiler not available' unless RHDL::Sim::Native::IR::COMPILER_AVAILABLE
+
+    runner = described_class.new(backend: :compile, headless: true)
+    runner.load_bios
+    runner.load_dos
+
+    4.times { runner.run(cycles: 25_000) }
+
+    ticks = runner.read_bytes(0x046C, 4, mapped: false)
+      .each_with_index
+      .sum { |byte, idx| byte << (8 * idx) }
+
+    expect(ticks).to be > 0
+    expect(runner.sim.runner_ao486_last_irq_vector).to eq(0x08)
+  end
+
   it 'enters the DOS boot-sector window after the BIOS handoff' do
     skip 'IR Compiler not available' unless RHDL::Sim::Native::IR::COMPILER_AVAILABLE
 
@@ -148,7 +165,7 @@ RSpec.describe RHDL::Examples::AO486::IrRunner, timeout: 30 do
     expect(runner.read_bytes(0x0600, 2, mapped: false)).to eq([0x61, 0x7C])
   end
 
-  it 'returns from the DOS INT 13h bridge back into the relocated boot loader fetch window' do
+  it 'returns from the DOS INT 13h bridge back into the relocated boot loader fetch window', timeout: 360 do
     skip 'IR Compiler not available' unless RHDL::Sim::Native::IR::COMPILER_AVAILABLE
 
     runner = described_class.new(backend: :compile, headless: true)
@@ -192,6 +209,42 @@ RSpec.describe RHDL::Examples::AO486::IrRunner, timeout: 30 do
     expect(runner.read_bytes(0x0900, 2, mapped: false)).to eq([0x00, 0x7C])
     expect(runner.read_bytes(0x0902, 1, mapped: false)).to eq([0x5A])
     expect(runner.peek('trace_wr_eip')).to be >= 0x7C70
+  end
+
+  it 'returns from DOS INT 13h when the read buffer overlaps the live boot stack', timeout: 90 do
+    skip 'IR Compiler not available' unless RHDL::Sim::Native::IR::COMPILER_AVAILABLE
+
+    runner = described_class.new(backend: :compile, headless: true)
+    runner.load_bios
+    runner.load_dos
+
+    base = described_class::DOS_RELOCATED_BOOT_SECTOR_ADDR + 0x5E
+    payload = [
+      0xFA,                   # cli
+      0xB8, 0xE0, 0x1F,       # mov ax, 0x1fe0
+      0x8E, 0xD0,             # mov ss, ax
+      0xBC, 0xA0, 0x7B,       # mov sp, 0x7ba0
+      0x31, 0xC0,             # xor ax, ax
+      0x8E, 0xD8,             # mov ds, ax
+      0xBB, 0x00, 0x00,       # mov bx, 0x0000
+      0xB8, 0x80, 0x27,       # mov ax, 0x2780
+      0x8E, 0xC0,             # mov es, ax
+      0xB8, 0x01, 0x02,       # mov ax, 0x0201
+      0xB9, 0x09, 0x09,       # mov cx, 0x0909
+      0xBA, 0x00, 0x00,       # mov dx, 0x0000
+      0xCD, 0x13,             # int 0x13
+      0xC6, 0x06, 0x00, 0x09, 0x5A, # mov byte [0x0900], 0x5a
+      0xEB, 0xFE              # jmp $
+    ]
+    payload.each_with_index do |byte, idx|
+      runner.write_memory(base + idx, byte)
+    end
+
+    runner.run(cycles: 5_000)
+
+    expect(runner.read_bytes(0x0900, 1, mapped: false)).to eq([0x5A])
+    expect(runner.peek('trace_wr_eip')).to be >= 0x7C7B
+    expect(runner.peek('pipeline_inst__decode_inst__eip')).to be >= 0x7C7B
   end
 
   it 'returns DOS INT 13h AH=08 geometry through the runner-local stub' do
@@ -341,6 +394,24 @@ RSpec.describe RHDL::Examples::AO486::IrRunner, timeout: 30 do
     expect(runner.read_bytes(0xB8000, 6, mapped: false)).to eq(['D'.ord, 0x07, 'O'.ord, 0x07, 'S'.ord, 0x07])
     expect(runner.read_bytes(RHDL::Examples::AO486::DisplayAdapter::CURSOR_BDA, 2, mapped: false)).to eq([0x03, 0x00])
     expect(runner.render_display).to include('DOS')
+  end
+
+  it 'renders the active hardware text page after syncing runtime windows' do
+    skip 'IR Compiler not available' unless RHDL::Sim::Native::IR::COMPILER_AVAILABLE
+
+    runner = described_class.new(backend: :compile, headless: true)
+    runner.load_bios
+    runner.run(cycles: 0)
+
+    page_base = RHDL::Examples::AO486::DisplayAdapter::TEXT_BASE +
+      RHDL::Examples::AO486::DisplayAdapter::BUFFER_SIZE
+    runner.sim.runner_write_memory(page_base, ['P'.ord, 0x07, '2'.ord, 0x07], mapped: false)
+    runner.sim.runner_write_memory(RHDL::Examples::AO486::DisplayAdapter::CURSOR_BDA + 2, [0x01, 0x00], mapped: false)
+    runner.sim.runner_write_memory(RHDL::Examples::AO486::DisplayAdapter::VIDEO_PAGE_BDA, [0x01], mapped: false)
+
+    runner.run(cycles: 0)
+
+    expect(runner.render_display.lines.first).to start_with('P_')
   end
 
   it 'consumes queued keyboard input through DOS INT 16h on the real runner path' do

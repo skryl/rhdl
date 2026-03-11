@@ -168,6 +168,7 @@ module RHDL
     wire :cpu_m1_n
     wire :cpu_mreq_n
     wire :cpu_clken
+    wire :const_one
 
     # Memory select signals
     wire :sel_timer
@@ -328,7 +329,10 @@ module RHDL
     port [:cpu, :m1_n] => :cpu_m1_n
     port [:cpu, :mreq_n] => :cpu_mreq_n
     port :cpu_clken => [:cpu, :clken]
+    port :const_one => [:cpu, :wait_n]
     port :irq_n => [:cpu, :int_n]
+    port :const_one => [:cpu, :nmi_n]
+    port :const_one => [:cpu, :busrq_n]
     port :is_gbc => [:cpu, :is_gbc]
     port :reset_n => [:cpu, :reset_n]
     port [:cpu, :debug_pc] => :debug_cpu_pc
@@ -435,6 +439,7 @@ module RHDL
     behavior do
       # Invert reset for CPU (active-low reset_n from active-high reset input)
       reset_n <= ~reset
+      const_one <= lit(1, width: 1)
 
       # Memory select signals (directly from gb.v lines 156-172)
       sel_timer <= (cpu_addr[15..4] == lit(0xFF0, width: 12)) & (cpu_addr[3..2] == lit(1, width: 2))

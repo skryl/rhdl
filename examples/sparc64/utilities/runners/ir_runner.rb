@@ -14,12 +14,13 @@ module RHDL
         include Integration
         COMPILER_MAX_SIGNAL_WIDTH = 128
 
-        attr_reader :sim, :clock_count, :backend
+        attr_reader :sim, :clock_count, :backend, :compiler_mode
 
         def initialize(backend: :compile, import_dir: nil, top: 'S1Top', component_class: nil,
                        sim_factory: nil, strict_runner_kind: true, trace_reader: nil, fault_reader: nil,
-                       fast_boot: false)
+                       fast_boot: false, compiler_mode: :auto)
           @backend = backend.to_sym
+          @compiler_mode = normalize_compiler_mode(compiler_mode)
           @component_class = component_class || Integration::ImportLoader.load_component_class(
             top: top,
             import_dir: import_dir,
@@ -55,7 +56,6 @@ module RHDL
           return nil unless result
 
           @clock_count += result[:cycles_run].to_i
-          refresh_runtime_state!
           result
         end
 
@@ -105,19 +105,22 @@ module RHDL
         def run_until_complete(max_cycles:, batch_cycles: 1_000)
           while clock_count < max_cycles.to_i
             run_cycles([batch_cycles.to_i, max_cycles.to_i - clock_count].min)
-            return completion_result if completed? || unmapped_accesses.any?
+            return completion_result if completed?
+
+            @unmapped_accesses = Array(@fault_reader.call(@sim))
+            return completion_result if @unmapped_accesses.any?
           end
 
           completion_result(timeout: true)
         end
 
         def wishbone_trace
-          refresh_runtime_state!
+          @wishbone_trace = Array(@trace_reader.call(@sim))
           Integration.normalize_wishbone_trace(@wishbone_trace)
         end
 
         def unmapped_accesses
-          refresh_runtime_state!
+          @unmapped_accesses = Array(@fault_reader.call(@sim))
           Array(@unmapped_accesses).dup
         end
 
@@ -125,9 +128,18 @@ module RHDL
 
         def build_simulator(component_class, backend)
           nodes = component_class.to_flat_circt_nodes
-          validate_compiler_width_support!(nodes) if backend.to_sym == :compile
-          json = RHDL::Sim::Native::IR.sim_json(nodes, backend: backend)
-          RHDL::Sim::Native::IR::Simulator.new(json, backend: backend)
+          with_compiler_env do
+            json = RHDL::Sim::Native::IR.sim_json(nodes, backend: backend)
+            RHDL::Sim::Native::IR::Simulator.new(json, backend: backend)
+          end
+        end
+
+        def normalize_runtime_modules_for_validation(nodes_or_package)
+          require 'rhdl/codegen/circt/runtime_json' unless defined?(RHDL::Codegen::CIRCT::RuntimeJSON)
+          RHDL::Codegen::CIRCT::RuntimeJSON.normalized_runtime_modules_from_input(
+            nodes_or_package,
+            compact_exprs: true
+          )
         end
 
         def validate_compiler_width_support!(nodes_or_package)
@@ -261,6 +273,27 @@ module RHDL
           end
         end
 
+        def normalize_compiler_mode(value)
+          mode = (value || :auto).to_sym
+          return mode if %i[auto rustc].include?(mode)
+
+          raise ArgumentError, "Unsupported SPARC64 compiler mode #{value.inspect}. Use :auto or :rustc."
+        end
+
+        def with_compiler_env
+          return yield unless backend.to_sym == :compile && compiler_mode == :rustc
+
+          previous = ENV['RHDL_IR_COMPILER_FORCE_RUSTC']
+          ENV['RHDL_IR_COMPILER_FORCE_RUSTC'] = '1'
+          yield
+        ensure
+          if previous.nil?
+            ENV.delete('RHDL_IR_COMPILER_FORCE_RUSTC')
+          else
+            ENV['RHDL_IR_COMPILER_FORCE_RUSTC'] = previous
+          end
+        end
+
         def ensure_sparc64_runner!
           return if @sim.respond_to?(:runner_kind) && @sim.runner_kind == :sparc64
 
@@ -274,8 +307,9 @@ module RHDL
         end
 
         def completion_result(timeout: false)
-          trace = wishbone_trace
-          faults = unmapped_accesses
+          refresh_runtime_state!
+          trace = Integration.normalize_wishbone_trace(@wishbone_trace)
+          faults = Array(@unmapped_accesses).dup
           {
             completed: completed?,
             timeout: timeout,

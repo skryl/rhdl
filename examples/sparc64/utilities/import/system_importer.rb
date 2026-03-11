@@ -965,11 +965,21 @@ module RHDL
 
               text = File.read(path)
               module_name = text[/def\s+self\.verilog_module_name.*?\n\s*["']([^"']+)["']/m, 1]
-              next path unless module_name == 'dffrl_async'
+              template = runtime_primitive_template_for(module_name)
+              next path unless template
 
-              File.write(path, dffrl_async_runtime_template)
+              File.write(path, template)
               diagnostics << "SPARC64 runtime primitive patch applied for #{module_name}"
               path
+            end
+          end
+
+          def runtime_primitive_template_for(module_name)
+            case module_name
+            when 'dffrl_async'
+              dffrl_async_runtime_template
+            when 'cluster_header'
+              cluster_header_runtime_template
             end
           end
 
@@ -1001,6 +1011,41 @@ module RHDL
 
                 behavior do
                   so <= 0
+                end
+              end
+            RUBY
+          end
+
+          def cluster_header_runtime_template
+            <<~RUBY
+              # frozen_string_literal: true
+
+              class ClusterHeader < RHDL::Sim::Component
+                def self.verilog_module_name
+                  "cluster_header"
+                end
+
+                input :gclk
+                input :cluster_cken
+                input :arst_l
+                input :grst_l
+                input :adbginit_l
+                input :gdbginit_l
+                input :si
+                input :se
+                output :dbginit_l
+                output :cluster_grst_l
+                output :rclk
+                output :so
+
+                behavior do
+                  # The SPARC64 runner pulses the top clock through explicit low/high
+                  # phases, so model the FPGA_SYN repeater as a low-phase-visible
+                  # passthrough instead of a synthesized negedge process.
+                  dbginit_l <= gdbginit_l
+                  cluster_grst_l <= grst_l
+                  rclk <= gclk
+                  so <= lit(0, width: 1)
                 end
               end
             RUBY

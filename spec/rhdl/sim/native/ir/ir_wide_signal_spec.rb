@@ -87,6 +87,41 @@ RSpec.describe 'IR native wide signal support' do
     ir::Package.new(modules: [top])
   end
 
+  def build_overwide_slice_probe_package
+    wide = ir::Signal.new(name: :wide_in, width: 256)
+
+    top = ir::ModuleOp.new(
+      name: 'overwide_slice_probe',
+      ports: [
+        ir::Port.new(name: :clk, direction: :in, width: 1),
+        ir::Port.new(name: :rst, direction: :in, width: 1),
+        ir::Port.new(name: :wide_in, direction: :in, width: 256),
+        ir::Port.new(name: :slice_above_128, direction: :out, width: 64),
+        ir::Port.new(name: :slice_low, direction: :out, width: 64)
+      ],
+      nets: [],
+      regs: [],
+      assigns: [
+        ir::Assign.new(
+          target: :slice_above_128,
+          expr: ir::Slice.new(base: wide, range: 191..128, width: 64)
+        ),
+        ir::Assign.new(
+          target: :slice_low,
+          expr: ir::Slice.new(base: wide, range: 63..0, width: 64)
+        )
+      ],
+      processes: [],
+      instances: [],
+      memories: [],
+      write_ports: [],
+      sync_read_ports: [],
+      parameters: {}
+    )
+
+    ir::Package.new(modules: [top])
+  end
+
   def run_probe(backend)
     json_payload = RHDL::Sim::Native::IR.sim_json(build_wide_probe_package, backend: backend)
 
@@ -165,6 +200,46 @@ RSpec.describe 'IR native wide signal support' do
     )
   end
 
+  def run_overwide_slice_probe(backend)
+    json_payload = RHDL::Sim::Native::IR.sim_json(build_overwide_slice_probe_package, backend: backend)
+
+    Dir.mktmpdir('ir_overwide_slice_probe') do |dir|
+      json_path = File.join(dir, 'overwide_slice_probe.json')
+      script_path = File.join(dir, 'probe.rb')
+      File.write(json_path, json_payload)
+      File.write(script_path, <<~RUBY)
+        require 'json'
+        require 'rhdl'
+
+        json_path = ARGV.fetch(0)
+        backend = ARGV.fetch(1).to_sym
+
+        sim = RHDL::Sim::Native::IR::Simulator.new(File.read(json_path), backend: backend)
+        sim.reset
+        sim.poke('rst', 0)
+        sim.poke('wide_in', 0x0123_4567_89AB_CDEF_FEDC_BA98_7654_3210)
+        sim.evaluate
+
+        puts JSON.generate(
+          slice_above_128: sim.peek('slice_above_128'),
+          slice_low: sim.peek('slice_low')
+        )
+      RUBY
+
+      stdout, stderr, status = Open3.capture3(
+        RbConfig.ruby,
+        '-Ilib',
+        script_path,
+        json_path,
+        backend.to_s,
+        chdir: File.expand_path('../../../../..', __dir__)
+      )
+
+      expect(status.success?).to be(true), stderr
+      JSON.parse(stdout, symbolize_names: true)
+    end
+  end
+
   it 'round-trips 128-bit signals on the interpreter backend', timeout: 0 do
     skip 'IR interpreter backend unavailable' unless RHDL::Sim::Native::IR::INTERPRETER_AVAILABLE
 
@@ -175,5 +250,14 @@ RSpec.describe 'IR native wide signal support' do
     skip 'IR JIT backend unavailable' unless RHDL::Sim::Native::IR::JIT_AVAILABLE
 
     expect_probe_to_round_trip_128_bits(:jit)
+  end
+
+  it 'zeros slices that start above bit 127 on the compiler backend', timeout: 0 do
+    skip 'IR compiler backend unavailable' unless RHDL::Sim::Native::IR::COMPILER_AVAILABLE
+
+    expect(run_overwide_slice_probe(:compiler)).to eq(
+      slice_above_128: 0,
+      slice_low: 0xFEDC_BA98_7654_3210
+    )
   end
 end

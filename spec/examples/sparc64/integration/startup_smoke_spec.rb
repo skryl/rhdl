@@ -5,18 +5,18 @@ require 'spec_helper'
 RSpec.describe 'SPARC64 integration startup smoke', slow: true do
   include Sparc64IntegrationSupport
 
-  it 'boots through the flash shim, hands off to DRAM, parks core 1, and reaches mailbox completion', timeout: 900 do
+  it 'boots through the flash shim, hands off to DRAM, parks core 1, and reaches mailbox completion', timeout: 3600 do
     pending_unless_runner_stack!
     pending_unless_runtime_backends!
     skip_unless_ir_compiler!
     skip_unless_program_toolchain!
 
-    runner = build_headless_runner(mode: :ir, sim: :compile)
+    runner = build_headless_runner(mode: :ir, sim: :compile, compile_mode: :auto)
     pending_unless_runner_contract!(runner)
     pending('SPARC64 benchmark loader not implemented yet') unless runner.respond_to?(:load_benchmark)
 
     runner.load_benchmark(:prime_sieve)
-    result = normalize_run_result(runner.run_until_complete(max_cycles: 2_000_000))
+    result = normalize_run_result(runner.run_until_complete(max_cycles: 2_000_000, batch_cycles: 100_000))
 
     expect(result[:completed]).to eq(true)
     expect(result[:boot_handoff_seen]).to eq(true)

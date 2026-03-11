@@ -10,6 +10,7 @@ use serde::Serialize;
 
 const FLASH_BOOT_BASE: u64 = 0x0000_0003_FFFF_C000;
 const PHYSICAL_ADDR_MASK: u64 = (1u64 << 59) - 1;
+const FAST_DRAM_LIMIT: usize = 16 * 1024 * 1024;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Sparc64WishboneRequest {
@@ -45,8 +46,9 @@ struct PendingResponse {
 }
 
 pub struct Sparc64Extension {
-    pub flash: HashMap<u64, u8>,
-    pub memory: HashMap<u64, u8>,
+    pub flash: Vec<u8>,
+    pub memory: Vec<u8>,
+    pub memory_sparse: HashMap<u64, u8>,
     pub trace: Vec<Sparc64WishboneTraceEvent>,
     pub unmapped_accesses: Vec<Sparc64Fault>,
 
@@ -63,6 +65,7 @@ pub struct Sparc64Extension {
     sel_o_idx: usize,
 
     pending_response: Option<PendingResponse>,
+    deferred_request: Option<Sparc64WishboneRequest>,
     reset_cycles_remaining: usize,
     cycle_count: u64,
 }
@@ -72,8 +75,9 @@ impl Sparc64Extension {
         let n = &core.name_to_idx;
 
         Self {
-            flash: HashMap::new(),
-            memory: HashMap::new(),
+            flash: Vec::new(),
+            memory: Vec::new(),
+            memory_sparse: HashMap::new(),
             trace: Vec::new(),
             unmapped_accesses: Vec::new(),
 
@@ -90,6 +94,7 @@ impl Sparc64Extension {
             sel_o_idx: idx(n, "wbm_sel_o"),
 
             pending_response: None,
+            deferred_request: None,
             reset_cycles_remaining: 4,
             cycle_count: 0,
         }
@@ -114,6 +119,7 @@ impl Sparc64Extension {
 
     pub fn reset_core(&mut self, core: &mut CoreSimulator) {
         self.pending_response = None;
+        self.deferred_request = None;
         self.trace.clear();
         self.unmapped_accesses.clear();
         self.reset_cycles_remaining = 4;
@@ -128,9 +134,14 @@ impl Sparc64Extension {
             return 0;
         }
         let base = canonical_bus_addr(offset as u64);
-        for (index, value) in data.iter().enumerate() {
-            self.flash.insert(base + index as u64, *value);
+        let Some(start) = self.flash_offset(base) else {
+            return 0;
+        };
+        let end = start + data.len();
+        if self.flash.len() < end {
+            self.flash.resize(end, 0);
         }
+        self.flash[start..end].copy_from_slice(data);
         data.len()
     }
 
@@ -140,7 +151,7 @@ impl Sparc64Extension {
         }
         let base = canonical_bus_addr(offset as u64);
         for (index, value) in data.iter().enumerate() {
-            self.memory.insert(base + index as u64, *value);
+            self.write_dram_byte(base + index as u64, *value);
         }
         data.len()
     }
@@ -174,13 +185,13 @@ impl Sparc64Extension {
                 if self.is_flash_addr(addr) {
                     return index;
                 }
-                self.memory.insert(addr, *value);
+                self.write_dram_byte(addr, *value);
             }
             return data.len();
         }
 
         for (index, value) in data.iter().enumerate() {
-            self.memory.insert(base + index as u64, *value);
+            self.write_dram_byte(base + index as u64, *value);
         }
         data.len()
     }
@@ -192,7 +203,7 @@ impl Sparc64Extension {
 
         let base = canonical_bus_addr(start as u64);
         for (index, slot) in out.iter_mut().enumerate() {
-            *slot = *self.flash.get(&(base + index as u64)).unwrap_or(&0);
+            *slot = self.read_flash_byte(base + index as u64);
         }
         out.len()
     }
@@ -217,23 +228,39 @@ impl Sparc64Extension {
                 self.record_acknowledged_response(response);
             }
 
-            let next_response = if reset_active {
+            let current_request = if reset_active {
                 None
             } else {
-                self.sample_request(core).and_then(|request| {
-                    if acked_response
-                        .map(|response| response.request == request)
-                        .unwrap_or(false)
-                    {
-                        None
-                    } else {
-                        Some(self.service_request(request))
-                    }
-                })
+                self.sample_request(core)
+            };
+            let same_as_acked = |request: &Sparc64WishboneRequest| {
+                acked_response
+                    .map(|response| response.request == *request)
+                    .unwrap_or(false)
+            };
+            let next_response = if reset_active {
+                None
+            } else if let Some(request) = current_request.filter(|request| !same_as_acked(request)) {
+                self.deferred_request = None;
+                Some(self.service_request(request))
+            } else if current_request.is_none() {
+                self.deferred_request
+                    .take()
+                    .filter(|request| !same_as_acked(request))
+                    .map(|request| self.service_request(request))
+            } else {
+                self.deferred_request = None;
+                None
             };
 
             self.set_signal(core, self.clk_idx, 1);
             core.tick();
+
+            self.deferred_request = if next_response.is_none() && !reset_active {
+                self.sample_request(core).filter(|request| !same_as_acked(request))
+            } else {
+                None
+            };
 
             self.pending_response = next_response;
             self.cycle_count = self.cycle_count.wrapping_add(1);
@@ -362,7 +389,7 @@ impl Sparc64Extension {
             }
 
             let byte = ((data >> ((7 - lane) * 8)) & 0xFF) as u8;
-            self.memory.insert(byte_addr, byte);
+            self.write_dram_byte(byte_addr, byte);
             mapped = true;
         }
 
@@ -372,7 +399,7 @@ impl Sparc64Extension {
     fn read_mapped_byte(&self, addr: u64) -> Option<u8> {
         let physical = canonical_bus_addr(addr);
         if self.is_flash_addr(physical) {
-            return Some(*self.flash.get(&physical).unwrap_or(&0));
+            return Some(self.read_flash_byte(physical));
         }
 
         if self.is_dram_addr(physical) {
@@ -383,7 +410,43 @@ impl Sparc64Extension {
     }
 
     fn read_dram_byte(&self, addr: u64) -> u8 {
-        *self.memory.get(&addr).unwrap_or(&0)
+        if let Some(index) = self.fast_dram_index(addr) {
+            self.memory.get(index).copied().unwrap_or(0)
+        } else {
+            *self.memory_sparse.get(&addr).unwrap_or(&0)
+        }
+    }
+
+    fn write_dram_byte(&mut self, addr: u64, value: u8) {
+        if let Some(index) = self.fast_dram_index(addr) {
+            if self.memory.len() <= index {
+                self.memory.resize(index + 1, 0);
+            }
+            self.memory[index] = value;
+        } else {
+            self.memory_sparse.insert(addr, value);
+        }
+    }
+
+    fn read_flash_byte(&self, addr: u64) -> u8 {
+        self.flash_offset(addr)
+            .and_then(|index| self.flash.get(index).copied())
+            .unwrap_or(0)
+    }
+
+    fn flash_offset(&self, addr: u64) -> Option<usize> {
+        canonical_bus_addr(addr)
+            .checked_sub(FLASH_BOOT_BASE)
+            .map(|offset| offset as usize)
+    }
+
+    fn fast_dram_index(&self, addr: u64) -> Option<usize> {
+        let physical = canonical_bus_addr(addr);
+        if physical < FAST_DRAM_LIMIT as u64 {
+            Some(physical as usize)
+        } else {
+            None
+        }
     }
 
     fn is_flash_addr(&self, addr: u64) -> bool {

@@ -875,6 +875,29 @@ module RHDL
       no_read <= mux(int_cycle,
                      lit(1, width: 1), no_read)  # No reads during interrupt cycle (we read vector from data bus directly)
 
+      # Consolidate all write-cycle cases once at the end of decode. The repeated
+      # write_sig/no_read mux chains above are intended to accumulate, but this
+      # final OR keeps write-side instructions from being wiped out by later
+      # false branches when lowering.
+      any_write_cycle =
+        ((((ir == lit(0x02, width: 8)) | (ir == lit(0x12, width: 8)) | (ir == lit(0x32, width: 8)) |
+           (ir == lit(0x22, width: 8)) | (ir == lit(0xE2, width: 8)) | is_ld_hl_r) &
+          (m_cycle == lit(2, width: 3))) |
+         ((((ir == lit(0x34, width: 8)) | (ir == lit(0x35, width: 8)) | (ir == lit(0x36, width: 8)) |
+            (ir == lit(0xE0, width: 8))) &
+           (m_cycle == lit(3, width: 3))) |
+          (((ir == lit(0xCD, width: 8)) | (ir == lit(0xEA, width: 8))) &
+           (m_cycle == lit(4, width: 3))) |
+          ((is_push | is_rst) &
+           ((m_cycle == lit(3, width: 3)) | (m_cycle == lit(4, width: 3)))) |
+          (is_ld_nn_sp &
+           ((m_cycle == lit(4, width: 3)) | (m_cycle == lit(5, width: 3)))) |
+          (int_cycle &
+           ((m_cycle == lit(2, width: 3)) | (m_cycle == lit(3, width: 3))))))
+
+      write_sig <= write_sig | any_write_cycle
+      no_read <= no_read | any_write_cycle
+
       # CB prefix - triggers CB instruction execution
       # The CB opcode is in cb_ir after M2
       # CB BIT b, r - test bit b of register r, affect Z flag only
@@ -1291,18 +1314,40 @@ module RHDL
                   mux((m_cycle == lit(1, width: 3)) | is_int_ack, lit(0, width: 1), lit(1, width: 1)),
                   m1_n)
 
-      # Memory request (active during T1-T3 of each cycle for both reads AND writes)
+      # Drive bus strobes from one explicit write-cycle predicate. This avoids
+      # depending on the accumulated write_sig/no_read mux chain above, which
+      # is vulnerable to lowering bugs on later write-side instructions.
+      bus_write_cycle =
+        ((((ir == lit(0x02, width: 8)) | (ir == lit(0x12, width: 8)) |
+           (ir == lit(0x32, width: 8)) | (ir == lit(0x22, width: 8)) |
+           (ir == lit(0xE2, width: 8)) | is_ld_hl_r) &
+          (m_cycle == lit(2, width: 3))) |
+         ((((ir == lit(0x34, width: 8)) | (ir == lit(0x35, width: 8)) |
+            (ir == lit(0x36, width: 8)) | (ir == lit(0xE0, width: 8))) &
+           (m_cycle == lit(3, width: 3))) |
+          ((call | (ir == lit(0xEA, width: 8))) &
+           (m_cycle == lit(4, width: 3))) |
+          (((ir == lit(0x08, width: 8)) | call) &
+           (m_cycle == lit(5, width: 3))) |
+          ((is_push | is_rst) &
+           ((m_cycle == lit(3, width: 3)) | (m_cycle == lit(4, width: 3)))) |
+          ((ir == lit(0x08, width: 8)) &
+           (m_cycle == lit(4, width: 3))) |
+          (int_cycle &
+           ((m_cycle == lit(2, width: 3)) | (m_cycle == lit(3, width: 3))))))
+      bus_no_read_cycle = int_cycle | bus_write_cycle
+
+      # Memory request (active during T1-T3 of each cycle for both reads and writes)
       # Note: Use < 4 instead of <= 3 because <= is the assignment operator in behavior DSL
-      # Must assert for reads (~no_read) OR writes (write_sig)
       mreq_n <= mux(clken,
-                    mux((t_state >= lit(1, width: 3)) & (t_state < lit(4, width: 3)) & (~no_read | write_sig),
+                    mux((t_state >= lit(1, width: 3)) & (t_state < lit(4, width: 3)) & (~bus_no_read_cycle | bus_write_cycle),
                         lit(0, width: 1),
                         lit(1, width: 1)),
                     mreq_n)
 
       # Read strobe (active during T1-T3 when reading)
       rd_n <= mux(clken,
-                  mux((t_state >= lit(1, width: 3)) & (t_state < lit(4, width: 3)) & ~no_read & ~write_sig,
+                  mux((t_state >= lit(1, width: 3)) & (t_state < lit(4, width: 3)) & ~bus_no_read_cycle & ~bus_write_cycle,
                       lit(0, width: 1),
                       lit(1, width: 1)),
                   rd_n)
@@ -1315,7 +1360,7 @@ module RHDL
       # - At T4: t_state_old=3, wr_n=1 (write INACTIVE - prevents wrong data after PC jump)
       # This is critical for CALL/RST which update PC at T3 but need correct pre-jump PC for stack push
       wr_n <= mux(clken,
-                  mux((t_state >= lit(1, width: 3)) & (t_state < lit(3, width: 3)) & write_sig,
+                  mux((t_state >= lit(1, width: 3)) & (t_state < lit(3, width: 3)) & bus_write_cycle,
                       lit(0, width: 1),
                       lit(1, width: 1)),
                   wr_n)

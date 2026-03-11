@@ -9,15 +9,17 @@ module RHDL
   module Examples
     module SPARC64
       class HeadlessRunner
-        attr_reader :runner, :mode, :sim_backend, :builder, :fast_boot
+        attr_reader :runner, :mode, :sim_backend, :builder, :fast_boot, :compile_mode
 
         def initialize(mode: :ir, sim: nil, runner: nil, ir_runner_class: IrRunner,
                        verilator_runner_class: VerilogRunner, builder: nil,
-                       builder_class: Integration::ProgramImageBuilder, fast_boot: true)
+                       builder_class: Integration::ProgramImageBuilder, fast_boot: true,
+                       compile_mode: :auto)
           @mode = (mode || :ir).to_sym
           @sim_backend = (sim || default_backend(@mode)).to_sym
           @builder = builder || builder_class.new
           @fast_boot = !!fast_boot
+          @compile_mode = (compile_mode || :auto).to_sym
           @runner = runner || build_runner(ir_runner_class: ir_runner_class, verilator_runner_class: verilator_runner_class)
         end
 
@@ -84,7 +86,11 @@ module RHDL
         def build_runner(ir_runner_class:, verilator_runner_class:)
           case @mode
           when :ir
-            ir_runner_class.new(backend: normalize_ir_backend(@sim_backend), fast_boot: fast_boot)
+            ir_runner_class.new(
+              backend: normalize_ir_backend(@sim_backend),
+              fast_boot: fast_boot,
+              compiler_mode: compile_mode
+            )
           when :verilog
             verilator_runner_class.new(fast_boot: fast_boot)
           else

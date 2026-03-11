@@ -14,7 +14,7 @@ diff --git a/T1-CPU/rtl/sparc.v b/T1-CPU/rtl/sparc.v
     assign fast_boot_tlu_ifu_trap_tid_w1[1:0] = fast_boot_reset_vector ? 2'b00 : tlu_ifu_trap_tid_w1[1:0];
     assign fast_boot_tlu_ifu_trappc_w2[48:0] = fast_boot_reset_vector ? FAST_BOOT_TRAPPC_W2 : tlu_ifu_trappc_w2[48:0];
     assign fast_boot_tlu_ifu_trapnpc_w2[48:0] = fast_boot_reset_vector ? FAST_BOOT_TRAPNPC_W2 : tlu_ifu_trapnpc_w2[48:0];
-+   assign fast_boot_agp_tid_window = 1'b1;
++   assign fast_boot_agp_tid_window = fast_boot_reset_vector;
 +   assign fast_boot_tlu_exu_agp[1:0] = fast_boot_agp_tid_window ? 2'b00 : tlu_exu_agp[1:0];
 +   assign fast_boot_tlu_exu_agp_tid[1:0] = fast_boot_agp_tid_window ? 2'b00 : tlu_exu_agp_tid[1:0];
  

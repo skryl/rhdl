@@ -147,8 +147,8 @@ impl IrSimContext {
         // The compiled simulator always needs the generated combinational
         // evaluator, but the large generic tick-helper surface is only used by
         // extensions that emit direct calls into those helpers. Plain cores,
-        // including SPARC64, drive sequential behavior through CoreSimulator's
-        // runtime tick path and do not need the generated tick symbols.
+        // SPARC64 still uses the generic runtime tick path for now; its large
+        // imported core relies on the more defensive runtime sampling logic.
         let needs_tick_helpers =
             self.apple2.is_some() || self.gameboy.is_some() || self.mos6502.is_some();
         let mut code = self.core.generate_core_code(needs_tick_helpers);
@@ -182,7 +182,15 @@ impl IrSimContext {
         {
             let needs_tick_helpers =
                 self.apple2.is_some() || self.gameboy.is_some() || self.mos6502.is_some();
-            if self.core.should_use_runtime_only_compile(needs_tick_helpers) {
+            let force_rustc = std::env::var("RHDL_IR_COMPILER_FORCE_RUSTC")
+                .map(|value| !value.trim().is_empty() && value != "0")
+                .unwrap_or(false);
+            if force_rustc && self.core.requires_runtime_only_compile(needs_tick_helpers) {
+                return Err(
+                    "full rustc compiler mode does not support overwide (>128-bit) runtime signals; use auto/runtime-only compiler mode".to_string()
+                );
+            }
+            if !force_rustc && self.core.should_use_runtime_only_compile(needs_tick_helpers) {
                 self.core.enable_runtime_only_compile();
                 return Ok(true);
             }
@@ -271,6 +279,7 @@ pub const RUNNER_PROBE_AO486_DOS_INT1A_STATE: c_uint = 25;
 pub const RUNNER_PROBE_AO486_DOS_INT13_BX: c_uint = 26;
 pub const RUNNER_PROBE_AO486_DOS_INT13_CX: c_uint = 27;
 pub const RUNNER_PROBE_AO486_DOS_INT13_DX: c_uint = 28;
+pub const RUNNER_PROBE_AO486_DOS_INT13_ES: c_uint = 29;
 
 #[repr(C)]
 pub struct RunnerCaps {
@@ -1128,7 +1137,8 @@ pub unsafe extern "C" fn runner_get_caps(
         | bit(RUNNER_PROBE_AO486_DOS_INT1A_STATE)
         | bit(RUNNER_PROBE_AO486_DOS_INT13_BX)
         | bit(RUNNER_PROBE_AO486_DOS_INT13_CX)
-        | bit(RUNNER_PROBE_AO486_DOS_INT13_DX);
+        | bit(RUNNER_PROBE_AO486_DOS_INT13_DX)
+        | bit(RUNNER_PROBE_AO486_DOS_INT13_ES);
 
     *caps_out = RunnerCaps {
         kind,
@@ -1488,6 +1498,11 @@ pub unsafe extern "C" fn runner_probe(ctx: *const IrSimContext, op: c_uint, arg0
             .ao486
             .as_ref()
             .map(|ext| ext.dos_int13_dx_probe())
+            .unwrap_or(0),
+        RUNNER_PROBE_AO486_DOS_INT13_ES => ctx_ref
+            .ao486
+            .as_ref()
+            .map(|ext| ext.dos_int13_es_probe())
             .unwrap_or(0),
         _ => 0,
     }

@@ -1032,7 +1032,7 @@ module RHDL
           lines << "else if (strcmp(name, \"old_timer_irq_internal\") == 0) return ctx->dut->rootp->gb__DOT__rt_tmp_15_1;"
           lines << "else if (strcmp(name, \"old_serial_irq_internal\") == 0) return ctx->dut->rootp->gb__DOT__rt_tmp_16_1;"
           lines << "else if (strcmp(name, \"old_ack_internal\") == 0) return ctx->dut->rootp->gb__DOT__rt_tmp_17_1;"
-          lines << "else if (strcmp(name, \"irq_ack_internal\") == 0) return (~ctx->dut->rootp->gb__DOT___cpu_IORQ_n & ~ctx->dut->rootp->gb__DOT___cpu_M1_n) ? 1u : 0u;"
+          lines << "else if (strcmp(name, \"irq_ack_internal\") == 0) return (ctx->dut->rootp->gb__DOT___cpu_IORQ_n == 0u && ctx->dut->rootp->gb__DOT___cpu_M1_n == 0u) ? 1u : 0u;"
           lines << "else if (strcmp(name, \"video_irq_internal\") == 0) return ctx->dut->rootp->gb__DOT___video_irq;"
           lines << "else if (strcmp(name, \"video_vblank_irq_internal\") == 0) return ctx->dut->rootp->gb__DOT___video_vblank_irq;"
           lines << "else if (strcmp(name, \"sel_ff50_internal\") == 0) return ctx->dut->rootp->gb__DOT___md_swizz_a_out == 0xFF50u ? 1u : 0u;"
@@ -1044,6 +1044,19 @@ module RHDL
           lines << "else if (strcmp(name, \"video_lcd_clkena_internal\") == 0) return ctx->dut->rootp->gb__DOT__video__DOT__lcd_clkena;"
           lines << "else if (strcmp(name, \"video_lcd_vsync_internal\") == 0) return ctx->dut->rootp->gb__DOT__video__DOT__lcd_vsync;"
           lines << "else if (strcmp(name, \"video_mode_internal\") == 0) return ctx->dut->rootp->gb__DOT___video_mode;"
+        elsif @top_module_name == 'game_boy_gameboy' && !direct_verilog_mode?
+          lines << "#{keyword} (strcmp(name, \"cpu_addr_internal\") == 0) return ctx->dut->rootp->game_boy_gameboy__DOT__gb_core__DOT___cpu_addr_bus;"
+          lines << "else if (strcmp(name, \"cpu_do_internal\") == 0) return ctx->dut->rootp->game_boy_gameboy__DOT__gb_core__DOT___cpu_data_out;"
+          lines << "else if (strcmp(name, \"cpu_rd_n_internal\") == 0) return ctx->dut->rootp->game_boy_gameboy__DOT__gb_core__DOT___cpu_rd_n;"
+          lines << "else if (strcmp(name, \"cpu_wr_n_internal\") == 0) return ctx->dut->rootp->game_boy_gameboy__DOT__gb_core__DOT___cpu_wr_n;"
+          lines << "else if (strcmp(name, \"cpu_m1_n_internal\") == 0) return ctx->dut->rootp->game_boy_gameboy__DOT__gb_core__DOT___cpu_m1_n;"
+          lines << "else if (strcmp(name, \"boot_rom_enabled_internal\") == 0) return ctx->dut->rootp->game_boy_gameboy__DOT__gb_core__DOT__rt_tmp_1_1;"
+          lines << "else if (strcmp(name, \"sel_ff50_internal\") == 0) return ctx->dut->rootp->game_boy_gameboy__DOT__gb_core__DOT___cpu_addr_bus == 0xFF50u ? 1u : 0u;"
+          lines << "else if (strcmp(name, \"video_lcd_on_internal\") == 0) return ctx->dut->rootp->game_boy_gameboy__DOT__gb_core__DOT__lcd_on;"
+          lines << "else if (strcmp(name, \"video_lcd_clkena_internal\") == 0) return ctx->dut->rootp->game_boy_gameboy__DOT__gb_core__DOT__lcd_clkena;"
+          lines << "else if (strcmp(name, \"video_lcd_vsync_internal\") == 0) return ctx->dut->rootp->game_boy_gameboy__DOT__gb_core__DOT__lcd_vsync;"
+          lines << "else if (strcmp(name, \"video_vblank_irq_internal\") == 0) return ctx->dut->rootp->game_boy_gameboy__DOT__gb_core__DOT___video_unit_vblank_irq;"
+          lines << "else if (strcmp(name, \"video_irq_internal\") == 0) return ctx->dut->rootp->game_boy_gameboy__DOT__gb_core__DOT___video_unit_irq;"
         elsif direct_verilog_import_wrapper_gameboy?
           lines << "#{keyword} (strcmp(name, \"cpu_pc_internal\") == 0) return ctx->dut->rootp->gameboy__DOT__gb_core__DOT__cpu__DOT__u0__DOT__pc;"
           lines << "else if (strcmp(name, \"cpu_addr_internal\") == 0) return ctx->dut->rootp->gameboy__DOT__gb_core__DOT___md_swizz_a_out;"
@@ -1079,7 +1092,7 @@ module RHDL
           lines << "else if (strcmp(name, \"old_timer_irq_internal\") == 0) return ctx->dut->rootp->gameboy__DOT__gb_core__DOT__rt_tmp_15_1;"
           lines << "else if (strcmp(name, \"old_serial_irq_internal\") == 0) return ctx->dut->rootp->gameboy__DOT__gb_core__DOT__rt_tmp_16_1;"
           lines << "else if (strcmp(name, \"old_ack_internal\") == 0) return ctx->dut->rootp->gameboy__DOT__gb_core__DOT__rt_tmp_17_1;"
-          lines << "else if (strcmp(name, \"irq_ack_internal\") == 0) return (~ctx->dut->rootp->gameboy__DOT__gb_core__DOT___cpu_IORQ_n & ~ctx->dut->rootp->gameboy__DOT__gb_core__DOT___cpu_M1_n) ? 1u : 0u;"
+          lines << "else if (strcmp(name, \"irq_ack_internal\") == 0) return (ctx->dut->rootp->gameboy__DOT__gb_core__DOT___cpu_IORQ_n == 0u && ctx->dut->rootp->gameboy__DOT__gb_core__DOT___cpu_M1_n == 0u) ? 1u : 0u;"
           lines << "else if (strcmp(name, \"video_irq_internal\") == 0) return ctx->dut->rootp->gameboy__DOT__gb_core__DOT___video_irq;"
           lines << "else if (strcmp(name, \"video_vblank_irq_internal\") == 0) return ctx->dut->rootp->gameboy__DOT__gb_core__DOT___video_vblank_irq;"
           lines << "else if (strcmp(name, \"sel_ff50_internal\") == 0) return ctx->dut->rootp->gameboy__DOT__gb_core__DOT___md_swizz_a_out == 0xFF50u ? 1u : 0u;"
@@ -1116,6 +1129,52 @@ module RHDL
         [
           "#{indent}ctx->dut->#{boot_data_port} = ctx->boot_rom[ctx->dut->#{boot_addr_port} & 0xFFu];"
         ].join("\n")
+      end
+
+      def c_cpu_write_watch_lines(indent:)
+        signal_lines =
+          if @top_module_name == 'gb' && !direct_verilog_mode?
+            [
+              "#{indent}write_active = (ctx->dut->rootp->gb__DOT___cpu_WR_n == 0u);",
+              "#{indent}write_addr = ctx->dut->rootp->gb__DOT___cpu_A;",
+              "#{indent}write_data = ctx->dut->rootp->gb__DOT___cpu_DO & 0xFFu;"
+            ]
+          elsif normalized_direct_verilog_gb?
+            [
+              "#{indent}write_active = (ctx->dut->rootp->gb__DOT___cpu_WR_n == 0u);",
+              "#{indent}write_addr = ctx->dut->rootp->gb__DOT___md_swizz_a_out;",
+              "#{indent}write_data = ctx->dut->rootp->gb__DOT___cpu_DO & 0xFFu;"
+            ]
+          elsif @top_module_name == 'game_boy_gameboy' && !direct_verilog_mode?
+            [
+              "#{indent}write_active = (ctx->dut->rootp->game_boy_gameboy__DOT__gb_core__DOT___cpu_wr_n == 0u);",
+              "#{indent}write_addr = ctx->dut->rootp->game_boy_gameboy__DOT__gb_core__DOT___cpu_addr_bus;",
+              "#{indent}write_data = ctx->dut->rootp->game_boy_gameboy__DOT__gb_core__DOT___cpu_data_out & 0xFFu;"
+            ]
+          elsif direct_verilog_import_wrapper_gameboy?
+            [
+              "#{indent}write_active = (ctx->dut->rootp->gameboy__DOT__gb_core__DOT___cpu_WR_n == 0u);",
+              "#{indent}write_addr = ctx->dut->rootp->gameboy__DOT__gb_core__DOT___md_swizz_a_out;",
+              "#{indent}write_data = ctx->dut->rootp->gameboy__DOT__gb_core__DOT___cpu_DO & 0xFFu;"
+            ]
+          else
+            []
+          end
+
+        lines = [
+          "#{indent}{",
+          "#{indent}unsigned int write_addr = 0u;",
+          "#{indent}unsigned int write_data = 0u;",
+          "#{indent}bool write_active = false;"
+        ]
+        lines.concat(signal_lines)
+        lines << "#{indent}if (write_active) {"
+        lines << "#{indent}  if (write_addr >= 0x8000u && write_addr <= 0x9FFFu) ctx->vram_write_count++;"
+        lines << "#{indent}  if (write_addr == 0xFF40u) ctx->ff40_write_count++;"
+        lines << "#{indent}  if (write_addr == 0xFF50u) ctx->ff50_write_count++;"
+        lines << "#{indent}}"
+        lines << "#{indent}}"
+        lines.join("\n")
       end
 
       def c_cart_feed_lines(indent:)
@@ -1406,12 +1465,16 @@ module RHDL
             verilog_codegen = File.expand_path('../../../../lib/rhdl/dsl/codegen.rb', __dir__)
             circt_codegen = File.expand_path('../../../../lib/rhdl/codegen/circt/tooling.rb', __dir__)
             export_deps = [__FILE__, verilog_codegen, circt_codegen, *hdl_source_dependency_paths].select { |p| File.exist?(p) }
-            needs_export = !File.exist?(verilog_file) ||
-                           export_deps.any? { |p| File.mtime(p) > File.mtime(verilog_file) }
+            current_verilog = current_component_verilog
+            needs_export = needs_component_verilog_export?(
+              verilog_file,
+              export_deps: export_deps,
+              current_verilog: current_verilog
+            )
 
             if needs_export
               log "  Exporting #{@component_class} to Verilog..."
-              export_verilog(verilog_file)
+              export_verilog(verilog_file, verilog_text: current_verilog)
             end
           end
         end
@@ -1441,14 +1504,23 @@ module RHDL
         load_shared_library(lib_file)
       end
 
-      def export_verilog(output_file)
+      def export_verilog(output_file, verilog_text: nil)
+        File.write(output_file, verilog_text || current_component_verilog)
+      end
+
+      def current_component_verilog
         # Export selected top via CIRCT-backed DSL codegen.
         all_verilog = @component_class.to_verilog
 
         # Post-process for Verilator compatibility
-        all_verilog = make_verilator_compatible(all_verilog)
+        make_verilator_compatible(all_verilog)
+      end
 
-        File.write(output_file, all_verilog)
+      def needs_component_verilog_export?(verilog_file, export_deps:, current_verilog:)
+        return true unless File.exist?(verilog_file)
+        return true if export_deps.any? { |path| File.mtime(path) > File.mtime(verilog_file) }
+
+        File.read(verilog_file) != current_verilog
       end
 
       def make_verilator_compatible(verilog)
@@ -1548,6 +1620,9 @@ module RHDL
           // Framebuffer access
           void sim_read_framebuffer(void* sim, unsigned char* out_buffer);
           unsigned long sim_get_frame_count(void* sim);
+          unsigned long sim_get_vram_write_count(void* sim);
+          unsigned long sim_get_ff40_write_count(void* sim);
+          unsigned long sim_get_ff50_write_count(void* sim);
 
           // Cycle result struct
           struct GbCycleResult {
@@ -1568,6 +1643,7 @@ module RHDL
         poke_dispatch = c_poke_dispatch_lines
         peek_dispatch = c_peek_dispatch_lines
         boot_feed = c_boot_rom_feed_lines(indent: '        ')
+        write_watch = c_cpu_write_watch_lines(indent: '        ')
         cart_feed = c_cart_feed_lines(indent: '        ')
         joypad_feed = c_joypad_drive_lines(indent: '        ')
         ce_feed_low = c_ce_drive_lines(indent: '        ')
@@ -1613,6 +1689,9 @@ module RHDL
               unsigned char cart_read_valid[6];
               unsigned int cart_last_full_addr;
               unsigned char cart_last_rd;
+              unsigned long vram_write_count;
+              unsigned long ff40_write_count;
+              unsigned long ff50_write_count;
           };
 
           static unsigned short cart_rom_bank_count(unsigned char rom_size_code) {
@@ -1739,6 +1818,9 @@ module RHDL
               ctx->rom_size_code = 0;
               ctx->ram_size_code = 0;
               ctx->rom_bank_count = 2;
+              ctx->vram_write_count = 0;
+              ctx->ff40_write_count = 0;
+              ctx->ff50_write_count = 0;
               cart_reset_runtime_state(ctx);
       #{constant_tieoffs}
               return ctx;
@@ -1754,6 +1836,9 @@ module RHDL
               SimContext* ctx = static_cast<SimContext*>(sim);
               cart_reset_runtime_state(ctx);
               ctx->clk_counter = 0;
+              ctx->vram_write_count = 0;
+              ctx->ff40_write_count = 0;
+              ctx->ff50_write_count = 0;
       #{constant_tieoffs}
               // Hold reset high and clock a few times to properly reset sequential logic
               ctx->dut->reset = 1;
@@ -1923,6 +2008,21 @@ module RHDL
               return ctx->frame_count;
           }
 
+          unsigned long sim_get_vram_write_count(void* sim) {
+              SimContext* ctx = static_cast<SimContext*>(sim);
+              return ctx->vram_write_count;
+          }
+
+          unsigned long sim_get_ff40_write_count(void* sim) {
+              SimContext* ctx = static_cast<SimContext*>(sim);
+              return ctx->ff40_write_count;
+          }
+
+          unsigned long sim_get_ff50_write_count(void* sim) {
+              SimContext* ctx = static_cast<SimContext*>(sim);
+              return ctx->ff50_write_count;
+          }
+
           // Batch cycle execution - runs until n_cycles CPU cycles completed
           // CPU cycles occur every 8 system clocks (SpeedControl divider)
           // This aligns with IR Compiler which counts effective CPU cycles
@@ -1939,6 +2039,7 @@ module RHDL
           #{joypad_feed}
           #{boot_feed}
           #{cart_feed}
+          #{write_watch}
                   ctx->dut->eval();
 
                   // Rising edge
@@ -1948,6 +2049,7 @@ module RHDL
           #{joypad_feed}
           #{boot_feed}
           #{cart_feed}
+          #{write_watch}
                   ctx->dut->eval();
 
                   // Count every system clock as a CPU cycle
@@ -2090,6 +2192,24 @@ module RHDL
 
         @sim_get_frame_count_fn = Fiddle::Function.new(
           @lib['sim_get_frame_count'],
+          [Fiddle::TYPE_VOIDP],
+          Fiddle::TYPE_LONG
+        )
+
+        @sim_get_vram_write_count_fn = Fiddle::Function.new(
+          @lib['sim_get_vram_write_count'],
+          [Fiddle::TYPE_VOIDP],
+          Fiddle::TYPE_LONG
+        )
+
+        @sim_get_ff40_write_count_fn = Fiddle::Function.new(
+          @lib['sim_get_ff40_write_count'],
+          [Fiddle::TYPE_VOIDP],
+          Fiddle::TYPE_LONG
+        )
+
+        @sim_get_ff50_write_count_fn = Fiddle::Function.new(
+          @lib['sim_get_ff50_write_count'],
           [Fiddle::TYPE_VOIDP],
           Fiddle::TYPE_LONG
         )
@@ -2239,6 +2359,21 @@ module RHDL
       def verilator_write_vram(addr, value)
         return unless @sim_ctx
         @sim_write_vram_fn.call(@sim_ctx, addr, value)
+      end
+
+      def verilator_vram_write_count
+        return 0 unless @sim_ctx && @sim_get_vram_write_count_fn
+        @sim_get_vram_write_count_fn.call(@sim_ctx).to_i
+      end
+
+      def verilator_ff40_write_count
+        return 0 unless @sim_ctx && @sim_get_ff40_write_count_fn
+        @sim_get_ff40_write_count_fn.call(@sim_ctx).to_i
+      end
+
+      def verilator_ff50_write_count
+        return 0 unless @sim_ctx && @sim_get_ff50_write_count_fn
+        @sim_get_ff50_write_count_fn.call(@sim_ctx).to_i
       end
 
       def verilator_read_vram(addr)

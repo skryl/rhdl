@@ -198,7 +198,7 @@ RSpec.describe RHDL::Examples::SPARC64::Integration::StagedVerilogBundle do
     expect(sparc_rtl_source).to include('wire                 fast_boot_agp_tid_window;')
     expect(sparc_rtl_source).to include("localparam [48:0]    FAST_BOOT_TRAPPC_W2  = 49'h0_0000_0000_8000;")
     expect(sparc_rtl_source).to include("localparam [48:0]    FAST_BOOT_TRAPNPC_W2 = 49'h0_0000_0000_8004;")
-    expect(sparc_rtl_source).to include('assign fast_boot_agp_tid_window = 1\'b1;')
+    expect(sparc_rtl_source).to include('assign fast_boot_agp_tid_window = fast_boot_reset_vector;')
     expect(sparc_rtl_source).to include('assign fast_boot_tlu_exu_agp[1:0] = fast_boot_agp_tid_window ? 2\'b00 : tlu_exu_agp[1:0];')
     expect(sparc_rtl_source).to include('assign fast_boot_tlu_exu_agp_tid[1:0] = fast_boot_agp_tid_window ? 2\'b00 : tlu_exu_agp_tid[1:0];')
 	    expect(sparc_rtl_source).to include('.tlu_ifu_trapnpc_w2    (fast_boot_tlu_ifu_trapnpc_w2[48:0]),')
@@ -209,7 +209,7 @@ RSpec.describe RHDL::Examples::SPARC64::Integration::StagedVerilogBundle do
     tlu_tcl_source = File.read(tlu_tcl_file)
     expect(tlu_tcl_source).to include('wire fast_boot_agp_tid_force;')
     expect(tlu_tcl_source).to include('assign agp_tid_sel =')
-    expect(tlu_tcl_source).to include("assign fast_boot_agp_tid_force = 1'b1;")
+    expect(tlu_tcl_source).to include('assign fast_boot_agp_tid_force = por_rstint_g;')
     expect(tlu_tcl_source).to include('(dnrtry_inst_g) | (tlu_gl_rw_g & wsr_inst_g);')
 
     support_stubs_source = File.read(support_stubs_file)

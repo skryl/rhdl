@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require 'json'
+require 'fileutils'
 
 require_relative '../../../../examples/gameboy/utilities/import/system_importer'
 require_relative '../../../../examples/gameboy/utilities/runners/headless_runner'
@@ -61,6 +62,15 @@ module GameboyImportHeadlessRuntimeSupport
     result = importer.run
     expect(result.success?).to be(true), Array(result.diagnostics).join("\n")
     result
+  end
+
+  def stable_import_dirs(prefix)
+    root = ENV.fetch('RHDL_GAMEBOY_PARITY_TMP_ROOT', '/tmp')
+    out_dir = File.join(root, "#{prefix}_out")
+    workspace = File.join(root, "#{prefix}_ws")
+    FileUtils.mkdir_p(root)
+    FileUtils.rm_rf(workspace)
+    [out_dir, workspace]
   end
 
   def build_headless_runner_for_leg(leg:, out_dir:, top: DEFAULT_IMPORT_TOP)

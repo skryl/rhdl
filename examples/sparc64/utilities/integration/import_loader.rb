@@ -184,7 +184,7 @@ module RHDL
 
                 pending.each do |path|
                   begin
-                    require path
+                    load path
                     progressed = true
                   rescue NameError => e
                     still_pending << path

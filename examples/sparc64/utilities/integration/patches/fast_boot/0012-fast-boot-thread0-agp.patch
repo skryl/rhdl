@@ -13,7 +13,7 @@ diff --git a/T1-CPU/tlu/tlu_tcl.v b/T1-CPU/tlu/tlu_tcl.v
  //=========================================================================================
  // modified for bug 3827
  //
-+assign fast_boot_agp_tid_force = 1'b1;
++assign fast_boot_agp_tid_force = por_rstint_g;
  assign agp_tid_sel = 
             (dnrtry_inst_g) | (tlu_gl_rw_g & wsr_inst_g); 
  assign	agp_tid_g[1:0] = 

@@ -76,10 +76,11 @@ module Sparc64IntegrationSupport
     EXPECTED_BENCHMARK_VALUES.fetch(name.to_sym)
   end
 
-  def build_headless_runner(mode:, sim: nil)
+  def build_headless_runner(mode:, sim: nil, **kwargs)
     pending_unless_runner_stack!
     args = { mode: mode }
     args[:sim] = sim if sim
+    args.merge!(kwargs)
     sparc64_headless_runner_class.new(**args)
   rescue StandardError => e
     pending("SPARC64 HeadlessRunner construction not ready yet: #{e.message}")

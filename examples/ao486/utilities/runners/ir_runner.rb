@@ -24,9 +24,10 @@ module RHDL
         DOS_RELOCATED_BOOT_SECTOR_ADDR = 0x27A00
         DOS_INT19_STUB_ADDR = 0x0500
         DOS_INT19_VECTOR_ADDR = 0x19 * 4
-        DOS_INT10_STUB_ADDR = 0x05B0
+        DOS_INT10_STUB_ADDR = 0x05E0
         DOS_INT10_VECTOR_ADDR = 0x10 * 4
         DOS_INT13_STUB_ADDR = 0x0540
+        DOS_INT13_SCRATCH_ADDR = 0x0740
         DOS_INT1A_STUB_OFFSET = 0x1130
         DOS_INT1A_STUB_SEGMENT = 0xF000
         DOS_INT1A_VECTOR_ADDR = 0x1A * 4
@@ -398,6 +399,11 @@ module RHDL
           [
             0xFA,             # cli
             0xFC,             # cld
+            0x9C,             # pushf
+            0x58,             # pop ax
+            0x80, 0xE4, 0xFE, # and ah, 0xfe ; clear TF
+            0x50,             # push ax
+            0x9D,             # popf
             0x31, 0xC0,       # xor ax, ax
             0x8E, 0xD8,       # mov ds, ax
             0xBD, 0x00, 0x7C, # mov bp, 0x7c00
@@ -428,26 +434,29 @@ module RHDL
         end
 
         def dos_int13_bootstrap_bytes
+          return_ip = DOS_INT13_SCRATCH_ADDR
+          return_cs = DOS_INT13_SCRATCH_ADDR + 2
+          return_flags = DOS_INT13_SCRATCH_ADDR + 4
+          result_ax = DOS_INT13_SCRATCH_ADDR + 6
+          carry_flag = DOS_INT13_SCRATCH_ADDR + 8
+          original_dx = DOS_INT13_SCRATCH_ADDR + 10
+
           [
             0x80, 0xFC, 0x08,       # cmp ah, 0x08
-            0x75, 0x1E,             # jne generic
-            0x5E,                   # pop si ; return IP
-            0x5F,                   # pop di ; return CS
-            0x58,                   # pop ax ; saved FLAGS
+            0x75, 0x2C,             # jne generic
+            0x8F, 0x06, return_ip & 0xFF, (return_ip >> 8) & 0xFF, # pop word ptr [return_ip]
+            0x8F, 0x06, return_cs & 0xFF, (return_cs >> 8) & 0xFF, # pop word ptr [return_cs]
+            0x8F, 0x06, return_flags & 0xFF, (return_flags >> 8) & 0xFF, # pop word ptr [return_flags]
+            0xA1, return_flags & 0xFF, (return_flags >> 8) & 0xFF, # mov ax, [return_flags]
             0x24, 0xFE,             # and al, 0xfe
-            0x50,                   # push ax
-            0x57,                   # push di
-            0x56,                   # push si
+            0xA3, return_flags & 0xFF, (return_flags >> 8) & 0xFF, # mov [return_flags], ax
             0x31, 0xC0,             # xor ax, ax
             0xBB, 0x00, 0x04,       # mov bx, 0x0400
             0xB9, 0x12, 0x4F,       # mov cx, 0x4f12
             0xBA, 0x02, 0x01,       # mov dx, 0x0102
-            0x50,                   # push ax
-            0xB8, 0x00, 0xF0,       # mov ax, 0xf000
-            0x8E, 0xC0,             # mov es, ax
-            0x58,                   # pop ax
-            0xBF,                   # mov di, 0xefde
-            DOS_DISKETTE_PARAM_TABLE_OFFSET & 0xFF, (DOS_DISKETTE_PARAM_TABLE_OFFSET >> 8) & 0xFF,
+            0xFF, 0x36, return_flags & 0xFF, (return_flags >> 8) & 0xFF, # push word ptr [return_flags]
+            0xFF, 0x36, return_cs & 0xFF, (return_cs >> 8) & 0xFF, # push word ptr [return_cs]
+            0xFF, 0x36, return_ip & 0xFF, (return_ip >> 8) & 0xFF, # push word ptr [return_ip]
             0xCF,                   # iret
             0x52,                   # push dx
             0xBA, 0xD0, 0x0E,       # mov dx, 0x0ed0
@@ -464,89 +473,84 @@ module RHDL
             0xBA, 0xD8, 0x0E,       # mov dx, 0x0ed8
             0xEF,                   # out dx, ax
             0x58,                   # pop ax ; original DX
+            0xA3, original_dx & 0xFF, (original_dx >> 8) & 0xFF, # mov [original_dx], ax
             0xBA, 0xD6, 0x0E,       # mov dx, 0x0ed6
             0xEF,                   # out dx, ax
+            0x8F, 0x06, return_ip & 0xFF, (return_ip >> 8) & 0xFF, # pop word ptr [return_ip]
+            0x8F, 0x06, return_cs & 0xFF, (return_cs >> 8) & 0xFF, # pop word ptr [return_cs]
+            0x8F, 0x06, return_flags & 0xFF, (return_flags >> 8) & 0xFF, # pop word ptr [return_flags]
             0xBA, 0xDA, 0x0E,       # mov dx, 0x0eda
             0x30, 0xC0,             # xor al, al
             0xEE,                   # out dx, al
             0xBA, 0xDC, 0x0E,       # mov dx, 0x0edc
             0xED,                   # in ax, dx
-            0x50,                   # push ax ; preserve AX result while patching caller FLAGS
-            0xBA, 0x10, 0x0F,       # mov dx, 0x0f10
-            0xED,                   # in ax, dx
-            0x93,                   # xchg ax, bx
-            0xBA, 0x12, 0x0F,       # mov dx, 0x0f12
-            0xED,                   # in ax, dx
-            0x91,                   # xchg ax, cx
-            0xBA, 0x14, 0x0F,       # mov dx, 0x0f14
-            0xED,                   # in ax, dx
-            0x89, 0xC2,             # mov dx, ax
+            0xA3, result_ax & 0xFF, (result_ax >> 8) & 0xFF, # mov [result_ax], ax
             0xBA, 0x16, 0x0F,       # mov dx, 0x0f16
             0xEC,                   # in al, dx
-            0x88, 0xC3,             # mov bl, al
-            0x58,                   # pop ax ; restore AX result
-            0x5E,                   # pop si ; return IP
-            0x5F,                   # pop di ; return CS
-            0x5A,                   # pop dx ; saved FLAGS
+            0x24, 0x01,             # and al, 0x01
+            0xA2, carry_flag & 0xFF, (carry_flag >> 8) & 0xFF, # mov [carry_flag], al
+            0xA1, result_ax & 0xFF, (result_ax >> 8) & 0xFF, # mov ax, [result_ax]
+            0x8B, 0x16, return_flags & 0xFF, (return_flags >> 8) & 0xFF, # mov dx, [return_flags]
             0x80, 0xE2, 0xFE,       # and dl, 0xfe
-            0x08, 0xDA,             # or dl, bl
-            0x52,                   # push dx
-            0x57,                   # push di
-            0x56,                   # push si
+            0x0A, 0x16, carry_flag & 0xFF, (carry_flag >> 8) & 0xFF, # or dl, [carry_flag]
+            0x89, 0x16, return_flags & 0xFF, (return_flags >> 8) & 0xFF, # mov [return_flags], dx
+            0xFF, 0x36, return_flags & 0xFF, (return_flags >> 8) & 0xFF, # push word ptr [return_flags]
+            0xFF, 0x36, return_cs & 0xFF, (return_cs >> 8) & 0xFF, # push word ptr [return_cs]
+            0xFF, 0x36, return_ip & 0xFF, (return_ip >> 8) & 0xFF, # push word ptr [return_ip]
+            0x8B, 0x16, original_dx & 0xFF, (original_dx >> 8) & 0xFF, # mov dx, [original_dx]
             0xCF                    # iret
           ]
         end
 
         def dos_int10_bootstrap_bytes
           [
-            0x55,
-            0x89, 0xE5,
-            0x50,
-            0x53,
-            0x51,
-            0x52,
-            0x06,
-            0x8B, 0x46, 0xFE,
-            0xBA, 0xE0, 0x0E,
-            0xEF,
-            0x8B, 0x46, 0xFC,
-            0xBA, 0xE2, 0x0E,
-            0xEF,
-            0x8B, 0x46, 0xFA,
-            0xBA, 0xE4, 0x0E,
-            0xEF,
-            0x8B, 0x46, 0xF8,
-            0xBA, 0xE6, 0x0E,
-            0xEF,
-            0x8B, 0x46, 0x00,
-            0xBA, 0xF2, 0x0E,
-            0xEF,
-            0x8B, 0x46, 0xF6,
-            0xBA, 0xF4, 0x0E,
-            0xEF,
-            0xBA, 0xE8, 0x0E,
-            0x30, 0xC0,
-            0xEE,
-            0xBA, 0xEA, 0x0E,
-            0xED,
-            0x89, 0x46, 0xFE,
-            0xBA, 0xEC, 0x0E,
-            0xED,
-            0x89, 0x46, 0xFC,
-            0xBA, 0xEE, 0x0E,
-            0xED,
-            0x89, 0x46, 0xFA,
-            0xBA, 0xF0, 0x0E,
-            0xED,
-            0x89, 0x46, 0xF8,
-            0x8B, 0x46, 0xFE,
-            0x8B, 0x5E, 0xFC,
-            0x8B, 0x4E, 0xFA,
-            0x8B, 0x56, 0xF8,
-            0x8E, 0x46, 0xF6,
-            0x83, 0xC4, 0x0A,
-            0x5D,
-            0xCF
+            0x55,                   # push bp
+            0x89, 0xE5,             # mov bp, sp
+            0x50,                   # push ax
+            0x53,                   # push bx
+            0x51,                   # push cx
+            0x52,                   # push dx
+            0x06,                   # push es
+            0x8B, 0x46, 0xFE,       # mov ax, [bp-2]
+            0xBA, 0xE0, 0x0E,       # mov dx, 0x0ee0
+            0xEF,                   # out dx, ax
+            0x8B, 0x46, 0xFC,       # mov ax, [bp-4]
+            0xBA, 0xE2, 0x0E,       # mov dx, 0x0ee2
+            0xEF,                   # out dx, ax
+            0x8B, 0x46, 0xFA,       # mov ax, [bp-6]
+            0xBA, 0xE4, 0x0E,       # mov dx, 0x0ee4
+            0xEF,                   # out dx, ax
+            0x8B, 0x46, 0xF8,       # mov ax, [bp-8]
+            0xBA, 0xE6, 0x0E,       # mov dx, 0x0ee6
+            0xEF,                   # out dx, ax
+            0x8B, 0x46, 0x00,       # mov ax, [bp]
+            0xBA, 0xF2, 0x0E,       # mov dx, 0x0ef2
+            0xEF,                   # out dx, ax
+            0x8B, 0x46, 0xF6,       # mov ax, [bp-10]
+            0xBA, 0xF4, 0x0E,       # mov dx, 0x0ef4
+            0xEF,                   # out dx, ax
+            0xBA, 0xE8, 0x0E,       # mov dx, 0x0ee8
+            0x30, 0xC0,             # xor al, al
+            0xEE,                   # out dx, al
+            0xBA, 0xEA, 0x0E,       # mov dx, 0x0eea
+            0xED,                   # in ax, dx
+            0x89, 0x46, 0xFE,       # mov [bp-2], ax
+            0xBA, 0xEC, 0x0E,       # mov dx, 0x0eec
+            0xED,                   # in ax, dx
+            0x89, 0x46, 0xFC,       # mov [bp-4], ax
+            0xBA, 0xEE, 0x0E,       # mov dx, 0x0eee
+            0xED,                   # in ax, dx
+            0x89, 0x46, 0xFA,       # mov [bp-6], ax
+            0xBA, 0xF0, 0x0E,       # mov dx, 0x0ef0
+            0xED,                   # in ax, dx
+            0x89, 0x46, 0xF8,       # mov [bp-8], ax
+            0x07,                   # pop es
+            0x5A,                   # pop dx
+            0x59,                   # pop cx
+            0x5B,                   # pop bx
+            0x58,                   # pop ax
+            0x5D,                   # pop bp
+            0xCF                    # iret
           ]
         end
 
@@ -681,18 +685,27 @@ module RHDL
         end
 
         def sync_display_window!
+          active_page = @sim.runner_read_memory(DisplayAdapter::VIDEO_PAGE_BDA, 1, mapped: true).fetch(0, 0) &
+            (DisplayAdapter::TEXT_PAGES - 1)
+          page_base = DisplayAdapter::TEXT_BASE + (active_page * DisplayAdapter::BUFFER_SIZE)
           bytes = @sim.runner_read_memory(
-            DisplayAdapter::TEXT_BASE,
-            DisplayAdapter::TEXT_ROWS * DisplayAdapter::TEXT_COLUMNS * 2,
+            page_base,
+            DisplayAdapter::BUFFER_SIZE,
             mapped: true
           )
-          update_display_buffer(bytes)
+          bytes.each_with_index do |byte, idx|
+            memory_store[page_base + idx] = byte
+          end
+          @display_buffer = bytes
         end
 
         def sync_cursor_window!
-          bytes = @sim.runner_read_memory(DisplayAdapter::CURSOR_BDA, 2, mapped: true)
-          memory_store[DisplayAdapter::CURSOR_BDA] = bytes.fetch(0, 0)
-          memory_store[DisplayAdapter::CURSOR_BDA + 1] = bytes.fetch(1, 0)
+          bytes = @sim.runner_read_memory(DisplayAdapter::CURSOR_BDA, DisplayAdapter::TEXT_PAGES * 2, mapped: true)
+          bytes.each_with_index do |byte, idx|
+            memory_store[DisplayAdapter::CURSOR_BDA + idx] = byte
+          end
+          memory_store[DisplayAdapter::VIDEO_PAGE_BDA] =
+            @sim.runner_read_memory(DisplayAdapter::VIDEO_PAGE_BDA, 1, mapped: true).fetch(0, 0)
         end
       end
     end

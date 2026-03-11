@@ -87,6 +87,50 @@ RSpec.describe RHDL::Examples::GameBoy::VerilogRunner do
     VERILOG
   end
 
+  describe '#needs_component_verilog_export?' do
+    it 'refreshes cached component verilog when the generated text changes even if mtimes do not' do
+      Dir.mktmpdir('rhdl_gb_verilog_cache') do |dir|
+        cached = File.join(dir, 'gameboy.v')
+        dep = File.join(dir, 'gameboy.rb')
+        File.write(dep, '# source')
+        File.write(cached, 'old verilog')
+        older = Time.now - 60
+        File.utime(older, older, dep)
+        File.utime(Time.now, Time.now, cached)
+
+        expect(
+          runner.send(
+            :needs_component_verilog_export?,
+            cached,
+            export_deps: [dep],
+            current_verilog: 'new verilog'
+          )
+        ).to be(true)
+      end
+    end
+
+    it 'keeps cached component verilog when dependencies and generated text are unchanged' do
+      Dir.mktmpdir('rhdl_gb_verilog_cache') do |dir|
+        cached = File.join(dir, 'gameboy.v')
+        dep = File.join(dir, 'gameboy.rb')
+        File.write(dep, '# source')
+        File.write(cached, 'same verilog')
+        older = Time.now - 60
+        File.utime(older, older, dep)
+        File.utime(Time.now, Time.now, cached)
+
+        expect(
+          runner.send(
+            :needs_component_verilog_export?,
+            cached,
+            export_deps: [dep],
+            current_verilog: 'same verilog'
+          )
+        ).to be(false)
+      end
+    end
+  end
+
   describe '#runtime_staged_verilog_entry' do
     it 'does not use staged mixed verilog unless explicitly enabled' do
       Dir.mktmpdir('rhdl_gb_staged') do |dir|
@@ -526,7 +570,7 @@ RSpec.describe RHDL::Examples::GameBoy::VerilogRunner do
       expect(lines).to include('strcmp(name, "old_timer_irq_internal") == 0) return ctx->dut->rootp->gb__DOT__rt_tmp_15_1;')
       expect(lines).to include('strcmp(name, "old_serial_irq_internal") == 0) return ctx->dut->rootp->gb__DOT__rt_tmp_16_1;')
       expect(lines).to include('strcmp(name, "old_ack_internal") == 0) return ctx->dut->rootp->gb__DOT__rt_tmp_17_1;')
-      expect(lines).to include('strcmp(name, "irq_ack_internal") == 0) return (~ctx->dut->rootp->gb__DOT___cpu_IORQ_n & ~ctx->dut->rootp->gb__DOT___cpu_M1_n) ? 1u : 0u;')
+      expect(lines).to include('strcmp(name, "irq_ack_internal") == 0) return (ctx->dut->rootp->gb__DOT___cpu_IORQ_n == 0u && ctx->dut->rootp->gb__DOT___cpu_M1_n == 0u) ? 1u : 0u;')
       expect(lines).to include('strcmp(name, "video_vblank_irq_internal") == 0) return ctx->dut->rootp->gb__DOT___video_vblank_irq;')
       expect(lines).to include('strcmp(name, "sel_ff50_internal") == 0) return ctx->dut->rootp->gb__DOT___md_swizz_a_out == 0xFF50u ? 1u : 0u;')
       expect(lines).to include('strcmp(name, "savestate_reset_out_internal") == 0) return ctx->dut->rootp->gb__DOT___gb_savestates_reset_out;')
@@ -568,13 +612,34 @@ RSpec.describe RHDL::Examples::GameBoy::VerilogRunner do
       expect(lines).to include('strcmp(name, "old_timer_irq_internal") == 0) return ctx->dut->rootp->gameboy__DOT__gb_core__DOT__rt_tmp_15_1;')
       expect(lines).to include('strcmp(name, "old_serial_irq_internal") == 0) return ctx->dut->rootp->gameboy__DOT__gb_core__DOT__rt_tmp_16_1;')
       expect(lines).to include('strcmp(name, "old_ack_internal") == 0) return ctx->dut->rootp->gameboy__DOT__gb_core__DOT__rt_tmp_17_1;')
-      expect(lines).to include('strcmp(name, "irq_ack_internal") == 0) return (~ctx->dut->rootp->gameboy__DOT__gb_core__DOT___cpu_IORQ_n & ~ctx->dut->rootp->gameboy__DOT__gb_core__DOT___cpu_M1_n) ? 1u : 0u;')
+      expect(lines).to include('strcmp(name, "irq_ack_internal") == 0) return (ctx->dut->rootp->gameboy__DOT__gb_core__DOT___cpu_IORQ_n == 0u && ctx->dut->rootp->gameboy__DOT__gb_core__DOT___cpu_M1_n == 0u) ? 1u : 0u;')
       expect(lines).to include('strcmp(name, "video_vblank_irq_internal") == 0) return ctx->dut->rootp->gameboy__DOT__gb_core__DOT___video_vblank_irq;')
       expect(lines).to include('strcmp(name, "savestate_reset_out_internal") == 0) return ctx->dut->rootp->gameboy__DOT__gb_core__DOT___gb_savestates_reset_out;')
       expect(lines).to include('strcmp(name, "request_loadstate_internal") == 0) return ctx->dut->rootp->gameboy__DOT__gb_core__DOT___gb_statemanager_request_loadstate;')
       expect(lines).to include('strcmp(name, "video_lcd_on_internal") == 0) return ctx->dut->rootp->gameboy__DOT__gb_core__DOT__video__DOT__lcd_on;')
       expect(lines).to include('strcmp(name, "ce_internal") == 0) return ctx->dut->rootp->gameboy__DOT__ce;')
       expect(lines).to include('strcmp(name, "boot_upload_active_internal") == 0) return ctx->dut->rootp->gameboy__DOT__boot_upload_active;')
+    end
+
+    it 'uses wrapped gb_core internals for component-mode gameboy wrapper tops' do
+      runner.instance_variable_set(:@top_module_name, 'game_boy_gameboy')
+      runner.instance_variable_set(:@direct_verilog_source_plan, nil)
+      runner.instance_variable_set(:@output_port_aliases, {})
+
+      lines = runner.send(:c_peek_dispatch_lines)
+
+      expect(lines).to include('strcmp(name, "cpu_addr_internal") == 0) return ctx->dut->rootp->game_boy_gameboy__DOT__gb_core__DOT___cpu_addr_bus;')
+      expect(lines).to include('strcmp(name, "cpu_do_internal") == 0) return ctx->dut->rootp->game_boy_gameboy__DOT__gb_core__DOT___cpu_data_out;')
+      expect(lines).to include('strcmp(name, "cpu_rd_n_internal") == 0) return ctx->dut->rootp->game_boy_gameboy__DOT__gb_core__DOT___cpu_rd_n;')
+      expect(lines).to include('strcmp(name, "cpu_wr_n_internal") == 0) return ctx->dut->rootp->game_boy_gameboy__DOT__gb_core__DOT___cpu_wr_n;')
+      expect(lines).to include('strcmp(name, "cpu_m1_n_internal") == 0) return ctx->dut->rootp->game_boy_gameboy__DOT__gb_core__DOT___cpu_m1_n;')
+      expect(lines).to include('strcmp(name, "boot_rom_enabled_internal") == 0) return ctx->dut->rootp->game_boy_gameboy__DOT__gb_core__DOT__rt_tmp_1_1;')
+      expect(lines).to include('strcmp(name, "sel_ff50_internal") == 0) return ctx->dut->rootp->game_boy_gameboy__DOT__gb_core__DOT___cpu_addr_bus == 0xFF50u ? 1u : 0u;')
+      expect(lines).to include('strcmp(name, "video_lcd_on_internal") == 0) return ctx->dut->rootp->game_boy_gameboy__DOT__gb_core__DOT__lcd_on;')
+      expect(lines).to include('strcmp(name, "video_lcd_clkena_internal") == 0) return ctx->dut->rootp->game_boy_gameboy__DOT__gb_core__DOT__lcd_clkena;')
+      expect(lines).to include('strcmp(name, "video_lcd_vsync_internal") == 0) return ctx->dut->rootp->game_boy_gameboy__DOT__gb_core__DOT__lcd_vsync;')
+      expect(lines).to include('strcmp(name, "video_vblank_irq_internal") == 0) return ctx->dut->rootp->game_boy_gameboy__DOT__gb_core__DOT___video_unit_vblank_irq;')
+      expect(lines).to include('strcmp(name, "video_irq_internal") == 0) return ctx->dut->rootp->game_boy_gameboy__DOT__gb_core__DOT___video_unit_irq;')
     end
 
     it 'does not assume normalized wrapper internals for raw direct gameboy wrappers' do

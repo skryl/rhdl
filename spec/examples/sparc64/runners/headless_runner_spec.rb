@@ -189,4 +189,69 @@ RSpec.describe RHDL::Examples::SPARC64::HeadlessRunner do
 
     expect(capturing_runner_class.last_kwargs).to include(backend: :compile, fast_boot: false)
   end
+
+  it 'forwards compile_mode to the IR runner' do
+    capturing_runner_class = Class.new do
+      class << self
+        attr_reader :last_kwargs
+      end
+
+      def initialize(**kwargs)
+        self.class.instance_variable_set(:@last_kwargs, kwargs)
+      end
+
+      def native?
+        true
+      end
+
+      def simulator_type
+        :ir_compile
+      end
+
+      def backend
+        :compile
+      end
+
+      def reset!
+      end
+
+      def load_images(**)
+      end
+
+      def run_until_complete(**)
+        {}
+      end
+
+      def read_memory(_addr, length)
+        Array.new(length, 0)
+      end
+
+      def write_memory(_addr, _bytes)
+      end
+
+      def wishbone_trace
+        []
+      end
+
+      def mailbox_status
+        0
+      end
+
+      def mailbox_value
+        0
+      end
+
+      def unmapped_accesses
+        []
+      end
+    end
+
+    described_class.new(
+      ir_runner_class: capturing_runner_class,
+      builder: builder,
+      compile_mode: :rustc
+    )
+
+    expect(capturing_runner_class.last_kwargs).to include(backend: :compile, compiler_mode: :rustc)
+  end
 end
