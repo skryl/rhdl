@@ -613,13 +613,19 @@ RHDL includes benchmarking tasks to measure simulation performance across backen
 
 ```bash
 rake bench:native[gates]             # Benchmark gate-level simulation
-rake bench:native[cpu8bit,cycles]    # Benchmark 8-bit CPU FastHarness (compiler vs arcilator_gpu)
+rake bench:native[cpu8bit,cycles]    # Benchmark 8-bit CPU FastHarness (compiler, arcilator_gpu, GemMetal)
+RHDL_BENCH_BACKENDS=gem_metal rake bench:native[cpu8bit,cycles] # Benchmark only GemMetal
 rake bench:native[mos6502,cycles]    # Benchmark MOS 6502 CPU
-rake bench:native[apple2,cycles]     # Benchmark Apple II full system
+rake bench:native[apple2,cycles]     # Benchmark Apple II full system (including GemMetal)
+RHDL_BENCH_BACKENDS=gem_metal rake bench:native[apple2,cycles] # Benchmark Apple II with only GemMetal
+rake bench:native[riscv,cycles]      # Benchmark RISC-V single-cycle core (includes GemMetal)
+RHDL_BENCH_BACKENDS=gem_metal rake bench:native[riscv,cycles] # Benchmark only RISC-V GemMetal
 rake bench:native[gameboy,frames]    # Benchmark GameBoy with Prince of Persia
 rake bench:web[apple2,cycles] # Benchmark Apple II web WASM backends
 rake bench:web[riscv,cycles]  # Benchmark RISC-V web WASM backends
 ```
+
+GemMetal is part of the default native backend set for CPU8bit, Apple II, and RISC-V. Use `RHDL_BENCH_BACKENDS` to restrict the runners, for example `RHDL_BENCH_BACKENDS=gem_metal bundle exec rake bench:native[cpu8bit,5000000]`, `RHDL_BENCH_BACKENDS=compiler,gem_metal bundle exec rake bench:native[apple2,2000000]`, or `RHDL_BENCH_BACKENDS=gem_metal bundle exec rake bench:native[riscv,500000]`. `gem` remains an alias for `gem_metal`. On RISC-V, the GemMetal path benchmarks an MMU-off synthesized core netlist via `metal_dummy_test`; it does not load xv6 images. For CPU8bit ArcilatorGPU throughput mode, set `RHDL_CPU8BIT_ARCILATOR_GPU_INSTANCES=<n>` or the benchmark-wide fallback `RHDL_BENCH_ARCILATOR_GPU_INSTANCES=<n>`.
 
 **Sample Results (1M cycles):**
 
@@ -650,7 +656,13 @@ bundle exec rake pspec[riscv]          # Run RISC-V specs in parallel
 bundle exec rake spec:bench[riscv,20]  # Benchmark 20 RISC-V spec files
 bundle exec rake bench:native[ir,5000000]     # Benchmark IR runners
 bundle exec rake bench:native[gates]          # Benchmark gate-level simulation
-bundle exec rake bench:native[cpu8bit,5000000] # Benchmark 8-bit CPU compiler vs arcilator_gpu
+bundle exec rake bench:native[cpu8bit,5000000] # Benchmark 8-bit CPU compiler vs arcilator_gpu vs GemMetal
+RHDL_CPU8BIT_ARCILATOR_GPU_INSTANCES=8 bundle exec rake bench:native[cpu8bit,5000000] # Benchmark CPU8bit ArcilatorGPU with 8 mirrored instances
+bundle exec rake bench:native[apple2,2000000]  # Benchmark Apple II including GemMetal
+bundle exec rake bench:native[riscv,500000]    # Benchmark RISC-V including GemMetal
+RHDL_BENCH_BACKENDS=gem_metal bundle exec rake bench:native[cpu8bit,5000000] # Benchmark only CPU8bit GemMetal
+RHDL_BENCH_BACKENDS=gem_metal bundle exec rake bench:native[apple2,2000000]  # Benchmark only Apple II GemMetal
+RHDL_BENCH_BACKENDS=gem_metal bundle exec rake bench:native[riscv,500000]    # Benchmark only RISC-V GemMetal
 bundle exec rake bench:web[apple2]     # Benchmark Apple II web compiler vs arcilator vs verilator
 bundle exec rake bench:web[riscv]      # Benchmark RISC-V web compiler vs arcilator vs verilator
 

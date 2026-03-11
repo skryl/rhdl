@@ -77,6 +77,28 @@ module RHDL
           }
         end
 
+        def self.arcilator_status
+          require_relative '../../utilities/runners/arcilator_runner'
+          RHDL::Examples::CPU8Bit::ArcilatorRunner.status
+        rescue LoadError, NameError => e
+          {
+            ready: false,
+            missing_tools: [],
+            missing_capabilities: ["arcilator runner unavailable: #{e.message}"]
+          }
+        end
+
+        def self.verilator_status
+          require_relative '../../utilities/runners/verilator_runner'
+          RHDL::Examples::CPU8Bit::VerilatorRunner.status
+        rescue LoadError, NameError => e
+          {
+            ready: false,
+            missing_tools: [],
+            missing_capabilities: ["verilator runner unavailable: #{e.message}"]
+          }
+        end
+
         def self.ensure_arcilator_gpu_available!
           status = arcilator_gpu_status
           return true if status[:ready]
@@ -89,6 +111,30 @@ module RHDL
             "Install an ArcToGPU-enabled arcilator build plus Metal/SPIR-V toolchain support."
         end
 
+        def self.ensure_arcilator_available!
+          status = arcilator_status
+          return true if status[:ready]
+
+          details = []
+          details << "missing tools: #{status[:missing_tools].join(', ')}" unless status[:missing_tools].empty?
+          details << "missing capabilities: #{status[:missing_capabilities].join(', ')}" unless status[:missing_capabilities].empty?
+          raise ArgumentError,
+            "arcilator backend unavailable (#{details.join('; ')}). " \
+            "Install an arcilator/firtool-enabled toolchain."
+        end
+
+        def self.ensure_verilator_available!
+          status = verilator_status
+          return true if status[:ready]
+
+          details = []
+          details << "missing tools: #{status[:missing_tools].join(', ')}" unless status[:missing_tools].empty?
+          details << "missing capabilities: #{status[:missing_capabilities].join(', ')}" unless status[:missing_capabilities].empty?
+          raise ArgumentError,
+            "verilator backend unavailable (#{details.join('; ')}). " \
+            "Install a verilator-enabled native build toolchain."
+        end
+
         def initialize(external_memory = nil, sim: :compile)
           require 'rhdl/codegen'
 
@@ -96,10 +142,23 @@ module RHDL
           @halted = false
           @sim_backend = normalize_sim_backend(sim)
 
-          if arcilator_gpu_mode?
-            self.class.ensure_arcilator_gpu_available!
-            require_relative '../../utilities/runners/arcilator_gpu_runner'
-            @sim = RHDL::Examples::CPU8Bit::ArcilatorGpuRunner.new
+          if runner_backend_mode?
+            @sim = case @sim_backend
+            when :arcilator_gpu
+              self.class.ensure_arcilator_gpu_available!
+              require_relative '../../utilities/runners/arcilator_gpu_runner'
+              RHDL::Examples::CPU8Bit::ArcilatorGpuRunner.new
+            when :arcilator
+              self.class.ensure_arcilator_available!
+              require_relative '../../utilities/runners/arcilator_runner'
+              RHDL::Examples::CPU8Bit::ArcilatorRunner.new
+            when :verilator
+              self.class.ensure_verilator_available!
+              require_relative '../../utilities/runners/verilator_runner'
+              RHDL::Examples::CPU8Bit::VerilatorRunner.new
+            else
+              raise ArgumentError, "Unsupported runner backend: #{@sim_backend.inspect}"
+            end
             @memory = RunnerMemory64K.new(@sim)
             ensure_runner_cpu8bit_mode!
           else
@@ -132,7 +191,17 @@ module RHDL
         end
 
         def backend
-          arcilator_gpu_mode? ? :arcilator_gpu : @sim.backend
+          return @sim_backend if runner_backend_mode?
+
+          @sim.backend
+        end
+
+        def parallel_instances
+          return 1 unless runner_backend_mode?
+          return 1 unless @sim.respond_to?(:runner_parallel_instances)
+
+          instances = @sim.runner_parallel_instances.to_i
+          instances.positive? ? instances : 1
         end
 
         # Read CPU state
@@ -172,7 +241,7 @@ module RHDL
           @halted = false
           @cycle_count = 0
 
-          if arcilator_gpu_mode?
+          if runner_backend_mode?
             @sim.poke('rst', 1)
             run_runner_cycles(1)
             @sim.poke('rst', 0)
@@ -189,7 +258,7 @@ module RHDL
         end
 
         def clock_cycle
-          if arcilator_gpu_mode?
+          if runner_backend_mode?
             run_runner_cycles(1)
             @halted = true if @sim.peek('halted') == 1
             return
@@ -224,7 +293,7 @@ module RHDL
           n = count.to_i
           return 0 if n <= 0
 
-          unless arcilator_gpu_mode?
+          unless runner_backend_mode?
             ran = 0
             n.times do
               break if @halted
@@ -236,22 +305,9 @@ module RHDL
             return ran
           end
 
-          remaining = n
-          ran = 0
-          batch = [batch_size.to_i, 1].max
-          while remaining.positive?
-            step = [remaining, batch].min
-            batch_ran = run_runner_cycles(step)
-            break if batch_ran <= 0
-
-            ran += batch_ran
-            remaining -= batch_ran
-            if @sim.peek('halted') == 1
-              @halted = true
-              break
-            end
-          end
-
+          # Native runner backends handle internal batching/scheduling.
+          # Keep host-side execution as a single call to avoid extra sync points.
+          ran = run_runner_cycles(n)
           @cycle_count += ran
           @halted = true if @sim.peek('halted') == 1
           ran
@@ -291,6 +347,8 @@ module RHDL
         def normalize_sim_backend(sim)
           sym = sim.to_sym
           return :compile if sym == :compiler
+          return :arcilator_gpu if sym == :arc_to_gpu
+          return :arcilator if sym == :arc
 
           sym
         end
@@ -303,11 +361,23 @@ module RHDL
           @sim_backend == :arcilator_gpu
         end
 
+        def arcilator_mode?
+          @sim_backend == :arcilator
+        end
+
+        def verilator_mode?
+          @sim_backend == :verilator
+        end
+
+        def runner_backend_mode?
+          arcilator_gpu_mode? || arcilator_mode? || verilator_mode?
+        end
+
         def ensure_runner_cpu8bit_mode!
           return if @sim.runner_mode? && @sim.runner_kind == :cpu8bit
 
           raise ArgumentError,
-            "arcilator_gpu backend requires native cpu8bit runner mode " \
+            "#{@sim_backend} backend requires native cpu8bit runner mode " \
             "(runner_mode=#{@sim.runner_mode?}, runner_kind=#{@sim.runner_kind.inspect})"
         end
 

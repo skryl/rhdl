@@ -55,6 +55,13 @@ module RHDL
                    end
                    require_relative 'arcilator_runner'
                    ArcilatorRunner.new(mem_size: resolved_mem_size)
+                 when :arcilator_gpu
+                   if @core != :single
+                     warn "ArcilatorGPU mode only supports single-cycle core; overriding core=#{@core} to single."
+                     @core = :single
+                   end
+                   require_relative 'arcilator_gpu_runner'
+                   ArcilatorGpuRunner.new(mem_size: resolved_mem_size)
                  else
                    raise ArgumentError, "Unsupported mode #{@effective_mode.inspect}"
                  end
@@ -239,13 +246,13 @@ module RHDL
 
         def normalize_mode(mode)
           case mode
-          when :ruby, :ir, :verilog, :circt
+          when :ruby, :ir, :verilog, :circt, :arcilator_gpu
             mode
           when :netlist
             warn "Mode #{mode.inspect} is not implemented for RISC-V yet; falling back to :ir."
             :ir
           else
-            raise ArgumentError, "Unsupported mode #{mode.inspect}. Use ruby, ir, netlist, verilog, or circt."
+            raise ArgumentError, "Unsupported mode #{mode.inspect}. Use ruby, ir, netlist, verilog, circt, or arcilator_gpu."
           end
         end
 
@@ -263,14 +270,14 @@ module RHDL
         end
 
         def xv6_capable?
-          return true if %i[verilog circt].include?(@effective_mode)
+          return true if %i[verilog circt arcilator_gpu].include?(@effective_mode)
           return true if native? && @cpu.respond_to?(:sim) && @cpu.sim.respond_to?(:runner_kind) && @cpu.sim.runner_kind == :riscv
 
           false
         end
 
         def linux_capable?
-          return true if %i[verilog circt].include?(@effective_mode)
+          return true if %i[verilog circt arcilator_gpu].include?(@effective_mode)
           return false unless native? && @cpu.respond_to?(:sim) && @cpu.sim.respond_to?(:runner_kind)
 
           %i[riscv hdl].include?(@cpu.sim.runner_kind)
@@ -305,10 +312,10 @@ module RHDL
             :ruby
           when :ir, :netlist
             :compile
-          when :verilog, :circt
+          when :verilog, :circt, :arcilator_gpu
             :ruby
           else
-            raise "Unknown mode: #{mode}. Valid modes: ruby, ir, netlist, verilog, circt"
+            raise "Unknown mode: #{mode}. Valid modes: ruby, ir, netlist, verilog, circt, arcilator_gpu"
           end
         end
 

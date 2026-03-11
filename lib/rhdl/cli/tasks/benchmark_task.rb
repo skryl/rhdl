@@ -215,6 +215,8 @@ module RHDL
             .split(',')
             .map { |name| name.strip.downcase.to_sym }
             .map { |name| name == :gpu ? :arcilator_gpu : name }
+            .map { |name| name == :arc ? :arcilator_gpu : name }
+            .map { |name| name == :gem ? :gem_metal : name }
             .reject(&:empty?)
 
           puts_header("8-bit CPU FastHarness Benchmark")
@@ -228,22 +230,36 @@ module RHDL
           runners = [
             {
               name: 'Compiler',
+              backend: :compiler,
               sim: :compile,
               filter_key: :compiler,
               available: RHDL::Codegen::IR::IR_COMPILER_AVAILABLE
             },
             {
               name: 'ArcilatorGPU',
+              backend: :arcilator_gpu,
               sim: :arcilator_gpu,
               filter_key: :arcilator_gpu,
               available: RHDL::HDL::CPU::FastHarness.arcilator_gpu_status[:ready]
             }
           ]
+          runners << {
+            name: 'GemMetal',
+            backend: :gem_metal,
+            filter_key: :gem_metal
+          }
           runners.select! { |runner| runner_filter.include?(runner[:filter_key]) } unless runner_filter.empty?
 
           results = []
 
           runners.each do |runner|
+            if runner[:backend] == :gem_metal
+              print "\n#{runner[:name]}: "
+              $stdout.flush
+              results << benchmark_gem_metal_cpu8bit(cycles: cycles, standalone: false)
+              next
+            end
+
             unless runner[:available]
               puts "\n#{runner[:name]}: SKIPPED (not available)"
               results << { name: runner[:name], status: :skipped }
@@ -269,12 +285,18 @@ module RHDL
               run_elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - run_start
 
               cycles_per_sec = cycles_run / run_elapsed
+              parallel_instances = sim.parallel_instances
+              effective_cycles_per_sec = cycles_per_sec * parallel_instances
               final_pc = sim.pc
 
               puts 'done'
               puts "  Init time:  #{format('%.3f', init_elapsed)}s"
               puts "  Run time:   #{format('%.3f', run_elapsed)}s"
               puts "  Cycles run: #{cycles_run}"
+              if parallel_instances > 1
+                puts "  Instances:  #{parallel_instances}"
+                puts "  Effective:  #{format('%.0f', effective_cycles_per_sec)} cycles/s"
+              end
               puts "  Final PC:   0x#{final_pc.to_s(16).upcase}"
 
               results << {
@@ -283,6 +305,8 @@ module RHDL
                 init_time: init_elapsed,
                 run_time: run_elapsed,
                 cycles_per_sec: cycles_per_sec,
+                parallel_instances: parallel_instances,
+                effective_cycles_per_sec: effective_cycles_per_sec,
                 final_pc: final_pc
               }
             rescue => e
@@ -294,6 +318,661 @@ module RHDL
           end
 
           print_benchmark_summary(results, cycles)
+        end
+
+        # Benchmark external GEM Metal binary on the 8-bit CPU workload.
+        # This builds (or reuses) a CPU8bit AIGPDK-mapped netlist and gemparts.
+        def benchmark_gem_metal_cpu8bit(cycles: options[:cycles] || 5_000, standalone: true)
+          require 'fileutils'
+          require 'open3'
+          require_relative '../../../../examples/8bit/hdl/cpu/cpu'
+
+          runner_name = 'GemMetal'
+          num_blocks = (options[:blocks] || ENV.fetch('RHDL_GEM_METAL_CPU8BIT_BLOCKS', '5')).to_i
+          num_blocks = 1 if num_blocks <= 0
+          top_module = ENV.fetch('RHDL_GEM_METAL_CPU8BIT_TOP', 'cpu8bit')
+          force_rebuild = truthy_env?(ENV.fetch('RHDL_GEM_METAL_CPU8BIT_REBUILD', '0'))
+
+          project_root = File.expand_path('../../../..', __dir__)
+          gem_root = File.join(project_root, 'external', 'GEM')
+          build_dir = File.expand_path(
+            ENV.fetch('RHDL_GEM_METAL_CPU8BIT_BUILD_DIR', File.join(project_root, 'examples/8bit/.gem_metal_cpu8bit'))
+          )
+          FileUtils.mkdir_p(build_dir)
+
+          rtl_path = File.join(build_dir, 'cpu8bit_rtl.v')
+          yosys_script_path = File.join(build_dir, 'cpu8bit_gem.ys')
+          yosys_log_path = File.join(build_dir, 'cpu8bit_yosys.log')
+          cut_map_log_path = File.join(build_dir, 'cpu8bit_cut_map.log')
+          metal_log_path = File.join(build_dir, 'cpu8bit_metal_dummy.log')
+
+          netlist_path = resolve_path_for_bench(
+            ENV['RHDL_GEM_METAL_CPU8BIT_NETLIST'],
+            File.join(build_dir, 'cpu8bit_gatelevel.gv'),
+            project_root
+          )
+          gemparts_path = resolve_path_for_bench(
+            ENV['RHDL_GEM_METAL_CPU8BIT_GEMPARTS'],
+            File.join(build_dir, 'cpu8bit.gemparts'),
+            project_root
+          )
+
+          level_split = ENV.fetch('RHDL_GEM_METAL_CPU8BIT_LEVEL_SPLIT', '').strip
+          max_stage_degrad = ENV.fetch('RHDL_GEM_METAL_CPU8BIT_MAX_STAGE_DEGRAD', '').strip
+
+          if standalone
+            puts_header('External GEM Metal Benchmark (CPU8bit)')
+            puts "Cycles per run: #{cycles}"
+            puts "Blocks: #{num_blocks}"
+            puts "Top module: #{top_module}"
+            puts "GEM root: #{gem_root}"
+            puts "Build dir: #{build_dir}"
+            puts "Netlist: #{netlist_path}"
+            puts "Gemparts: #{gemparts_path}"
+            puts "Force rebuild: #{force_rebuild}"
+            puts
+          else
+            print 'initializing... '
+            $stdout.flush
+          end
+
+          init_start = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+
+          unless Dir.exist?(gem_root)
+            message = "external GEM repo not found at #{gem_root}"
+            puts(standalone ? "Error: #{message}" : "SKIPPED (#{message})")
+            return { name: runner_name, status: :skipped }
+          end
+
+          unless command_available?('cargo')
+            message = 'cargo not found in PATH'
+            puts(standalone ? "Error: #{message}" : "SKIPPED (#{message})")
+            return { name: runner_name, status: :skipped }
+          end
+
+          need_netlist = force_rebuild || !File.exist?(netlist_path)
+          need_gemparts = force_rebuild || !File.exist?(gemparts_path)
+
+          if need_netlist
+            unless command_available?('yosys')
+              message = 'yosys not found in PATH (required to synthesize CPU8bit AIGPDK netlist)'
+              puts(standalone ? "Error: #{message}" : "SKIPPED (#{message})")
+              puts "Set RHDL_GEM_METAL_CPU8BIT_NETLIST to a prebuilt netlist or install yosys, then retry." if standalone
+              return { name: runner_name, status: :skipped }
+            end
+
+            aigpdk_nomem_lib = File.join(gem_root, 'aigpdk', 'aigpdk_nomem.lib')
+            unless File.exist?(aigpdk_nomem_lib)
+              message = "missing AIGPDK library at #{aigpdk_nomem_lib}"
+              puts(standalone ? "Error: #{message}" : "SKIPPED (#{message})")
+              return { name: runner_name, status: :skipped }
+            end
+
+            puts 'Generating CPU8bit Verilog hierarchy...' if standalone
+            FileUtils.mkdir_p(File.dirname(rtl_path))
+            File.write(rtl_path, RHDL::HDL::CPU::CPU.to_verilog_hierarchy(top_name: top_module))
+
+            puts 'Synthesizing/mapping CPU8bit netlist with yosys...' if standalone
+            yosys_script = <<~YOSYS
+              read_verilog "#{rtl_path}"
+              hierarchy -check -top #{top_module}
+              synth -flatten
+              delete t:\$print
+              dfflibmap -liberty "#{aigpdk_nomem_lib}"
+              opt_clean -purge
+              abc -liberty "#{aigpdk_nomem_lib}"
+              opt_clean -purge
+              write_verilog "#{netlist_path}"
+            YOSYS
+            File.write(yosys_script_path, yosys_script)
+
+            yosys_cmd = ['yosys', '-q', '-s', yosys_script_path]
+            yosys_out, yosys_status = Open3.capture2e(*yosys_cmd)
+            File.write(yosys_log_path, yosys_out)
+            unless yosys_status.success?
+              puts yosys_out if standalone
+              puts if standalone
+              message = "yosys synthesis exited with #{yosys_status.exitstatus}"
+              puts(standalone ? "FAILED: #{message}" : "FAILED (#{message})")
+              puts "Yosys log: #{yosys_log_path}" if standalone
+              return { name: runner_name, status: :failed, error: message }
+            end
+          elsif standalone
+            puts "Reusing existing netlist at #{netlist_path}"
+          end
+
+          if need_gemparts
+            puts 'Generating GEM partition (.gemparts) via cut_map_interactive...' if standalone
+            cut_map_cmd = ['cargo', 'run', '--release', '--features', 'metal', '--bin', 'cut_map_interactive', '--',
+                           netlist_path]
+            cut_map_cmd += ['--top-module', top_module]
+            cut_map_cmd += ['--level-split', level_split] unless level_split.empty?
+            cut_map_cmd += ['--max-stage-degrad', max_stage_degrad] unless max_stage_degrad.empty?
+            cut_map_cmd << gemparts_path
+
+            cut_map_out, cut_map_status = Open3.capture2e(*cut_map_cmd, chdir: gem_root)
+            File.write(cut_map_log_path, cut_map_out)
+            unless cut_map_status.success?
+              puts cut_map_out if standalone
+              puts if standalone
+              message = "cut_map_interactive exited with #{cut_map_status.exitstatus}"
+              puts(standalone ? "FAILED: #{message}" : "FAILED (#{message})")
+              puts "Cut-map log: #{cut_map_log_path}" if standalone
+              return { name: runner_name, status: :failed, error: message }
+            end
+          elsif standalone
+            puts "Reusing existing gemparts at #{gemparts_path}"
+          end
+
+          unless File.exist?(netlist_path)
+            message = "netlist not found at #{netlist_path}"
+            puts(standalone ? "FAILED: #{message}" : "FAILED (#{message})")
+            return { name: runner_name, status: :failed, error: message }
+          end
+          unless File.exist?(gemparts_path)
+            message = "gemparts not found at #{gemparts_path}"
+            puts(standalone ? "FAILED: #{message}" : "FAILED (#{message})")
+            return { name: runner_name, status: :failed, error: message }
+          end
+
+          init_elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - init_start
+
+          cmd = [
+            'cargo', 'run', '--release', '--features', 'metal', '--bin', 'metal_dummy_test', '--',
+            netlist_path, gemparts_path, num_blocks.to_s, cycles.to_s
+          ]
+
+          print(standalone ? "Running: #{cmd.join(' ')}\n" : "running #{cycles} cycles... ")
+          $stdout.flush
+          run_start = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+          out, status = Open3.capture2e(*cmd, chdir: gem_root)
+          run_elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - run_start
+          File.write(metal_log_path, out)
+
+          unless status.success?
+            puts out if standalone
+            puts if standalone
+            message = "external GEM CPU8bit benchmark command exited with #{status.exitstatus}"
+            puts(standalone ? "FAILED: #{message}" : "FAILED (#{message})")
+            puts "Metal log: #{metal_log_path}" if standalone
+            return { name: runner_name, status: :failed, error: message }
+          end
+
+          summary = parse_gem_metal_summary(out)
+          unless summary && summary[:cycles_per_sec]
+            message = 'could not parse metal_dummy_test summary line'
+            puts(standalone ? "FAILED: #{message}" : "FAILED (#{message})")
+            puts "Metal log: #{metal_log_path}" if standalone
+            return { name: runner_name, status: :failed, error: message }
+          end
+
+          puts 'done'
+          puts "  Init time: #{format('%.3f', init_elapsed)}s"
+          puts "  Run time:  #{format('%.3f', run_elapsed)}s"
+          puts "  Logical dispatches: #{summary[:logical_dispatches]}"
+          puts "  GPU dispatches: #{summary[:gpu_dispatches]}"
+          puts "  Reported total: #{format('%.3f', summary[:total_ms] || 0.0)}ms"
+          puts "  Cycles/s: #{format('%.2f', summary[:cycles_per_sec])}"
+
+          {
+            name: runner_name,
+            status: :success,
+            init_time: init_elapsed,
+            run_time: run_elapsed,
+            cycles_per_sec: summary[:cycles_per_sec],
+            logical_dispatches: summary[:logical_dispatches],
+            gpu_dispatches: summary[:gpu_dispatches],
+            total_ms: summary[:total_ms]
+          }
+        rescue => e
+          puts 'FAILED'
+          puts "  Error: #{e.message}"
+          puts "  #{e.backtrace.first(3).join("\n  ")}" if options[:verbose]
+          { name: runner_name, status: :failed, error: e.message }
+        end
+
+        # Benchmark external GEM Metal binary on the Apple2 workload.
+        # This builds (or reuses) an Apple2 AIGPDK-mapped netlist and gemparts.
+        def benchmark_gem_metal_apple2(cycles: options[:cycles] || 5_000, standalone: true)
+          require 'fileutils'
+          require 'open3'
+          require_relative '../../../../examples/apple2/hdl'
+
+          runner_name = 'GemMetal'
+          num_blocks = (options[:blocks] || ENV.fetch('RHDL_GEM_METAL_APPLE2_BLOCKS', '5')).to_i
+          num_blocks = 1 if num_blocks <= 0
+          top_module = ENV.fetch('RHDL_GEM_METAL_APPLE2_TOP', 'apple2_apple2')
+          force_rebuild = truthy_env?(ENV.fetch('RHDL_GEM_METAL_APPLE2_REBUILD', '0'))
+
+          project_root = File.expand_path('../../../..', __dir__)
+          gem_root = File.join(project_root, 'external', 'GEM')
+          build_dir = File.expand_path(
+            ENV.fetch('RHDL_GEM_METAL_APPLE2_BUILD_DIR', File.join(project_root, 'examples/apple2/.gem_metal_apple2'))
+          )
+          FileUtils.mkdir_p(build_dir)
+
+          rtl_path = File.join(build_dir, 'apple2_rtl.v')
+          yosys_script_path = File.join(build_dir, 'apple2_gem.ys')
+          yosys_log_path = File.join(build_dir, 'apple2_yosys.log')
+          cut_map_log_path = File.join(build_dir, 'apple2_cut_map.log')
+          metal_log_path = File.join(build_dir, 'apple2_metal_dummy.log')
+
+          netlist_path = resolve_path_for_bench(
+            ENV['RHDL_GEM_METAL_APPLE2_NETLIST'],
+            File.join(build_dir, 'apple2_gatelevel.gv'),
+            project_root
+          )
+          gemparts_path = resolve_path_for_bench(
+            ENV['RHDL_GEM_METAL_APPLE2_GEMPARTS'],
+            File.join(build_dir, 'apple2.gemparts'),
+            project_root
+          )
+
+          level_split = ENV.fetch('RHDL_GEM_METAL_APPLE2_LEVEL_SPLIT', '').strip
+          max_stage_degrad = ENV.fetch('RHDL_GEM_METAL_APPLE2_MAX_STAGE_DEGRAD', '').strip
+
+          if standalone
+            puts_header('External GEM Metal Benchmark (Apple2)')
+            puts "Cycles per run: #{cycles}"
+            puts "Blocks: #{num_blocks}"
+            puts "Top module: #{top_module}"
+            puts "GEM root: #{gem_root}"
+            puts "Build dir: #{build_dir}"
+            puts "Netlist: #{netlist_path}"
+            puts "Gemparts: #{gemparts_path}"
+            puts "Force rebuild: #{force_rebuild}"
+            puts
+          else
+            print 'initializing... '
+            $stdout.flush
+          end
+
+          init_start = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+
+          unless Dir.exist?(gem_root)
+            message = "external GEM repo not found at #{gem_root}"
+            puts(standalone ? "Error: #{message}" : "SKIPPED (#{message})")
+            return { name: runner_name, status: :skipped }
+          end
+
+          unless command_available?('cargo')
+            message = 'cargo not found in PATH'
+            puts(standalone ? "Error: #{message}" : "SKIPPED (#{message})")
+            return { name: runner_name, status: :skipped }
+          end
+
+          need_netlist = force_rebuild || !File.exist?(netlist_path)
+          need_gemparts = force_rebuild || !File.exist?(gemparts_path)
+
+          if need_netlist
+            unless command_available?('yosys')
+              message = 'yosys not found in PATH (required to synthesize Apple2 AIGPDK netlist)'
+              puts(standalone ? "Error: #{message}" : "SKIPPED (#{message})")
+              puts "Set RHDL_GEM_METAL_APPLE2_NETLIST to a prebuilt netlist or install yosys, then retry." if standalone
+              return { name: runner_name, status: :skipped }
+            end
+
+            aigpdk_nomem_lib = File.join(gem_root, 'aigpdk', 'aigpdk_nomem.lib')
+            unless File.exist?(aigpdk_nomem_lib)
+              message = "missing AIGPDK library at #{aigpdk_nomem_lib}"
+              puts(standalone ? "Error: #{message}" : "SKIPPED (#{message})")
+              return { name: runner_name, status: :skipped }
+            end
+
+            puts 'Generating Apple2 Verilog hierarchy...' if standalone
+            FileUtils.mkdir_p(File.dirname(rtl_path))
+            rtl = RHDL::Examples::Apple2::Apple2.to_verilog_hierarchy(top_name: top_module)
+            File.write(rtl_path, rtl)
+
+            puts 'Synthesizing/mapping Apple2 netlist with yosys...' if standalone
+            yosys_script = <<~YOSYS
+              read_verilog "#{rtl_path}"
+              hierarchy -check -top #{top_module}
+              synth -flatten
+              delete t:\$print
+              dfflibmap -liberty "#{aigpdk_nomem_lib}"
+              opt_clean -purge
+              abc -liberty "#{aigpdk_nomem_lib}"
+              opt_clean -purge
+              write_verilog "#{netlist_path}"
+            YOSYS
+            File.write(yosys_script_path, yosys_script)
+
+            yosys_cmd = ['yosys', '-q', '-s', yosys_script_path]
+            yosys_out, yosys_status = Open3.capture2e(*yosys_cmd)
+            File.write(yosys_log_path, yosys_out)
+            unless yosys_status.success?
+              puts yosys_out if standalone
+              puts if standalone
+              message = "yosys synthesis exited with #{yosys_status.exitstatus}"
+              puts(standalone ? "FAILED: #{message}" : "FAILED (#{message})")
+              puts "Yosys log: #{yosys_log_path}" if standalone
+              return { name: runner_name, status: :failed, error: message }
+            end
+          elsif standalone
+            puts "Reusing existing netlist at #{netlist_path}"
+          end
+
+          if need_gemparts
+            puts 'Generating GEM partition (.gemparts) via cut_map_interactive...' if standalone
+            cut_map_cmd = ['cargo', 'run', '--release', '--features', 'metal', '--bin', 'cut_map_interactive', '--',
+                           netlist_path]
+            cut_map_cmd += ['--top-module', top_module]
+            cut_map_cmd += ['--level-split', level_split] unless level_split.empty?
+            cut_map_cmd += ['--max-stage-degrad', max_stage_degrad] unless max_stage_degrad.empty?
+            cut_map_cmd << gemparts_path
+
+            cut_map_out, cut_map_status = Open3.capture2e(*cut_map_cmd, chdir: gem_root)
+            File.write(cut_map_log_path, cut_map_out)
+            unless cut_map_status.success?
+              puts cut_map_out if standalone
+              puts if standalone
+              message = "cut_map_interactive exited with #{cut_map_status.exitstatus}"
+              puts(standalone ? "FAILED: #{message}" : "FAILED (#{message})")
+              puts "Cut-map log: #{cut_map_log_path}" if standalone
+              return { name: runner_name, status: :failed, error: message }
+            end
+          elsif standalone
+            puts "Reusing existing gemparts at #{gemparts_path}"
+          end
+
+          unless File.exist?(netlist_path)
+            message = "netlist not found at #{netlist_path}"
+            puts(standalone ? "FAILED: #{message}" : "FAILED (#{message})")
+            return { name: runner_name, status: :failed, error: message }
+          end
+          unless File.exist?(gemparts_path)
+            message = "gemparts not found at #{gemparts_path}"
+            puts(standalone ? "FAILED: #{message}" : "FAILED (#{message})")
+            return { name: runner_name, status: :failed, error: message }
+          end
+
+          init_elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - init_start
+
+          cmd = [
+            'cargo', 'run', '--release', '--features', 'metal', '--bin', 'metal_dummy_test', '--',
+            netlist_path, gemparts_path, num_blocks.to_s, cycles.to_s
+          ]
+
+          print(standalone ? "Running: #{cmd.join(' ')}\n" : "running #{cycles} cycles... ")
+          $stdout.flush
+          run_start = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+          out, status = Open3.capture2e(*cmd, chdir: gem_root)
+          run_elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - run_start
+          File.write(metal_log_path, out)
+
+          unless status.success?
+            puts out if standalone
+            puts if standalone
+            message = "external GEM Apple2 benchmark command exited with #{status.exitstatus}"
+            puts(standalone ? "FAILED: #{message}" : "FAILED (#{message})")
+            puts "Metal log: #{metal_log_path}" if standalone
+            return { name: runner_name, status: :failed, error: message }
+          end
+
+          summary = parse_gem_metal_summary(out)
+          unless summary && summary[:cycles_per_sec]
+            message = 'could not parse metal_dummy_test summary line'
+            puts(standalone ? "FAILED: #{message}" : "FAILED (#{message})")
+            puts "Metal log: #{metal_log_path}" if standalone
+            return { name: runner_name, status: :failed, error: message }
+          end
+
+          puts 'done'
+          puts "  Init time: #{format('%.3f', init_elapsed)}s"
+          puts "  Run time:  #{format('%.3f', run_elapsed)}s"
+          puts "  Logical dispatches: #{summary[:logical_dispatches]}"
+          puts "  GPU dispatches: #{summary[:gpu_dispatches]}"
+          puts "  Reported total: #{format('%.3f', summary[:total_ms] || 0.0)}ms"
+          puts "  Cycles/s: #{format('%.2f', summary[:cycles_per_sec])}"
+
+          {
+            name: runner_name,
+            status: :success,
+            init_time: init_elapsed,
+            run_time: run_elapsed,
+            cycles_per_sec: summary[:cycles_per_sec],
+            logical_dispatches: summary[:logical_dispatches],
+            gpu_dispatches: summary[:gpu_dispatches],
+            total_ms: summary[:total_ms]
+          }
+        rescue => e
+          puts 'FAILED'
+          puts "  Error: #{e.message}"
+          puts "  #{e.backtrace.first(3).join("\n  ")}" if options[:verbose]
+          { name: runner_name, status: :failed, error: e.message }
+        end
+
+        # Benchmark external GEM Metal binary on the RISC-V core.
+        # This builds (or reuses) an MMU-off RISC-V AIGPDK-mapped netlist and gemparts.
+        def benchmark_gem_metal_riscv(cycles: options[:cycles] || 5_000, standalone: true)
+          require 'fileutils'
+          require 'json'
+          require 'open3'
+          require_relative '../../../../examples/riscv/hdl/cpu'
+
+          runner_name = 'GemMetal'
+          num_blocks = (options[:blocks] || ENV.fetch('RHDL_GEM_METAL_RISCV_BLOCKS', '5')).to_i
+          num_blocks = 1 if num_blocks <= 0
+          top_module = ENV.fetch('RHDL_GEM_METAL_RISCV_TOP', 'riscv_cpu')
+          force_rebuild = truthy_env?(ENV.fetch('RHDL_GEM_METAL_RISCV_REBUILD', '0'))
+
+          project_root = File.expand_path('../../../..', __dir__)
+          gem_root = File.join(project_root, 'external', 'GEM')
+          build_dir = File.expand_path(
+            ENV.fetch('RHDL_GEM_METAL_RISCV_BUILD_DIR', File.join(project_root, 'examples/riscv/.gem_metal_riscv'))
+          )
+          FileUtils.mkdir_p(build_dir)
+
+          rtl_path = File.join(build_dir, 'riscv_rtl.v')
+          yosys_script_path = File.join(build_dir, 'riscv_gem.ys')
+          yosys_log_path = File.join(build_dir, 'riscv_yosys.log')
+          cut_map_log_path = File.join(build_dir, 'riscv_cut_map.log')
+          metal_log_path = File.join(build_dir, 'riscv_metal_dummy.log')
+          build_config_path = File.join(build_dir, 'riscv_gem_build_config.json')
+
+          netlist_path = resolve_path_for_bench(
+            ENV['RHDL_GEM_METAL_RISCV_NETLIST'],
+            File.join(build_dir, 'riscv_gatelevel.gv'),
+            project_root
+          )
+          gemparts_path = resolve_path_for_bench(
+            ENV['RHDL_GEM_METAL_RISCV_GEMPARTS'],
+            File.join(build_dir, 'riscv.gemparts'),
+            project_root
+          )
+
+          level_split = ENV.fetch('RHDL_GEM_METAL_RISCV_LEVEL_SPLIT', '').strip
+          max_stage_degrad = ENV.fetch('RHDL_GEM_METAL_RISCV_MAX_STAGE_DEGRAD', '').strip
+          expected_build_config = {
+            'format' => 1,
+            'top_module' => top_module,
+            'mmu_disabled' => true,
+            'level_split' => level_split,
+            'max_stage_degrad' => max_stage_degrad
+          }
+
+          if standalone
+            puts_header('External GEM Metal Benchmark (RISC-V)')
+            puts "Cycles per run: #{cycles}"
+            puts "Blocks: #{num_blocks}"
+            puts "Top module: #{top_module}"
+            puts "GEM root: #{gem_root}"
+            puts "Build dir: #{build_dir}"
+            puts "Netlist: #{netlist_path}"
+            puts "Gemparts: #{gemparts_path}"
+            puts "Force rebuild: #{force_rebuild}"
+            puts
+          else
+            print 'initializing... '
+            $stdout.flush
+          end
+
+          init_start = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+
+          unless Dir.exist?(gem_root)
+            message = "external GEM repo not found at #{gem_root}"
+            puts(standalone ? "Error: #{message}" : "SKIPPED (#{message})")
+            return { name: runner_name, status: :skipped }
+          end
+
+          unless command_available?('cargo')
+            message = 'cargo not found in PATH'
+            puts(standalone ? "Error: #{message}" : "SKIPPED (#{message})")
+            return { name: runner_name, status: :skipped }
+          end
+
+          build_config = begin
+            if File.exist?(build_config_path)
+              JSON.parse(File.read(build_config_path))
+            end
+          rescue JSON::ParserError
+            nil
+          end
+          need_netlist = force_rebuild || !File.exist?(netlist_path) || build_config != expected_build_config
+          need_gemparts = force_rebuild || !File.exist?(gemparts_path) || need_netlist
+
+          if need_netlist
+            unless command_available?('yosys')
+              message = 'yosys not found in PATH (required to synthesize RISC-V AIGPDK netlist)'
+              puts(standalone ? "Error: #{message}" : "SKIPPED (#{message})")
+              puts "Set RHDL_GEM_METAL_RISCV_NETLIST to a prebuilt netlist or install yosys, then retry." if standalone
+              return { name: runner_name, status: :skipped }
+            end
+
+            aigpdk_nomem_lib = File.join(gem_root, 'aigpdk', 'aigpdk_nomem.lib')
+            unless File.exist?(aigpdk_nomem_lib)
+              message = "missing AIGPDK library at #{aigpdk_nomem_lib}"
+              puts(standalone ? "Error: #{message}" : "SKIPPED (#{message})")
+              return { name: runner_name, status: :skipped }
+            end
+
+            puts 'Generating RISC-V Verilog hierarchy...' if standalone
+            FileUtils.mkdir_p(File.dirname(rtl_path))
+            rtl = RHDL::Examples::RISCV::CPU.to_verilog_hierarchy(top_name: top_module)
+            File.write(rtl_path, disable_riscv_mmu_for_gem_rtl(rtl))
+
+            puts 'Synthesizing/mapping RISC-V netlist with yosys...' if standalone
+            yosys_script = <<~YOSYS
+              read_verilog "#{rtl_path}"
+              hierarchy -check -top #{top_module}
+              synth -flatten
+              delete t:\$print
+              dfflibmap -liberty "#{aigpdk_nomem_lib}"
+              opt_clean -purge
+              abc -liberty "#{aigpdk_nomem_lib}"
+              opt_clean -purge
+              write_verilog "#{netlist_path}"
+            YOSYS
+            File.write(yosys_script_path, yosys_script)
+
+            yosys_cmd = ['yosys', '-q', '-s', yosys_script_path]
+            yosys_out, yosys_status = Open3.capture2e(*yosys_cmd)
+            File.write(yosys_log_path, yosys_out)
+            unless yosys_status.success?
+              puts yosys_out if standalone
+              puts if standalone
+              message = "yosys synthesis exited with #{yosys_status.exitstatus}"
+              puts(standalone ? "FAILED: #{message}" : "FAILED (#{message})")
+              puts "Yosys log: #{yosys_log_path}" if standalone
+              return { name: runner_name, status: :failed, error: message }
+            end
+          elsif standalone
+            puts "Reusing existing netlist at #{netlist_path}"
+          end
+
+          if need_gemparts
+            puts 'Generating GEM partition (.gemparts) via cut_map_interactive...' if standalone
+            cut_map_cmd = ['cargo', 'run', '--release', '--features', 'metal', '--bin', 'cut_map_interactive', '--',
+                           netlist_path]
+            cut_map_cmd += ['--top-module', top_module]
+            cut_map_cmd += ['--level-split', level_split] unless level_split.empty?
+            cut_map_cmd += ['--max-stage-degrad', max_stage_degrad] unless max_stage_degrad.empty?
+            cut_map_cmd << gemparts_path
+
+            cut_map_out, cut_map_status = Open3.capture2e(*cut_map_cmd, chdir: gem_root)
+            File.write(cut_map_log_path, cut_map_out)
+            unless cut_map_status.success?
+              puts cut_map_out if standalone
+              puts if standalone
+              message = "cut_map_interactive exited with #{cut_map_status.exitstatus}"
+              puts(standalone ? "FAILED: #{message}" : "FAILED (#{message})")
+              puts "Cut-map log: #{cut_map_log_path}" if standalone
+              return { name: runner_name, status: :failed, error: message }
+            end
+          elsif standalone
+            puts "Reusing existing gemparts at #{gemparts_path}"
+          end
+
+          unless File.exist?(netlist_path)
+            message = "netlist not found at #{netlist_path}"
+            puts(standalone ? "FAILED: #{message}" : "FAILED (#{message})")
+            return { name: runner_name, status: :failed, error: message }
+          end
+          unless File.exist?(gemparts_path)
+            message = "gemparts not found at #{gemparts_path}"
+            puts(standalone ? "FAILED: #{message}" : "FAILED (#{message})")
+            return { name: runner_name, status: :failed, error: message }
+          end
+
+          if need_netlist || need_gemparts || !File.exist?(build_config_path)
+            File.write(build_config_path, JSON.pretty_generate(expected_build_config))
+          end
+
+          init_elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - init_start
+
+          cmd = [
+            'cargo', 'run', '--release', '--features', 'metal', '--bin', 'metal_dummy_test', '--',
+            netlist_path, gemparts_path, num_blocks.to_s, cycles.to_s
+          ]
+
+          print(standalone ? "Running: #{cmd.join(' ')}\n" : "running #{cycles} cycles... ")
+          $stdout.flush
+          run_start = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+          out, status = Open3.capture2e(*cmd, chdir: gem_root)
+          run_elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - run_start
+          File.write(metal_log_path, out)
+
+          unless status.success?
+            puts out if standalone
+            puts if standalone
+            message = "external GEM RISC-V benchmark command exited with #{status.exitstatus}"
+            puts(standalone ? "FAILED: #{message}" : "FAILED (#{message})")
+            puts "Metal log: #{metal_log_path}" if standalone
+            return { name: runner_name, status: :failed, error: message }
+          end
+
+          summary = parse_gem_metal_summary(out)
+          unless summary && summary[:cycles_per_sec]
+            message = 'could not parse metal_dummy_test summary line'
+            puts(standalone ? "FAILED: #{message}" : "FAILED (#{message})")
+            puts "Metal log: #{metal_log_path}" if standalone
+            return { name: runner_name, status: :failed, error: message }
+          end
+
+          puts 'done'
+          puts "  Init time: #{format('%.3f', init_elapsed)}s"
+          puts "  Run time:  #{format('%.3f', run_elapsed)}s"
+          puts "  Logical dispatches: #{summary[:logical_dispatches]}"
+          puts "  GPU dispatches: #{summary[:gpu_dispatches]}"
+          puts "  Reported total: #{format('%.3f', summary[:total_ms] || 0.0)}ms"
+          puts "  Cycles/s: #{format('%.2f', summary[:cycles_per_sec])}"
+
+          {
+            name: runner_name,
+            status: :success,
+            init_time: init_elapsed,
+            run_time: run_elapsed,
+            cycles_per_sec: summary[:cycles_per_sec],
+            logical_dispatches: summary[:logical_dispatches],
+            gpu_dispatches: summary[:gpu_dispatches],
+            total_ms: summary[:total_ms]
+          }
+        rescue => e
+          puts 'FAILED'
+          puts "  Error: #{e.message}"
+          puts "  #{e.backtrace.first(3).join("\n  ")}" if options[:verbose]
+          { name: runner_name, status: :failed, error: e.message }
         end
 
         # Benchmark MOS6502 CPU IR with memory bridging (like karateka tests)
@@ -524,55 +1203,20 @@ module RHDL
         def benchmark_apple2
           require 'rhdl/codegen'
 
-          # Paths to ROM and memory dump
-          rom_path = File.expand_path('../../../../examples/apple2/software/roms/appleiigo.rom', __dir__)
-          karateka_path = File.expand_path('../../../../examples/apple2/software/disks/karateka_mem.bin', __dir__)
-
-          unless File.exist?(rom_path)
-            puts "Error: AppleIIgo ROM not found at #{rom_path}"
-            puts "Please ensure the ROM file exists."
-            return
-          end
-
-          unless File.exist?(karateka_path)
-            puts "Error: Karateka memory dump not found at #{karateka_path}"
-            puts "Please ensure the memory dump file exists."
-            return
-          end
-
-          # Load ROM and memory data
-          rom_data = File.binread(rom_path).bytes
-          karateka_mem = File.binread(karateka_path).bytes
-
-          # Modify ROM reset vector to point to game entry ($B82A)
-          karateka_rom = rom_data.dup
-          karateka_rom[0x2FFC] = 0x2A  # low byte of $B82A
-          karateka_rom[0x2FFD] = 0xB8  # high byte of $B82A
-
           cycles = options[:cycles] || 100_000
           compiler_sub_cycles = 14
           runner_filter = (ENV['RHDL_BENCH_BACKENDS'] || '')
             .split(',')
             .map { |name| name.strip.downcase.to_sym }
+            .map { |name| name == :gem ? :gem_metal : name }
             .reject(&:empty?)
 
           puts_header("Apple2 Full System IR Benchmark - Karateka Game Code")
           puts "Cycles per run: #{cycles}"
           puts "Compiler sub-cycles: #{compiler_sub_cycles} (fixed)"
-          puts "ROM: #{rom_path}"
-          puts "Memory dump: #{karateka_path}"
           puts
 
-          # Generate IR once for all runners
-          print "Generating Apple2 IR... "
-          $stdout.flush
-
           require_relative '../../../../examples/apple2/hdl'
-          ir_start = Process.clock_gettime(Process::CLOCK_MONOTONIC)
-          ir = RHDL::Examples::Apple2::Apple2.to_flat_ir
-          ir_json = RHDL::Codegen::IR::IRToJson.convert(ir)
-          ir_elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - ir_start
-          puts "done (#{format('%.3f', ir_elapsed)}s)"
 
           # Define runners to benchmark
           runners = [
@@ -580,13 +1224,66 @@ module RHDL
             { name: 'JIT', backend: :jit, available_const: :IR_JIT_AVAILABLE },
             { name: 'Compiler', backend: :compiler, available_const: :IR_COMPILER_AVAILABLE },
             { name: 'Verilator', backend: :verilator },
-            { name: 'Arcilator', backend: :arcilator }
+            { name: 'Arcilator', backend: :arcilator },
+            { name: 'ArcilatorGPU', backend: :arcilator_gpu }
           ]
+          runners << { name: 'GemMetal', backend: :gem_metal }
           runners.select! { |runner| runner_filter.include?(runner[:backend]) } unless runner_filter.empty?
+
+          workload_backends = runners.reject { |runner| runner[:backend] == :gem_metal }
+          ir_json = nil
+          karateka_rom = nil
+          karateka_mem = nil
+
+          unless workload_backends.empty?
+            # Paths to ROM and memory dump
+            rom_path = File.expand_path('../../../../examples/apple2/software/roms/appleiigo.rom', __dir__)
+            karateka_path = File.expand_path('../../../../examples/apple2/software/disks/karateka_mem.bin', __dir__)
+
+            unless File.exist?(rom_path)
+              puts "Error: AppleIIgo ROM not found at #{rom_path}"
+              puts "Please ensure the ROM file exists."
+              return
+            end
+
+            unless File.exist?(karateka_path)
+              puts "Error: Karateka memory dump not found at #{karateka_path}"
+              puts "Please ensure the memory dump file exists."
+              return
+            end
+
+            puts "ROM: #{rom_path}"
+            puts "Memory dump: #{karateka_path}"
+
+            # Load ROM and memory data
+            rom_data = File.binread(rom_path).bytes
+            karateka_mem = File.binread(karateka_path).bytes
+
+            # Modify ROM reset vector to point to game entry ($B82A)
+            karateka_rom = rom_data.dup
+            karateka_rom[0x2FFC] = 0x2A  # low byte of $B82A
+            karateka_rom[0x2FFD] = 0xB8  # high byte of $B82A
+
+            # Generate IR once for all non-GEM runners
+            print "Generating Apple2 IR... "
+            $stdout.flush
+            ir_start = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+            ir = RHDL::Examples::Apple2::Apple2.to_flat_ir
+            ir_json = RHDL::Codegen::IR::IRToJson.convert(ir)
+            ir_elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - ir_start
+            puts "done (#{format('%.3f', ir_elapsed)}s)"
+          end
 
           results = []
 
           runners.each do |runner|
+            if runner[:backend] == :gem_metal
+              print "\n#{runner[:name]}: "
+              $stdout.flush
+              results << benchmark_gem_metal_apple2(cycles: cycles, standalone: false)
+              next
+            end
+
             # Skip Interpreter for large cycle counts (too slow)
             if runner[:backend] == :interpreter && cycles > 100_000
               puts "\n#{runner[:name]}: SKIPPED (cycles > 100K, too slow)"
@@ -601,6 +1298,9 @@ module RHDL
               available = verilator_available?
             elsif runner[:backend] == :arcilator
               available = arcilator_available?
+            elsif runner[:backend] == :arcilator_gpu
+              require_relative '../../../../examples/apple2/utilities/runners/arcilator_gpu_runner'
+              available = RHDL::Examples::Apple2::ArcilatorGpuRunner.available?
             else
               available = false
             end
@@ -614,7 +1314,7 @@ module RHDL
             print "\n#{runner[:name]}: "
             $stdout.flush
 
-            is_hdl_runner = runner[:backend] == :verilator || runner[:backend] == :arcilator
+            is_hdl_runner = %i[verilator arcilator arcilator_gpu].include?(runner[:backend])
 
             begin
               # Create simulator
@@ -635,6 +1335,9 @@ module RHDL
               when :arcilator
                 require_relative '../../../../examples/apple2/utilities/runners/arcilator_runner'
                 RHDL::Examples::Apple2::ArcilatorRunner.new(sub_cycles: 14)
+              when :arcilator_gpu
+                require_relative '../../../../examples/apple2/utilities/runners/arcilator_gpu_runner'
+                RHDL::Examples::Apple2::ArcilatorGpuRunner.new(sub_cycles: 14)
               end
 
               init_elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - init_start
@@ -880,6 +1583,7 @@ module RHDL
           runner_filter = (ENV['RHDL_BENCH_BACKENDS'] || '')
             .split(',')
             .map { |name| name.strip.downcase.to_sym }
+            .map { |name| name == :gem ? :gem_metal : name }
             .reject(&:empty?)
 
           puts_header("RISC-V Single-Cycle CPU Benchmark - xv6 Boot")
@@ -893,13 +1597,22 @@ module RHDL
           runners = [
             { name: 'IR Compiler', mode: :ir, sim: :compile, filter_key: :compiler },
             { name: 'Verilator', mode: :verilog, sim: nil, filter_key: :verilator },
-            { name: 'CIRCT', mode: :circt, sim: nil, filter_key: :circt }
+            { name: 'CIRCT', mode: :circt, sim: nil, filter_key: :circt },
+            { name: 'ArcilatorGPU', mode: :arcilator_gpu, sim: nil, filter_key: :arcilator_gpu },
+            { name: 'GemMetal', backend: :gem_metal, filter_key: :gem_metal }
           ]
           runners.select! { |r| runner_filter.include?(r[:filter_key]) } unless runner_filter.empty?
 
           results = []
 
           runners.each do |runner_config|
+            if runner_config[:backend] == :gem_metal
+              print "\n#{runner_config[:name]}: "
+              $stdout.flush
+              results << benchmark_gem_metal_riscv(cycles: cycles, standalone: false)
+              next
+            end
+
             # Check availability
             available = case runner_config[:mode]
                         when :ir
@@ -913,6 +1626,9 @@ module RHDL
                           verilator_available?
                         when :circt
                           arcilator_available?
+                        when :arcilator_gpu
+                          require_relative '../../../../examples/riscv/utilities/runners/arcilator_gpu_runner'
+                          RHDL::Examples::RISCV::ArcilatorGpuRunner.available?
                         end
 
             unless available
@@ -951,9 +1667,12 @@ module RHDL
               runner.run_steps(cycles)
               run_elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - run_start
 
-              cycles_per_sec = cycles / run_elapsed
               state = runner.cpu_state
-              pc = state[:pc]
+              pc = state[:pc].to_i
+              if pc.zero?
+                raise "#{runner_config[:name]} did not initialize xv6 correctly (PC remained 0x0)"
+              end
+              cycles_per_sec = cycles / run_elapsed
 
               puts "done"
               puts "  Init time: #{format('%.3f', init_elapsed)}s"
@@ -1156,16 +1875,34 @@ module RHDL
         def print_benchmark_summary(results, cycles)
           puts
           puts_header("Summary")
-          puts "#{'Runner'.ljust(15)} #{'Status'.ljust(10)} #{'Init'.rjust(10)} #{'Run'.rjust(10)}"
+          show_instances = results.any? { |r| r[:parallel_instances].to_i > 1 }
+          if show_instances
+            puts "#{'Runner'.ljust(15)} #{'Status'.ljust(10)} #{'Inst'.rjust(6)} #{'Init'.rjust(10)} #{'Run'.rjust(10)}"
+          else
+            puts "#{'Runner'.ljust(15)} #{'Status'.ljust(10)} #{'Init'.rjust(10)} #{'Run'.rjust(10)}"
+          end
           puts_separator
 
           results.each do |r|
             if r[:status] == :success
-              puts "#{r[:name].ljust(15)} #{'OK'.ljust(10)} #{format('%8.3f', r[:init_time])}s #{format('%8.3f', r[:run_time])}s"
+              if show_instances
+                inst = r[:parallel_instances].to_i
+                puts "#{r[:name].ljust(15)} #{'OK'.ljust(10)} #{inst.to_s.rjust(6)} #{format('%8.3f', r[:init_time])}s #{format('%8.3f', r[:run_time])}s"
+              else
+                puts "#{r[:name].ljust(15)} #{'OK'.ljust(10)} #{format('%8.3f', r[:init_time])}s #{format('%8.3f', r[:run_time])}s"
+              end
             elsif r[:status] == :skipped
-              puts "#{r[:name].ljust(15)} #{'SKIP'.ljust(10)} #{'-'.rjust(10)} #{'-'.rjust(10)}"
+              if show_instances
+                puts "#{r[:name].ljust(15)} #{'SKIP'.ljust(10)} #{'-'.rjust(6)} #{'-'.rjust(10)} #{'-'.rjust(10)}"
+              else
+                puts "#{r[:name].ljust(15)} #{'SKIP'.ljust(10)} #{'-'.rjust(10)} #{'-'.rjust(10)}"
+              end
             else
-              puts "#{r[:name].ljust(15)} #{'FAIL'.ljust(10)} #{'-'.rjust(10)} #{'-'.rjust(10)}"
+              if show_instances
+                puts "#{r[:name].ljust(15)} #{'FAIL'.ljust(10)} #{'-'.rjust(6)} #{'-'.rjust(10)} #{'-'.rjust(10)}"
+              else
+                puts "#{r[:name].ljust(15)} #{'FAIL'.ljust(10)} #{'-'.rjust(10)} #{'-'.rjust(10)}"
+              end
             end
           end
 
@@ -1180,6 +1917,21 @@ module RHDL
               next if r[:name] == base[:name]
 
               ratio = r[:cycles_per_sec] / base[:cycles_per_sec]
+              puts "  #{r[:name]} vs #{base[:name]}: #{format('%.3f', ratio)}x"
+            end
+          end
+
+          effective_enabled = successful.any? { |r| r[:parallel_instances].to_i > 1 }
+          if effective_enabled && successful.length >= 2
+            puts
+            puts "Effective Performance Ratios (instances-adjusted):"
+            base = compiler || successful.first
+            base_eff = base[:effective_cycles_per_sec] || base[:cycles_per_sec]
+            successful.each do |r|
+              next if r[:name] == base[:name]
+
+              eff = r[:effective_cycles_per_sec] || r[:cycles_per_sec]
+              ratio = eff / base_eff
               puts "  #{r[:name]} vs #{base[:name]}: #{format('%.3f', ratio)}x"
             end
           end
@@ -1208,6 +1960,75 @@ module RHDL
           ENV.fetch('PATH', '').split(File::PATH_SEPARATOR).any? do |dir|
             File.executable?(File.join(dir, cmd))
           end
+        end
+
+        def truthy_env?(raw)
+          case raw.to_s.strip.downcase
+          when '1', 'true', 'yes', 'y', 'on'
+            true
+          else
+            false
+          end
+        end
+
+        def resolve_path_for_bench(raw_path, default_path, project_root)
+          return default_path if raw_path.nil? || raw_path.strip.empty?
+
+          path = raw_path.strip
+          return path if path.start_with?('/')
+
+          File.expand_path(path, project_root)
+        end
+
+        def parse_gem_metal_summary(output)
+          summary_line = output.lines.reverse.find { |line| line.include?('metal_dummy_test: logical_dispatches=') }
+          return nil unless summary_line
+
+          {
+            logical_dispatches: summary_line[/logical_dispatches=(\d+)/, 1]&.to_i,
+            gpu_dispatches: summary_line[/gpu_dispatches=(\d+)/, 1]&.to_i,
+            total_ms: summary_line[/total_ms=([0-9.]+)/, 1]&.to_f,
+            cycles_per_sec: summary_line[/cycles_per_sec=([0-9.]+)/, 1]&.to_f
+          }
+        end
+
+        # GEM currently requires strictly acyclic combinational logic.
+        # For RISC-V benchmarking we provide an MMU-off RTL variant that removes
+        # the Sv32 TLB instances and forces satp translation off.
+        def disable_riscv_mmu_for_gem_rtl(rtl)
+          patched = rtl.dup
+
+          satp_rewritten = patched.sub!(
+            /^\s*assign\s+satp_translate\s*=.*?;\s*$/m,
+            "  assign satp_translate = 1'b0;\n"
+          )
+
+          replaced_instances = []
+          patched = patched.gsub(
+            /^\s*riscv_sv32_tlb\s+(itlb|dtlb)\s*\(\n(?:.*?\n)*?^\s*\);\n/m
+          ) do
+            inst = Regexp.last_match(1)
+            replaced_instances << inst
+            <<~VERILOG
+                assign #{inst}__hit = 1'b0;
+                assign #{inst}__ppn = 20'd0;
+                assign #{inst}__perm_r = 1'b0;
+                assign #{inst}__perm_w = 1'b0;
+                assign #{inst}__perm_x = 1'b0;
+                assign #{inst}__perm_u = 1'b0;
+
+            VERILOG
+          end
+
+          missing = []
+          missing << 'satp_translate assignment' unless satp_rewritten
+          missing << 'itlb instance' unless replaced_instances.include?('itlb')
+          missing << 'dtlb instance' unless replaced_instances.include?('dtlb')
+          unless missing.empty?
+            raise "Failed to apply RISC-V MMU-off RTL transform (missing: #{missing.join(', ')})"
+          end
+
+          patched
         end
 
         # Build/locate WASM backends for the web Apple II benchmark.

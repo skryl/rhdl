@@ -7,11 +7,20 @@ RSpec.describe 'RISC-V HDL Runners' do
   before(:all) do
     @verilator_available = HdlToolchain.verilator_available?
     @arcilator_available = HdlToolchain.arcilator_available?
+    @arcilator_gpu_available = false
 
     if @verilator_available || @arcilator_available
       require_relative '../../../../examples/riscv/utilities/runners/headless_runner'
       require_relative '../../../../examples/riscv/utilities/assembler'
     end
+
+    begin
+      require_relative '../../../../examples/riscv/utilities/runners/arcilator_gpu_runner'
+      @arcilator_gpu_available = RHDL::Examples::RISCV::ArcilatorGpuRunner.available?
+    rescue LoadError, NameError
+      @arcilator_gpu_available = false
+    end
+
   end
 
   describe 'VerilogRunner' do
@@ -74,6 +83,37 @@ RSpec.describe 'RISC-V HDL Runners' do
     end
   end
 
+  describe 'ArcilatorGpuRunner' do
+    it 'is defined when arcilator gpu toolchain is available' do
+      skip 'ArcilatorGPU runner not available' unless @arcilator_gpu_available
+      require_relative '../../../../examples/riscv/utilities/runners/arcilator_gpu_runner'
+      expect(defined?(RHDL::Examples::RISCV::ArcilatorGpuRunner)).to eq('constant')
+    end
+
+    it 'has the required public interface methods' do
+      skip 'ArcilatorGPU runner not available' unless @arcilator_gpu_available
+      require_relative '../../../../examples/riscv/utilities/runners/arcilator_gpu_runner'
+
+      required_methods = %i[
+        native? simulator_type backend reset!
+        run_cycles clock_count
+        read_reg read_pc load_program load_data
+        read_inst_word read_data_word write_data_word
+        set_interrupts set_plic_sources
+        uart_receive_byte uart_receive_bytes uart_receive_text
+        uart_tx_bytes clear_uart_tx_bytes
+        load_virtio_disk read_virtio_disk_byte
+        state current_inst
+        dispatch_count wait_count fast_dispatch_count fallback_dispatch_count
+      ]
+
+      required_methods.each do |method|
+        expect(RHDL::Examples::RISCV::ArcilatorGpuRunner.instance_methods).to include(method),
+          "Missing method: #{method}"
+      end
+    end
+  end
+
   describe 'HeadlessRunner integration' do
     it 'creates verilator-backed runner' do
       skip 'Verilator not available' unless @verilator_available
@@ -97,6 +137,18 @@ RSpec.describe 'RISC-V HDL Runners' do
       expect(runner.cpu.simulator_type).to eq(:hdl_arcilator)
     rescue LoadError, RuntimeError => e
       skip "Arcilator backend unavailable: #{e.message}"
+    end
+
+    it 'creates arcilator gpu-backed runner' do
+      skip 'ArcilatorGPU runner not available' unless @arcilator_gpu_available
+
+      runner = RHDL::Examples::RISCV::HeadlessRunner.new(mode: :arcilator_gpu)
+      expect(runner.mode).to eq(:arcilator_gpu)
+      expect(runner.effective_mode).to eq(:arcilator_gpu)
+      expect(runner.cpu).to be_a(RHDL::Examples::RISCV::ArcilatorGpuRunner)
+      expect(runner.cpu.simulator_type).to eq(:hdl_arcilator_gpu)
+    rescue LoadError, RuntimeError => e
+      skip "ArcilatorGPU backend unavailable: #{e.message}"
     end
 
     it 'creates ruby-backed runner' do

@@ -289,6 +289,7 @@ RSpec.describe RHDL::Examples::RISCV::HeadlessRunner do
     rescue LoadError, RuntimeError => e
       skip "Arcilator backend unavailable: #{e.message}"
     end
+
   end
 
   describe 'program execution' do

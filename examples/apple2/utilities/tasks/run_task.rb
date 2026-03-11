@@ -226,6 +226,7 @@ module RHDL
                       when :netlist then "Netlist (gate-level)"
                       when :verilog then "Verilog (Verilator RTL)"
                       when :circt then "CIRCT (Arcilator RTL)"
+                      when :arcilator_gpu then "Arcilator GPU (ArcToGPU Metal)"
                       else @sim_mode.to_s
                       end
           puts "Starting Apple II emulator in #{mode_name} mode..."

@@ -49,8 +49,22 @@ lib/rhdl/codegen/ir/sim/ir_compiler/*.json
 .arcilator_build/
 .arcilator_gpu_build/
 
+# Metal backend build artifacts
+.metal_build/
+.metal_probe/
+
 # HDL build artifacts (Verilator/Arcilator for example systems)
 .hdl_build/
+/examples/8bit/.gem_metal_cpu8bit/
+/examples/apple2/.gem_metal_apple2/
+/examples/riscv/.gem_metal_riscv/
+
+# Submodule trees
+/examples/apple2/reference/
+/examples/gameboy/reference/
+/examples/riscv/software/xv6/
+/examples/riscv/software/linux/
+/external/GEM/
 
 # Web simulator generated artifacts
 web/assets/fixtures/*
@@ -95,3 +109,12 @@ web/build/verilator/*
 /examples/riscv/software/.buildroot.defconfig
 /examples/riscv/software/.docker-config*/
 /examples/riscv/software/.tmp_*/
+
+# AO486 local scratch/import artifacts
+/examples/ao486/reference/
+/examples/ao486/tmp/
+/examples/ao486/software/tmp/
+/examples/ao486/hdl/tmp/
+/examples/ao486/hdl/reports/
+/examples/ao486/hdl/vendor/source_hdl/
+/examples/ao486/hdl/lib/hdl/modules/frontend_blackbox_stubs__*.rb
