@@ -89,10 +89,7 @@ RSpec.describe RHDL::Examples::SPARC64::Import::SystemImporter do
           result = new_importer(output_dir: out_dir, workspace_dir: workspace).run
 
           expect(result.success?).to be(true), diagnostic_summary(result)
-          expect(Array(result.diagnostics)).to contain_exactly(
-            'SPARC64 runtime primitive patch applied for cluster_header',
-            'SPARC64 runtime primitive patch applied for dffrl_async'
-          )
+          expect(Array(result.diagnostics)).to eq([])
           expect(Array(result.raise_diagnostics)).to eq([])
           expect(result.staged_root).to eq(File.join(workspace, 'mixed_sources'))
           expect(result.staged_top_file).to eq(File.join(workspace, 'mixed_sources', 'Top', 'W1.v'))
@@ -154,6 +151,7 @@ RSpec.describe RHDL::Examples::SPARC64::Import::SystemImporter do
           support_stubs_source = File.read(support_stubs_path)
 
           aggregate_failures do
+            expect(bundle.fetch(:tool_args)).to include('-DFPGA_SYN', '-DNO_SCAN')
             expect(support_stubs_source).to include('module bw_r_tlb_fpga(')
             expect(support_stubs_source).to include('output [39:10] tlb_pgnum_crit;')
             expect(support_stubs_source).to include('output [39:10] tlb_pgnum;')
@@ -366,82 +364,6 @@ RSpec.describe RHDL::Examples::SPARC64::Import::SystemImporter do
             ).to eq(0)
           end
         end
-      end
-    end
-  end
-
-  describe 'runtime primitive patching' do
-    it 'rewrites dffrl_async for FPGA_SYN no-scan semantics' do
-      Dir.mktmpdir('sparc64_runtime_patch') do |dir|
-        path = File.join(dir, 'dffrl_async.rb')
-        File.write(
-          path,
-          <<~RUBY
-            # frozen_string_literal: true
-
-            class DffrlAsync < RHDL::Sim::Component
-              def self.verilog_module_name
-                "dffrl_async"
-              end
-            end
-          RUBY
-        )
-
-        diagnostics = []
-        importer = new_importer(output_dir: dir, workspace_dir: dir)
-
-        files_written = importer.send(
-          :patch_generated_runtime_primitives,
-          files_written: [path],
-          diagnostics: diagnostics
-        )
-
-        patched = File.read(path)
-
-        expect(files_written).to eq([path])
-        expect(diagnostics).to include('SPARC64 runtime primitive patch applied for dffrl_async')
-        expect(patched).to include('q <= din')
-        expect(patched).to include('so <= 0')
-        expect(patched).not_to include('q <= mux(se, si, din)')
-        expect(patched).not_to include('so <= q')
-      end
-    end
-
-    it 'rewrites cluster_header for the native low/high phase runner contract' do
-      Dir.mktmpdir('sparc64_cluster_header_patch') do |dir|
-        path = File.join(dir, 'cluster_header.rb')
-        File.write(
-          path,
-          <<~RUBY
-            # frozen_string_literal: true
-
-            class ClusterHeader < RHDL::Sim::SequentialComponent
-              def self.verilog_module_name
-                "cluster_header"
-              end
-            end
-          RUBY
-        )
-
-        diagnostics = []
-        importer = new_importer(output_dir: dir, workspace_dir: dir)
-
-        files_written = importer.send(
-          :patch_generated_runtime_primitives,
-          files_written: [path],
-          diagnostics: diagnostics
-        )
-
-        patched = File.read(path)
-
-        expect(files_written).to eq([path])
-        expect(diagnostics).to include('SPARC64 runtime primitive patch applied for cluster_header')
-        expect(patched).to include('class ClusterHeader < RHDL::Sim::Component')
-        expect(patched).to include('cluster_grst_l <= grst_l')
-        expect(patched).to include('dbginit_l <= gdbginit_l')
-        expect(patched).to include('rclk <= gclk')
-        expect(patched).not_to include('sequential clock:')
-        expect(patched).not_to include('__1 <=')
       end
     end
   end

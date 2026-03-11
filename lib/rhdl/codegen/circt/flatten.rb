@@ -190,7 +190,10 @@ module RHDL
             statements: process.statements.map { |stmt| prefix_stmt(stmt, prefix, expr_cache: expr_cache) },
             clocked: process.clocked,
             clock: process.clock ? "#{prefix}__#{process.clock}" : nil,
-            sensitivity_list: Array(process.sensitivity_list).map { |entry| "#{prefix}__#{entry}" }
+            sensitivity_list: Array(process.sensitivity_list).map { |entry| "#{prefix}__#{entry}" },
+            reset: process.reset ? "#{prefix}__#{process.reset}" : nil,
+            reset_active_low: process.reset_active_low,
+            reset_values: process.reset_values
           )
         end
 

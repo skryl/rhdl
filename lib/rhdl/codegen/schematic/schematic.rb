@@ -63,6 +63,7 @@ module RHDL
 
       def walk_hierarchy(node, live_names:, components:, path_tokens:, parent_path:)
         path = path_tokens.empty? ? 'top' : path_tokens.join('.')
+        expr_pool = Array(node['exprs'])
 
         ports = Array(node['ports']).map do |port|
           next unless port.is_a?(Hash)
@@ -146,6 +147,7 @@ module RHDL
           next if target.empty?
           target_ref = signal_ref(target, path_tokens, live_names)
           fallback_expr_signal_names = lambda do |expr|
+            expr = resolve_expr_ref(expr, expr_pool)
             case expr
             when Hash
               expr.flat_map do |key, value|
@@ -162,7 +164,7 @@ module RHDL
               []
             end
           end
-          source_names = collect_expr_signal_names(assign['expr']).to_a
+          source_names = collect_expr_signal_names(assign['expr'], expr_pool: expr_pool).to_a
           if source_names.empty?
             source_names = fallback_expr_signal_names.call(assign['expr'])
           end
@@ -177,25 +179,22 @@ module RHDL
         end.compact
 
         write_ports = Array(node['write_ports']).map do |port|
-          clock_ref = signal_ref(port['clock'], path_tokens, live_names)
           {
             memory: port['memory'].to_s,
-            addr_signals: port_signal_refs(port['addr'], path_tokens, live_names),
-            data_signals: port_signal_refs(port['data'], path_tokens, live_names),
-            enable_signals: port_signal_refs(port['enable'], path_tokens, live_names),
-            clock_signals: clock_ref ? [clock_ref] : []
+            addr_signals: port_signal_refs(port['addr'], path_tokens, live_names, expr_pool),
+            data_signals: port_signal_refs(port['data'], path_tokens, live_names, expr_pool),
+            enable_signals: port_signal_refs(port['enable'], path_tokens, live_names, expr_pool),
+            clock_signals: port_signal_refs(port['clock'], path_tokens, live_names, expr_pool)
           }
         end
 
         sync_read_ports = Array(node['sync_read_ports']).map do |port|
-          clock_ref = signal_ref(port['clock'], path_tokens, live_names)
-          data_ref = signal_ref(port['data'], path_tokens, live_names)
           {
             memory: port['memory'].to_s,
-            addr_signals: port_signal_refs(port['addr'], path_tokens, live_names),
-            enable_signals: port_signal_refs(port['enable'], path_tokens, live_names),
-            clock_signals: clock_ref ? [clock_ref] : [],
-            data_signals: data_ref ? [data_ref] : []
+            addr_signals: port_signal_refs(port['addr'], path_tokens, live_names, expr_pool),
+            enable_signals: port_signal_refs(port['enable'], path_tokens, live_names, expr_pool),
+            clock_signals: port_signal_refs(port['clock'], path_tokens, live_names, expr_pool),
+            data_signals: port_signal_refs(port['data'], path_tokens, live_names, expr_pool)
           }
         end
 
@@ -720,22 +719,59 @@ module RHDL
         }
       end
 
-      def collect_expr_signal_names(expr, out = Set.new)
+      def collect_expr_signal_names(expr, out = Set.new, expr_pool: nil, visited_expr_refs: Set.new)
         case expr
         when Hash
+          resolved_expr = resolve_expr_ref(expr, expr_pool, visited_expr_refs)
+          unless resolved_expr.equal?(expr)
+            collect_expr_signal_names(
+              resolved_expr,
+              out,
+              expr_pool: expr_pool,
+              visited_expr_refs: visited_expr_refs
+            )
+            return out
+          end
+
           if expr['kind'].to_s == 'signal' && expr['name'].is_a?(String) && !expr['name'].strip.empty?
             out.add(expr['name'].strip)
           end
-          expr.each_value { |value| collect_expr_signal_names(value, out) }
+          expr.each_value do |value|
+            collect_expr_signal_names(value, out, expr_pool: expr_pool, visited_expr_refs: visited_expr_refs)
+          end
         when Array
-          expr.each { |entry| collect_expr_signal_names(entry, out) }
+          expr.each do |entry|
+            collect_expr_signal_names(entry, out, expr_pool: expr_pool, visited_expr_refs: visited_expr_refs)
+          end
         end
         out
       end
 
-      def port_signal_refs(port_expr, path_tokens, signal_set)
-        names = collect_expr_signal_names(port_expr).to_a
+      def port_signal_refs(port_expr, path_tokens, signal_set, expr_pool = nil)
+        if port_expr.is_a?(String)
+          ref = signal_ref(port_expr, path_tokens, signal_set)
+          return ref ? [ref] : []
+        end
+
+        names = collect_expr_signal_names(port_expr, expr_pool: expr_pool).to_a
         uniq_signal_refs(names.map { |name| signal_ref(name, path_tokens, signal_set) })
+      end
+
+      def resolve_expr_ref(expr, expr_pool, visited_expr_refs = Set.new)
+        return expr unless expr.is_a?(Hash)
+        return expr unless expr['kind'].to_s == 'expr_ref'
+
+        expr_id = expr['id']
+        return expr unless expr_id.is_a?(Integer) || expr_id.to_s.match?(/\A\d+\z/)
+
+        normalized_id = expr_id.to_i
+        return expr if visited_expr_refs.include?(normalized_id)
+
+        resolved_expr = Array(expr_pool)[normalized_id]
+        return expr unless resolved_expr
+
+        visited_expr_refs.add(normalized_id)
+        resolve_expr_ref(resolved_expr, expr_pool, visited_expr_refs)
       end
 
       def uniq_signal_refs(refs)

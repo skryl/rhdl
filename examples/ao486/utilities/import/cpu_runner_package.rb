@@ -23,9 +23,12 @@ module RHDL
             return CpuTracePackage.failure_from_import(imported) unless imported.success?
 
             modules = Array(imported.modules).map { |mod| CpuTracePackage.dup_module(mod) }
-            patch_icache_runner_bypass!(modules)
-            patch_prefetch_fifo_runner_model!(modules)
-            patch_prefetch_runner_flow!(modules)
+            # The parity icache/prefetch model has proven stable across the IR
+            # compiler and Verilator. Reuse that fetch path here and layer the
+            # runner-specific DOS bridge and call/return fixes on top.
+            CpuParityPackage.patch_icache_bypass!(modules)
+            CpuParityPackage.patch_prefetch_fifo_register_model!(modules)
+            CpuParityPackage.patch_prefetch_reference_flow!(modules)
             patch_memory_runner_bridges!(modules)
             CpuParityPackage.patch_fetch_threshold_logic!(modules)
             patch_execute_call_relative_target!(modules)

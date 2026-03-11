@@ -397,66 +397,24 @@ RSpec.describe 'Rakefile interface' do
     end
   end
 
-  describe 'ao486 tasks' do
-    it 'ao486:import invokes CLI AO486Task with action: :import' do
-      require_relative '../../../lib/rhdl/cli/tasks/ao486_task'
-      task_instance = instance_double(RHDL::CLI::Tasks::AO486Task)
-      allow(task_instance).to receive(:run)
-
-      expect(RHDL::CLI::Tasks::AO486Task).to receive(:new) do |opts|
-        expect(opts[:action]).to eq(:import)
-        expect(opts[:output_dir]).to eq('/tmp/ao486_out')
-        expect(opts[:import_strategy]).to eq(RHDL::CLI::Tasks::AO486Task::DEFAULT_CLI_IMPORT_STRATEGY)
-        task_instance
+  describe 'legacy ao486 rake tasks' do
+    %w[ao486:import ao486:parity ao486:verify].each do |task_name|
+      it "does not define #{task_name}" do
+        expect(Rake::Task.task_defined?(task_name)).to be(false),
+          "Expected ao486 rake task '#{task_name}' to be undefined"
       end
-
-      Rake::Task['ao486:import'].invoke('/tmp/ao486_out')
-    end
-
-    it 'ao486:parity invokes CLI AO486Task with action: :parity' do
-      require_relative '../../../lib/rhdl/cli/tasks/ao486_task'
-      expect_task_class(RHDL::CLI::Tasks::AO486Task, action: :parity)
-      Rake::Task['ao486:parity'].invoke
-    end
-
-    it 'ao486:verify invokes CLI AO486Task with action: :verify' do
-      require_relative '../../../lib/rhdl/cli/tasks/ao486_task'
-      expect_task_class(RHDL::CLI::Tasks::AO486Task, action: :verify)
-      Rake::Task['ao486:verify'].invoke
     end
   end
 
-  describe 'scope alias tasks' do
-    it 'spec:ao486 delegates to spec[ao486]' do
-      spec_task = Rake::Task['spec']
-      expect(spec_task).to receive(:reenable).and_call_original
-      expect(spec_task).to receive(:invoke).with('ao486')
-
-      Rake::Task['spec:ao486'].invoke
-    end
-
-    it 'pspec:ao486 delegates to pspec[ao486]' do
-      pspec_task = Rake::Task['pspec']
-      expect(pspec_task).to receive(:reenable).and_call_original
-      expect(pspec_task).to receive(:invoke).with('ao486')
-
-      Rake::Task['pspec:ao486'].invoke
-    end
-
-    it 'spec:sparc64 delegates to spec[sparc64]' do
-      spec_task = Rake::Task['spec']
-      expect(spec_task).to receive(:reenable).and_call_original
-      expect(spec_task).to receive(:invoke).with('sparc64')
-
-      Rake::Task['spec:sparc64'].invoke
-    end
-
-    it 'pspec:sparc64 delegates to pspec[sparc64]' do
-      pspec_task = Rake::Task['pspec']
-      expect(pspec_task).to receive(:reenable).and_call_original
-      expect(pspec_task).to receive(:invoke).with('sparc64')
-
-      Rake::Task['pspec:sparc64'].invoke
+  describe 'legacy scoped task aliases' do
+    %w[
+      spec:lib spec:hdl spec:ao486 spec:gameboy spec:mos6502 spec:apple2 spec:riscv spec:sparc64
+      pspec:lib pspec:hdl pspec:ao486 pspec:gameboy pspec:mos6502 pspec:apple2 pspec:riscv pspec:sparc64
+    ].each do |task_name|
+      it "does not define #{task_name}" do
+        expect(Rake::Task.task_defined?(task_name)).to be(false),
+          "Expected legacy rake task '#{task_name}' to be undefined"
+      end
     end
   end
 
@@ -464,15 +422,12 @@ RSpec.describe 'Rakefile interface' do
     # Verify all custom rake tasks exist
       %w[
         spec pspec
-        spec:lib spec:hdl spec:ao486 spec:mos6502 spec:apple2 spec:riscv spec:sparc64
         spec:bench spec:bench:timing spec:bench:quick
-        pspec:lib pspec:hdl pspec:ao486 pspec:mos6502 pspec:apple2 pspec:riscv pspec:sparc64
         pspec:n pspec:prepare pspec:balanced
         deps deps:install deps:check deps:check_gpu
         bench:native bench:web
         gem:build gem:build:checksum gem:install gem:install:local gem:release
         native:build native:clean native:check
-        ao486:import ao486:parity ao486:verify
         web:start web:build web:generate
         build:setup build:setup:binstubs
         build:clean build:clobber

@@ -168,7 +168,6 @@ module RHDL
                   diagnostics: diagnostics
                 )
               end
-              files_written = patch_generated_runtime_primitives(files_written: files_written, diagnostics: diagnostics)
 
               report = read_report(report_path)
               artifacts = report.fetch('artifacts', {})
@@ -314,7 +313,8 @@ module RHDL
 
                 acc[name] = File.join(staged.fetch(:staged_root), relpath)
               end,
-              tool_args: staged.fetch(:include_dirs).map { |dir| "-I#{dir}" } + ['-DFPGA_SYN', support_stub_path, *extra_source_files]
+              tool_args: staged.fetch(:include_dirs).map { |dir| "-I#{dir}" } +
+                ['-DFPGA_SYN', '-DNO_SCAN', support_stub_path, *extra_source_files]
             }
           end
 
@@ -1055,98 +1055,6 @@ module RHDL
                 stem.start_with?("#{candidate_stem}_")
               end
               .max_by { |candidate| File.basename(candidate, '.rb').length }
-          end
-
-          def patch_generated_runtime_primitives(files_written:, diagnostics:)
-            Array(files_written).map do |path|
-              next path unless File.file?(path)
-
-              text = File.read(path)
-              module_name = text[/def\s+self\.verilog_module_name.*?\n\s*["']([^"']+)["']/m, 1]
-              template = runtime_primitive_template_for(module_name)
-              next path unless template
-
-              File.write(path, template)
-              diagnostics << "SPARC64 runtime primitive patch applied for #{module_name}"
-              path
-            end
-          end
-
-          def runtime_primitive_template_for(module_name)
-            case module_name
-            when 'dffrl_async'
-              dffrl_async_runtime_template
-            when 'cluster_header'
-              cluster_header_runtime_template
-            end
-          end
-
-          def dffrl_async_runtime_template
-            <<~RUBY
-              # frozen_string_literal: true
-
-              class DffrlAsync < RHDL::Sim::SequentialComponent
-                include RHDL::DSL::Behavior
-                include RHDL::DSL::Sequential
-
-                def self.verilog_module_name
-                  "dffrl_async"
-                end
-
-                input :din
-                input :clk
-                input :rst_l
-                input :se
-                input :si
-                output :q
-                output :so
-
-                sequential clock: :clk, reset: :rst_l, reset_values: { q: 0 } do
-                  # The SPARC64 import suite runs with FPGA_SYN/NO_SCAN enabled, so
-                  # scan ports are present in the interface but inactive in behavior.
-                  q <= din
-                end
-
-                behavior do
-                  so <= 0
-                end
-              end
-            RUBY
-          end
-
-          def cluster_header_runtime_template
-            <<~RUBY
-              # frozen_string_literal: true
-
-              class ClusterHeader < RHDL::Sim::Component
-                def self.verilog_module_name
-                  "cluster_header"
-                end
-
-                input :gclk
-                input :cluster_cken
-                input :arst_l
-                input :grst_l
-                input :adbginit_l
-                input :gdbginit_l
-                input :si
-                input :se
-                output :dbginit_l
-                output :cluster_grst_l
-                output :rclk
-                output :so
-
-                behavior do
-                  # The SPARC64 runner pulses the top clock through explicit low/high
-                  # phases, so model the FPGA_SYN repeater as a low-phase-visible
-                  # passthrough instead of a synthesized negedge process.
-                  dbginit_l <= gdbginit_l
-                  cluster_grst_l <= grst_l
-                  rclk <= gclk
-                  so <= lit(0, width: 1)
-                end
-              end
-            RUBY
           end
 
           def source_relative_path(path)

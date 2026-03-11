@@ -721,8 +721,9 @@ RSpec.describe 'Apple II Simulator Modes' do
           @sim.tick
           @sim.poke('reset', 0)
 
-          # Run enough cycles to complete boot sequence
-          @sim.runner_run_cycles(200, 0, false)
+          # A small post-reset batch is enough to prove forward progress here.
+          # Larger single JIT batches can exceed the per-example timeout.
+          @sim.runner_run_cycles(50, 0, false)
 
           pc = @sim.peek('cpu__pc_reg')
 

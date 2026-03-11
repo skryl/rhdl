@@ -17,7 +17,7 @@ RSpec.describe RHDL::Examples::SPARC64::Integration::StagedVerilogBundle do
     expect(result.top_module).to eq('s1_top')
     expect(File).to exist(result.top_file)
     expect(result.source_files).not_to be_empty
-    expect(result.verilator_args).to include('-DFPGA_SYN')
+    expect(result.verilator_args).to include('-DFPGA_SYN', '-DNO_SCAN')
     expect(described_class::FAST_BOOT_PATCHES_DIR).to be_a(String)
     expect(Dir.glob(File.join(described_class::FAST_BOOT_PATCHES_DIR, '*.patch'))).not_to be_empty
 
@@ -34,6 +34,7 @@ RSpec.describe RHDL::Examples::SPARC64::Integration::StagedVerilogBundle do
     lsu_qctl1_file = File.join(result.staged_root, 'T1-CPU', 'lsu', 'lsu_qctl1.v')
     lsu_qctl2_file = File.join(result.staged_root, 'T1-CPU', 'lsu', 'lsu_qctl2.v')
     sparc_rtl_file = File.join(result.staged_root, 'T1-CPU', 'rtl', 'sparc.v')
+    cluster_header_file = File.join(result.staged_root, 'T1-common', 'common', 'cluster_header.v')
     tlu_tcl_file = File.join(result.staged_root, 'T1-CPU', 'tlu', 'tlu_tcl.v')
     support_stubs_file = File.join(result.staged_root, '__rhdl_sparc64_hierarchy_stubs.v')
 
@@ -50,6 +51,7 @@ RSpec.describe RHDL::Examples::SPARC64::Integration::StagedVerilogBundle do
     expect(File).to exist(lsu_qctl1_file)
     expect(File).to exist(lsu_qctl2_file)
     expect(File).to exist(sparc_rtl_file)
+    expect(File).to exist(cluster_header_file)
     expect(File).to exist(tlu_tcl_file)
     expect(File).to exist(support_stubs_file)
 
@@ -201,10 +203,18 @@ RSpec.describe RHDL::Examples::SPARC64::Integration::StagedVerilogBundle do
     expect(sparc_rtl_source).to include('assign fast_boot_agp_tid_window = fast_boot_reset_vector;')
     expect(sparc_rtl_source).to include('assign fast_boot_tlu_exu_agp[1:0] = fast_boot_agp_tid_window ? 2\'b00 : tlu_exu_agp[1:0];')
     expect(sparc_rtl_source).to include('assign fast_boot_tlu_exu_agp_tid[1:0] = fast_boot_agp_tid_window ? 2\'b00 : tlu_exu_agp_tid[1:0];')
-	    expect(sparc_rtl_source).to include('.tlu_ifu_trapnpc_w2    (fast_boot_tlu_ifu_trapnpc_w2[48:0]),')
-	    expect(sparc_rtl_source).to include('.tlu_ifu_trappc_w2     (fast_boot_tlu_ifu_trappc_w2[48:0]),')
+	    expect(sparc_rtl_source.scan('.tlu_ifu_trap_tid_w1   (fast_boot_tlu_ifu_trap_tid_w1[1:0]),').size).to eq(2)
+	    expect(sparc_rtl_source.scan('.tlu_ifu_trapnpc_w2    (fast_boot_tlu_ifu_trapnpc_w2[48:0]),').size).to eq(2)
+	    expect(sparc_rtl_source.scan('.tlu_ifu_trappc_w2     (fast_boot_tlu_ifu_trappc_w2[48:0]),').size).to eq(2)
 	    expect(sparc_rtl_source).to include('.tlu_exu_agp           (fast_boot_tlu_exu_agp[1:0]),')
 	    expect(sparc_rtl_source).to include('.tlu_exu_agp_tid       (fast_boot_tlu_exu_agp_tid[1:0]),')
+
+    cluster_header_source = File.read(cluster_header_file)
+    expect(cluster_header_source).to include('assign rclk = gclk;')
+    expect(cluster_header_source).to include('assign dbginit_l = gdbginit_l;')
+    expect(cluster_header_source).to include('assign cluster_grst_l = grst_l;')
+    expect(cluster_header_source).to include("assign so = 1'b0;")
+    expect(cluster_header_source).not_to include('always @(negedge rclk)')
 
     tlu_tcl_source = File.read(tlu_tcl_file)
     expect(tlu_tcl_source).to include('wire fast_boot_agp_tid_force;')

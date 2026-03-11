@@ -258,6 +258,52 @@ RSpec.describe RHDL::Codegen::CIRCT::Raise do
       expect(source).to include('_0y <= (_0a + _class)')
     end
 
+    it 'emits resettable sequential blocks when imported process metadata carries reset info' do
+      mod = ir::ModuleOp.new(
+        name: 'seq_with_reset',
+        ports: [
+          ir::Port.new(name: :clk, direction: :in, width: 1),
+          ir::Port.new(name: :rst_l, direction: :in, width: 1),
+          ir::Port.new(name: :d, direction: :in, width: 1),
+          ir::Port.new(name: :q, direction: :out, width: 1)
+        ],
+        nets: [],
+        regs: [ir::Reg.new(name: :q, width: 1, reset_value: 0)],
+        assigns: [ir::Assign.new(target: :q, expr: ir::Signal.new(name: :q, width: 1))],
+        processes: [
+          ir::Process.new(
+            name: :seq_logic,
+            clocked: true,
+            clock: :clk,
+            reset: :rst_l,
+            reset_active_low: true,
+            reset_values: { q: 0 },
+            statements: [
+              ir::SeqAssign.new(
+                target: :q,
+                expr: ir::BinaryOp.new(
+                  op: :&,
+                  left: ir::Signal.new(name: :rst_l, width: 1),
+                  right: ir::Signal.new(name: :d, width: 1),
+                  width: 1
+                )
+              )
+            ]
+          )
+        ],
+        instances: [],
+        memories: [],
+        write_ports: [],
+        sync_read_ports: [],
+        parameters: {}
+      )
+
+      source = described_class.to_sources(mod, top: 'seq_with_reset', strict: true).sources.fetch('seq_with_reset')
+      expect(source).to include('sequential clock: :clk, reset: :rst_l, reset_values: { q: 0 } do')
+      expect(source).to include('q <= d')
+      expect(source).not_to include('q <= (rst_l & d)')
+    end
+
     it 'renames numbered-parameter style identifiers so generated behavior stays valid Ruby' do
       mod = ir::ModuleOp.new(
         name: 'numbered_ident',

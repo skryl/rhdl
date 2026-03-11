@@ -8,7 +8,7 @@ In Progress - 2026-03-11
 
 The SPARC64 fast-boot path currently relies on a patch series under:
 
-- `examples/sparc64/utilities/integration/patches/fast_boot`
+- `examples/sparc64/patches/fast_boot`
 
 The goal of this audit is to separate:
 

@@ -3,7 +3,7 @@
 //! Provides internalized RAM/ROM and batched cycle execution for Apple II.
 
 use std::collections::HashMap;
-use crate::core::{CoreSimulator, FlatOp, OP_COPY_TO_SIG};
+use crate::core::CoreSimulator;
 use crate::signal_value::SignalValue;
 
 /// Result of batched cycle execution
@@ -150,7 +150,7 @@ impl Apple2Extension {
 
         // Rising edge
         unsafe { *core.signals.get_unchecked_mut(self.clk_idx) = 1; }
-        self.tick_fast(core);
+        core.tick();
 
         // Handle RAM writes
         let mut text_dirty = false;
@@ -171,65 +171,6 @@ impl Apple2Extension {
         self.prev_speaker = speaker as u64;
 
         (text_dirty, key_cleared, speaker_toggled)
-    }
-
-    /// Optimized tick for Apple II
-    #[inline(always)]
-    fn tick_fast(&mut self, core: &mut CoreSimulator) {
-        for (i, &clk_idx) in core.clock_indices.iter().enumerate() {
-            core.prev_clock_values[i] = core.signals[clk_idx];
-        }
-
-        core.evaluate();
-
-        for (i, seq_assign) in core.seq_assigns.iter().enumerate() {
-            if let Some((src_idx, mask)) = seq_assign.fast_source {
-                let val = unsafe { *core.signals.get_unchecked(src_idx) } & (mask as SignalValue);
-                core.next_regs[i] = val;
-                continue;
-            }
-
-            let ops_len = seq_assign.ops.len();
-            if ops_len == 0 {
-                continue;
-            }
-
-            for op in &seq_assign.ops[..ops_len.saturating_sub(1)] {
-                CoreSimulator::execute_flat_op_static(&mut core.signals, &mut core.temps, &core.memory_arrays, op);
-            }
-
-            let last_op = &seq_assign.ops[ops_len - 1];
-            if last_op.op_type == OP_COPY_TO_SIG {
-                let val = FlatOp::get_operand(&core.signals, &core.temps, last_op.arg0) & (last_op.arg2 as SignalValue);
-                core.next_regs[i] = val;
-            } else {
-                CoreSimulator::execute_flat_op_static(&mut core.signals, &mut core.temps, &core.memory_arrays, last_op);
-                core.next_regs[i] = unsafe { *core.signals.get_unchecked(seq_assign.final_target) };
-            }
-        }
-
-        const MAX_ITERATIONS: usize = 10;
-        for _ in 0..MAX_ITERATIONS {
-            let mut any_edge = false;
-            for (clock_list_idx, &clk_idx) in core.clock_indices.iter().enumerate() {
-                let old_val = core.prev_clock_values[clock_list_idx];
-                let new_val = unsafe { *core.signals.get_unchecked(clk_idx) };
-
-                if old_val == 0 && new_val == 1 {
-                    any_edge = true;
-                    for &(seq_idx, target_idx) in &core.clock_domain_assigns[clock_list_idx] {
-                        unsafe { *core.signals.get_unchecked_mut(target_idx) = core.next_regs[seq_idx]; }
-                    }
-                    core.prev_clock_values[clock_list_idx] = 1;
-                }
-            }
-
-            if !any_edge {
-                break;
-            }
-
-            core.evaluate();
-        }
     }
 
     /// Run N CPU cycles with batched execution
@@ -258,184 +199,5 @@ impl Apple2Extension {
         }
 
         result
-    }
-}
-
-impl CoreSimulator {
-    /// Static version of execute_flat_op for use in extensions
-    #[inline(always)]
-    pub fn execute_flat_op_static(signals: &mut [SignalValue], temps: &mut [SignalValue], memories: &[Vec<SignalValue>], op: &FlatOp) {
-        use crate::core::*;
-
-        match op.op_type {
-            OP_COPY_TO_SIG => {
-                let val = FlatOp::get_operand(signals, temps, op.arg0) & (op.arg2 as SignalValue);
-                unsafe { *signals.get_unchecked_mut(op.dst) = val; }
-            }
-            OP_COPY_SIG | OP_COPY_IMM | OP_COPY_TMP => {
-                let val = FlatOp::get_operand(signals, temps, op.arg0) & (op.arg2 as SignalValue);
-                unsafe { *temps.get_unchecked_mut(op.dst) = val; }
-            }
-            OP_NOT => {
-                let val = (!FlatOp::get_operand(signals, temps, op.arg0)) & (op.arg2 as SignalValue);
-                unsafe { *temps.get_unchecked_mut(op.dst) = val; }
-            }
-            OP_REDUCE_AND => {
-                let val = FlatOp::get_operand(signals, temps, op.arg0);
-                let mask = op.arg1 as SignalValue;
-                let result = ((val & mask) == mask) as SignalValue;
-                unsafe { *temps.get_unchecked_mut(op.dst) = result; }
-            }
-            OP_REDUCE_OR => {
-                let result = (FlatOp::get_operand(signals, temps, op.arg0) != 0) as SignalValue;
-                unsafe { *temps.get_unchecked_mut(op.dst) = result; }
-            }
-            OP_REDUCE_XOR => {
-                let result = (FlatOp::get_operand(signals, temps, op.arg0).count_ones() & 1) as SignalValue;
-                unsafe { *temps.get_unchecked_mut(op.dst) = result; }
-            }
-            OP_AND => {
-                let result = FlatOp::get_operand(signals, temps, op.arg0) & FlatOp::get_operand(signals, temps, op.arg1);
-                unsafe { *temps.get_unchecked_mut(op.dst) = result; }
-            }
-            OP_OR => {
-                let result = FlatOp::get_operand(signals, temps, op.arg0) | FlatOp::get_operand(signals, temps, op.arg1);
-                unsafe { *temps.get_unchecked_mut(op.dst) = result; }
-            }
-            OP_XOR => {
-                let result = FlatOp::get_operand(signals, temps, op.arg0) ^ FlatOp::get_operand(signals, temps, op.arg1);
-                unsafe { *temps.get_unchecked_mut(op.dst) = result; }
-            }
-            OP_ADD => {
-                let result = FlatOp::get_operand(signals, temps, op.arg0).wrapping_add(FlatOp::get_operand(signals, temps, op.arg1)) & (op.arg2 as SignalValue);
-                unsafe { *temps.get_unchecked_mut(op.dst) = result; }
-            }
-            OP_SUB => {
-                let result = FlatOp::get_operand(signals, temps, op.arg0).wrapping_sub(FlatOp::get_operand(signals, temps, op.arg1)) & (op.arg2 as SignalValue);
-                unsafe { *temps.get_unchecked_mut(op.dst) = result; }
-            }
-            OP_MUL => {
-                let result = FlatOp::get_operand(signals, temps, op.arg0).wrapping_mul(FlatOp::get_operand(signals, temps, op.arg1)) & (op.arg2 as SignalValue);
-                unsafe { *temps.get_unchecked_mut(op.dst) = result; }
-            }
-            OP_DIV => {
-                let r = FlatOp::get_operand(signals, temps, op.arg1);
-                let result = if r != 0 { FlatOp::get_operand(signals, temps, op.arg0) / r } else { 0 };
-                unsafe { *temps.get_unchecked_mut(op.dst) = result; }
-            }
-            OP_MOD => {
-                let r = FlatOp::get_operand(signals, temps, op.arg1);
-                let result = if r != 0 { FlatOp::get_operand(signals, temps, op.arg0) % r } else { 0 };
-                unsafe { *temps.get_unchecked_mut(op.dst) = result; }
-            }
-            OP_SHL => {
-                let shift = FlatOp::get_operand(signals, temps, op.arg1).min(63) as u32;
-                let result = (FlatOp::get_operand(signals, temps, op.arg0) << shift) & (op.arg2 as SignalValue);
-                unsafe { *temps.get_unchecked_mut(op.dst) = result; }
-            }
-            OP_SHR => {
-                let shift = FlatOp::get_operand(signals, temps, op.arg1).min(63) as u32;
-                let result = FlatOp::get_operand(signals, temps, op.arg0) >> shift;
-                unsafe { *temps.get_unchecked_mut(op.dst) = result; }
-            }
-            OP_EQ => {
-                let result = (FlatOp::get_operand(signals, temps, op.arg0) == FlatOp::get_operand(signals, temps, op.arg1)) as SignalValue;
-                unsafe { *temps.get_unchecked_mut(op.dst) = result; }
-            }
-            OP_NE => {
-                let result = (FlatOp::get_operand(signals, temps, op.arg0) != FlatOp::get_operand(signals, temps, op.arg1)) as SignalValue;
-                unsafe { *temps.get_unchecked_mut(op.dst) = result; }
-            }
-            OP_LT => {
-                let result = (FlatOp::get_operand(signals, temps, op.arg0) < FlatOp::get_operand(signals, temps, op.arg1)) as SignalValue;
-                unsafe { *temps.get_unchecked_mut(op.dst) = result; }
-            }
-            OP_GT => {
-                let result = (FlatOp::get_operand(signals, temps, op.arg0) > FlatOp::get_operand(signals, temps, op.arg1)) as SignalValue;
-                unsafe { *temps.get_unchecked_mut(op.dst) = result; }
-            }
-            OP_LE => {
-                let result = (FlatOp::get_operand(signals, temps, op.arg0) <= FlatOp::get_operand(signals, temps, op.arg1)) as SignalValue;
-                unsafe { *temps.get_unchecked_mut(op.dst) = result; }
-            }
-            OP_GE => {
-                let result = (FlatOp::get_operand(signals, temps, op.arg0) >= FlatOp::get_operand(signals, temps, op.arg1)) as SignalValue;
-                unsafe { *temps.get_unchecked_mut(op.dst) = result; }
-            }
-            OP_MUX => {
-                let c = FlatOp::get_operand(signals, temps, op.arg0);
-                let t = FlatOp::get_operand(signals, temps, op.arg1);
-                let f = FlatOp::get_operand(signals, temps, op.arg2);
-                let select = if c != 0 { SignalValue::MAX } else { 0 };
-                let result = (select & t) | ((!select) & f);
-                unsafe { *temps.get_unchecked_mut(op.dst) = result; }
-            }
-            OP_SLICE => {
-                let shift = op.arg1 as u32;
-                let result = (FlatOp::get_operand(signals, temps, op.arg0) >> shift) & (op.arg2 as SignalValue);
-                unsafe { *temps.get_unchecked_mut(op.dst) = result; }
-            }
-            OP_CONCAT_INIT => {
-                unsafe { *temps.get_unchecked_mut(op.dst) = 0; }
-            }
-            OP_CONCAT_ACCUM => {
-                let part = FlatOp::get_operand(signals, temps, op.arg0) & (op.arg2 as SignalValue);
-                let shift = op.arg1 as usize;
-                unsafe {
-                    let current = *temps.get_unchecked(op.dst);
-                    *temps.get_unchecked_mut(op.dst) = current | (part << shift);
-                }
-            }
-            OP_CONCAT_FINISH => {
-                unsafe {
-                    let val = *temps.get_unchecked(op.dst);
-                    *temps.get_unchecked_mut(op.dst) = val & (op.arg2 as SignalValue);
-                }
-            }
-            OP_RESIZE => {
-                let result = FlatOp::get_operand(signals, temps, op.arg0) & (op.arg2 as SignalValue);
-                unsafe { *temps.get_unchecked_mut(op.dst) = result; }
-            }
-            OP_MEM_READ => {
-                let mem_idx = op.arg0 as usize;
-                let addr = FlatOp::get_operand(signals, temps, op.arg1) as usize;
-                let result = if mem_idx < memories.len() {
-                    let mem = &memories[mem_idx];
-                    if addr < mem.len() { mem[addr] } else { 0 }
-                } else {
-                    0
-                };
-                unsafe { *temps.get_unchecked_mut(op.dst) = result & (op.arg2 as SignalValue); }
-            }
-            OP_COPY_SIG_TO_SIG => {
-                let val = unsafe { *signals.get_unchecked(op.arg0 as usize) } & (op.arg2 as SignalValue);
-                unsafe { *signals.get_unchecked_mut(op.dst) = val; }
-            }
-            OP_AND_SS => {
-                let result = unsafe { *signals.get_unchecked(op.arg0 as usize) & *signals.get_unchecked(op.arg1 as usize) };
-                unsafe { *temps.get_unchecked_mut(op.dst) = result; }
-            }
-            OP_OR_SS => {
-                let result = unsafe { *signals.get_unchecked(op.arg0 as usize) | *signals.get_unchecked(op.arg1 as usize) };
-                unsafe { *temps.get_unchecked_mut(op.dst) = result; }
-            }
-            OP_XOR_SS => {
-                let result = unsafe { *signals.get_unchecked(op.arg0 as usize) ^ *signals.get_unchecked(op.arg1 as usize) };
-                unsafe { *temps.get_unchecked_mut(op.dst) = result; }
-            }
-            OP_EQ_SS => {
-                let result = unsafe { (*signals.get_unchecked(op.arg0 as usize) == *signals.get_unchecked(op.arg1 as usize)) as SignalValue };
-                unsafe { *temps.get_unchecked_mut(op.dst) = result; }
-            }
-            OP_MUX_SSS => {
-                let c = unsafe { *signals.get_unchecked(op.arg0 as usize) };
-                let t = unsafe { *signals.get_unchecked(op.arg1 as usize) };
-                let f = unsafe { *signals.get_unchecked(op.arg2 as usize) };
-                let select = if c != 0 { SignalValue::MAX } else { 0 };
-                let result = (select & t) | ((!select) & f);
-                unsafe { *temps.get_unchecked_mut(op.dst) = result; }
-            }
-            _ => {}
-        }
     }
 }

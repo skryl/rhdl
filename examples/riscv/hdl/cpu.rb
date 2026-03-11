@@ -1294,9 +1294,6 @@ module RHDL
                             (is_sc & amo_sc_success) |
                             (is_amo_rmw & (~is_amocas | amo_cas_success)),
                             width: 1)
-      amo_rd_data = local(:amo_rd_data,
-                          mux(is_sc, mux(amo_sc_success, lit(0, width: 32), lit(1, width: 32)), amo_old),
-                          width: 32)
       data_vaddr = local(:data_vaddr, mux(is_amo, rs1_data, alu_result), width: 32)
       data_access_req = local(:data_access_req, mem_read | mem_write | is_amo, width: 1)
       data_store_access = local(:data_store_access, mem_write | is_sc | is_amo_rmw, width: 1)
@@ -1747,10 +1744,16 @@ module RHDL
       # - trap: mtvec/stvec
       # - else: pc_plus4
       jal_target = local(:jal_target, pc + imm, width: 32)
-      trap_target = local(:trap_target, csr_read_selected & lit(0xFFFFFFFC, width: 32), width: 32)
+      trap_vector = local(:trap_vector,
+                          mux(trap_to_supervisor, csr_read_data10, csr_read_data9),
+                          width: 32)
+      ret_vector = local(:ret_vector,
+                         mux(is_mret, csr_read_data11, csr_read_data12),
+                         width: 32)
+      trap_target = local(:trap_target, trap_vector & lit(0xFFFFFFFC, width: 32), width: 32)
 
       pc_next <= mux(trap_taken, trap_target,
-                     mux(is_mret | is_sret, csr_read_selected,
+                     mux(is_mret | is_sret, ret_vector,
                          mux(jump,
                              mux(jalr, jalr_target, jal_target),
                              mux(branch & branch_taken, branch_target, pc_plus4))))
@@ -1761,6 +1764,14 @@ module RHDL
       # - csr: old CSR value
       # - fmv.x.w: raw bits from fp register
       # - else: ALU result
+      amo_sc_write_committed = local(:amo_sc_write_committed,
+                                     amo_mem_write & ~trap_taken & ~data_page_fault,
+                                     width: 1)
+      amo_rd_data = local(:amo_rd_data,
+                          mux(is_sc,
+                              mux(amo_sc_write_committed, lit(0, width: 32), lit(1, width: 32)),
+                              amo_old),
+                          width: 32)
       rd_data <= mux(is_amo, amo_rd_data,
                      mux(is_vsetvli | is_vmv_x_s, v_scalar_result,
                      mux(is_csr_instr, csr_read_selected,

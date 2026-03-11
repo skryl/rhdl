@@ -24,13 +24,19 @@ module RHDL
           end
 
           def resolve_native_lib_path(ext_dir, base)
-            native_lib_candidates(base)
+            candidates = native_lib_candidates(base)
+            found = candidates
               .map { |name| [name, File.join(ext_dir, name)] }
               .find { |_name, path| File.exist?(path) }
+
+            return found if found
+
+            fallback_name = candidates.first
+            [fallback_name, File.join(ext_dir, fallback_name)]
           end
 
           def sim_backend_available?(lib_path)
-            return false unless File.exist?(lib_path)
+            return false unless lib_path && File.exist?(lib_path)
 
             lib = Fiddle.dlopen(lib_path)
             lib['sim_create']

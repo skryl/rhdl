@@ -76,10 +76,20 @@ module RHDL
           previous_array_elements_cache = Thread.current[:rhdl_circt_import_array_elements_cache]
           previous_literal_cache = Thread.current[:rhdl_circt_import_literal_cache]
           previous_signal_cache = Thread.current[:rhdl_circt_import_signal_cache]
+          previous_expr_signature_cache = Thread.current[:rhdl_circt_import_expr_signature_cache]
+          previous_expr_signature_active = Thread.current[:rhdl_circt_import_expr_signature_active]
+          previous_simplify_expr_cache = Thread.current[:rhdl_circt_import_simplify_expr_cache]
+          previous_simplify_expr_active = Thread.current[:rhdl_circt_import_simplify_expr_active]
+          previous_expr_equivalent_cache = Thread.current[:rhdl_circt_import_expr_equivalent_cache]
           previous_forward_refs_seen = Thread.current[:rhdl_circt_import_forward_refs_seen]
           Thread.current[:rhdl_circt_import_array_elements_cache] = {}
           Thread.current[:rhdl_circt_import_literal_cache] = {}
           Thread.current[:rhdl_circt_import_signal_cache] = {}
+          Thread.current[:rhdl_circt_import_expr_signature_cache] = {}
+          Thread.current[:rhdl_circt_import_expr_signature_active] = {}
+          Thread.current[:rhdl_circt_import_simplify_expr_cache] = {}
+          Thread.current[:rhdl_circt_import_simplify_expr_active] = {}
+          Thread.current[:rhdl_circt_import_expr_equivalent_cache] = {}
           Thread.current[:rhdl_circt_import_forward_refs_seen] = false
 
           diagnostics = []
@@ -458,6 +468,11 @@ module RHDL
           Thread.current[:rhdl_circt_import_array_elements_cache] = previous_array_elements_cache
           Thread.current[:rhdl_circt_import_literal_cache] = previous_literal_cache
           Thread.current[:rhdl_circt_import_signal_cache] = previous_signal_cache
+          Thread.current[:rhdl_circt_import_expr_signature_cache] = previous_expr_signature_cache
+          Thread.current[:rhdl_circt_import_expr_signature_active] = previous_expr_signature_active
+          Thread.current[:rhdl_circt_import_simplify_expr_cache] = previous_simplify_expr_cache
+          Thread.current[:rhdl_circt_import_simplify_expr_active] = previous_simplify_expr_active
+          Thread.current[:rhdl_circt_import_expr_equivalent_cache] = previous_expr_equivalent_cache
           Thread.current[:rhdl_circt_import_forward_refs_seen] = previous_forward_refs_seen
         end
 
@@ -802,6 +817,14 @@ module RHDL
             strict: strict
           )
           return false if seq_statements.empty?
+          seq_statements = simplify_seq_statements(seq_statements)
+
+          reset_info = infer_llhd_process_reset(
+            wait_term: wait_term,
+            check_block: check_block,
+            value_map: value_map,
+            clock_name: clock_name
+          )
 
           target_widths = {}
           collect_seq_targets(seq_statements).each do |target_name, expr|
@@ -827,7 +850,10 @@ module RHDL
             statements: seq_statements,
             clocked: true,
             clock: clock_name,
-            sensitivity_list: []
+            sensitivity_list: [],
+            reset: reset_info&.fetch(:name, nil),
+            reset_active_low: reset_info&.fetch(:active_low, false) || false,
+            reset_values: default_reset_values_for_targets(target_widths.keys)
           )
           true
         rescue StandardError => e
@@ -898,6 +924,14 @@ module RHDL
               strict: strict
             )
             return false if seq_statements.empty?
+            seq_statements = simplify_seq_statements(seq_statements)
+
+            reset_info = infer_llhd_process_reset(
+              wait_term: wait_term,
+              check_block: check_block,
+              value_map: value_map,
+              clock_name: clock_name
+            )
 
             target_widths = {}
             collect_seq_targets(seq_statements).each do |target_name, expr|
@@ -923,7 +957,10 @@ module RHDL
               statements: seq_statements,
               clocked: true,
               clock: clock_name,
-              sensitivity_list: []
+              sensitivity_list: [],
+              reset: reset_info&.fetch(:name, nil),
+              reset_active_low: reset_info&.fetch(:active_low, false) || false,
+              reset_values: default_reset_values_for_targets(target_widths.keys)
             )
             return true
           end
@@ -1813,40 +1850,67 @@ module RHDL
           return true if lhs.equal?(rhs)
           return false if lhs.nil? || rhs.nil?
 
-          expr_signature(lhs) == expr_signature(rhs)
+          cache = Thread.current[:rhdl_circt_import_expr_equivalent_cache]
+          cache_key = [lhs.object_id, rhs.object_id]
+          if cache && cache.key?(cache_key)
+            return cache[cache_key]
+          end
+
+          result = expr_signature(lhs) == expr_signature(rhs)
+          if cache
+            cache[cache_key] = result
+            cache[[rhs.object_id, lhs.object_id]] = result
+          end
+          result
         end
 
         def expr_signature(expr)
-          case expr
-          when IR::Signal
-            [:signal, expr.name.to_s, expr.width.to_i]
-          when IR::Literal
-            [:literal, expr.value, expr.width.to_i]
-          when IR::UnaryOp
-            [:unary, expr.op, expr_signature(expr.operand), expr.width.to_i]
-          when IR::BinaryOp
-            [:binary, expr.op, expr_signature(expr.left), expr_signature(expr.right), expr.width.to_i]
-          when IR::Mux
-            [:mux, expr_signature(expr.condition), expr_signature(expr.when_true), expr_signature(expr.when_false), expr.width.to_i]
-          when IR::Concat
-            [:concat, Array(expr.parts).map { |part| expr_signature(part) }, expr.width.to_i]
-          when IR::Slice
-            [:slice, expr_signature(expr.base), expr.range&.first, expr.range&.last, expr.width.to_i]
-          when IR::Resize
-            [:resize, expr_signature(expr.expr), expr.width.to_i]
-          when IR::Case
-            [
-              :case,
-              expr_signature(expr.selector),
-              expr.cases.to_h { |k, v| [k, expr_signature(v)] },
-              expr_signature(expr.default),
-              expr.width.to_i
-            ]
-          when IR::MemoryRead
-            [:memory_read, expr.memory.to_s, expr_signature(expr.addr), expr.width.to_i]
-          else
-            [:unknown, expr.class.name, expr.to_s]
+          cache = Thread.current[:rhdl_circt_import_expr_signature_cache]
+          active = Thread.current[:rhdl_circt_import_expr_signature_active]
+          cache_key = expr.object_id
+          if cache && cache.key?(cache_key)
+            return cache[cache_key]
           end
+          if active && active[cache_key]
+            return [:cycle, expr.class.name, expr.width.to_i, cache_key]
+          end
+
+          active[cache_key] = true if active
+          signature =
+            case expr
+            when IR::Signal
+              [:signal, expr.name.to_s, expr.width.to_i]
+            when IR::Literal
+              [:literal, expr.value, expr.width.to_i]
+            when IR::UnaryOp
+              [:unary, expr.op, expr_signature(expr.operand), expr.width.to_i]
+            when IR::BinaryOp
+              [:binary, expr.op, expr_signature(expr.left), expr_signature(expr.right), expr.width.to_i]
+            when IR::Mux
+              [:mux, expr_signature(expr.condition), expr_signature(expr.when_true), expr_signature(expr.when_false), expr.width.to_i]
+            when IR::Concat
+              [:concat, Array(expr.parts).map { |part| expr_signature(part) }, expr.width.to_i]
+            when IR::Slice
+              [:slice, expr_signature(expr.base), expr.range&.first, expr.range&.last, expr.width.to_i]
+            when IR::Resize
+              [:resize, expr_signature(expr.expr), expr.width.to_i]
+            when IR::Case
+              [
+                :case,
+                expr_signature(expr.selector),
+                expr.cases.to_h { |k, v| [k, expr_signature(v)] },
+                expr_signature(expr.default),
+                expr.width.to_i
+              ]
+            when IR::MemoryRead
+              [:memory_read, expr.memory.to_s, expr_signature(expr.addr), expr.width.to_i]
+            else
+              [:unknown, expr.class.name, expr.to_s]
+            end
+          cache[cache_key] = signature if cache
+          signature
+        ensure
+          active.delete(cache_key) if active
         end
 
         def collect_seq_targets(statements, acc = {})
@@ -1860,6 +1924,133 @@ module RHDL
             end
           end
           acc
+        end
+
+        def simplify_seq_statements(statements)
+          Array(statements).map do |stmt|
+            case stmt
+            when IR::SeqAssign
+              IR::SeqAssign.new(target: stmt.target, expr: simplify_expr(stmt.expr))
+            when IR::If
+              IR::If.new(
+                condition: simplify_expr(stmt.condition),
+                then_statements: simplify_seq_statements(stmt.then_statements),
+                else_statements: simplify_seq_statements(stmt.else_statements)
+              )
+            else
+              stmt
+            end
+          end
+        end
+
+        def infer_llhd_process_reset(wait_term:, check_block:, value_map:, clock_name:)
+          value_tokens = Array(wait_term[:value_tokens])
+          return nil if value_tokens.length < 2
+
+          instructions = Array(check_block[:instructions]).map(&:to_s)
+
+          value_tokens.each do |token|
+            signal_expr = lookup_value(value_map, token, width: 1)
+            next unless signal_expr.is_a?(IR::Signal)
+
+            signal_name = signal_expr.name.to_s
+            next if signal_name == clock_name.to_s
+
+            inverted_match = instructions.find do |instruction|
+              instruction.match(/\A(#{SSA_TOKEN_PATTERN})\s*=\s*comb\.xor\s+bin\s+#{Regexp.escape(token)}\s*,\s*%true\s*:\s*i1\z/)
+            end
+            next unless inverted_match
+
+            inverted_token = inverted_match.match(/\A(#{SSA_TOKEN_PATTERN})/)[1]
+            next unless instructions.any? do |instruction|
+              instruction.match(/\A#{SSA_TOKEN_PATTERN}\s*=\s*comb\.and\s+bin\s+#{SSA_TOKEN_PATTERN}\s*,\s*#{Regexp.escape(inverted_token)}\s*:\s*i1\z/)
+            end
+
+            return { name: signal_name, active_low: true }
+          end
+
+          nil
+        end
+
+        def default_reset_values_for_targets(targets)
+          Array(targets).each_with_object({}) do |target, acc|
+            acc[target.to_s] = 0
+          end
+        end
+
+        def infer_implicit_clocked_reset(expr, reg_name:, clock_name:)
+          simplified = simplify_expr(expr)
+          return nil unless simplified.is_a?(IR::Mux)
+          return nil unless signal_name_matches?(simplified.when_false, reg_name)
+
+          outer_guard = unwrap_boolean_guard_expr(simplified.condition)
+          if simplified.when_true.is_a?(IR::Mux) &&
+             expr_signature(unwrap_boolean_guard_expr(simplified.when_true.condition)) == expr_signature(outer_guard) &&
+             literal_zero?(simplified.when_true.when_false)
+            data_reset = infer_active_low_zero_reset_from_expr(simplify_expr(simplified.when_true.when_true))
+            return data_reset unless data_reset.nil?
+          end
+
+          return nil unless sequential_guard_matches_clock_expr?(outer_guard, clock_name)
+
+          infer_active_low_zero_reset_from_expr(simplify_expr(simplified.when_true))
+        end
+
+        def infer_active_low_zero_reset_from_expr(expr)
+          simplified = simplify_expr(expr)
+          return nil unless simplified.is_a?(IR::BinaryOp) && simplified.op == :&
+
+          if simplified.left.is_a?(IR::Signal) && !literal_zero?(simplified.right)
+            return { name: simplified.left.name.to_s, active_low: true, reset_value: 0 }
+          end
+          if simplified.right.is_a?(IR::Signal) && !literal_zero?(simplified.left)
+            return { name: simplified.right.name.to_s, active_low: true, reset_value: 0 }
+          end
+
+          nil
+        end
+
+        def signal_name_matches?(expr, name)
+          expr.is_a?(IR::Signal) && expr.name.to_s == name.to_s
+        end
+
+        def literal_zero?(expr)
+          expr.is_a?(IR::Literal) && expr.value.to_i.zero?
+        end
+
+        def literal_one?(expr)
+          expr.is_a?(IR::Literal) && expr.value.to_i == 1
+        end
+
+        def sequential_guard_matches_clock_expr?(expr, clock_name)
+          return false if clock_name.to_s.empty?
+
+          simplified = unwrap_boolean_guard_expr(simplify_expr(expr))
+          return true if signal_name_matches?(simplified, clock_name)
+
+          return false unless simplified.is_a?(IR::BinaryOp)
+
+          case simplified.op
+          when :&
+            (literal_one?(simplified.left) && sequential_guard_matches_clock_expr?(simplified.right, clock_name)) ||
+              (literal_one?(simplified.right) && sequential_guard_matches_clock_expr?(simplified.left, clock_name))
+          when :|
+            left_matches = sequential_guard_matches_clock_expr?(simplified.left, clock_name)
+            right_matches = sequential_guard_matches_clock_expr?(simplified.right, clock_name)
+            (left_matches || literal_zero?(simplified.left)) &&
+              (right_matches || literal_zero?(simplified.right)) &&
+              (left_matches || right_matches)
+          else
+            false
+          end
+        end
+
+        def unwrap_boolean_guard_expr(expr)
+          simplified = simplify_expr(expr)
+          return simplified unless simplified.is_a?(IR::Mux)
+          return simplified unless literal_one?(simplified.when_true) && literal_zero?(simplified.when_false)
+
+          simplify_expr(simplified.condition)
         end
 
         def prune_literal_assigns_for_clocked_targets(assigns, processes)
@@ -3729,6 +3920,8 @@ module RHDL
           regs << IR::Reg.new(name: reg_name, width: width, reset_value: reg_reset)
 
           data_expr = lookup_value(value_map, parsed[:data], width: width)
+          clock_name = clock_name_for_token(value_map, parsed[:clock])
+          clock_name = clock_name_for_token(value_map, parsed[:clock])
           seq_expr = if parsed[:reset]
                        IR::Mux.new(
                          condition: lookup_value(value_map, parsed[:reset], width: 1),
@@ -3739,13 +3932,32 @@ module RHDL
                      else
                        data_expr
                      end
+          seq_expr = simplify_expr(seq_expr)
+          implicit_reset = parsed[:reset] ? nil : infer_implicit_clocked_reset(
+            seq_expr,
+            reg_name: reg_name,
+            clock_name: clock_name
+          )
 
           seq_stmt = IR::SeqAssign.new(target: reg_name, expr: seq_expr)
           processes << IR::Process.new(
             name: :seq_logic,
             statements: [seq_stmt],
             clocked: true,
-            clock: clock_name_for_token(value_map, parsed[:clock])
+            clock: clock_name,
+            reset: if parsed[:reset]
+                     clock_name_for_token(value_map, parsed[:reset])
+                   else
+                     implicit_reset&.fetch(:name, nil)
+                   end,
+            reset_active_low: parsed[:reset] ? false : implicit_reset&.fetch(:active_low, false) || false,
+            reset_values: if parsed[:reset]
+                            { reg_name => (reg_reset || 0) }
+                          elsif implicit_reset
+                            { reg_name => implicit_reset.fetch(:reset_value, 0) }
+                          else
+                            {}
+                          end
           )
           value_map[out_token] = IR::Signal.new(name: reg_name, width: width)
           true
@@ -3944,6 +4156,7 @@ module RHDL
                       end
           regs << IR::Reg.new(name: reg_name, width: width, reset_value: reg_reset)
 
+          clock_name = clock_name_for_token(value_map, parsed[:clock])
           seq_expr = if parsed[:reset]
                        IR::Mux.new(
                          condition: lookup_value(value_map, parsed[:reset], width: 1),
@@ -3954,13 +4167,32 @@ module RHDL
                      else
                        data_expr
                      end
+          seq_expr = simplify_expr(seq_expr)
+          implicit_reset = parsed[:reset] ? nil : infer_implicit_clocked_reset(
+            seq_expr,
+            reg_name: reg_name,
+            clock_name: clock_name
+          )
 
           seq_stmt = IR::SeqAssign.new(target: reg_name, expr: seq_expr)
           processes << IR::Process.new(
             name: :seq_logic,
             statements: [seq_stmt],
             clocked: true,
-            clock: clock_name_for_token(value_map, parsed[:clock])
+            clock: clock_name,
+            reset: if parsed[:reset]
+                     clock_name_for_token(value_map, parsed[:reset])
+                   else
+                     implicit_reset&.fetch(:name, nil)
+                   end,
+            reset_active_low: parsed[:reset] ? false : implicit_reset&.fetch(:active_low, false) || false,
+            reset_values: if parsed[:reset]
+                            { reg_name => (reg_reset || 0) }
+                          elsif implicit_reset
+                            { reg_name => implicit_reset.fetch(:reset_value, 0) }
+                          else
+                            {}
+                          end
           )
           value_map[out_token] = IR::Signal.new(name: reg_name, width: width)
           true
@@ -4306,7 +4538,10 @@ module RHDL
               statements: statements,
               clocked: process.clocked,
               clock: process.clock,
-              sensitivity_list: process.sensitivity_list
+              sensitivity_list: process.sensitivity_list,
+              reset: process.reset,
+              reset_active_low: process.reset_active_low,
+              reset_values: process.reset_values
             )
           end
         end
@@ -4975,7 +5210,10 @@ module RHDL
               statements: statements,
               clocked: process.clocked,
               clock: process.clock,
-              sensitivity_list: process.sensitivity_list
+              sensitivity_list: process.sensitivity_list,
+              reset: process.reset,
+              reset_active_low: process.reset_active_low,
+              reset_values: process.reset_values
             )
           end.compact
 
@@ -5236,7 +5474,10 @@ module RHDL
               statements: remaining_statements,
               clocked: process.clocked,
               clock: process.clock,
-              sensitivity_list: process.sensitivity_list
+              sensitivity_list: process.sensitivity_list,
+              reset: process.reset,
+              reset_active_low: process.reset_active_low,
+              reset_values: process.reset_values
             )
           end
 
@@ -5298,7 +5539,10 @@ module RHDL
                   statements: rewrite_memory_like_register_statements(process.statements, recovered),
                   clocked: process.clocked,
                   clock: process.clock,
-                  sensitivity_list: process.sensitivity_list
+                  sensitivity_list: process.sensitivity_list,
+                  reset: process.reset,
+                  reset_active_low: process.reset_active_low,
+                  reset_values: process.reset_values
                 )
               end,
               instances: mod.instances,
@@ -5645,56 +5889,74 @@ module RHDL
         def simplify_expr(expr)
           return expr if expr.nil?
 
-          case expr
-          when IR::UnaryOp
-            operand = simplify_expr(expr.operand)
-            IR::UnaryOp.new(op: expr.op, operand: operand, width: expr.width.to_i)
-          when IR::BinaryOp
-            left = simplify_expr(expr.left)
-            right = simplify_expr(expr.right)
-            fold_literal_binary_expr(left: left, right: right, op: expr.op.to_sym, width: expr.width.to_i) ||
-              IR::BinaryOp.new(op: expr.op, left: left, right: right, width: expr.width.to_i)
-          when IR::Mux
-            condition = simplify_expr(expr.condition)
-            when_true = simplify_expr(expr.when_true)
-            when_false = simplify_expr(expr.when_false)
-            return when_false if condition.is_a?(IR::Literal) && condition.value.to_i.zero?
-            return when_true if condition.is_a?(IR::Literal) && condition.value.to_i != 0
-            return when_true if expr_equivalent?(when_true, when_false)
-
-            IR::Mux.new(
-              condition: condition,
-              when_true: when_true,
-              when_false: when_false,
-              width: expr.width.to_i
-            )
-          when IR::Concat
-            IR::Concat.new(
-              parts: Array(expr.parts).map { |part| simplify_expr(part) },
-              width: expr.width.to_i
-            )
-          when IR::Slice
-            base = simplify_expr(expr.base)
-            if base.is_a?(IR::Literal)
-              low = expr.range.begin.to_i
-              mask = (1 << expr.width.to_i) - 1
-              return IR::Literal.new(value: ((base.value.to_i >> low) & mask), width: expr.width.to_i)
-            end
-
-            IR::Slice.new(base: base, range: expr.range, width: expr.width.to_i)
-          when IR::Resize
-            inner = simplify_expr(expr.expr)
-            IR::Resize.new(expr: inner, width: expr.width.to_i)
-          when IR::Case
-            IR::Case.new(
-              selector: simplify_expr(expr.selector),
-              cases: expr.cases.transform_values { |value| simplify_expr(value) },
-              default: simplify_expr(expr.default),
-              width: expr.width.to_i
-            )
-          else
-            expr
+          cache = Thread.current[:rhdl_circt_import_simplify_expr_cache]
+          active = Thread.current[:rhdl_circt_import_simplify_expr_active]
+          cache_key = expr.object_id
+          if cache && cache.key?(cache_key)
+            return cache[cache_key]
           end
+          if active && active[cache_key]
+            return expr
+          end
+
+          active[cache_key] = true if active
+          simplified =
+            case expr
+            when IR::UnaryOp
+              operand = simplify_expr(expr.operand)
+              IR::UnaryOp.new(op: expr.op, operand: operand, width: expr.width.to_i)
+            when IR::BinaryOp
+              left = simplify_expr(expr.left)
+              right = simplify_expr(expr.right)
+              fold_literal_binary_expr(left: left, right: right, op: expr.op.to_sym, width: expr.width.to_i) ||
+                IR::BinaryOp.new(op: expr.op, left: left, right: right, width: expr.width.to_i)
+            when IR::Mux
+              condition = simplify_expr(expr.condition)
+              when_true = simplify_expr(expr.when_true)
+              when_false = simplify_expr(expr.when_false)
+              if condition.is_a?(IR::Literal)
+                condition.value.to_i.zero? ? when_false : when_true
+              elsif expr_equivalent?(when_true, when_false)
+                when_true
+              else
+                IR::Mux.new(
+                  condition: condition,
+                  when_true: when_true,
+                  when_false: when_false,
+                  width: expr.width.to_i
+                )
+              end
+            when IR::Concat
+              IR::Concat.new(
+                parts: Array(expr.parts).map { |part| simplify_expr(part) },
+                width: expr.width.to_i
+              )
+            when IR::Slice
+              base = simplify_expr(expr.base)
+              if base.is_a?(IR::Literal)
+                low = expr.range.begin.to_i
+                mask = (1 << expr.width.to_i) - 1
+                IR::Literal.new(value: ((base.value.to_i >> low) & mask), width: expr.width.to_i)
+              else
+                IR::Slice.new(base: base, range: expr.range, width: expr.width.to_i)
+              end
+            when IR::Resize
+              inner = simplify_expr(expr.expr)
+              IR::Resize.new(expr: inner, width: expr.width.to_i)
+            when IR::Case
+              IR::Case.new(
+                selector: simplify_expr(expr.selector),
+                cases: expr.cases.transform_values { |value| simplify_expr(value) },
+                default: simplify_expr(expr.default),
+                width: expr.width.to_i
+              )
+            else
+              expr
+            end
+          cache[cache_key] = simplified if cache
+          simplified
+        ensure
+          active.delete(cache_key) if active
         end
 
         def simplify_value(value)

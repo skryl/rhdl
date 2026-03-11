@@ -205,7 +205,10 @@ module RHDL
                 statements: statements,
                 clocked: process.clocked,
                 clock: process.clock,
-                sensitivity_list: process.sensitivity_list
+                sensitivity_list: process.sensitivity_list,
+                reset: process.reset,
+                reset_active_low: process.reset_active_low,
+                reset_values: process.reset_values
               )
             end
           end
@@ -2031,7 +2034,10 @@ module RHDL
               statements: statements,
               clocked: process.clocked,
               clock: process.clock,
-              sensitivity_list: process.sensitivity_list
+              sensitivity_list: process.sensitivity_list,
+              reset: process.reset,
+              reset_active_low: process.reset_active_low,
+              reset_values: process.reset_values
             )
           end
 

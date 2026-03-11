@@ -5,7 +5,7 @@ module RHDL
     module SPARC64
       module Integration
         module ImportPatchSet
-          PATCH_ROOT = File.expand_path('patches', __dir__).freeze
+          PATCH_ROOT = File.expand_path('../../patches', __dir__).freeze
           FAST_BOOT_PATCH_DIR = File.join(PATCH_ROOT, 'fast_boot').freeze
           FAST_BOOT_MEM_SIZE = "64'h00000000_00000020"
           FAST_BOOT_PATCH_TARGETS = %w[
@@ -17,6 +17,7 @@ module RHDL
             T1-CPU/ifu/sparc_ifu_fdp.v
             T1-CPU/lsu/lsu_qctl1.v
             T1-CPU/rtl/sparc.v
+            T1-common/common/cluster_header.v
           ].freeze
 
           class << self

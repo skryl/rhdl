@@ -703,12 +703,6 @@ bundle exec rhdl examples gameboy import # Import the Game Boy reference HDL and
 bundle exec rhdl examples gameboy import --auto-stub-modules # Import with simulation-safe stubs for wrapper-disabled subsystems
 bundle exec ruby examples/gameboy/bin/gb import --workspace tmp/gameboy_ws --keep-workspace --no-strict # Keep import artifacts for debugging and allow non-strict import
 
-# AO486 import/parity workflow
-bundle exec rake "ao486:import[examples/ao486/import]" # Import rtl/ao486/ao486.v via CIRCT and regenerate examples/ao486/import
-bundle exec rake "ao486:import[examples/ao486/import,,stubbed,true]" # Same import with an explicit stubbed baseline override
-bundle exec rake ao486:parity          # Run bounded Verilog (Verilator) vs raised RHDL (IR) parity harness
-bundle exec rake ao486:verify          # Run AO486 importer + parity + import-path verification specs
-
 # Web simulator
 bundle exec rake web:build             # Generate web simulator WASM artifacts
 bundle exec rake web:generate          # Generate web fixtures/artifacts

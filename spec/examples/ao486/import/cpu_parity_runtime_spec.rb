@@ -6,9 +6,9 @@ require 'fileutils'
 
 require_relative '../../../../examples/ao486/utilities/import/cpu_importer'
 require_relative '../../../../examples/ao486/utilities/import/cpu_parity_programs'
-require_relative '../../../../examples/ao486/utilities/import/cpu_parity_runtime'
+require_relative '../../../../examples/ao486/utilities/runners/ir_runner'
 
-RSpec.describe RHDL::Examples::AO486::Import::CpuParityRuntime do
+RSpec.describe RHDL::Examples::AO486::IrRunner do
   include AO486SpecSupport::HeadlessImportRunnerHelper
 
   def require_import_tool!

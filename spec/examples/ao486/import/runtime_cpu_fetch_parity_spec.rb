@@ -6,8 +6,8 @@ require 'fileutils'
 
 require_relative '../../../../examples/ao486/utilities/import/cpu_importer'
 require_relative '../../../../examples/ao486/utilities/import/cpu_parity_programs'
-require_relative '../../../../examples/ao486/utilities/import/cpu_parity_runtime'
-require_relative '../../../../examples/ao486/utilities/import/cpu_parity_verilator_runtime'
+require_relative '../../../../examples/ao486/utilities/runners/ir_runner'
+require_relative '../../../../examples/ao486/utilities/runners/verilator_runner'
 
 RSpec.describe 'AO486 CPU parity-package fetch parity', slow: true do
   include AO486SpecSupport::HeadlessImportRunnerHelper

@@ -285,9 +285,20 @@ module RHDL
 
         def load_import_report!(root)
           report_path = File.join(root, 'import_report.json')
-          raise ArgumentError, "Imported Game Boy report not found: #{report_path}" unless File.file?(report_path)
+          return JSON.parse(File.read(report_path)) if File.file?(report_path)
 
-          JSON.parse(File.read(report_path))
+          fallback_core_mlir = File.join(root, '.mixed_import', 'gb.core.mlir')
+          raise ArgumentError, "Imported Game Boy report not found: #{report_path}" unless File.file?(fallback_core_mlir)
+
+          {
+            'artifacts' => {
+              'core_mlir_path' => fallback_core_mlir
+            },
+            'mixed_import' => {
+              'top_name' => 'gb',
+              'core_mlir_path' => fallback_core_mlir
+            }
+          }
         end
 
         def imported_core_top_name
@@ -324,6 +335,7 @@ module RHDL
               core_mlir_path,
               imported_core_top_name,
               llvm_opt_level,
+              llvm_threads.to_s,
               arcilator_split_funcs_threshold.to_s,
               OBSERVE_FLAGS.join(','),
               __FILE__
@@ -866,7 +878,7 @@ module RHDL
           # LLVM IR with clang on macOS uses excessive memory. Prefer llc when
           # available and keep clang only as a fallback.
           if command_available?('llc')
-            cmd = ['llc', '-filetype=obj', llvm_opt_level, '-relocation-model=pic']
+            cmd = ['llc', "--threads=#{llvm_threads}", '-filetype=obj', llvm_opt_level, '-relocation-model=pic']
             cmd += ["-mtriple=#{target_triple}"] if target_triple
             cmd += [ll_path, '-o', obj_path]
             stdout, stderr, status = Open3.capture3(*cmd)
@@ -930,6 +942,12 @@ module RHDL
           raw = ENV.fetch('RHDL_GAMEBOY_ARC_LLVM_OPT_LEVEL', '0').to_s.strip
           level = raw.match?(/\A[0-3sz]\z/i) ? raw.downcase : '0'
           "-O#{level}"
+        end
+
+        def llvm_threads
+          raw = ENV.fetch('RHDL_GAMEBOY_ARC_LLVM_THREADS', '8').to_s.strip
+          value = Integer(raw, exception: false)
+          value && value.positive? ? value : 8
         end
 
         def arcilator_split_funcs_threshold

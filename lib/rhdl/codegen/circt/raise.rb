@@ -844,9 +844,6 @@ module RHDL
         end
 
         def emit_sequential(lines, mod, diagnostics, strict: false)
-          clock = mod.processes.find(&:clocked)&.clock || :clk
-          lines << "  sequential clock: :#{sanitize_name(clock)} do"
-
           mod.processes.each_with_index do |process, process_idx|
             next unless process.clocked
 
@@ -861,10 +858,20 @@ module RHDL
               strict: strict,
               mod_name: mod.name
             )
+            next if target_order.empty?
+
+            reset_values = process_reset_values_for(process, mod, target_order)
+            lines << sequential_header_for_process(process, mod, target_order, reset_values: reset_values)
 
             target_order.each do |target|
               expr = seq_state[target.to_s]
               next unless expr
+              expr = normalize_sequential_expr(
+                expr,
+                process: process,
+                target: target,
+                reset_value: reset_values[target.to_s]
+              )
 
               rewritten_expr, locals = hoist_shared_behavior_expr(
                 expr,
@@ -891,10 +898,169 @@ module RHDL
                 indent: 4
               )
             end
+
+            lines << '  end'
+            lines << ''
+          end
+        end
+
+        def sequential_header_for_process(process, _mod, target_order, reset_values:)
+          clock = sanitize_name(process.clock || :clk)
+          return "  sequential clock: :#{clock} do" unless process.reset
+
+          values = reset_values
+          values = default_reset_values_for_targets(target_order) if values.empty?
+          formatted = values.sort.map { |name, value| "#{sanitize_name(name)}: #{value.inspect}" }.join(', ')
+          "  sequential clock: :#{clock}, reset: :#{sanitize_name(process.reset)}, reset_values: { #{formatted} } do"
+        end
+
+        def process_reset_values_for(process, mod, target_order)
+          values = {}
+          Array(process.reset_values).each do |name, value|
+            values[sanitize_name(name)] = value
           end
 
-          lines << '  end'
-          lines << ''
+          reg_by_name = Array(mod.regs).each_with_object({}) { |reg, acc| acc[sanitize_name(reg.name)] = reg }
+          Array(target_order).each do |target|
+            key = sanitize_name(target)
+            next if values.key?(key)
+
+            reg = reg_by_name[key]
+            values[key] = reg.reset_value unless reg.nil? || reg.reset_value.nil?
+          end
+
+          return values unless process.reset && values.empty?
+
+          default_reset_values_for_targets(target_order)
+        end
+
+        def default_reset_values_for_targets(target_order)
+          Array(target_order).each_with_object({}) do |target, acc|
+            acc[sanitize_name(target)] = 0
+          end
+        end
+
+        def normalize_sequential_expr(expr, process:, target:, reset_value:)
+          normalized = strip_self_hold_sequential_expr(expr, target: target, clock_name: process.clock)
+          normalized = strip_clock_guard_from_seq_expr(
+            normalized,
+            clock_name: process.clock,
+            reset_value: reset_value
+          )
+          strip_reset_from_seq_expr(
+            normalized,
+            reset_name: process.reset,
+            active_low: process.reset_active_low,
+            reset_value: reset_value
+          )
+        end
+
+        def strip_self_hold_sequential_expr(expr, target:, clock_name:)
+          return expr unless expr.is_a?(IR::Mux)
+          return expr unless sequential_guard_matches_clock?(expr.condition, clock_name)
+
+          if signal_matches_name?(expr.when_false, target)
+            strip_self_hold_sequential_expr(expr.when_true, target: target, clock_name: clock_name)
+          else
+            expr
+          end
+        end
+
+        def strip_clock_guard_from_seq_expr(expr, clock_name:, reset_value:)
+          return expr unless expr.is_a?(IR::Mux)
+          return expr unless literal_matches_value?(expr.when_false, reset_value || 0)
+          return expr unless sequential_guard_matches_clock?(expr.condition, clock_name)
+
+          strip_clock_guard_from_seq_expr(expr.when_true, clock_name: clock_name, reset_value: reset_value)
+        end
+
+        def strip_reset_from_seq_expr(expr, reset_name:, active_low:, reset_value:)
+          return expr if reset_name.nil?
+
+          if active_low
+            if expr.is_a?(IR::BinaryOp) && expr.op == :&
+              return expr.right if signal_matches_name?(expr.left, reset_name) && literal_value?(expr.left).nil?
+              return expr.left if signal_matches_name?(expr.right, reset_name) && literal_value?(expr.right).nil?
+            end
+
+            if expr.is_a?(IR::Mux) &&
+               signal_matches_name?(expr.condition, reset_name) &&
+               literal_matches_value?(expr.when_false, reset_value || 0)
+              return expr.when_true
+            end
+          elsif expr.is_a?(IR::Mux) &&
+                signal_matches_name?(expr.condition, reset_name) &&
+                literal_matches_value?(expr.when_true, reset_value || 0)
+            return expr.when_false
+          end
+
+          expr
+        end
+
+        def sequential_guard_matches_clock?(expr, clock_name)
+          return false if clock_name.nil?
+
+          expr = unwrap_boolean_guard(expr)
+
+          case expr
+          when IR::Signal
+            signal_matches_name?(expr, clock_name)
+          when IR::BinaryOp
+            case expr.op
+            when :&
+              (literal_one?(expr.left) && sequential_guard_matches_clock?(expr.right, clock_name)) ||
+                (literal_one?(expr.right) && sequential_guard_matches_clock?(expr.left, clock_name))
+            when :|
+              (sequential_guard_matches_clock?(expr.left, clock_name) || literal_zero_tree?(expr.left)) &&
+                (sequential_guard_matches_clock?(expr.right, clock_name) || literal_zero_tree?(expr.right)) &&
+                (sequential_guard_matches_clock?(expr.left, clock_name) || sequential_guard_matches_clock?(expr.right, clock_name))
+            else
+              false
+            end
+          else
+            false
+          end
+        end
+
+        def unwrap_boolean_guard(expr)
+          return expr unless expr.is_a?(IR::Mux)
+          return expr unless literal_one?(expr.when_true) && literal_matches_value?(expr.when_false, 0)
+
+          expr.condition
+        end
+
+        def signal_matches_name?(expr, name)
+          expr.is_a?(IR::Signal) && sanitize_name(expr.name) == sanitize_name(name)
+        end
+
+        def literal_value?(expr)
+          expr.is_a?(IR::Literal) ? expr.value.to_i : nil
+        end
+
+        def literal_matches_value?(expr, value)
+          expr.is_a?(IR::Literal) && expr.value.to_i == value.to_i
+        end
+
+        def literal_one?(expr)
+          literal_matches_value?(expr, 1)
+        end
+
+        def literal_zero_tree?(expr)
+          case expr
+          when IR::Literal
+            expr.value.to_i == 0
+          when IR::BinaryOp
+            case expr.op
+            when :&
+              literal_zero_tree?(expr.left) || literal_zero_tree?(expr.right)
+            when :|
+              literal_zero_tree?(expr.left) && literal_zero_tree?(expr.right)
+            else
+              false
+            end
+          else
+            false
+          end
         end
 
         def lower_seq_statements_to_mux(statements, seq_state:, target_order:, mod:, diagnostics:, strict:, mod_name:)

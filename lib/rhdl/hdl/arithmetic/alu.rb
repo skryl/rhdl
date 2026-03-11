@@ -216,6 +216,30 @@ module RHDL
           ],
           add_result
         )
+
+        selected_negative = select_case.call(
+          op,
+          4,
+          [
+            [OP_ADD, add_result[7]],
+            [OP_SUB, sub_result[7]],
+            [OP_AND, and_result[7]],
+            [OP_OR, or_result[7]],
+            [OP_XOR, xor_result[7]],
+            [OP_NOT, not_result[7]],
+            [OP_SHL, shl_result[7]],
+            [OP_SHR, shr_result[7]],
+            [OP_SAR, sar_result[7]],
+            [OP_ROL, rol_result[7]],
+            [OP_ROR, ror_result[7]],
+            [OP_MUL, mul_result[7]],
+            [OP_DIV, div_result[7]],
+            [OP_MOD, mod_result[7]],
+            [OP_INC, inc_result[7]],
+            [OP_DEC, dec_result[7]]
+          ],
+          add_result[7]
+        )
         result <= selected_result
 
         # Select cout based on opcode
@@ -270,7 +294,7 @@ module RHDL
 
         # Zero and negative flags depend on result
         zero <= mux(selected_result == lit(0, width: 8), lit(1, width: 1), lit(0, width: 1))
-        negative <= selected_result[7]
+        negative <= selected_negative
       end
     end
   end

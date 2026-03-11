@@ -72,14 +72,19 @@ module RHDL
         end
 
         class Process
-          attr_reader :name, :clock, :sensitivity_list, :statements, :clocked
+          attr_reader :name, :clock, :sensitivity_list, :statements, :clocked,
+                      :reset, :reset_active_low, :reset_values
 
-          def initialize(name:, statements:, clocked:, clock: nil, sensitivity_list: [])
+          def initialize(name:, statements:, clocked:, clock: nil, sensitivity_list: [],
+                         reset: nil, reset_active_low: false, reset_values: {})
             @name = name
             @statements = statements
             @clocked = clocked
             @clock = clock
             @sensitivity_list = sensitivity_list
+            @reset = reset
+            @reset_active_low = !!reset_active_low
+            @reset_values = (reset_values || {}).each_with_object({}) { |(key, value), acc| acc[key.to_s] = value }
           end
         end
 

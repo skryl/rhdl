@@ -14,16 +14,15 @@ module RHDL
         BOOT1_ADDR = 0xC0000
         CURSOR_BDA = DisplayAdapter::CURSOR_BDA
 
-        attr_reader :backend, :sim_backend, :cycles_run, :floppy_image, :import_runtime, :last_run_stats
+        attr_reader :backend, :sim_backend, :cycles_run, :floppy_image, :last_run_stats
 
-        def initialize(backend:, sim: nil, debug: false, speed: nil, headless: false, cycles: nil, import_runtime: nil)
+        def initialize(backend:, sim: nil, debug: false, speed: nil, headless: false, cycles: nil)
           @backend = backend.to_sym
           @sim_backend = sim&.to_sym
           @debug = !!debug
           @speed = speed
           @headless = !!headless
           @requested_cycles = cycles
-          @import_runtime = import_runtime
           @memory = Hash.new(0)
           @rom = {}
           @floppy_image = nil
@@ -90,11 +89,6 @@ module RHDL
         end
 
         def load_bytes(base, bytes, target: @memory)
-          if imported_runtime? && target.equal?(@memory)
-            @import_runtime.load_bytes(base, bytes)
-            return self
-          end
-
           normalized_bytes = bytes.is_a?(String) ? bytes.bytes : Array(bytes)
           normalized_bytes.each_with_index do |byte, idx|
             target[base + idx] = byte.to_i & 0xFF
@@ -103,8 +97,6 @@ module RHDL
         end
 
         def read_bytes(base, length, mapped: true)
-          return @import_runtime.read_bytes(base, length) if imported_runtime?
-
           Array.new(length) do |idx|
             addr = base + idx
             if mapped && @rom.key?(addr)
@@ -116,17 +108,11 @@ module RHDL
         end
 
         def write_memory(addr, value)
-          return load_bytes(addr, [value]) if imported_runtime?
-
           @memory[addr] = value.to_i & 0xFF
         end
 
         def clear_memory!
-          if imported_runtime?
-            @import_runtime.clear_memory! if @import_runtime.respond_to?(:clear_memory!)
-          else
-            @memory.clear
-          end
+          @memory.clear
           self
         end
 
@@ -151,14 +137,11 @@ module RHDL
         end
 
         def memory
-          imported_runtime? ? @import_runtime.memory : @memory
+          @memory
         end
 
         def sim
-          return nil unless imported_runtime?
-          return nil unless @import_runtime.respond_to?(:sim)
-
-          @import_runtime.sim
+          nil
         end
 
         def update_display_buffer(buffer)
@@ -184,7 +167,6 @@ module RHDL
         end
 
         def reset
-          @import_runtime.reset! if imported_runtime? && @import_runtime.respond_to?(:reset!)
           @cycles_run = 0
           @last_run_stats = nil
           @keyboard_buffer.clear
@@ -193,12 +175,6 @@ module RHDL
         end
 
         def run(cycles: nil, speed: nil, headless: @headless, max_cycles: nil)
-          if imported_runtime? && !max_cycles.nil? && @import_runtime.respond_to?(:run)
-            return capture_run_stats(operation: :run, cycles: max_cycles) do
-              @import_runtime.run(max_cycles: max_cycles)
-            end
-          end
-
           started_at = Process.clock_gettime(Process::CLOCK_MONOTONIC)
           start_cycles = @cycles_run
           chunk = cycles || @requested_cycles || speed || @speed || DEFAULT_UNLIMITED_CHUNK
@@ -231,70 +207,39 @@ module RHDL
             cursor: cursor_position,
             last_run_stats: @last_run_stats
           }
-          snapshot[:import_runtime] = true if imported_runtime?
           snapshot
         end
 
         def run_fetch_words(max_cycles: nil)
-          raise NoMethodError, "#{self.class} does not support fetch-word traces" unless imported_runtime?
-
-          capture_run_stats(operation: :run_fetch_words, cycles: max_cycles || DEFAULT_UNLIMITED_CHUNK) do
-            @import_runtime.run_fetch_words(max_cycles: max_cycles || DEFAULT_UNLIMITED_CHUNK)
-          end
+          raise NoMethodError, "#{self.class} does not support fetch-word traces"
         end
 
         def run_fetch_trace(max_cycles: nil)
-          raise NoMethodError, "#{self.class} does not support fetch traces" unless imported_runtime?
-
-          capture_run_stats(operation: :run_fetch_trace, cycles: max_cycles || DEFAULT_UNLIMITED_CHUNK) do
-            @import_runtime.run_fetch_trace(max_cycles: max_cycles || DEFAULT_UNLIMITED_CHUNK)
-          end
+          raise NoMethodError, "#{self.class} does not support fetch traces"
         end
 
         def run_fetch_groups(max_cycles: nil)
-          raise NoMethodError, "#{self.class} does not support fetch-group traces" unless imported_runtime?
-
-          capture_run_stats(operation: :run_fetch_groups, cycles: max_cycles || DEFAULT_UNLIMITED_CHUNK) do
-            @import_runtime.run_fetch_groups(max_cycles: max_cycles || DEFAULT_UNLIMITED_CHUNK)
-          end
+          raise NoMethodError, "#{self.class} does not support fetch-group traces"
         end
 
         def run_fetch_pc_groups(max_cycles: nil)
-          raise NoMethodError, "#{self.class} does not support fetch-pc traces" unless imported_runtime?
-
-          capture_run_stats(operation: :run_fetch_pc_groups, cycles: max_cycles || DEFAULT_UNLIMITED_CHUNK) do
-            @import_runtime.run_fetch_pc_groups(max_cycles: max_cycles || DEFAULT_UNLIMITED_CHUNK)
-          end
+          raise NoMethodError, "#{self.class} does not support fetch-pc traces"
         end
 
         def run_step_trace(max_cycles: nil)
-          raise NoMethodError, "#{self.class} does not support step traces" unless imported_runtime?
-
-          capture_run_stats(operation: :run_step_trace, cycles: max_cycles || DEFAULT_UNLIMITED_CHUNK) do
-            @import_runtime.run_step_trace(max_cycles: max_cycles || DEFAULT_UNLIMITED_CHUNK)
-          end
+          raise NoMethodError, "#{self.class} does not support step traces"
         end
 
         def run_final_state(max_cycles: nil)
-          raise NoMethodError, "#{self.class} does not support final-state traces" unless imported_runtime?
-
-          capture_run_stats(operation: :run_final_state, cycles: max_cycles || DEFAULT_UNLIMITED_CHUNK) do
-            @import_runtime.run_final_state(max_cycles: max_cycles || DEFAULT_UNLIMITED_CHUNK)
-          end
+          raise NoMethodError, "#{self.class} does not support final-state traces"
         end
 
         def final_state_snapshot
-          raise NoMethodError, "#{self.class} does not support final-state snapshots" unless imported_runtime?
-          raise NoMethodError, "#{self.class} runtime does not expose final_state_snapshot" unless @import_runtime.respond_to?(:final_state_snapshot)
-
-          @import_runtime.final_state_snapshot
+          raise NoMethodError, "#{self.class} does not support final-state snapshots"
         end
 
         def step(cycle)
-          raise NoMethodError, "#{self.class} does not support single-cycle stepping" unless imported_runtime?
-          raise NoMethodError, "#{self.class} runtime does not expose step" unless @import_runtime.respond_to?(:step)
-
-          @import_runtime.step(cycle)
+          raise NoMethodError, "#{self.class} does not support single-cycle stepping"
         end
 
         def peek(signal_name)
@@ -305,10 +250,6 @@ module RHDL
         end
 
         protected
-
-        def imported_runtime?
-          !@import_runtime.nil?
-        end
 
         def capture_run_stats(operation:, cycles:)
           started_at = Process.clock_gettime(Process::CLOCK_MONOTONIC)

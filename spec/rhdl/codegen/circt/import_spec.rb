@@ -3,6 +3,27 @@
 require 'spec_helper'
 
 RSpec.describe RHDL::Codegen::CIRCT::Import do
+  def with_import_expr_caches
+    previous_signature_cache = Thread.current[:rhdl_circt_import_expr_signature_cache]
+    previous_signature_active = Thread.current[:rhdl_circt_import_expr_signature_active]
+    previous_simplify_cache = Thread.current[:rhdl_circt_import_simplify_expr_cache]
+    previous_simplify_active = Thread.current[:rhdl_circt_import_simplify_expr_active]
+    previous_equivalent_cache = Thread.current[:rhdl_circt_import_expr_equivalent_cache]
+
+    Thread.current[:rhdl_circt_import_expr_signature_cache] = {}
+    Thread.current[:rhdl_circt_import_expr_signature_active] = {}
+    Thread.current[:rhdl_circt_import_simplify_expr_cache] = {}
+    Thread.current[:rhdl_circt_import_simplify_expr_active] = {}
+    Thread.current[:rhdl_circt_import_expr_equivalent_cache] = {}
+    yield
+  ensure
+    Thread.current[:rhdl_circt_import_expr_signature_cache] = previous_signature_cache
+    Thread.current[:rhdl_circt_import_expr_signature_active] = previous_signature_active
+    Thread.current[:rhdl_circt_import_simplify_expr_cache] = previous_simplify_cache
+    Thread.current[:rhdl_circt_import_simplify_expr_active] = previous_simplify_active
+    Thread.current[:rhdl_circt_import_expr_equivalent_cache] = previous_equivalent_cache
+  end
+
   describe '.from_mlir' do
     it 'imports combinational and sequential modules' do
       mlir = <<~MLIR
@@ -271,6 +292,9 @@ RSpec.describe RHDL::Codegen::CIRCT::Import do
       expect(mod.regs.first.reset_value).to eq(0)
 
       process = mod.processes.first
+      expect(process.reset).to eq('rst')
+      expect(process.reset_active_low).to be(false)
+      expect(process.reset_values).to eq('q' => 0)
       stmt = process.statements.first
       expect(stmt).to be_a(RHDL::Codegen::CIRCT::IR::SeqAssign)
       expect(stmt.expr).to be_a(RHDL::Codegen::CIRCT::IR::Mux)
@@ -295,6 +319,74 @@ RSpec.describe RHDL::Codegen::CIRCT::Import do
       expect(result.success?).to be(true)
       expect(result.modules.first.regs.first.name).to eq('q')
       expect(result.modules.first.processes.first.statements.first.expr).to be_a(RHDL::Codegen::CIRCT::IR::Mux)
+    end
+
+    it 'captures active-low LLHD wait/reset metadata on imported clocked processes' do
+      mlir = <<~MLIR
+        hw.module @result_yield_bind(in %din : i1, in %clk : i1, in %rst_l : i1, in %se : i1, in %si : i1, out q : i1) {
+          %t0 = llhd.constant_time <0ns, 1d, 0e>
+          %true = hw.constant true
+          %false = hw.constant false
+          %q_sig = llhd.sig %false : i1
+          %proc:2 = llhd.process -> i1, i1 {
+            cf.br ^bb1(%clk, %rst_l, %false, %false : i1, i1, i1, i1)
+          ^bb1(%prev_clk: i1, %prev_rst_l: i1, %value: i1, %enable: i1):
+            llhd.wait yield (%value, %enable : i1, i1), (%clk, %rst_l : i1, i1), ^bb2(%prev_clk, %prev_rst_l : i1, i1)
+          ^bb2(%seen_clk: i1, %seen_rst_l: i1):
+            %edge_clk = comb.xor bin %seen_clk, %true : i1
+            %posedge_clk = comb.and bin %edge_clk, %clk : i1
+            %rst_low = comb.xor bin %rst_l, %true : i1
+            %negedge_rst_l = comb.and bin %seen_rst_l, %rst_low : i1
+            %trigger = comb.or bin %posedge_clk, %negedge_rst_l : i1
+            cf.cond_br %trigger, ^bb3, ^bb1(%clk, %rst_l, %false, %false : i1, i1, i1, i1)
+          ^bb3:
+            %selected = comb.mux %se, %si, %din : i1
+            %next_q = comb.and %rst_l, %selected : i1
+            cf.br ^bb1(%clk, %rst_l, %next_q, %true : i1, i1, i1, i1)
+          }
+          llhd.drv %q_sig, %proc#0 after %t0 if %proc#1 : i1
+          %q_value = llhd.prb %q_sig : i1
+          hw.output %q_value : i1
+        }
+      MLIR
+
+      result = described_class.from_mlir(mlir, strict: true)
+      expect(result.success?).to be(true), result.diagnostics.map(&:message).join("\n")
+
+      process = result.modules.first.processes.first
+      expect(process.clock).to eq('clk')
+      expect(process.reset).to eq('rst_l')
+      expect(process.reset_active_low).to be(true)
+      expect(process.reset_values.values).to eq([0])
+    end
+
+    it 'captures implicit active-low reset wrappers around seq.compreg state' do
+      mlir = <<~MLIR
+        hw.module @dffrl_async(in %din : i1, in %clk : i1, in %rst_l : i1, in %se : i1, in %si : i1, out q : i1, out so : i1) {
+          %clock = seq.to_clock %clk
+          %c0 = hw.constant 0 : i1
+          %c1 = hw.constant 1 : i1
+          %clk_gate = comb.and %c1, %clk : i1
+          %rst_not = comb.xor %rst_l, %c1 : i1
+          %rst_gate = comb.and %c0, %rst_not : i1
+          %trigger = comb.or %clk_gate, %rst_gate : i1
+          %armed = comb.mux %trigger, %c1, %c0 : i1
+          %next = comb.and %rst_l, %din : i1
+          %selected = comb.mux %trigger, %next, %c0 : i1
+          %q_next = comb.mux %armed, %selected, %q : i1
+          %q = seq.compreg %q_next, %clock : i1
+          hw.output %q, %c0 : i1, i1
+        }
+      MLIR
+
+      result = described_class.from_mlir(mlir, strict: true)
+      expect(result.success?).to be(true), result.diagnostics.map(&:message).join("\n")
+
+      process = result.modules.first.processes.first
+      expect(process.clock).to eq('clk')
+      expect(process.reset).to eq('rst_l')
+      expect(process.reset_active_low).to be(true)
+      expect(process.reset_values.values).to eq([0])
     end
 
     it 'imports seq.to_clock plus seq.firreg as sequential state' do
@@ -1153,6 +1245,45 @@ RSpec.describe RHDL::Codegen::CIRCT::Import do
       expect(expr).to be_a(RHDL::Codegen::CIRCT::IR::BinaryOp)
       expect(expr.left).to be_a(RHDL::Codegen::CIRCT::IR::BinaryOp)
       expect(expr.left.op).to eq(:==)
+    end
+
+    it 'guards expr_signature and simplify_expr against cyclic expression graphs' do
+      with_import_expr_caches do
+        cond = RHDL::Codegen::CIRCT::IR::Signal.new(name: 'cond', width: 1)
+        lit = RHDL::Codegen::CIRCT::IR::Literal.new(value: 1, width: 1)
+        mux = RHDL::Codegen::CIRCT::IR::Mux.new(condition: cond, when_true: lit, when_false: lit, width: 1)
+        mux.instance_variable_set(:@when_false, mux)
+
+        signature = described_class.send(:expr_signature, mux)
+        simplified = described_class.send(:simplify_expr, mux)
+
+        expect(signature.inspect).to include('cycle')
+        expect(simplified).to be_a(RHDL::Codegen::CIRCT::IR::Mux)
+      end
+    end
+
+    it 'memoizes repeated simplification of shared expression dags' do
+      with_import_expr_caches do
+        shared = RHDL::Codegen::CIRCT::IR::BinaryOp.new(
+          op: :and,
+          left: RHDL::Codegen::CIRCT::IR::Signal.new(name: 'a', width: 1),
+          right: RHDL::Codegen::CIRCT::IR::Signal.new(name: 'b', width: 1),
+          width: 1
+        )
+        expr = RHDL::Codegen::CIRCT::IR::Mux.new(
+          condition: RHDL::Codegen::CIRCT::IR::Signal.new(name: 'sel', width: 1),
+          when_true: shared,
+          when_false: shared,
+          width: 1
+        )
+
+        first = described_class.send(:simplify_expr, expr)
+        second = described_class.send(:simplify_expr, expr)
+
+        expect(first).to equal(second)
+        expect(first).to be_a(RHDL::Codegen::CIRCT::IR::BinaryOp)
+        expect(first.op).to eq(:and)
+      end
     end
   end
 end

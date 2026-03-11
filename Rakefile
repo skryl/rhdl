@@ -86,10 +86,6 @@ def load_cli_tasks
   require_relative 'lib/rhdl/cli'
 end
 
-def load_ao486_tasks
-  require_relative 'lib/rhdl/cli/tasks/ao486_task'
-end
-
 WRAPPED_SPEC_RESULTS = []
 WRAPPED_SPEC_TIMEOUT_SECONDS = Integer(ENV.fetch('RHDL_WRAPPED_SPEC_TIMEOUT_SECONDS', '600'))
 
@@ -441,27 +437,6 @@ rescue LoadError
   end
 end
 
-# Convenience aliases:
-#   rake spec:lib, spec:hdl, spec:ao486, spec:gameboy, spec:mos6502, spec:apple2, spec:riscv, spec:sparc64
-namespace :spec do
-  {
-    lib: 'lib',
-    hdl: 'hdl',
-    ao486: 'ao486',
-    gameboy: 'gameboy',
-    mos6502: 'mos6502',
-    apple2: 'apple2',
-    riscv: 'riscv',
-    sparc64: 'sparc64'
-  }.each do |name, scope|
-    desc "Run #{scope} specs"
-    task name => 'build:setup:binstubs' do
-      Rake::Task[:spec].reenable
-      Rake::Task[:spec].invoke(scope)
-    end
-  end
-end
-
 # =============================================================================
 # Parallel Test Tasks (pspec namespace)
 # =============================================================================
@@ -560,27 +535,6 @@ rescue LoadError
   end
 end
 
-# Convenience aliases:
-#   rake pspec:lib, pspec:hdl, pspec:ao486, pspec:gameboy, pspec:mos6502, pspec:apple2, pspec:riscv, pspec:sparc64
-namespace :pspec do
-  {
-    lib: 'lib',
-    hdl: 'hdl',
-    ao486: 'ao486',
-    gameboy: 'gameboy',
-    mos6502: 'mos6502',
-    apple2: 'apple2',
-    riscv: 'riscv',
-    sparc64: 'sparc64'
-  }.each do |name, scope|
-    desc "Run #{scope} specs in parallel"
-    task name => 'build:setup:binstubs' do
-      Rake::Task[:pspec].reenable
-      Rake::Task[:pspec].invoke(scope)
-    end
-  end
-end
-
 # RuboCop tasks (optional)
 begin
   require "rubocop/rake_task"
@@ -666,56 +620,6 @@ namespace :bench do
       puts "Available scopes: apple2, riscv"
       exit 1
     end
-  end
-end
-
-# AO486 CIRCT import/parity tasks
-namespace :ao486 do
-  desc "Import AO486 rtl/ao486/ao486.v via CIRCT and raise DSL to output_dir (required arg)"
-  task :import, [:output_dir, :workspace_dir, :strategy, :fallback, :maintain_directory_structure, :clean] do |_t, args|
-    load_ao486_tasks
-    if args[:output_dir].to_s.strip.empty?
-      abort 'ao486:import requires output_dir. Usage: rake "ao486:import[output_dir,workspace_dir,strategy,fallback,maintain_directory_structure,clean]"'
-    end
-
-    import_strategy = args[:strategy]&.to_sym || RHDL::CLI::Tasks::AO486Task::DEFAULT_CLI_IMPORT_STRATEGY
-    fallback_to_stubbed = if args[:fallback].nil?
-                            false
-                          else
-                            !%w[0 false no off].include?(args[:fallback].to_s.strip.downcase)
-                          end
-    maintain_directory_structure = if args[:maintain_directory_structure].nil?
-                                     true
-                                   else
-                                     !%w[0 false no off].include?(args[:maintain_directory_structure].to_s.strip.downcase)
-                                   end
-    clean_output = if args[:clean].nil?
-                     true
-                   else
-                     !%w[0 false no off].include?(args[:clean].to_s.strip.downcase)
-                   end
-
-    RHDL::CLI::Tasks::AO486Task.new(
-      action: :import,
-      output_dir: args[:output_dir],
-      workspace_dir: args[:workspace_dir],
-      import_strategy: import_strategy,
-      fallback_to_stubbed: fallback_to_stubbed,
-      maintain_directory_structure: maintain_directory_structure,
-      clean_output: clean_output
-    ).run
-  end
-
-  desc "Run AO486 bounded parity harness (Verilog/Verilator vs raised RHDL/IR)"
-  task :parity => 'build:setup:binstubs' do
-    load_ao486_tasks
-    RHDL::CLI::Tasks::AO486Task.new(action: :parity).run
-  end
-
-  desc "Run AO486 import/parity verification suite"
-  task :verify => 'build:setup:binstubs' do
-    load_ao486_tasks
-    RHDL::CLI::Tasks::AO486Task.new(action: :verify).run
   end
 end
 

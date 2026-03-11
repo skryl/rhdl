@@ -9,7 +9,6 @@ require 'rhdl/sim/native/ir/simulator'
 require_relative 'backend_runner'
 require_relative '../import/cpu_importer'
 require_relative '../import/cpu_parity_package'
-require_relative '../import/cpu_parity_runtime'
 require_relative '../import/cpu_runner_package'
 
 module RHDL
@@ -17,6 +16,28 @@ module RHDL
     module AO486
       class IrRunner < BackendRunner
         DEFAULT_UNLIMITED_CHUNK = 100_000
+        RESET_VECTOR_PHYSICAL = 0xFFFF0
+        DEFAULT_FETCH_BURST_BEATS = 8
+        PARITY_DEFAULT_MAX_CYCLES = 200
+        STARTUP_CS_BASE = 0xF0000
+        FINAL_STATE_SIGNALS = %w[
+          trace_arch_new_export
+          trace_arch_eax
+          trace_arch_ebx
+          trace_arch_ecx
+          trace_arch_edx
+          trace_arch_esi
+          trace_arch_edi
+          trace_arch_esp
+          trace_arch_ebp
+          trace_arch_eip
+          trace_wr_eip
+          trace_wr_consumed
+          trace_wr_hlt_in_progress
+          trace_wr_finished
+          trace_wr_ready
+          trace_retired
+        ].freeze
         POST_INIT_IVT_CALL_OFFSET = 0xE0C6
         POST_INIT_IVT_CALL_PATCH = [0x90, 0x90, 0x90].freeze
         DOS_POST_BOOTSTRAP_HELPER_OFFSET = 0x1080
@@ -89,8 +110,19 @@ module RHDL
           0x18 => 0x8666,
           0x19 => 0xE6F2
         }.freeze
+        StepEvent = Struct.new(:cycle, :eip, :consumed, :bytes, keyword_init: true)
+        FetchWordEvent = Struct.new(:cycle, :address, :word, keyword_init: true)
+        FetchGroupEvent = Struct.new(:cycle, :address, :bytes, keyword_init: true)
+        FetchPcGroupEvent = Struct.new(:cycle, :pc, :bytes, keyword_init: true)
 
         class << self
+          def preferred_import_backend
+            return :compiler if RHDL::Sim::Native::IR::COMPILER_AVAILABLE
+            return :jit if RHDL::Sim::Native::IR::JIT_AVAILABLE
+
+            nil
+          end
+
           def runtime_bundle(backend:)
             mutex.synchronize do
               runtime_cache[backend] ||= build_runtime_bundle(backend: backend)
@@ -130,15 +162,31 @@ module RHDL
           end
         end
 
-        def self.build_from_cleaned_mlir(mlir_text, backend: RHDL::Examples::AO486::Import::CpuParityRuntime.preferred_backend)
-          runtime = RHDL::Examples::AO486::Import::CpuParityRuntime.build_from_cleaned_mlir(mlir_text, backend: backend)
-          new(backend: backend, import_runtime: runtime, headless: true)
+        def self.build_from_cleaned_mlir(mlir_text, backend: preferred_import_backend)
+          raise ArgumentError, 'IrRunner imported AO486 runtime requires an IR compiler or JIT backend' unless backend
+
+          parity = RHDL::Examples::AO486::Import::CpuParityPackage.from_cleaned_mlir(mlir_text)
+          raise ArgumentError, Array(parity[:diagnostics]).join("\n") unless parity[:success]
+
+          flat = RHDL::Codegen::CIRCT::Flatten.to_flat_module(parity.fetch(:package), top: 'ao486')
+          ir_json = RHDL::Sim::Native::IR.sim_json(flat, backend: backend)
+
+          new(backend: backend, headless: true).tap do |runner|
+            runner.send(:initialize_imported_parity_runtime!, ir_json)
+          end
         end
 
-        def initialize(backend: :compile, import_runtime: nil, **kwargs)
-          super(backend: :ir, sim: backend, import_runtime: import_runtime, **kwargs)
+        def initialize(backend: nil, sim: nil, runner_backend: :ir, **kwargs)
+          backend ||= sim || :compile
+          super(backend: runner_backend, sim: backend, **kwargs)
           @sim = nil
           @runtime_loaded = false
+          @imported_parity_mode = false
+          @parity_sim_factory = nil
+          @read_burst = nil
+          @delivered_read_beat = false
+          @previous_trace_key = nil
+          @last_fetch_word = nil
         end
 
         def simulator_type
@@ -178,11 +226,14 @@ module RHDL
         def load_bytes(base, bytes, target: memory_store)
           normalized_bytes = bytes.is_a?(String) ? bytes.bytes : Array(bytes)
           super(base, normalized_bytes, target: target)
+          return self if imported_parity_mode?
+
           @sim&.runner_load_memory(normalized_bytes, base, false)
           self
         end
 
         def read_bytes(base, length, mapped: true)
+          return super if imported_parity_mode?
           return super unless @sim
 
           @sim.runner_read_memory(base, length, mapped: mapped)
@@ -190,10 +241,19 @@ module RHDL
 
         def write_memory(addr, value)
           super
+          return if imported_parity_mode?
+
           @sim&.runner_write_memory(addr, [value.to_i & 0xFF], mapped: false)
         end
 
         def reset
+          if imported_parity_mode?
+            reset_imported_parity_runtime!
+            @cycles_run = 0
+            @last_run_stats = nil
+            return self
+          end
+
           super
           return self unless @sim
 
@@ -203,7 +263,13 @@ module RHDL
         end
 
         def run(cycles: nil, speed: nil, headless: @headless, max_cycles: nil)
-          return super(cycles: cycles, speed: speed, headless: headless, max_cycles: max_cycles) if imported_runtime? || !max_cycles.nil?
+          if imported_parity_mode?
+            cycles_to_run = max_cycles || cycles || speed || @requested_cycles || @speed || PARITY_DEFAULT_MAX_CYCLES
+            return capture_run_stats(operation: :run, cycles: cycles_to_run) do
+              run_imported_parity(cycles_to_run)
+            end
+          end
+          return super(cycles: cycles, speed: speed, headless: headless, max_cycles: max_cycles) if !max_cycles.nil?
 
           ensure_sim!
           started_at = Process.clock_gettime(Process::CLOCK_MONOTONIC)
@@ -235,20 +301,104 @@ module RHDL
         end
 
         def peek(signal_name)
-          return super if imported_runtime?
-
           ensure_sim!
           @sim.peek(signal_name)
         end
 
         def sim
-          return @import_runtime.sim if imported_runtime? && @import_runtime.respond_to?(:sim)
-
           @sim
+        end
+
+        def step(cycle)
+          raise NoMethodError, "#{self.class} does not support single-cycle stepping" unless imported_parity_mode?
+
+          step_imported_parity(cycle)
+        end
+
+        def run_fetch_words(max_cycles: PARITY_DEFAULT_MAX_CYCLES)
+          raise NoMethodError, "#{self.class} does not support fetch-word traces" unless imported_parity_mode?
+
+          capture_run_stats(operation: :run_fetch_words, cycles: max_cycles) do
+            run_fetch_trace(max_cycles: max_cycles).map(&:word)
+          end
+        end
+
+        def run_fetch_trace(max_cycles: PARITY_DEFAULT_MAX_CYCLES)
+          raise NoMethodError, "#{self.class} does not support fetch traces" unless imported_parity_mode?
+
+          capture_run_stats(operation: :run_fetch_trace, cycles: max_cycles) do
+            reset_imported_parity_runtime!
+            events = []
+
+            max_cycles.times do |cycle|
+              step_imported_parity(cycle)
+              event = capture_fetch_word_event(cycle)
+              events << event if event
+            end
+
+            events
+          end
+        end
+
+        def run_fetch_groups(max_cycles: PARITY_DEFAULT_MAX_CYCLES)
+          raise NoMethodError, "#{self.class} does not support fetch-group traces" unless imported_parity_mode?
+
+          capture_run_stats(operation: :run_fetch_groups, cycles: max_cycles) do
+            run_fetch_trace(max_cycles: max_cycles).map do |event|
+              FetchGroupEvent.new(
+                cycle: event.cycle,
+                address: event.address,
+                bytes: word_to_bytes(event.word)
+              )
+            end
+          end
+        end
+
+        def run_fetch_pc_groups(max_cycles: PARITY_DEFAULT_MAX_CYCLES)
+          raise NoMethodError, "#{self.class} does not support fetch-pc traces" unless imported_parity_mode?
+
+          capture_run_stats(operation: :run_fetch_pc_groups, cycles: max_cycles) do
+            run_fetch_groups(max_cycles: max_cycles).map do |event|
+              next if event.address < STARTUP_CS_BASE
+
+              FetchPcGroupEvent.new(
+                cycle: event.cycle,
+                pc: event.address - STARTUP_CS_BASE,
+                bytes: event.bytes
+              )
+            end.compact
+          end
+        end
+
+        def run_step_trace(max_cycles: PARITY_DEFAULT_MAX_CYCLES)
+          raise NoMethodError, "#{self.class} does not support step traces" unless imported_parity_mode?
+
+          capture_run_stats(operation: :run_step_trace, cycles: max_cycles) do
+            run_imported_parity(max_cycles)
+          end
+        end
+
+        def run_final_state(max_cycles: PARITY_DEFAULT_MAX_CYCLES)
+          raise NoMethodError, "#{self.class} does not support final-state traces" unless imported_parity_mode?
+
+          capture_run_stats(operation: :run_final_state, cycles: max_cycles) do
+            reset_imported_parity_runtime!
+            max_cycles.times { |cycle| step_imported_parity(cycle) }
+            final_state_snapshot
+          end
+        end
+
+        def final_state_snapshot
+          raise NoMethodError, "#{self.class} does not support final-state snapshots" unless imported_parity_mode?
+
+          FINAL_STATE_SIGNALS.each_with_object({}) do |name, state|
+            state[name] = @sim.peek(name)
+          end
         end
 
         def state
           snapshot = super
+          return snapshot if imported_parity_mode?
           return snapshot unless @sim
 
           snapshot.merge(
@@ -272,6 +422,90 @@ module RHDL
 
         private
 
+        def imported_parity_mode?
+          @imported_parity_mode
+        end
+
+        def initialize_imported_parity_runtime!(ir_json)
+          @parity_sim_factory = lambda {
+            RHDL::Sim::Native::IR::Simulator.new(ir_json, backend: sim_backend || self.class.preferred_import_backend)
+          }
+          @imported_parity_mode = true
+          @sim = nil
+          reset_imported_parity_runtime!
+        end
+
+        def reset_imported_parity_runtime!
+          @sim = build_imported_parity_simulator!
+          @read_burst = nil
+          @delivered_read_beat = false
+          @previous_trace_key = nil
+          @last_fetch_word = nil
+          apply_imported_parity_inputs
+          @sim.poke('clk', 0)
+          @sim.poke('rst_n', 0)
+          @sim.evaluate
+          @sim.poke('clk', 1)
+          @sim.tick
+        end
+
+        def build_imported_parity_simulator!
+          return @parity_sim_factory.call if @parity_sim_factory
+          raise ArgumentError, 'IrRunner imported parity runtime requires a simulator factory'
+        end
+
+        def apply_imported_parity_inputs
+          {
+            'a20_enable' => 1,
+            'cache_disable' => 1,
+            'interrupt_do' => 0,
+            'interrupt_vector' => 0,
+            'avm_waitrequest' => 0,
+            'avm_readdatavalid' => 0,
+            'avm_readdata' => 0,
+            'dma_address' => 0,
+            'dma_16bit' => 0,
+            'dma_write' => 0,
+            'dma_writedata' => 0,
+            'dma_read' => 0,
+            'io_read_data' => 0,
+            'io_read_done' => 0,
+            'io_write_done' => 0
+          }.each do |name, value|
+            @sim.poke(name, value)
+          end
+        end
+
+        def run_imported_parity(max_cycles)
+          reset_imported_parity_runtime!
+          events = []
+
+          max_cycles.times do |cycle|
+            event = step_imported_parity(cycle)
+            events << event if event
+          end
+
+          events
+        end
+
+        def step_imported_parity(cycle)
+          drive_imported_parity_read_data_inputs
+
+          @sim.poke('clk', 0)
+          @sim.poke('rst_n', 1)
+          @sim.evaluate
+          arm_imported_parity_read_burst_if_needed
+
+          @sim.poke('clk', 1)
+          @sim.poke('rst_n', 1)
+          @sim.tick
+
+          commit_imported_parity_write_if_needed
+          advance_imported_parity_read_burst
+
+          capture_step_event(cycle)
+        end
+
         def snapshot_signal(signal_name)
           @sim.peek(signal_name)
         rescue StandardError
@@ -280,6 +514,7 @@ module RHDL
 
         def ensure_sim!
           return @sim if @sim
+          return @sim = build_imported_parity_simulator! if imported_parity_mode?
 
           bundle = self.class.runtime_bundle(backend: sim_backend || :compile)
           @sim = RHDL::Sim::Native::IR::Simulator.new(
@@ -293,6 +528,107 @@ module RHDL
           sync_runtime_windows!
           @runtime_loaded = true
           @sim
+        end
+
+        def drive_imported_parity_read_data_inputs
+          @delivered_read_beat = deliver_imported_parity_read_beat?
+
+          if @delivered_read_beat
+            addr = @read_burst[:base] + (@read_burst[:beat_index] * 4)
+            @last_fetch_word = { address: addr, word: little_endian_word(addr) }
+            @sim.poke('avm_readdatavalid', 1)
+            @sim.poke('avm_readdata', @last_fetch_word[:word])
+          else
+            @last_fetch_word = nil
+            @sim.poke('avm_readdatavalid', 0)
+            @sim.poke('avm_readdata', 0)
+          end
+        end
+
+        def little_endian_word(addr)
+          4.times.reduce(0) do |acc, idx|
+            acc | ((memory_store[addr + idx] || 0) << (8 * idx))
+          end
+        end
+
+        def commit_imported_parity_write_if_needed
+          return unless @sim.peek('avm_write') == 1
+
+          write_word(
+            @sim.peek('avm_address') << 2,
+            @sim.peek('avm_writedata'),
+            @sim.peek('avm_byteenable')
+          )
+        end
+
+        def advance_imported_parity_read_burst
+          return unless @read_burst
+
+          if @delivered_read_beat
+            @read_burst[:beat_index] += 1
+            @read_burst = nil if @read_burst[:beat_index] >= @read_burst[:beats_total]
+          else
+            @read_burst[:started] = true
+          end
+        end
+
+        def arm_imported_parity_read_burst_if_needed
+          return unless @read_burst.nil?
+          return unless @sim.peek('avm_read') == 1
+
+          @read_burst = {
+            base: @sim.peek('avm_address') << 2,
+            beat_index: 0,
+            beats_total: [@sim.peek('avm_burstcount'), 1].max,
+            started: false
+          }
+        end
+
+        def deliver_imported_parity_read_beat?
+          @read_burst && @read_burst[:started]
+        end
+
+        def capture_step_event(cycle)
+          trace_key = [@sim.peek('trace_wr_eip'), @sim.peek('trace_wr_consumed')]
+          return nil if trace_key == [0, 0]
+          return nil if trace_key == @previous_trace_key
+
+          retired = @sim.peek('trace_retired') == 1
+          return nil unless retired
+
+          @previous_trace_key = trace_key
+          consumed = trace_key[1]
+          start_eip = trace_key[0] - consumed
+
+          StepEvent.new(
+            cycle: cycle,
+            eip: start_eip,
+            consumed: consumed,
+            bytes: read_bytes(STARTUP_CS_BASE + start_eip, consumed)
+          )
+        end
+
+        def capture_fetch_word_event(cycle)
+          return nil unless @sim.peek('avm_readdatavalid') == 1
+          return nil unless @last_fetch_word
+
+          FetchWordEvent.new(
+            cycle: cycle,
+            address: @last_fetch_word[:address],
+            word: @last_fetch_word[:word]
+          )
+        end
+
+        def word_to_bytes(word)
+          Array.new(4) { |idx| (word >> (idx * 8)) & 0xFF }
+        end
+
+        def write_word(addr, word, byteenable)
+          4.times do |idx|
+            next unless ((byteenable >> idx) & 1) == 1
+
+            memory_store[addr + idx] = (word >> (idx * 8)) & 0xFF
+          end
         end
 
         def sync_loaded_artifacts_to_sim!
