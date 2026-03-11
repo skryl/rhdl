@@ -360,6 +360,56 @@ RSpec.describe RHDL::Codegen::CIRCT::Import do
       expect(process.reset_values.values).to eq([0])
     end
 
+    it 'preserves memory IR across one-shot resultful llhd array init processes' do
+      mlir = <<~MLIR
+        hw.module @resultful_array_init(in %clk : i1, in %rd : i1, out y : i8) {
+          %t0 = llhd.constant_time <0ns, 1d, 0e>
+          %c0_i32 = hw.constant 0 : i32
+          %c1_i32 = hw.constant 1 : i32
+          %c2_i32 = hw.constant 2 : i32
+          %c0_i8 = hw.constant 0 : i8
+          %true = hw.constant true
+          %false = hw.constant false
+          %zero_arr = hw.aggregate_constant [0 : i8, 0 : i8] : !hw.array<2xi8>
+          %q_sig = llhd.sig %c0_i8 : i8
+          %mem = llhd.sig %zero_arr : !hw.array<2xi8>
+          %proc:2 = llhd.process -> i32, !hw.array<2xi8>, i1 {
+            cf.br ^bb1(%c0_i32, %zero_arr, %false : i32, !hw.array<2xi8>, i1)
+          ^bb1(%i: i32, %acc: !hw.array<2xi8>, %done: i1):
+            %lt = comb.icmp slt %i, %c2_i32 : i32
+            cf.cond_br %lt, ^bb2, ^bb3
+          ^bb2:
+            %idx = comb.extract %i from 0 : (i32) -> i1
+            %next = hw.array_inject %acc[%idx], %c0_i8 : !hw.array<2xi8>, i1
+            %i_next = comb.add %i, %c1_i32 : i32
+            cf.br ^bb1(%i_next, %next, %true : i32, !hw.array<2xi8>, i1)
+          ^bb3:
+            llhd.halt %i, %acc, %done : i32, !hw.array<2xi8>, i1
+          }
+          llhd.drv %q_sig, %c0_i8 after %t0 : i8
+          llhd.drv %mem, %proc#1 after %t0 if %proc#2 : !hw.array<2xi8>
+          %read = hw.array_get %mem[%rd] : !hw.array<2xi8>, i1
+          %next_arr = hw.array_inject %mem[%rd], %c0_i8 : !hw.array<2xi8>, i1
+          %clock = seq.to_clock %clk
+          %mem_next = seq.firreg %next_arr clock %clock : !hw.array<2xi8>
+          llhd.drv %mem, %mem_next after %t0 : !hw.array<2xi8>
+          hw.output %read : i8
+        }
+      MLIR
+
+      result = described_class.from_mlir(mlir, strict: true)
+      expect(result.success?).to be(true), result.diagnostics.map(&:message).join("\n")
+
+      mod = result.modules.first
+      expect(mod.memories.map(&:name)).to eq(['mem'])
+      expect(mod.regs.map(&:name)).not_to include('mem')
+      expect(mod.write_ports.length).to eq(1)
+      y_assign = mod.assigns.find { |assign| assign.target == 'y' }
+      expect(y_assign).not_to be_nil
+      expect(y_assign.expr).to be_a(RHDL::Codegen::CIRCT::IR::MemoryRead)
+      expect(y_assign.expr.memory).to eq('mem')
+    end
+
     it 'captures implicit active-low reset wrappers around seq.compreg state' do
       mlir = <<~MLIR
         hw.module @dffrl_async(in %din : i1, in %clk : i1, in %rst_l : i1, in %se : i1, in %si : i1, out q : i1, out so : i1) {

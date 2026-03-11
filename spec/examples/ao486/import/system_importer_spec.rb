@@ -24,7 +24,8 @@ RSpec.describe RHDL::Examples::AO486::Import::SystemImporter do
   end
 
   def run_importer(out_dir:, workspace:, import_strategy: :stubbed, fallback_to_stubbed: true,
-                   maintain_directory_structure: true, patches_dir: nil)
+                   maintain_directory_structure: true, patch_profile: nil, patch_profiles: nil,
+                   patches_dir: nil, progress: nil)
     described_class.new(
       output_dir: out_dir,
       workspace_dir: workspace,
@@ -32,7 +33,10 @@ RSpec.describe RHDL::Examples::AO486::Import::SystemImporter do
       import_strategy: import_strategy,
       fallback_to_stubbed: fallback_to_stubbed,
       maintain_directory_structure: maintain_directory_structure,
-      patches_dir: patches_dir
+      patch_profile: patch_profile,
+      patch_profiles: patch_profiles,
+      patches_dir: patches_dir,
+      progress: progress
     ).run
   end
 
@@ -60,10 +64,37 @@ RSpec.describe RHDL::Examples::AO486::Import::SystemImporter do
     end.to raise_error(ArgumentError, /output_dir is required/)
   end
 
+  it 'always includes the selected top in the circt-verilog import command' do
+    importer = described_class.new(output_dir: '/tmp/rhdl_ao486_out', top: 'custom_top')
+
+    command = importer.send(:circt_verilog_import_command_string, '/tmp/import_all.stubbed.sv')
+
+    expect(command).to include('circt-verilog')
+    expect(command).to include('--detect-memories')
+    expect(command).to include('--top\\=custom_top')
+  end
+
+  it 'raises when the ao486 circt-verilog import top is empty' do
+    importer = described_class.new(output_dir: '/tmp/rhdl_ao486_out', top: '')
+
+    expect do
+      importer.send(:circt_verilog_import_extra_args)
+    end.to raise_error(ArgumentError, /requires a non-empty top/)
+  end
+
   it 'rejects a missing patches_dir' do
     expect do
       described_class.new(output_dir: '/tmp/rhdl_ao486_out', patches_dir: '/tmp/does_not_exist')
     end.to raise_error(ArgumentError, /patches_dir not found/)
+  end
+
+  it 'rejects an unknown named patch profile' do
+    importer = described_class.allocate
+    allow(importer).to receive(:ao486_patches_root).and_return('/tmp/rhdl_missing_ao486_patches')
+
+    expect do
+      importer.send(:normalize_patch_profiles, patch_profile: :runner, patch_profiles: nil)
+    end.to raise_error(ArgumentError, /AO486 patch profile not found: runner/)
   end
 
   it 'applies an opt-in patch series to a staged source copy only' do
@@ -111,6 +142,59 @@ RSpec.describe RHDL::Examples::AO486::Import::SystemImporter do
       expect(File.read(prepared[:staged_system_path])).to include('patched_again')
       expect(command_log.any? { |cmd| cmd.include?('git apply --check') }).to be(true)
       expect(command_log.any? { |cmd| cmd.include?('git apply') && !cmd.include?('--check') }).to be(true)
+    end
+  end
+
+  it 'applies named patch profiles in the requested order before import' do
+    skip 'git not available' unless HdlToolchain.which('git')
+
+    Dir.mktmpdir('ao486_patch_profiles_root') do |root|
+      rtl_root = File.join(root, 'rtl')
+      FileUtils.mkdir_p(rtl_root)
+
+      source_path = File.join(rtl_root, 'system.v')
+      File.write(source_path, "module system;\nendmodule\n")
+
+      patches_root = File.join(root, 'patch_profiles')
+      trace_dir = File.join(patches_root, 'trace')
+      runner_dir = File.join(patches_root, 'runner')
+      FileUtils.mkdir_p(trace_dir)
+      FileUtils.mkdir_p(runner_dir)
+      write_unified_patch(
+        File.join(trace_dir, '0001-trace.patch'),
+        relpath: 'system.v',
+        removal: 'module system;',
+        addition: 'module system; wire trace_patch;'
+      )
+      write_unified_patch(
+        File.join(runner_dir, '0001-runner.patch'),
+        relpath: 'system.v',
+        removal: 'module system; wire trace_patch;',
+        addition: 'module system; wire trace_patch; wire runner_patch;'
+      )
+
+      workspace = File.join(root, 'workspace')
+      importer = described_class.new(
+        source_path: source_path,
+        output_dir: File.join(root, 'out'),
+        workspace_dir: workspace,
+        keep_workspace: true,
+        patch_profiles: %i[trace runner]
+      )
+      allow(importer).to receive(:ao486_patches_root).and_return(patches_root)
+
+      diagnostics = []
+      command_log = []
+      prepared_source = importer.send(:prepare_import_source_tree, workspace, diagnostics: diagnostics, command_log: command_log)
+      expect(prepared_source[:success]).to be(true), diagnostics.join("\n")
+
+      prepared = importer.send(:prepare_workspace, workspace, strategy: :stubbed)
+      staged_text = File.read(prepared[:staged_system_path])
+      expect(staged_text).to include('trace_patch')
+      expect(staged_text).to include('runner_patch')
+      expect(command_log.grep(/0001-trace\.patch/).length).to eq(2)
+      expect(command_log.grep(/0001-runner\.patch/).length).to eq(2)
+      expect(command_log.index { |cmd| cmd.include?('0001-trace.patch') }).to be < command_log.index { |cmd| cmd.include?('0001-runner.patch') }
     end
   end
 
@@ -176,9 +260,33 @@ RSpec.describe RHDL::Examples::AO486::Import::SystemImporter do
 
         expect(result.command_log.any? do |cmd|
           cmd.include?(RHDL::Codegen::CIRCT::Tooling::DEFAULT_VERILOG_IMPORT_TOOL) &&
-            cmd.include?(RHDL::Codegen::CIRCT::Tooling::DEFAULT_CIRCT_VERILOG_IMPORT_MODE)
+            cmd.include?(RHDL::Codegen::CIRCT::Tooling::DEFAULT_CIRCT_VERILOG_IMPORT_MODE) &&
+            cmd.include?('--top\\=system')
         end).to be(true)
         expect(result.command_log.none? { |cmd| cmd.include?('--import-verilog') }).to be(true)
+      end
+    end
+  end
+
+  it 'reports staged Verilog, MLIR, and raised RHDL package sizes through progress output', timeout: 120 do
+    require_import_tool!
+    skip 'circt-opt not available' unless HdlToolchain.which('circt-opt')
+
+    Dir.mktmpdir('ao486_import_out') do |out_dir|
+      Dir.mktmpdir('ao486_import_ws') do |workspace|
+        progress = []
+        result = run_importer(
+          out_dir: out_dir,
+          workspace: workspace,
+          progress: lambda { |message| progress << message }
+        )
+
+        expect(result.success?).to be(true), diagnostic_summary(result)
+        expect(progress.any? { |line| line.include?('staged pure Verilog package files=') && line.include?('size=') }).to be(true)
+        expect(progress.any? { |line| line.include?('moore MLIR') && line.include?('size=') }).to be(true)
+        expect(progress.any? { |line| line.include?('core MLIR') && line.include?('size=') }).to be(true)
+        expect(progress.any? { |line| line.include?('normalized core MLIR') && line.include?('size=') }).to be(true)
+        expect(progress.any? { |line| line.include?('raised RHDL package files=') && line.include?('size=') }).to be(true)
       end
     end
   end

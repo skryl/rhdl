@@ -42,6 +42,53 @@ RSpec.describe RHDL::CLI::Tasks::ImportTask do
     expect { task.run }.to output(/Wrote CIRCT MLIR/).to_stdout
   end
 
+  it 'passes the requested top through to circt-verilog imports' do
+    input = File.join(tmp_dir, 'design.v')
+    File.write(input, 'module design(input logic a, output logic y); assign y = a; endmodule')
+
+    task = described_class.new(
+      mode: :verilog,
+      input: input,
+      out: tmp_dir,
+      top: 'design',
+      raise_to_dsl: false
+    )
+
+    allow(RHDL::Codegen::CIRCT::Tooling).to receive(:verilog_to_circt_mlir).and_return(
+      {
+        success: true,
+        command: circt_verilog_import_command(input, extra_args: ['--top=design']),
+        stdout: '',
+        stderr: ''
+      }
+    )
+
+    task.run
+
+    expect(RHDL::Codegen::CIRCT::Tooling).to have_received(:verilog_to_circt_mlir).with(
+      hash_including(
+        verilog_path: input,
+        extra_args: array_including('--top=design')
+      )
+    )
+  end
+
+  it 'raises when a system import requires circt-verilog --top and none is available' do
+    input = File.join(tmp_dir, 'design.v')
+    File.write(input, 'module design(input logic a, output logic y); assign y = a; endmodule')
+
+    task = described_class.new(
+      mode: :verilog,
+      input: input,
+      out: tmp_dir,
+      require_verilog_import_top: true,
+      raise_to_dsl: false
+    )
+
+    expect(RHDL::Codegen::CIRCT::Tooling).not_to receive(:verilog_to_circt_mlir)
+    expect { task.run }.to raise_error(ArgumentError, /requires --top to be passed to circt-verilog/)
+  end
+
   it 'cleans imported core MLIR after circt-verilog import' do
     input = File.join(tmp_dir, 'design.v')
     core_mlir = File.join(tmp_dir, 'design.core.mlir')
@@ -846,6 +893,59 @@ RSpec.describe RHDL::CLI::Tasks::ImportTask do
 
       expect { task.run }.to output(/Wrote CIRCT MLIR/).to_stdout
       expect(task).to have_received(:build_mixed_import_staging)
+    end
+
+    it 'passes the resolved mixed top through to circt-verilog imports' do
+      manifest_path = File.join(tmp_dir, 'mixed_import.yml')
+      File.write(
+        manifest_path,
+        <<~YAML
+          version: 1
+          top:
+            name: mixed_top
+            language: verilog
+            file: top.sv
+          files:
+            - path: top.sv
+              language: verilog
+        YAML
+      )
+
+      staged_verilog = File.join(tmp_dir, 'staged.v')
+      task = described_class.new(
+        mode: :mixed,
+        manifest: manifest_path,
+        out: tmp_dir,
+        raise_to_dsl: false
+      )
+
+      allow(task).to receive(:build_mixed_import_staging).and_return(
+        {
+          staged_verilog_path: staged_verilog,
+          pure_verilog_root: File.join(tmp_dir, '.mixed_import', 'pure_verilog'),
+          pure_verilog_entry_path: staged_verilog,
+          top_name: 'mixed_top',
+          tool_args: [],
+          provenance: { source_files: [] }
+        }
+      )
+      allow(RHDL::Codegen::CIRCT::Tooling).to receive(:verilog_to_circt_mlir).and_return(
+        {
+          success: true,
+          command: circt_verilog_import_command(staged_verilog, extra_args: ['--top=mixed_top']),
+          stdout: '',
+          stderr: ''
+        }
+      )
+
+      task.run
+
+      expect(RHDL::Codegen::CIRCT::Tooling).to have_received(:verilog_to_circt_mlir).with(
+        hash_including(
+          verilog_path: staged_verilog,
+          extra_args: array_including('--top=mixed_top')
+        )
+      )
     end
 
     it 'writes mixed import provenance into report when raise flow is enabled' do

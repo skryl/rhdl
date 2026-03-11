@@ -103,6 +103,47 @@ RSpec.describe RHDL::Examples::AO486::Import::CpuImporter do
     end
   end
 
+  it 'passes named patch profiles through the CPU importer staging path' do
+    skip 'git not available' unless HdlToolchain.which('git')
+
+    Dir.mktmpdir('ao486_cpu_patch_profile_root') do |root|
+      rtl_root = File.join(root, 'rtl', 'ao486')
+      FileUtils.mkdir_p(rtl_root)
+
+      source_path = File.join(rtl_root, 'ao486.v')
+      File.write(source_path, "module ao486;\nendmodule\n")
+
+      patches_root = File.join(root, 'patch_profiles')
+      runner_dir = File.join(patches_root, 'runner')
+      FileUtils.mkdir_p(runner_dir)
+      write_unified_patch(
+        File.join(runner_dir, '0001-ao486.patch'),
+        relpath: 'ao486/ao486.v',
+        removal: 'module ao486;',
+        addition: 'module ao486; wire runner_profile;'
+      )
+
+      workspace = File.join(root, 'workspace')
+      importer = described_class.new(
+        source_path: source_path,
+        output_dir: File.join(root, 'out'),
+        workspace_dir: workspace,
+        keep_workspace: true,
+        patch_profile: :runner
+      )
+      allow(importer).to receive(:ao486_patches_root).and_return(patches_root)
+
+      diagnostics = []
+      command_log = []
+      prepared_source = importer.send(:prepare_import_source_tree, workspace, diagnostics: diagnostics, command_log: command_log)
+      expect(prepared_source[:success]).to be(true), diagnostics.join("\n")
+
+      prepared = importer.send(:prepare_workspace, workspace, strategy: :stubbed)
+      expect(File.read(prepared[:staged_system_path])).to include('runner_profile')
+      expect(command_log.any? { |cmd| cmd.include?('0001-ao486.patch') }).to be(true)
+    end
+  end
+
   it 'imports ao486.v through CIRCT and emits CPU artifacts needed for runtime parity', timeout: 240 do
     require_import_tool!
     skip 'circt-opt not available' unless HdlToolchain.which('circt-opt')

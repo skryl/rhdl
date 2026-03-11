@@ -1294,6 +1294,9 @@ module RHDL
                             (is_sc & amo_sc_success) |
                             (is_amo_rmw & (~is_amocas | amo_cas_success)),
                             width: 1)
+      amo_rd_data = local(:amo_rd_data,
+                          mux(is_sc, mux(amo_sc_success, lit(0, width: 32), lit(1, width: 32)), amo_old),
+                          width: 32)
       data_vaddr = local(:data_vaddr, mux(is_amo, rs1_data, alu_result), width: 32)
       data_access_req = local(:data_access_req, mem_read | mem_write | is_amo, width: 1)
       data_store_access = local(:data_store_access, mem_write | is_sc | is_amo_rmw, width: 1)
@@ -1764,14 +1767,6 @@ module RHDL
       # - csr: old CSR value
       # - fmv.x.w: raw bits from fp register
       # - else: ALU result
-      amo_sc_write_committed = local(:amo_sc_write_committed,
-                                     amo_mem_write & ~trap_taken & ~data_page_fault,
-                                     width: 1)
-      amo_rd_data = local(:amo_rd_data,
-                          mux(is_sc,
-                              mux(amo_sc_write_committed, lit(0, width: 32), lit(1, width: 32)),
-                              amo_old),
-                          width: 32)
       rd_data <= mux(is_amo, amo_rd_data,
                      mux(is_vsetvli | is_vmv_x_s, v_scalar_result,
                      mux(is_csr_instr, csr_read_selected,

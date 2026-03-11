@@ -477,20 +477,31 @@ module RHDL
         def circt_sequential_state
           return { processes: [], sequential_targets: Set.new, reset_values: {} } unless respond_to?(:execute_sequential_for_synthesis)
 
-          seq_ir = execute_sequential_for_synthesis
-          return { processes: [], sequential_targets: Set.new, reset_values: {} } unless seq_ir
+          sequential_irs = Array(execute_sequential_for_synthesis).compact
+          return { processes: [], sequential_targets: Set.new, reset_values: {} } if sequential_irs.empty?
 
-          process = circt_process_from_sequential_ir(seq_ir)
-          sequential_targets = Set.new(seq_ir.assignments.map { |assignment| assignment.target.to_sym } + seq_ir.reset_values.keys)
+          processes = sequential_irs.each_with_index.map do |seq_ir, index|
+            circt_process_from_sequential_ir(seq_ir, index: index)
+          end
+          sequential_targets = Set.new(
+            sequential_irs.flat_map do |seq_ir|
+              seq_ir.assignments.map { |assignment| assignment.target.to_sym } + Array(seq_ir.reset_values).map { |name, _| name.to_sym }
+            end
+          )
+          reset_values = sequential_irs.each_with_object({}) do |seq_ir, acc|
+            Array(seq_ir.reset_values).each do |name, value|
+              acc[name.to_sym] = value
+            end
+          end
 
           {
-            processes: [process],
+            processes: processes,
             sequential_targets: sequential_targets,
-            reset_values: seq_ir.reset_values || {}
+            reset_values: reset_values
           }
         end
 
-        def circt_process_from_sequential_ir(seq_ir)
+        def circt_process_from_sequential_ir(seq_ir, index: 0)
           normal_statements = seq_ir.assignments.map do |assign|
             RHDL::Codegen::CIRCT::IR::SeqAssign.new(
               target: assign.target,
@@ -528,10 +539,13 @@ module RHDL
           end
 
           RHDL::Codegen::CIRCT::IR::Process.new(
-            name: :seq_logic,
+            name: (index.zero? ? :seq_logic : :"seq_logic_#{index}"),
             statements: statements,
             clocked: true,
-            clock: seq_ir.clock
+            clock: seq_ir.clock,
+            reset: seq_ir.reset,
+            reset_active_low: !!(seq_ir.reset && RHDL::DSL::Sequential.active_low_reset_name?(seq_ir.reset)),
+            reset_values: seq_ir.reset_values
           )
         end
 
@@ -784,7 +798,11 @@ module RHDL
             name: :"#{prefix}__#{process.name}",
             statements: process.statements.map { |stmt| prefix_circt_statement(stmt, prefix) },
             clocked: process.clocked,
-            clock: process.clock ? "#{prefix}__#{process.clock}" : nil
+            clock: process.clock ? "#{prefix}__#{process.clock}" : nil,
+            sensitivity_list: Array(process.sensitivity_list).map { |entry| "#{prefix}__#{entry}" },
+            reset: process.reset ? "#{prefix}__#{process.reset}" : nil,
+            reset_active_low: process.reset_active_low,
+            reset_values: process.reset_values
           )
         end
 

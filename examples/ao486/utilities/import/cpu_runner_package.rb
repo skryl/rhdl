@@ -23,12 +23,9 @@ module RHDL
             return CpuTracePackage.failure_from_import(imported) unless imported.success?
 
             modules = Array(imported.modules).map { |mod| CpuTracePackage.dup_module(mod) }
-            # The parity icache/prefetch model has proven stable across the IR
-            # compiler and Verilator. Reuse that fetch path here and layer the
-            # runner-specific DOS bridge and call/return fixes on top.
-            CpuParityPackage.patch_icache_bypass!(modules)
-            CpuParityPackage.patch_prefetch_fifo_register_model!(modules)
-            CpuParityPackage.patch_prefetch_reference_flow!(modules)
+            patch_icache_runner_bypass!(modules)
+            patch_prefetch_fifo_runner_model!(modules)
+            patch_prefetch_runner_flow!(modules)
             patch_memory_runner_bridges!(modules)
             CpuParityPackage.patch_fetch_threshold_logic!(modules)
             patch_execute_call_relative_target!(modules)
@@ -676,6 +673,10 @@ module RHDL
               CpuParityPackage.ensure_reg(mod, "parity_fifo_entry_#{index}", 36, 0)
             end
             CpuParityPackage.ensure_reg(mod, 'parity_fifo_used', 5, 0)
+            CpuParityPackage.ensure_reg(mod, 'runner_prev_write_do', 1, 0)
+            CpuParityPackage.ensure_reg(mod, 'runner_prev_limit_do', 1, 0)
+            CpuParityPackage.ensure_reg(mod, 'runner_prev_pf_do', 1, 0)
+            CpuParityPackage.ensure_reg(mod, 'runner_prev_write_data', 36, 0)
 
             rst_n = CpuTracePackage.signal('rst_n', 1)
             pr_reset = CpuTracePackage.signal('pr_reset', 1)
@@ -686,6 +687,10 @@ module RHDL
             accept_do = CpuTracePackage.signal('prefetchfifo_accept_do', 1)
             fifo_used = CpuTracePackage.signal('parity_fifo_used', 5)
             fifo_entries = 8.times.map { |index| CpuTracePackage.signal("parity_fifo_entry_#{index}", 36) }
+            prev_write_do = CpuTracePackage.signal('runner_prev_write_do', 1)
+            prev_limit_do = CpuTracePackage.signal('runner_prev_limit_do', 1)
+            prev_pf_do = CpuTracePackage.signal('runner_prev_pf_do', 1)
+            prev_write_data = CpuTracePackage.signal('runner_prev_write_data', 36)
 
             one1 = ir::Literal.new(value: 1, width: 1)
             zero5 = ir::Literal.new(value: 0, width: 5)
@@ -697,7 +702,30 @@ module RHDL
             empty = CpuTracePackage.binop(:==, fifo_used, zero5, 1)
             not_empty = CpuTracePackage.binop(:^, empty, one1, 1)
             full = CpuTracePackage.binop(:>=, fifo_used, eight5, 1)
-            bypass = CpuTracePackage.binop(:&, write_do, empty, 1)
+            write_pulse = CpuTracePackage.binop(
+              :&,
+              write_do,
+              CpuTracePackage.binop(
+                :|,
+                CpuTracePackage.binop(:^, prev_write_do, one1, 1),
+                CpuTracePackage.binop(:!=, prev_write_data, write_data, 1),
+                1
+              ),
+              1
+            )
+            limit_pulse = CpuTracePackage.binop(
+              :&,
+              limit_do,
+              CpuTracePackage.binop(:^, prev_limit_do, one1, 1),
+              1
+            )
+            pf_pulse = CpuTracePackage.binop(
+              :&,
+              pf_do,
+              CpuTracePackage.binop(:^, prev_pf_do, one1, 1),
+              1
+            )
+            bypass = CpuTracePackage.binop(:&, write_pulse, empty, 1)
             accept_empty = CpuTracePackage.binop(:&, empty, CpuTracePackage.binop(:^, bypass, one1, 1), 1)
             effective_rd = CpuTracePackage.binop(:&, accept_do, not_empty, 1)
             raw_wrreq = CpuTracePackage.binop(
@@ -706,7 +734,7 @@ module RHDL
                 :|,
                 CpuTracePackage.binop(
                   :&,
-                  write_do,
+                  write_pulse,
                   CpuTracePackage.binop(
                     :|,
                     not_empty,
@@ -715,10 +743,10 @@ module RHDL
                   ),
                   1
                 ),
-                limit_do,
+                limit_pulse,
                 1
               ),
-              pf_do,
+              pf_pulse,
               1
             )
             effective_wr = CpuTracePackage.binop(
@@ -824,7 +852,13 @@ module RHDL
               width: 5
             )
 
-            statements = [ir::SeqAssign.new(target: 'parity_fifo_used', expr: next_used)]
+            statements = [
+              ir::SeqAssign.new(target: 'parity_fifo_used', expr: next_used),
+              ir::SeqAssign.new(target: 'runner_prev_write_do', expr: write_do),
+              ir::SeqAssign.new(target: 'runner_prev_limit_do', expr: limit_do),
+              ir::SeqAssign.new(target: 'runner_prev_pf_do', expr: pf_do),
+              ir::SeqAssign.new(target: 'runner_prev_write_data', expr: write_data)
+            ]
             fifo_entries.each_with_index do |entry, index|
               shifted_entry = fifo_entries[index + 1] || zero36
               base_entry = ir::Mux.new(

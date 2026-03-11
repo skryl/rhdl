@@ -15,6 +15,7 @@ module RHDL
         # deterministic top-level import baseline.
         class SystemImporter
           DEFAULT_REFERENCE_ROOT = File.expand_path('../../reference', __dir__)
+          DEFAULT_PATCHES_ROOT = File.expand_path('../../patches', __dir__)
           DEFAULT_SOURCE_PATH = File.join(DEFAULT_REFERENCE_ROOT, 'rtl', 'system.v')
           DEFAULT_TOP = 'system'
           DEFAULT_IMPORT_STRATEGY = :stubbed
@@ -65,7 +66,7 @@ module RHDL
 
           attr_reader :source_path, :output_dir, :top, :keep_workspace, :workspace_dir, :clean_output,
                       :import_strategy, :fallback_to_stubbed, :maintain_directory_structure, :strict,
-                      :format_output, :patches_dir,
+                      :format_output, :patches_dir, :patch_profiles,
                       :progress_callback
 
           def initialize(source_path: DEFAULT_SOURCE_PATH,
@@ -77,6 +78,8 @@ module RHDL
                          import_strategy: DEFAULT_IMPORT_STRATEGY,
                          fallback_to_stubbed: true,
                          maintain_directory_structure: true,
+                         patch_profile: nil,
+                         patch_profiles: nil,
                          patches_dir: nil,
                          format_output: false,
                          strict: true,
@@ -92,6 +95,10 @@ module RHDL
             @import_strategy = normalize_import_strategy(import_strategy)
             @fallback_to_stubbed = fallback_to_stubbed
             @maintain_directory_structure = maintain_directory_structure
+            @patch_profiles = normalize_patch_profiles(
+              patch_profile: patch_profile,
+              patch_profiles: patch_profiles
+            )
             @patches_dir = normalize_patches_dir(patches_dir)
             @format_output = format_output
             @strict = strict
@@ -188,6 +195,7 @@ module RHDL
               diagnostics: diagnostics
             )
             File.write(prepared[:normalized_core_mlir_path], normalized_core_mlir)
+            emit_artifact_size_progress('normalized core MLIR', prepared[:normalized_core_mlir_path])
 
             FileUtils.mkdir_p(output_dir)
             emit_progress("clean output directory: #{output_dir}") if clean_output
@@ -218,6 +226,7 @@ module RHDL
                 diagnostics: diagnostics
               )
             end
+            emit_output_package_progress(files_written)
 
             raise_diagnostics = Array(raise_result.diagnostics) + Array(format_result.diagnostics)
             success = raise_result.success? && format_result.success?
@@ -411,13 +420,16 @@ module RHDL
               staged_system_path: staged_system_path,
               stub_path: stub_path,
               wrapper_path: wrapper_path,
+              include_paths: include_paths.freeze,
               moore_mlir_path: moore_mlir_path,
               core_mlir_path: core_mlir_path,
               normalized_core_mlir_path: normalized_core_mlir_path,
               stub_modules: stub_ports.keys.sort,
               module_source_relpaths: module_source_relpaths,
               command_chdir: (strategy == :tree ? workspace : nil)
-            }.merge(metadata)
+            }.merge(metadata).tap do |prepared|
+              emit_prepared_package_progress(prepared)
+            end
           end
 
           def prepared_metadata(source_root:, staged_source_path:, workspace:, include_paths:, module_source_relpaths:)
@@ -470,11 +482,13 @@ module RHDL
             import_result = RHDL::Codegen::CIRCT::Tooling.verilog_to_circt_mlir(
               verilog_path: prepared[:wrapper_path],
               out_path: prepared[:moore_mlir_path],
-              tool: RHDL::Codegen::CIRCT::Tooling::DEFAULT_VERILOG_IMPORT_TOOL
+              tool: RHDL::Codegen::CIRCT::Tooling::DEFAULT_VERILOG_IMPORT_TOOL,
+              extra_args: circt_verilog_import_extra_args
             )
             command_log << import_result[:command]
             append_diagnostics(diagnostics, import_result[:stderr], max_lines: 60)
             return { success: false, stage: :import, stderr: import_result[:stderr] } unless import_result[:success]
+            emit_artifact_size_progress('moore MLIR', prepared[:moore_mlir_path])
 
             imported_text = File.read(prepared[:moore_mlir_path])
             if imported_text.include?('moore.module')
@@ -495,8 +509,10 @@ module RHDL
               command_log << lower_result[:command]
               append_diagnostics(diagnostics, lower_result[:stderr], max_lines: 60)
               return { success: false, stage: :lower, stderr: lower_result[:stderr] } unless lower_result[:success]
+              emit_artifact_size_progress('core MLIR', prepared[:core_mlir_path])
             else
               FileUtils.cp(prepared[:moore_mlir_path], prepared[:core_mlir_path])
+              emit_artifact_size_progress('core MLIR', prepared[:core_mlir_path])
             end
 
             emit_progress('import pipeline complete')
@@ -504,7 +520,17 @@ module RHDL
           end
 
           def circt_verilog_import_command_string(verilog_path)
-            RHDL::Codegen::CIRCT::Tooling.circt_verilog_import_command_string(verilog_path: verilog_path)
+            RHDL::Codegen::CIRCT::Tooling.circt_verilog_import_command_string(
+              verilog_path: verilog_path,
+              extra_args: circt_verilog_import_extra_args
+            )
+          end
+
+          def circt_verilog_import_extra_args
+            current_top = top.to_s.strip
+            raise ArgumentError, 'AO486 SystemImporter requires a non-empty top for circt-verilog import' if current_top.empty?
+
+            ["--top=#{current_top}"]
           end
 
           def normalize_system_source!(path)
@@ -911,7 +937,8 @@ module RHDL
           def prepare_import_source_tree(workspace, diagnostics:, command_log:)
             @prepared_source_search_root = source_search_root
             @prepared_source_path = source_path
-            return { success: true, patch_files: [] } unless patches_dir
+            patch_roots = resolved_patch_roots
+            return { success: true, patch_files: [] } if patch_roots.empty?
 
             unless tool_available?('git')
               diagnostics << 'Required tool not found: git'
@@ -921,7 +948,7 @@ module RHDL
             staged_root = File.join(workspace, 'patched_source')
             copy_directory_contents(source_search_root, staged_root)
 
-            patch_files = patch_series_files(patches_dir)
+            patch_files = patch_roots.flat_map { |root| patch_series_files(root) }
             relative_source_path = path_relative_to_root(source_path, source_search_root)
 
             patch_files.each do |patch_path|
@@ -978,6 +1005,33 @@ module RHDL
             expanded
           end
 
+          def normalize_patch_profiles(patch_profile:, patch_profiles:)
+            profiles = []
+            profiles << patch_profile unless patch_profile.nil?
+            profiles.concat(Array(patch_profiles))
+            profiles = profiles.flatten.compact.map { |entry| entry.to_s.strip }.reject(&:empty?)
+            profiles.each { |name| resolve_patch_profile_dir(name) }
+            profiles.freeze
+          end
+
+          def resolved_patch_roots
+            roots = patch_profiles.map { |name| resolve_patch_profile_dir(name) }
+            roots << patches_dir if patches_dir
+            roots
+          end
+
+          def resolve_patch_profile_dir(profile_name)
+            path = File.join(ao486_patches_root, profile_name.to_s)
+            expanded = File.expand_path(path)
+            raise ArgumentError, "AO486 patch profile not found: #{profile_name} (#{expanded})" unless Dir.exist?(expanded)
+
+            expanded
+          end
+
+          def ao486_patches_root
+            DEFAULT_PATCHES_ROOT
+          end
+
           def helper_include_source_root(root)
             ao486_root = File.join(root, 'ao486')
             return ao486_root if Dir.exist?(ao486_root)
@@ -1024,6 +1078,53 @@ module RHDL
             return unless progress_callback.respond_to?(:call)
 
             progress_callback.call(message)
+          end
+
+          def emit_prepared_package_progress(prepared)
+            stats = package_file_stats(
+              [
+                prepared[:wrapper_path],
+                prepared[:stub_path],
+                *Array(prepared[:include_paths])
+              ]
+            )
+            emit_progress("staged pure Verilog package files=#{stats[:file_count]} size=#{format_byte_size(stats[:bytes])}")
+          end
+
+          def emit_artifact_size_progress(label, path)
+            return unless path && File.file?(path)
+
+            emit_progress("#{label} #{File.basename(path)} size=#{format_byte_size(File.size(path))}")
+          end
+
+          def emit_output_package_progress(files_written)
+            stats = package_file_stats(Array(files_written))
+            emit_progress("raised RHDL package files=#{stats[:file_count]} size=#{format_byte_size(stats[:bytes])}")
+          end
+
+          def package_file_stats(paths)
+            files = Array(paths).compact.map { |path| File.expand_path(path) }.uniq.select { |path| File.file?(path) }
+            {
+              file_count: files.length,
+              bytes: files.sum { |path| File.size(path) }
+            }
+          end
+
+          def format_byte_size(bytes)
+            value = bytes.to_i
+            return '0 B' if value <= 0
+
+            units = ['B', 'KiB', 'MiB', 'GiB'].freeze
+            size = value.to_f
+            unit_index = 0
+            while size >= 1024.0 && unit_index < units.length - 1
+              size /= 1024.0
+              unit_index += 1
+            end
+
+            return "#{size.round} #{units[unit_index]}" if unit_index.zero?
+
+            format('%.1f %s', size, units[unit_index])
           end
         end
       end

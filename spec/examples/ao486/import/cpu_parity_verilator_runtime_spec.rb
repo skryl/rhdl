@@ -64,7 +64,8 @@ RSpec.describe 'AO486 CPU parity runtime across IR, Verilator, and Arcilator' do
       output_dir: out_dir,
       workspace_dir: workspace,
       keep_workspace: true,
-      maintain_directory_structure: false
+      maintain_directory_structure: false,
+      patch_profile: :parity
     ).run
   end
 

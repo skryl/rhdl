@@ -8,8 +8,6 @@ require 'rhdl/sim/native/ir/simulator'
 
 require_relative 'backend_runner'
 require_relative '../import/cpu_importer'
-require_relative '../import/cpu_parity_package'
-require_relative '../import/cpu_runner_package'
 
 module RHDL
   module Examples
@@ -146,14 +144,16 @@ module RHDL
               output_dir: out_dir,
               workspace_dir: workspace_dir,
               keep_workspace: true,
+              patch_profile: :runner,
               strict: false
             ).run
+            raise Array(import_result.diagnostics).join("\n") unless import_result.success?
 
             cleaned_mlir = File.read(import_result.normalized_core_mlir_path)
-            runner_pkg = RHDL::Examples::AO486::Import::CpuRunnerPackage.from_cleaned_mlir(cleaned_mlir)
-            raise Array(runner_pkg[:diagnostics]).join("\n") unless runner_pkg[:success]
+            imported = RHDL::Codegen.import_circt_mlir(cleaned_mlir, strict: false, top: 'ao486')
+            raise Array(imported.diagnostics).join("\n") unless imported.success?
 
-            flat = RHDL::Codegen::CIRCT::Flatten.to_flat_module(runner_pkg.fetch(:package), top: 'ao486')
+            flat = RHDL::Codegen::CIRCT::Flatten.to_flat_module(imported.modules, top: 'ao486')
             {
               backend: backend,
               ir_json: RHDL::Sim::Native::IR.sim_json(flat, backend: backend),
@@ -165,10 +165,10 @@ module RHDL
         def self.build_from_cleaned_mlir(mlir_text, backend: preferred_import_backend)
           raise ArgumentError, 'IrRunner imported AO486 runtime requires an IR compiler or JIT backend' unless backend
 
-          parity = RHDL::Examples::AO486::Import::CpuParityPackage.from_cleaned_mlir(mlir_text)
-          raise ArgumentError, Array(parity[:diagnostics]).join("\n") unless parity[:success]
+          imported = RHDL::Codegen.import_circt_mlir(mlir_text, strict: false, top: 'ao486')
+          raise ArgumentError, Array(imported.diagnostics).join("\n") unless imported.success?
 
-          flat = RHDL::Codegen::CIRCT::Flatten.to_flat_module(parity.fetch(:package), top: 'ao486')
+          flat = RHDL::Codegen::CIRCT::Flatten.to_flat_module(imported.modules, top: 'ao486')
           ir_json = RHDL::Sim::Native::IR.sim_json(flat, backend: backend)
 
           new(backend: backend, headless: true).tap do |runner|

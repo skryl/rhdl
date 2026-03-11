@@ -92,7 +92,7 @@ module RHDL
       class << self
         # Check if sequential block is defined
         def sequential_defined?
-          respond_to?(:_sequential_block) && _sequential_block
+          respond_to?(:_sequential_blocks) ? _sequential_blocks.any? : (respond_to?(:_sequential_block) && _sequential_block)
         end
       end
     end

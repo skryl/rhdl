@@ -138,6 +138,58 @@ RSpec.describe RHDL::Examples::SPARC64::Import::SystemImporter do
     end
   end
 
+  describe '#run_import_task' do
+    it 'requires circt-verilog --top through the shared import task path' do
+      fake_task_class = Class.new do
+        class << self
+          attr_accessor :last_options
+        end
+
+        def initialize(options)
+          self.class.last_options = options
+          @options = options
+        end
+
+        def run
+          FileUtils.mkdir_p(@options.fetch(:out))
+          File.write(File.join(@options.fetch(:out), 'generated_component.rb'), "# generated\n")
+          File.write(@options.fetch(:report), "{}\n")
+        end
+      end
+
+      Dir.mktmpdir('sparc64_import_task_out') do |out_dir|
+        Dir.mktmpdir('sparc64_import_task_ws') do |workspace|
+          report_path = File.join(out_dir, 'import_report.json')
+          manifest_path = File.join(workspace, 'mixed.yml')
+          File.write(manifest_path, "version: 1\n")
+
+          importer = described_class.new(
+            output_dir: out_dir,
+            workspace_dir: workspace,
+            keep_workspace: true,
+            clean_output: false,
+            top: 'W1',
+            top_file: File.join(workspace, 'Top', 'W1.v'),
+            import_task_class: fake_task_class,
+            progress: ->(_msg) {}
+          )
+
+          result = importer.send(
+            :run_import_task,
+            mode: :mixed,
+            mlir_path: File.join(out_dir, 'W1.core.mlir'),
+            report_path: report_path,
+            manifest_path: manifest_path
+          )
+
+          expect(result.fetch(:success)).to be(true)
+          expect(fake_task_class.last_options.fetch(:require_verilog_import_top)).to be(true)
+          expect(fake_task_class.last_options.fetch(:tool_args)).to include('--top=W1')
+        end
+      end
+    end
+  end
+
   describe '#write_import_source_bundle' do
     it 'emits a semantic bw_r_tlb_fpga hierarchy stub for the import path' do
       require_reference_tree!

@@ -13,6 +13,7 @@ module RHDL
 
         DEFAULT_VERILOG_IMPORT_TOOL = 'circt-verilog'
         DEFAULT_CIRCT_VERILOG_IMPORT_MODE = '--ir-hw'
+        DEFAULT_CIRCT_VERILOG_IMPORT_PASSES = ['--detect-memories'].freeze
         DEFAULT_VERILOG_EXPORT_TOOL = 'firtool'
         DEFAULT_FIRTOOL_LOWERING_OPTIONS = 'disallowMuxInlining,disallowPortDeclSharing,disallowLocalVariables,locationInfoStyle=none,omitVersionComment'
         DEFAULT_VHDL_IMPORT_TOOL = 'ghdl'
@@ -22,6 +23,9 @@ module RHDL
           args = Array(extra_args).dup
           unless args.any? { |arg| arg.to_s.start_with?('--ir-') }
             args.unshift(DEFAULT_CIRCT_VERILOG_IMPORT_MODE)
+          end
+          DEFAULT_CIRCT_VERILOG_IMPORT_PASSES.reverse_each do |default_arg|
+            args.unshift(default_arg) unless args.include?(default_arg)
           end
           args
         end

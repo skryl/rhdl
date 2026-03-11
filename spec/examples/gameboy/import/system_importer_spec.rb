@@ -223,6 +223,7 @@ RSpec.describe RHDL::Examples::GameBoy::Import::SystemImporter do
           expect(options).not_to be_nil
           expect(options.fetch(:mode)).to eq(:mixed)
           expect(options.fetch(:top)).to eq('gb')
+          expect(options.fetch(:require_verilog_import_top)).to be(true)
           expect(options.fetch(:out)).to eq(out_dir)
           expect(options.fetch(:format_output)).to eq(false)
           expect(options).not_to have_key(:arc_remove_llhd)

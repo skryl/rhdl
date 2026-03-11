@@ -141,7 +141,7 @@ module RHDL
         wire = Wire.new("#{@name}.#{name}", width: width)
         @inputs[name] = wire
         wire.on_change do |_|
-          next if self.class.respond_to?(:_sequential_block) && self.class._sequential_block
+          next if self.class.respond_to?(:sequential_defined?) && self.class.sequential_defined?
           next if @subcomponents && !@subcomponents.empty?
 
           propagate
@@ -199,8 +199,8 @@ module RHDL
 
       def sequential_component_node?(component)
         component.respond_to?(:sample_inputs) &&
-          component.class.respond_to?(:_sequential_block) &&
-          component.class._sequential_block
+          component.class.respond_to?(:sequential_defined?) &&
+          component.class.sequential_defined?
       end
 
       def component_state_snapshot(component)

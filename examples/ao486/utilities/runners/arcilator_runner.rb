@@ -9,7 +9,6 @@ require 'rhdl/codegen'
 
 require_relative 'backend_runner'
 require_relative 'ir_runner'
-require_relative '../import/cpu_parity_package'
 require_relative '../../../../lib/rhdl/codegen/circt/tooling'
 
 module RHDL
@@ -87,9 +86,6 @@ module RHDL
         private
 
         def build_imported_parity!(mlir_text, work_dir:)
-          parity = RHDL::Examples::AO486::Import::CpuParityPackage.from_cleaned_mlir(mlir_text)
-          raise ArgumentError, Array(parity[:diagnostics]).join("\n") unless parity[:success]
-
           @work_dir = File.expand_path(work_dir)
           FileUtils.mkdir_p(@work_dir)
 
@@ -101,7 +97,7 @@ module RHDL
           bin_path = File.join(@work_dir, 'cpu_parity_arc')
           linked_bc_path = File.join(@work_dir, 'cpu_parity_arc.bc')
 
-          File.write(mlir_path, parity.fetch(:mlir))
+          File.write(mlir_path, mlir_text)
 
           prepared = RHDL::Codegen::CIRCT::Tooling.prepare_arc_mlir_from_circt_mlir(
             mlir_path: mlir_path,

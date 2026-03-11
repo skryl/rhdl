@@ -333,6 +333,7 @@ module RHDL
             seed = [
               @import_root,
               core_mlir_path,
+              core_mlir_digest,
               imported_core_top_name,
               llvm_opt_level,
               llvm_threads.to_s,
@@ -350,6 +351,10 @@ module RHDL
 
         def shared_lib_path
           File.join(build_dir, 'libgameboy_arc_sim.so')
+        end
+
+        def core_mlir_digest
+          @core_mlir_digest ||= Digest::SHA1.file(core_mlir_path).hexdigest[0, 12]
         end
 
         def check_tools_available!

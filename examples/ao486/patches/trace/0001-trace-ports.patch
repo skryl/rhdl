@@ -1,0 +1,180 @@
+diff --git a/ao486/ao486.v b/ao486/ao486.v
+index 3ed4f278..e1a05b4d 100644
+--- a/ao486/ao486.v
++++ b/ao486/ao486.v
+@@ -72,7 +72,32 @@ module ao486 (
+ 	output       [15:0] io_write_address,
+ 	output       [2:0]  io_write_length,
+ 	output       [31:0] io_write_data,
+-	input               io_write_done
++	input               io_write_done,
++	output              trace_retired,
++	output              trace_wr_finished,
++	output              trace_wr_ready,
++	output              trace_wr_hlt_in_progress,
++	output      [31:0]  trace_wr_eip,
++	output      [3:0]   trace_wr_consumed,
++	output      [63:0]  trace_cs_cache,
++	output              trace_cs_cache_valid,
++	output      [31:0]  trace_prefetch_eip,
++	output      [3:0]   trace_fetch_valid,
++	output      [63:0]  trace_fetch_bytes,
++	output      [3:0]   trace_dec_acceptable,
++	output      [3:0]   trace_fetch_accept_length,
++	output              trace_prefetchfifo_accept_empty,
++	output              trace_prefetchfifo_accept_do,
++	output              trace_arch_new_export,
++	output      [31:0]  trace_arch_eax,
++	output      [31:0]  trace_arch_ebx,
++	output      [31:0]  trace_arch_ecx,
++	output      [31:0]  trace_arch_edx,
++	output      [31:0]  trace_arch_esi,
++	output      [31:0]  trace_arch_edi,
++	output      [31:0]  trace_arch_esp,
++	output      [31:0]  trace_arch_ebp,
++	output      [31:0]  trace_arch_eip
+ );
+ 
+ //------------------------------------------------------------------------------
+@@ -681,6 +706,26 @@ pipeline pipeline_inst(
+     .acflag                        (acflag),                        //output
+     
+     .cr3                           (cr3),                           //output [31:0]
++    .trace_retired                 (trace_retired),                 //output
++    .trace_wr_finished             (trace_wr_finished),             //output
++    .trace_wr_ready                (trace_wr_ready),                //output
++    .trace_wr_hlt_in_progress      (trace_wr_hlt_in_progress),      //output
++    .trace_cs_cache_valid          (trace_cs_cache_valid),          //output
++    .trace_prefetch_eip            (trace_prefetch_eip),            //output [31:0]
++    .trace_fetch_valid             (trace_fetch_valid),             //output [3:0]
++    .trace_fetch_bytes             (trace_fetch_bytes),             //output [63:0]
++    .trace_dec_acceptable          (trace_dec_acceptable),          //output [3:0]
++    .trace_fetch_accept_length     (trace_fetch_accept_length),     //output [3:0]
++    .trace_arch_new_export         (trace_arch_new_export),         //output
++    .trace_arch_eax                (trace_arch_eax),                //output [31:0]
++    .trace_arch_ebx                (trace_arch_ebx),                //output [31:0]
++    .trace_arch_ecx                (trace_arch_ecx),                //output [31:0]
++    .trace_arch_edx                (trace_arch_edx),                //output [31:0]
++    .trace_arch_esi                (trace_arch_esi),                //output [31:0]
++    .trace_arch_edi                (trace_arch_edi),                //output [31:0]
++    .trace_arch_esp                (trace_arch_esp),                //output [31:0]
++    .trace_arch_ebp                (trace_arch_ebp),                //output [31:0]
++    .trace_arch_eip                (trace_arch_eip),                //output [31:0]
+     
+     // prefetch_fifo
+     .prefetchfifo_accept_do        (prefetchfifo_accept_do),        //output
+@@ -776,6 +821,12 @@ pipeline pipeline_inst(
+     .io_write_done                 (io_write_done)                  //input
+ );
+ 
++assign trace_wr_eip = wr_eip;
++assign trace_wr_consumed = wr_consumed;
++assign trace_cs_cache = cs_cache;
++assign trace_prefetchfifo_accept_empty = prefetchfifo_accept_empty;
++assign trace_prefetchfifo_accept_do = prefetchfifo_accept_do;
++
+ //------------------------------------------------------------------------------
+ 
+ endmodule
+diff --git a/ao486/pipeline/pipeline.v b/ao486/pipeline/pipeline.v
+index 16422701..0f96aac4 100644
+--- a/ao486/pipeline/pipeline.v
++++ b/ao486/pipeline/pipeline.v
+@@ -137,6 +137,26 @@ module pipeline(
+     output      [15:0]  rd_error_code,
+     output      [15:0]  exe_error_code,
+     output      [15:0]  wr_error_code,
++    output              trace_retired,
++    output              trace_wr_finished,
++    output              trace_wr_ready,
++    output              trace_wr_hlt_in_progress,
++    output              trace_cs_cache_valid,
++    output      [31:0]  trace_prefetch_eip,
++    output      [3:0]   trace_fetch_valid,
++    output      [63:0]  trace_fetch_bytes,
++    output      [3:0]   trace_dec_acceptable,
++    output      [3:0]   trace_fetch_accept_length,
++    output              trace_arch_new_export,
++    output      [31:0]  trace_arch_eax,
++    output      [31:0]  trace_arch_ebx,
++    output      [31:0]  trace_arch_ecx,
++    output      [31:0]  trace_arch_edx,
++    output      [31:0]  trace_arch_esi,
++    output      [31:0]  trace_arch_edi,
++    output      [31:0]  trace_arch_esp,
++    output      [31:0]  trace_arch_ebp,
++    output      [31:0]  trace_arch_eip,
+     
+     //glob output
+     output              glob_descriptor_set,
+@@ -867,6 +887,9 @@ wire [31:0] wr_stack_offset;
+ wire [1:0]  wr_task_rpl;
+     
+ wire        dr6_bd_set;
++wire        write_trace_wr_finished;
++wire        write_trace_wr_ready;
++wire        write_trace_wr_hlt_in_progress;
+ 
+ wire [31:0]  exe_buffer;
+ wire [463:0] exe_buffer_shifted;
+@@ -1245,6 +1268,9 @@ write write_inst(
+     .wr_new_push_ss_fault          (wr_new_push_ss_fault),          //output
+     .wr_string_es_fault            (wr_string_es_fault),            //output
+     .wr_push_ss_fault              (wr_push_ss_fault),              //output
++    .trace_wr_finished             (write_trace_wr_finished),       //output
++    .trace_wr_ready                (write_trace_wr_ready),          //output
++    .trace_wr_hlt_in_progress      (write_trace_wr_hlt_in_progress), //output
+     
+     //eip control
+     .wr_eip                         (wr_eip),                       //output [31:0]
+@@ -1434,4 +1460,25 @@ cpu_export cpu_export_inst(
+ );
+ // synthesis translate_on
+ 
++assign trace_retired = write_trace_wr_finished | (write_trace_wr_ready & write_trace_wr_hlt_in_progress);
++assign trace_wr_finished = write_trace_wr_finished;
++assign trace_wr_ready = write_trace_wr_ready;
++assign trace_wr_hlt_in_progress = write_trace_wr_hlt_in_progress;
++assign trace_cs_cache_valid = cs_cache_valid;
++assign trace_prefetch_eip = prefetch_eip;
++assign trace_fetch_valid = fetch_valid;
++assign trace_fetch_bytes = fetch;
++assign trace_dec_acceptable = dec_acceptable;
++assign trace_fetch_accept_length = (fetch_valid < dec_acceptable)? fetch_valid : dec_acceptable;
++assign trace_arch_new_export = exe_ready;
++assign trace_arch_eax = eax;
++assign trace_arch_ebx = ebx;
++assign trace_arch_ecx = ecx;
++assign trace_arch_edx = edx;
++assign trace_arch_esi = esi;
++assign trace_arch_edi = edi;
++assign trace_arch_esp = esp;
++assign trace_arch_ebp = ebp;
++assign trace_arch_eip = dec_eip;
++
+ endmodule
+diff --git a/ao486/pipeline/write.v b/ao486/pipeline/write.v
+index 98807f81..eb70d237 100644
+--- a/ao486/pipeline/write.v
++++ b/ao486/pipeline/write.v
+@@ -123,6 +123,9 @@ module write(
+     output              wr_new_push_ss_fault,
+     output              wr_string_es_fault,
+     output              wr_push_ss_fault,
++    output              trace_wr_finished,
++    output              trace_wr_ready,
++    output              trace_wr_hlt_in_progress,
+     
+     //eip control
+     output reg  [31:0]  wr_eip,
+@@ -553,6 +556,10 @@ assign wr_is_front = wr_cmd != `CMD_NULL;
+ assign wr_finished =
+     wr_ready && (~(wr_not_finished) || (wr_hlt_in_progress && iflag_to_reg && interrupt_do) || wr_string_in_progress);
+ 
++assign trace_wr_finished = wr_finished;
++assign trace_wr_ready = wr_ready;
++assign trace_wr_hlt_in_progress = wr_hlt_in_progress;
++
+ assign wr_interrupt_possible_prepare =
+     interrupt_do &&
+     wr_ready && (~(wr_not_finished) || wr_hlt_in_progress || wr_string_in_progress) &&

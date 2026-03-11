@@ -51,13 +51,15 @@ module RHDL
           base = File.basename(input, File.extname(input))
           mlir_out = options[:mlir_out] || File.join(out_dir, "#{base}.core.mlir")
           tool = RHDL::Codegen::CIRCT::Tooling::DEFAULT_VERILOG_IMPORT_TOOL
+          tool_args = default_verilog_import_tool_args(top_name: options[:top], extra_args: options[:tool_args])
+          ensure_verilog_import_top!(tool_args, mode: :verilog)
 
           result = with_timed_step("Verilog -> CIRCT MLIR (#{tool})") do
             RHDL::Codegen::CIRCT::Tooling.verilog_to_circt_mlir(
               verilog_path: input,
               out_path: mlir_out,
               tool: tool,
-              extra_args: Array(options[:tool_args])
+              extra_args: tool_args
             )
           end
 
@@ -96,7 +98,11 @@ module RHDL
           base = resolved_top_name || File.basename(staged_verilog_path, File.extname(staged_verilog_path))
           mlir_out = options[:mlir_out] || File.join(out_dir, "#{base}.core.mlir")
           tool = RHDL::Codegen::CIRCT::Tooling::DEFAULT_VERILOG_IMPORT_TOOL
-          tool_args = Array(options[:tool_args]) + Array(staging[:tool_args])
+          tool_args = default_verilog_import_tool_args(
+            top_name: resolved_top_name,
+            extra_args: Array(options[:tool_args]) + Array(staging[:tool_args])
+          )
+          ensure_verilog_import_top!(tool_args, mode: :mixed)
 
           result = with_timed_step("Verilog -> CIRCT MLIR (#{tool})") do
             RHDL::Codegen::CIRCT::Tooling.verilog_to_circt_mlir(
@@ -176,6 +182,23 @@ module RHDL
           )
 
           run_raise_flow(mlir_out: input, out_dir: out_dir)
+        end
+
+        def default_verilog_import_tool_args(top_name:, extra_args:)
+          args = Array(extra_args).dup
+          top = top_name.to_s.strip
+          return args if top.empty?
+          return args if args.any? { |arg| arg.to_s.start_with?('--top=') }
+
+          args.unshift("--top=#{top}")
+        end
+
+        def ensure_verilog_import_top!(tool_args, mode:)
+          return unless options[:require_verilog_import_top]
+          return if Array(tool_args).any? { |arg| arg.to_s.start_with?('--top=') }
+
+          raise ArgumentError,
+                "System import requires --top to be passed to circt-verilog during #{mode} Verilog -> MLIR conversion"
         end
 
         def run_raise_flow(mlir_out:, out_dir:, top_override: nil, mixed_provenance: nil, artifact_paths: nil,

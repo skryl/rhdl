@@ -695,6 +695,7 @@ module RHDL
               mlir_out: mlir_path,
               report: report_path,
               top: top,
+              require_verilog_import_top: true,
               strict: strict,
               raise_to_dsl: true,
               format_output: false,

@@ -8,8 +8,6 @@ require 'rhdl/codegen/verilog/sim/verilog_simulator'
 require 'fiddle'
 
 require_relative 'ir_runner'
-require_relative '../import/cpu_parity_package'
-require_relative '../import/cpu_runner_package'
 
 module RHDL
   module Examples
@@ -48,18 +46,16 @@ module RHDL
               output_dir: out_dir,
               workspace_dir: workspace_dir,
               keep_workspace: true,
+              patch_profile: :runner,
               strict: false
             ).run
-
-            cleaned_mlir = File.read(import_result.normalized_core_mlir_path)
-            runner_pkg = RHDL::Examples::AO486::Import::CpuRunnerPackage.from_cleaned_mlir(cleaned_mlir)
-            raise Array(runner_pkg[:diagnostics]).join("\n") unless runner_pkg[:success]
+            raise Array(import_result.diagnostics).join("\n") unless import_result.success?
 
             mlir_path = File.join(build_dir, 'ao486_runner.mlir')
             verilog_path = File.join(build_dir, 'verilog', 'ao486_runner.v')
             wrapper_path = File.join(build_dir, 'verilog', 'ao486_runner_wrapper.cpp')
             FileUtils.mkdir_p(File.dirname(verilog_path))
-            File.write(mlir_path, runner_pkg.fetch(:mlir))
+            FileUtils.cp(import_result.normalized_core_mlir_path, mlir_path)
 
             firtool_stdout, firtool_stderr, firtool_status = Open3.capture3(
               'firtool',
@@ -181,6 +177,7 @@ module RHDL
                 else if (!std::strcmp(name, "trace_wr_hlt_in_progress")) return ctx->dut->trace_wr_hlt_in_progress;
                 else if (!std::strcmp(name, "trace_wr_consumed")) return ctx->dut->trace_wr_consumed;
                 else if (!std::strcmp(name, "trace_fetch_valid")) return ctx->dut->trace_fetch_valid;
+                else if (!std::strcmp(name, "trace_dec_acceptable")) return ctx->dut->trace_dec_acceptable;
                 else if (!std::strcmp(name, "trace_fetch_accept_length")) return ctx->dut->trace_fetch_accept_length;
                 else if (!std::strcmp(name, "trace_wr_eip")) return ctx->dut->trace_wr_eip;
                 else if (!std::strcmp(name, "trace_prefetch_eip")) return ctx->dut->trace_prefetch_eip;
@@ -193,14 +190,25 @@ module RHDL
                 else if (!std::strcmp(name, "trace_arch_esp")) return ctx->dut->trace_arch_esp;
                 else if (!std::strcmp(name, "trace_arch_ebp")) return ctx->dut->trace_arch_ebp;
                 else if (!std::strcmp(name, "trace_arch_eip")) return ctx->dut->trace_arch_eip;
+                else if (!std::strcmp(name, "pipeline_inst__decode_inst__fetch_valid")) return root->ao486__DOT__pipeline_inst__DOT__decode_inst__DOT__fetch_valid;
+                else if (!std::strcmp(name, "pipeline_inst__decode_inst__decoder_count")) return root->ao486__DOT__pipeline_inst__DOT__decode_inst__DOT___decode_regs_inst_decoder_count;
+                else if (!std::strcmp(name, "pipeline_inst__decode_inst__micro_busy")) return root->ao486__DOT__pipeline_inst__DOT__decode_inst__DOT__micro_busy;
                 else if (!std::strcmp(name, "pipeline_inst__decode_inst__eip")) return root->ao486__DOT___pipeline_inst_dec_eip;
                 else if (!std::strcmp(name, "pipeline_inst__read_inst__rd_eip")) return root->ao486__DOT___pipeline_inst_rd_eip;
+                else if (!std::strcmp(name, "pipeline_inst__read_inst__rd_busy")) return root->ao486__DOT__pipeline_inst__DOT___read_inst_rd_busy;
+                else if (!std::strcmp(name, "pipeline_inst__read_inst__rd_ready")) return root->ao486__DOT__pipeline_inst__DOT___read_inst_rd_ready;
                 else if (!std::strcmp(name, "pipeline_inst__execute_inst__exe_eip")) return root->ao486__DOT__pipeline_inst__DOT___execute_inst_exe_eip_final;
                 else if (!std::strcmp(name, "memory_inst__prefetch_inst__prefetch_address")) return root->ao486__DOT__memory_inst__DOT___prefetch_control_inst_icacheread_address;
                 else if (!std::strcmp(name, "memory_inst__prefetch_inst__prefetch_length")) return root->ao486__DOT__memory_inst__DOT___prefetch_inst_prefetch_length;
-                else if (!std::strcmp(name, "memory_inst__prefetch_control_inst__prefetchfifo_used")) return 0;
+                else if (!std::strcmp(name, "memory_inst__prefetch_control_inst__prefetchfifo_used")) return root->ao486__DOT__memory_inst__DOT__prefetch_control_inst__DOT__prefetchfifo_used;
                 else if (!std::strcmp(name, "memory_inst__icache_inst__readcode_do")) return root->ao486__DOT__memory_inst__DOT___icache_inst_readcode_do;
                 else if (!std::strcmp(name, "memory_inst__icache_inst__readcode_address")) return root->ao486__DOT__memory_inst__DOT___icache_inst_readcode_address;
+                else if (!std::strcmp(name, "memory_inst__icache_inst__prefetched_do")) return root->ao486__DOT__memory_inst__DOT___icache_inst_prefetched_do;
+                else if (!std::strcmp(name, "memory_inst__icache_inst__prefetched_length")) return root->ao486__DOT__memory_inst__DOT___icache_inst_prefetched_length;
+                else if (!std::strcmp(name, "memory_inst__icache_inst__reset_prefetch")) return root->ao486__DOT__memory_inst__DOT___icache_inst_reset_prefetch;
+                else if (!std::strcmp(name, "memory_inst__icache_inst__prefetchfifo_write_do")) return root->ao486__DOT__memory_inst__DOT___icache_inst_prefetchfifo_write_do;
+                else if (!std::strcmp(name, "memory_inst__prefetch_inst__prefetchfifo_signal_limit_do")) return root->ao486__DOT__memory_inst__DOT___prefetch_inst_prefetchfifo_signal_limit_do;
+                else if (!std::strcmp(name, "memory_inst__tlb_inst__prefetchfifo_signal_pf_do")) return root->ao486__DOT__memory_inst__DOT___tlb_inst_prefetchfifo_signal_pf_do;
                 else if (!std::strcmp(name, "exception_inst__exc_vector")) return root->ao486__DOT___exception_inst_exc_vector;
                 else if (!std::strcmp(name, "exception_inst__exc_eip")) return root->ao486__DOT___exception_inst_exc_eip;
                 return 0;
@@ -209,9 +217,15 @@ module RHDL
               uint64_t sim_peek_u64(void* sim, const char* name) {
                 auto* ctx = static_cast<SimContext*>(sim);
                 if (!ctx || !ctx->dut || !name) return 0;
+                auto* root = ctx->dut->rootp;
                 if (!std::strcmp(name, "trace_cs_cache")) return ctx->dut->trace_cs_cache;
                 else if (!std::strcmp(name, "pipeline_inst__decode_inst__cs_cache")) return ctx->dut->trace_cs_cache;
                 else if (!std::strcmp(name, "trace_fetch_bytes")) return ctx->dut->trace_fetch_bytes;
+                else if (!std::strcmp(name, "memory_inst__icache_inst__prefetchfifo_write_data")) return root->ao486__DOT__memory_inst__DOT___icache_inst_prefetchfifo_write_data;
+                else if (!std::strcmp(name, "pipeline_inst__decode_inst__decoder_lo")) {
+                  return static_cast<uint64_t>(root->ao486__DOT__pipeline_inst__DOT__decode_inst__DOT__decoder[0])
+                    | (static_cast<uint64_t>(root->ao486__DOT__pipeline_inst__DOT__decode_inst__DOT__decoder[1]) << 32);
+                }
                 return static_cast<uint64_t>(sim_peek_u32(sim, name));
               }
 
@@ -1169,9 +1183,6 @@ module RHDL
         private
 
         def build_imported_parity!(mlir_text, work_dir:)
-          parity = RHDL::Examples::AO486::Import::CpuParityPackage.from_cleaned_mlir(mlir_text)
-          raise ArgumentError, Array(parity[:diagnostics]).join("\n") unless parity[:success]
-
           @work_dir = File.expand_path(work_dir)
           FileUtils.mkdir_p(@work_dir)
 
@@ -1180,7 +1191,7 @@ module RHDL
           cpp_path = File.join(@work_dir, 'cpu_parity_tb.cpp')
           obj_dir = File.join(@work_dir, 'obj_dir')
 
-          File.write(mlir_path, parity.fetch(:mlir))
+          File.write(mlir_path, mlir_text)
 
           firtool_stdout, firtool_stderr, firtool_status = Open3.capture3(
             'firtool',

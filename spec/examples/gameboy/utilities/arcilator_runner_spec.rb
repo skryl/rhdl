@@ -79,4 +79,26 @@ RSpec.describe RHDL::Examples::GameBoy::ArcilatorRunner do
       previous.nil? ? ENV.delete('RHDL_GAMEBOY_ARC_LLVM_THREADS') : ENV['RHDL_GAMEBOY_ARC_LLVM_THREADS'] = previous
     end
   end
+
+  describe '#core_mlir_digest' do
+    it 'tracks the imported core MLIR content for cache invalidation' do
+      Dir.mktmpdir('rhdl_gameboy_arc_digest') do |dir|
+        core_mlir = File.join(dir, 'gb.core.mlir')
+        File.write(core_mlir, 'module @gb {}')
+
+        runner = described_class.allocate
+        runner.instance_variable_set(:@import_report, {
+                                       'artifacts' => { 'core_mlir_path' => core_mlir },
+                                       'mixed_import' => { 'top_name' => 'gb', 'core_mlir_path' => core_mlir }
+                                     })
+
+        first = runner.send(:core_mlir_digest)
+        runner.remove_instance_variable(:@core_mlir_digest)
+        File.write(core_mlir, 'module @gb { hw.output }')
+        second = runner.send(:core_mlir_digest)
+
+        expect(first).not_to eq(second)
+      end
+    end
+  end
 end

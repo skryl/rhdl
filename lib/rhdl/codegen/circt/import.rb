@@ -180,7 +180,11 @@ module RHDL
                   assigns: assigns,
                   regs: regs,
                   nets: nets,
+                  memories: memories,
+                  write_ports: write_ports,
+                  sync_read_ports: sync_read_ports,
                   processes: processes,
+                  instances: instances,
                   input_ports: input_ports,
                   output_ports: output_ports,
                   diagnostics: diagnostics,
@@ -765,7 +769,6 @@ module RHDL
 
             parsed = parse_llhd_drive(line)
             break unless parsed
-            break unless parsed[:process_token] == process_token
 
             collected << line
             idx += 1
@@ -868,9 +871,17 @@ module RHDL
         end
 
         def parse_resultful_llhd_process_block(process_token:, process_lines:, drive_lines:, value_map:, array_meta:,
-                                               array_element_refs:, assigns:, regs:, nets:, processes:, input_ports:,
-                                               output_ports:, diagnostics:, line_no:, strict:)
-          return false if Array(drive_lines).empty?
+                                               array_element_refs:, assigns:, regs:, nets:, memories:, write_ports:,
+                                               sync_read_ports:, processes:, instances:, input_ports:, output_ports:,
+                                               diagnostics:, line_no:, strict:)
+          drive_lines = Array(drive_lines)
+          return false if drive_lines.empty?
+
+          result_drive_lines, passthrough_drive_lines = drive_lines.partition do |line|
+            parsed = parse_llhd_drive(line)
+            parsed && parsed[:process_token] == process_token
+          end
+          return false if result_drive_lines.empty?
 
           blocks, entry_target = parse_llhd_blocks(process_lines)
           return false if blocks.empty? || entry_target.nil?
@@ -879,7 +890,35 @@ module RHDL
           return false unless wait_block
 
           wait_term = parse_llhd_wait(wait_block[:terminator])
-          return false unless wait_term
+          unless wait_term
+            return false unless ignorable_one_shot_resultful_array_init_process?(
+              process_lines,
+              result_drive_lines: result_drive_lines,
+              value_map: value_map
+            )
+
+            passthrough_drive_lines.each do |line|
+              parse_body_line(
+                line,
+                value_map: value_map,
+                array_meta: array_meta,
+                array_element_refs: array_element_refs,
+                assigns: assigns,
+                regs: regs,
+                nets: nets,
+                memories: memories,
+                write_ports: write_ports,
+                sync_read_ports: sync_read_ports,
+                processes: processes,
+                instances: instances,
+                output_ports: output_ports,
+                diagnostics: diagnostics,
+                line_no: line_no,
+                strict: strict
+              )
+            end
+            return true
+          end
 
           check_block = blocks[wait_term[:target]]
           return false unless check_block
@@ -914,7 +953,7 @@ module RHDL
           if clock_name
             seq_statements = build_resultful_llhd_drive_statements(
               process_token: process_token,
-              drive_lines: drive_lines,
+              drive_lines: result_drive_lines,
               stop_block: wait_block,
               stop_env: stop_env,
               yield_tokens: wait_term[:yield_tokens],
@@ -962,12 +1001,32 @@ module RHDL
               reset_active_low: reset_info&.fetch(:active_low, false) || false,
               reset_values: default_reset_values_for_targets(target_widths.keys)
             )
+            passthrough_drive_lines.each do |line|
+              parse_body_line(
+                line,
+                value_map: value_map,
+                array_meta: array_meta,
+                array_element_refs: array_element_refs,
+                assigns: assigns,
+                regs: regs,
+                nets: nets,
+                memories: memories,
+                write_ports: write_ports,
+                sync_read_ports: sync_read_ports,
+                processes: processes,
+                instances: instances,
+                output_ports: output_ports,
+                diagnostics: diagnostics,
+                line_no: line_no,
+                strict: strict
+              )
+            end
             return true
           end
 
           result_assigns = build_resultful_llhd_assigns(
             process_token: process_token,
-            drive_lines: drive_lines,
+            drive_lines: result_drive_lines,
             stop_block: wait_block,
             stop_env: stop_env,
             yield_tokens: wait_term[:yield_tokens],
@@ -979,6 +1038,26 @@ module RHDL
           return false if result_assigns.empty?
 
           assigns.concat(result_assigns)
+          passthrough_drive_lines.each do |line|
+            parse_body_line(
+              line,
+              value_map: value_map,
+              array_meta: array_meta,
+              array_element_refs: array_element_refs,
+              assigns: assigns,
+              regs: regs,
+              nets: nets,
+              memories: memories,
+              write_ports: write_ports,
+              sync_read_ports: sync_read_ports,
+              processes: processes,
+              instances: instances,
+              output_ports: output_ports,
+              diagnostics: diagnostics,
+              line_no: line_no,
+              strict: strict
+            )
+          end
           true
         rescue StandardError => e
           diagnostics << Diagnostic.new(
@@ -989,6 +1068,23 @@ module RHDL
             op: 'llhd.process'
           )
           false
+        end
+
+        def ignorable_one_shot_resultful_array_init_process?(process_lines, result_drive_lines:, value_map:)
+          lines = Array(process_lines).map { |line| line.to_s.strip }.reject(&:empty?)
+          return false if lines.empty?
+          return false unless llhd_process_opener?(lines.first)
+          return false unless lines.last == '}'
+
+          body = lines[1...-1]
+          return false if body.nil? || body.empty?
+          return false if body.any? { |line| line.start_with?('llhd.wait ') }
+          return false unless body.any? { |line| parse_llhd_halt(line) }
+
+          Array(result_drive_lines).all? do |line|
+            parsed = parse_llhd_drive(line)
+            parsed && value_map[parsed[:target_token]].is_a?(ArrayForwardRef)
+          end
         end
 
         def resolve_llhd_stop_env(blocks:, current_label:, stop_label:, stop_block:, value_map:, array_meta:,
@@ -1014,7 +1110,7 @@ module RHDL
           end
 
           terminator = block[:terminator].to_s.strip
-          return {} if terminator == 'llhd.yield' || terminator == 'llhd.halt'
+          return {} if terminator == 'llhd.yield' || parse_llhd_halt(terminator)
 
           if (cond_br = parse_cf_cond_br(terminator))
             cond_expr = lookup_value(local_map, cond_br[:cond_token], width: 1)
@@ -1491,7 +1587,7 @@ module RHDL
               blocks[current_label] ||= { instructions: [], terminator: nil, args: [] }
             end
 
-            if parse_cf_cond_br(line) || parse_cf_br(line) || parse_llhd_wait(line) || line == 'llhd.yield' || line == 'llhd.halt'
+            if parse_cf_cond_br(line) || parse_cf_br(line) || parse_llhd_wait(line) || line == 'llhd.yield' || parse_llhd_halt(line)
               blocks[current_label][:terminator] = line
             else
               blocks[current_label][:instructions] << line
@@ -1566,6 +1662,29 @@ module RHDL
             yield_tokens: [],
             target: m[2],
             target_args: []
+          }
+        end
+
+        def parse_llhd_halt(line)
+          m = line.to_s.strip.match(/\Allhd\.halt(?:\s+(.+?)\s*:\s*(.+))?\z/)
+          return nil unless m
+
+          result_tokens =
+            if m[1]
+              split_top_level_csv(m[1]).map { |token| normalize_value_token(token) }.reject(&:empty?)
+            else
+              []
+            end
+          result_types =
+            if m[2]
+              split_top_level_csv(m[2]).map(&:strip).reject(&:empty?)
+            else
+              []
+            end
+
+          {
+            result_tokens: result_tokens,
+            result_types: result_types
           }
         end
 
@@ -1661,7 +1780,7 @@ module RHDL
           end
 
           terminator = block[:terminator].to_s.strip
-          return statements if terminator == 'llhd.yield' || terminator == 'llhd.halt'
+          return statements if terminator == 'llhd.yield' || parse_llhd_halt(terminator)
 
           if (cond_br = parse_cf_cond_br(terminator))
             cond_expr = lookup_value(local_map, cond_br[:cond_token], width: 1)
@@ -1808,8 +1927,8 @@ module RHDL
           body = lines[1...-1]
           return false if body.nil? || body.empty?
           return false if body.any? { |line| line.start_with?('llhd.wait ') || line.start_with?('cf.') }
-          body.any? { |line| line == 'llhd.halt' } &&
-            body.all? { |line| line == 'llhd.halt' || parse_llhd_drive(line) || line.match?(/\A\^bb\d+:/) }
+          body.any? { |line| parse_llhd_halt(line) } &&
+            body.all? { |line| parse_llhd_halt(line) || parse_llhd_drive(line) || line.match?(/\A\^bb\d+:/) }
         end
 
         def evaluate_combinational_statements(statements, env = {})
@@ -2521,7 +2640,7 @@ module RHDL
           return if body.start_with?('cf.br ') || body.start_with?('cf.cond_br ')
           return if llhd_process_opener?(body)
           return if body.start_with?('llhd.wait ')
-          return if body == 'llhd.halt'
+          return if parse_llhd_halt(body)
           return if body == 'llhd.yield'
 
           if (op = fast_body_op(body))

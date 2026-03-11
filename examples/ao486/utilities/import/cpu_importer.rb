@@ -24,6 +24,8 @@ module RHDL
                          import_strategy: DEFAULT_IMPORT_STRATEGY,
                          fallback_to_stubbed: false,
                          maintain_directory_structure: true,
+                         patch_profile: nil,
+                         patch_profiles: nil,
                          patches_dir: nil,
                          format_output: false,
                          strict: false,
@@ -38,6 +40,8 @@ module RHDL
               import_strategy: import_strategy,
               fallback_to_stubbed: fallback_to_stubbed,
               maintain_directory_structure: maintain_directory_structure,
+              patch_profile: patch_profile,
+              patch_profiles: patch_profiles,
               patches_dir: patches_dir,
               format_output: format_output,
               strict: strict,
@@ -104,13 +108,16 @@ module RHDL
               staged_system_path: staged_source_path,
               stub_path: stub_path,
               wrapper_path: wrapper_path,
+              include_paths: include_paths.freeze,
               moore_mlir_path: moore_mlir_path,
               core_mlir_path: core_mlir_path,
               normalized_core_mlir_path: normalized_core_mlir_path,
               stub_modules: stub_ports.keys.sort,
               module_source_relpaths: module_source_relpaths,
               command_chdir: (strategy == :tree ? workspace : nil)
-            }.merge(metadata)
+            }.merge(metadata).tap do |prepared|
+              emit_prepared_package_progress(prepared)
+            end
           end
 
           def discover_tree_module_files(force_stub_modules:)

@@ -38,12 +38,12 @@ RSpec.describe RHDL::Codegen::CIRCT::Tooling do
   end
 
   describe '.circt_verilog_import_command' do
-    it 'builds the canonical circt-verilog import command with --ir-hw by default' do
+    it 'builds the canonical circt-verilog import command with memory detection by default' do
       expect(described_class.circt_verilog_import_command(verilog_path: 'in.v')).to eq(
-        ['circt-verilog', '--ir-hw', 'in.v']
+        ['circt-verilog', '--detect-memories', '--ir-hw', 'in.v']
       )
       expect(described_class.circt_verilog_import_command_string(verilog_path: 'in.v')).to eq(
-        'circt-verilog --ir-hw in.v'
+        'circt-verilog --detect-memories --ir-hw in.v'
       )
     end
 
@@ -53,7 +53,16 @@ RSpec.describe RHDL::Codegen::CIRCT::Tooling do
           verilog_path: 'in.v',
           extra_args: ['--ir-moore']
         )
-      ).to eq(['circt-verilog', '--ir-moore', 'in.v'])
+      ).to eq(['circt-verilog', '--detect-memories', '--ir-moore', 'in.v'])
+    end
+
+    it 'does not duplicate detect-memories when explicitly requested' do
+      expect(
+        described_class.circt_verilog_import_command(
+          verilog_path: 'in.v',
+          extra_args: ['--detect-memories', '--ir-moore']
+        )
+      ).to eq(['circt-verilog', '--detect-memories', '--ir-moore', 'in.v'])
     end
   end
 

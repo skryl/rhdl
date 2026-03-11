@@ -5,9 +5,8 @@ require 'tmpdir'
 require 'fileutils'
 
 require_relative '../../../../examples/ao486/utilities/import/cpu_importer'
-require_relative '../../../../examples/ao486/utilities/import/cpu_parity_package'
 
-RSpec.describe RHDL::Examples::AO486::Import::CpuParityPackage do
+RSpec.describe 'AO486 parity patch profile' do
   def require_import_tool!
     tool = RHDL::Codegen::CIRCT::Tooling::DEFAULT_VERILOG_IMPORT_TOOL
     skip "#{tool} not available" unless HdlToolchain.which(tool)
@@ -18,7 +17,8 @@ RSpec.describe RHDL::Examples::AO486::Import::CpuParityPackage do
       output_dir: out_dir,
       workspace_dir: workspace,
       keep_workspace: true,
-      maintain_directory_structure: false
+      maintain_directory_structure: false,
+      patch_profile: :parity
     ).run
   end
 
@@ -37,12 +37,10 @@ RSpec.describe RHDL::Examples::AO486::Import::CpuParityPackage do
     Dir.mktmpdir('ao486_cpu_parity_out') do |out_dir|
       Dir.mktmpdir('ao486_cpu_parity_ws') do |workspace|
         result = run_importer(out_dir: out_dir, workspace: workspace)
-        parity = described_class.from_cleaned_mlir(File.read(result.normalized_core_mlir_path))
+        imported = RHDL::Codegen.import_circt_mlir(File.read(result.normalized_core_mlir_path), strict: false, top: 'ao486')
+        expect(imported.success?).to be(true), Array(imported.diagnostics).join("\n")
 
-        expect(parity[:success]).to be(true), Array(parity[:diagnostics]).join("\n")
-        expect(parity[:package]).not_to be_nil
-
-        flat = RHDL::Codegen::CIRCT::Flatten.to_flat_module(parity[:package], top: 'ao486')
+        flat = RHDL::Codegen::CIRCT::Flatten.to_flat_module(imported.modules, top: 'ao486')
         ir_json = RHDL::Sim::Native::IR.sim_json(flat, backend: backend)
         sim = RHDL::Sim::Native::IR::Simulator.new(ir_json, backend: backend)
 

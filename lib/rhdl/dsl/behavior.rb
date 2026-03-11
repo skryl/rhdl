@@ -1111,7 +1111,7 @@ module RHDL
           # Define propagate method if this is a Component
           # BUT only if sequential is NOT defined (sequential handles its own propagate
           # and will call execute_behavior_for_simulation itself)
-          sequential_block_defined = respond_to?(:_sequential_block) && !_sequential_block.nil?
+          sequential_block_defined = respond_to?(:sequential_defined?) && sequential_defined?
           if ancestors.include?(RHDL::Sim::Component) && !sequential_block_defined
             define_method(:propagate) do
               # Delegate hierarchical scheduling to Component#propagate_subcomponents
