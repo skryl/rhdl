@@ -1,0 +1,26 @@
+diff --git a/os2wb/os2wb.v b/os2wb/os2wb.v
+--- a/os2wb/os2wb.v
++++ b/os2wb/os2wb.v
+@@ -1015,7 +1015,7 @@ always @(posedge clk or negedge rstn)
+                if(!fp_rdy)
+                   state<=`FP_WAIT; // Else wait for another one if it is not here still
+          `CPX_SEND_ETH_IRQ:
+             begin
+-               cpx_packet_1<=145'h1_7_000_000000000000001D_000000000000_001D;
++               cpx_packet_1<=145'b0;
+                eth_int_sent<=0;
+                state<=`CPX_READY_1;
+             end
+diff --git a/os2wb/os2wb_dual.v b/os2wb/os2wb_dual.v
+--- a/os2wb/os2wb_dual.v
++++ b/os2wb/os2wb_dual.v
+@@ -996,7 +996,7 @@ always @(posedge clk or negedge rstn)
+                if(!fp_rdy)
+                   state<=`FP_WAIT; // Else wait for another one if it is not here still
+          `CPX_SEND_ETH_IRQ:
+             begin
+-               cpx_packet_1<=145'h1_7_000_000000000000001D_000000000000_001D;
++               cpx_packet_1<=145'b0;
+                eth_int_sent<=0;
+                state<=`CPX_READY_1;
+             end

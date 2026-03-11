@@ -79,6 +79,8 @@ RSpec.describe RHDL::Examples::SPARC64::Integration::StagedVerilogBundle do
     expect(os2wb_source).to include('cpx_packet_1[127:0]<={wb_data_i[63:32],wb_data_i[63:32],wb_data_i[63:32],wb_data_i[63:32]};')
     expect(os2wb_source).to include("cpx_packet<=145'h1700000000000000000000000000000010001;")
     expect(os2wb_source).to include('cpx_ready<=1;')
+    expect(os2wb_source).not_to include("cpx_packet_1<=145'h1_7_000_000000000000001D_000000000000_001D;")
+    expect(os2wb_source).to include("cpx_packet_1<=145'b0;")
 
     os2wb_dual_source = File.read(os2wb_dual_file)
     expect(os2wb_dual_source).to include('`define TEST_DRAM        0')
@@ -104,6 +106,8 @@ RSpec.describe RHDL::Examples::SPARC64::Integration::StagedVerilogBundle do
     expect(os2wb_dual_source).not_to include("cpx_packet<=145'h1700000000000000000000000000000010001;")
     expect(os2wb_dual_source).to include('cpx_packet<=145\'b0;')
     expect(os2wb_dual_source).to include('cpx_ready<=0;')
+    expect(os2wb_dual_source).not_to include("cpx_packet_1<=145'h1_7_000_000000000000001D_000000000000_001D;")
+    expect(os2wb_dual_source).to include("cpx_packet_1<=145'b0;")
 
 	    staged_irf_register_source = File.read(staged_irf_register_file)
 	    expect(staged_irf_register_source).to include('reg	[71:0]	reg_th0 /* verilator public_flat_rw */;')

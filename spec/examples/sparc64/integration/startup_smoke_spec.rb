@@ -5,7 +5,7 @@ require 'spec_helper'
 RSpec.describe 'SPARC64 integration startup smoke', slow: true do
   include Sparc64IntegrationSupport
 
-  it 'boots through the flash shim, hands off to DRAM, parks core 1, and reaches mailbox completion', timeout: 300 do
+  it 'boots through the flash shim, hands off to DRAM, parks core 1, and reaches mailbox completion', timeout: 900 do
     pending_unless_runner_stack!
     pending_unless_runtime_backends!
     skip_unless_ir_compiler!

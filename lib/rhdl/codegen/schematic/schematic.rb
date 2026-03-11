@@ -145,7 +145,28 @@ module RHDL
           target = assign['target'].to_s.strip
           next if target.empty?
           target_ref = signal_ref(target, path_tokens, live_names)
-          sources = collect_expr_signal_names(assign['expr']).to_a.sort.map do |name|
+          fallback_expr_signal_names = lambda do |expr|
+            case expr
+            when Hash
+              expr.flat_map do |key, value|
+                key_name = key.to_s
+                if %w[name signal source operand left right base cond when_true when_false expr].include?(key_name) && value.is_a?(String)
+                  [value]
+                else
+                  fallback_expr_signal_names.call(value)
+                end
+              end
+            when Array
+              expr.flat_map { |entry| fallback_expr_signal_names.call(entry) }
+            else
+              []
+            end
+          end
+          source_names = collect_expr_signal_names(assign['expr']).to_a
+          if source_names.empty?
+            source_names = fallback_expr_signal_names.call(assign['expr'])
+          end
+          sources = source_names.uniq.sort.map do |name|
             signal_ref(name, path_tokens, live_names)
           end.compact
           {

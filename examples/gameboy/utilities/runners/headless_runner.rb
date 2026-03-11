@@ -63,6 +63,13 @@ module RHDL
         @runner.load_rom(bytes, base_addr: base_addr)
       end
 
+      def load_boot_rom(path_or_bytes = nil)
+        return false unless @runner.respond_to?(:load_boot_rom)
+
+        @runner.load_boot_rom(path_or_bytes)
+        true
+      end
+
       # Load RAM (for testing)
       def load_ram(bytes, base_addr:)
         @runner.load_ram(bytes, base_addr: base_addr)
@@ -93,6 +100,18 @@ module RHDL
         @runner.cycle_count
       end
 
+      def frame_count
+        return 0 unless @runner.respond_to?(:frame_count)
+
+        @runner.frame_count
+      end
+
+      def read_framebuffer
+        return Array.new(0) unless @runner.respond_to?(:read_framebuffer)
+
+        @runner.read_framebuffer
+      end
+
       # Check if using native implementation
       def native?
         @runner.native?
@@ -113,6 +132,12 @@ module RHDL
         else
           @sim_backend
         end
+      end
+
+      def close
+        return false unless @runner.respond_to?(:close)
+
+        @runner.close
       end
 
       # Get ROM size (for verification)

@@ -196,7 +196,7 @@ RSpec.describe RHDL::Examples::SPARC64::IrRunner do
     expect(runner.native?).to be(true)
   end
 
-  it 'raises a clear error when compiler-backed input exceeds the current 128-bit backend ceiling' do
+  it 'raises a clear error when compiler-backed input contains a non-zero literal beyond the current 128-bit runtime value limit' do
     ir = RHDL::Codegen::CIRCT::IR
     wide_component_class = Class.new do
       define_singleton_method(:to_flat_circt_nodes) do
@@ -226,7 +226,52 @@ RSpec.describe RHDL::Examples::SPARC64::IrRunner do
       described_class.new(component_class: wide_component_class, backend: :compile, strict_runner_kind: false)
     end.to raise_error(
       RuntimeError,
-      /supports signals up to 128 bits; imported design reaches 1440 bits.*first non-zero overwide literal is 145 bits/
+      /rejects non-zero literals wider than 128 bits; imported design reaches 1440 bits.*first non-zero overwide literal is 145 bits/
     )
+  end
+
+  it 'does not pre-reject overwide internal state when no non-zero literal exceeds 128 bits' do
+    ir = RHDL::Codegen::CIRCT::IR
+    wide_component_class = Class.new do
+      define_singleton_method(:to_flat_circt_nodes) do
+        ir::ModuleOp.new(
+          name: 'wide_top',
+          ports: [
+            ir::Port.new(name: 'clk', direction: :in, width: 1),
+            ir::Port.new(name: 'out', direction: :out, width: 1)
+          ],
+          nets: [ir::Net.new(name: 'store_buffer', width: 1_440)],
+          regs: [],
+          assigns: [
+            ir::Assign.new(
+              target: 'out',
+              expr: ir::Literal.new(value: 1, width: 1)
+            )
+          ],
+          processes: [],
+          instances: [],
+          memories: [],
+          write_ports: [],
+          sync_read_ports: [],
+          parameters: {}
+        )
+      end
+    end
+
+    simulator = instance_double(
+      RHDL::Sim::Native::IR::Simulator,
+      native?: true,
+      simulator_type: :ir_compile,
+      runner_kind: :sparc64
+    )
+    expect(RHDL::Sim::Native::IR).to receive(:sim_json).with(instance_of(RHDL::Codegen::CIRCT::IR::ModuleOp), backend: :compile)
+                                                      .and_return('{"circt_json_version":1,"modules":[{"name":"wide_top"}]}')
+    expect(RHDL::Sim::Native::IR::Simulator).to receive(:new)
+      .with('{"circt_json_version":1,"modules":[{"name":"wide_top"}]}', backend: :compile)
+      .and_return(simulator)
+
+    runner = described_class.new(component_class: wide_component_class, backend: :compile, strict_runner_kind: false)
+
+    expect(runner.sim).to eq(simulator)
   end
 end

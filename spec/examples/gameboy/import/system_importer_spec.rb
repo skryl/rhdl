@@ -610,8 +610,6 @@ RSpec.describe RHDL::Examples::GameBoy::Import::SystemImporter do
           expect(File.read(wrapper_path)).to include('class Gameboy < RHDL::Sim::SequentialComponent')
           expect(File.read(wrapper_path)).to include('instance :speed_ctrl, Speedcontrol')
           expect(File.read(wrapper_path)).to include('instance :gb_core, Gb')
-          expect(File.read(wrapper_path)).to include('input :cart_oe')
-          expect(File.read(wrapper_path)).to include('input :cart_ram_size, width: 8')
           expect(File.read(wrapper_path)).to include('port :const_zero => [:speed_ctrl, :pause]')
           expect(File.read(wrapper_path)).to include('port :const_zero => [:speed_ctrl, :DMA_on]')
           expect(File.read(wrapper_path)).to include('port :const_zero => [:speed_ctrl, :speedup]')
@@ -619,7 +617,8 @@ RSpec.describe RHDL::Examples::GameBoy::Import::SystemImporter do
           expect(File.read(wrapper_path)).to include('port :const_zero => [:gb_core, :gg_reset]')
           expect(File.read(wrapper_path)).to include('port :const_one => [:gb_core, :serial_data_in]')
           expect(File.read(wrapper_path)).to include('port :const_zero => [:gb_core, :increaseSSHeaderCount]')
-          expect(File.read(wrapper_path)).to include('port :cart_ram_size => [:gb_core, :cart_ram_size]')
+          expect(File.read(wrapper_path)).to include('port :const_one => [:gb_core, :cart_oe]')
+          expect(File.read(wrapper_path)).to include('port :const_zero_8 => [:gb_core, :cart_ram_size]')
           expect(File.read(wrapper_path)).not_to include('input :ce')
 
           report = JSON.parse(File.read(result.report_path))

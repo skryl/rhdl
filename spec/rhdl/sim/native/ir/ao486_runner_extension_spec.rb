@@ -1872,7 +1872,9 @@ RSpec.describe 'IR compiler AO486 runner extension' do
     expect(sim.peek('observed_dx')).to eq(0x0000)
     expect(sim.peek('observed_flags')).to eq(0)
     expect(sim.runner_ao486_last_io_write).to eq({ address: 0x0EDA, length: 1, data: 0x0000_0000 })
-    expect(sim.runner_ao486_dos_int13_state).to eq({ ax: 0x0201, result_ax: 0x0001, flags: 0 })
+    expect(sim.runner_ao486_dos_int13_state).to eq(
+      { ax: 0x0201, bx: 0x0000, cx: 0x0002, dx: 0x0000, result_ax: 0x0001, flags: 0 }
+    )
     expect(sim.runner_read_memory(0x0600, 16, mapped: false)).to eq(stage_sector.first(16))
   end
 

@@ -590,6 +590,18 @@ impl Ao486Extension {
             | ((self.dos_int13_result_flags as u64) << 32)
     }
 
+    pub fn dos_int13_bx_probe(&self) -> u64 {
+        self.dos_int13_bx as u64
+    }
+
+    pub fn dos_int13_cx_probe(&self) -> u64 {
+        self.dos_int13_cx as u64
+    }
+
+    pub fn dos_int13_dx_probe(&self) -> u64 {
+        self.dos_int13_dx as u64
+    }
+
     pub fn dos_int10_state_probe(&self) -> u64 {
         (self.dos_int10_ax as u64) | ((self.dos_int10_result_ax as u64) << 16)
     }

@@ -245,7 +245,14 @@ module RHDL
 
         def emit_component(mod, class_name, diagnostics, strict: false)
           structure_plan = build_structure_plan(mod, diagnostics)
-          dsl_features = dsl_features_for_module(mod, structure_plan: structure_plan)
+          memory_plan = build_memory_plan(mod, diagnostics)
+          combined_structure_plan = {
+            lines: structure_plan[:lines],
+            bridge_assignments: Array(structure_plan[:bridge_assignments]) + Array(memory_plan[:bridge_assignments]),
+            bridge_wires: Array(structure_plan[:bridge_wires]) + Array(memory_plan[:bridge_wires]),
+            structural_output_targets: structure_plan[:structural_output_targets]
+          }
+          dsl_features = dsl_features_for_module(mod, structure_plan: combined_structure_plan)
           base = dsl_features[:sequential] ? 'RHDL::Sim::SequentialComponent' : 'RHDL::Sim::Component'
 
           lines = []
@@ -268,7 +275,9 @@ module RHDL
           end
           lines << ''
 
-          extra_wires = structure_plan[:bridge_wires]
+          emit_memory_declarations(lines, memory_plan)
+
+          extra_wires = combined_structure_plan[:bridge_wires]
           inferred_wires = infer_referenced_internal_wires(mod, extra_wires: extra_wires)
           emit_internal_wires(lines, mod, extra_wires: extra_wires + inferred_wires)
           emit_structure(lines, structure_plan)
@@ -282,7 +291,7 @@ module RHDL
             mod,
             diagnostics,
             strict: strict,
-            bridge_assignments: structure_plan[:bridge_assignments],
+            bridge_assignments: combined_structure_plan[:bridge_assignments],
             structural_output_targets: structure_plan[:structural_output_targets],
             behavior_plan: dsl_features[:behavior_plan]
           )
@@ -404,6 +413,72 @@ module RHDL
           end
 
           lines << '' if emitted.positive?
+        end
+
+        def build_memory_plan(mod, _diagnostics)
+          memory_by_name = Array(mod.memories).each_with_object({}) { |memory, acc| acc[memory.name.to_s] = memory }
+          declaration_lines = Array(mod.memories).map do |memory|
+            "  memory :#{sanitize_name(memory.name)}, depth: #{memory.depth.to_i}, width: #{memory.width.to_i}"
+          end
+
+          bridge_assignments = []
+          bridge_wires = []
+
+          Array(mod.write_ports).each_with_index do |write_port, idx|
+            memory = memory_by_name[write_port.memory.to_s]
+            addr_name = "#{sanitize_name(write_port.memory)}__write_addr_#{idx}"
+            data_name = "#{sanitize_name(write_port.memory)}__write_data_#{idx}"
+            enable_name = "#{sanitize_name(write_port.memory)}__write_enable_#{idx}"
+
+            bridge_wires << { name: addr_name, width: write_port.addr.width.to_i }
+            bridge_wires << { name: data_name, width: write_port.data.width.to_i }
+            bridge_wires << { name: enable_name, width: 1 }
+            bridge_assignments << IR::Assign.new(target: addr_name, expr: write_port.addr)
+            bridge_assignments << IR::Assign.new(target: data_name, expr: write_port.data)
+            bridge_assignments << IR::Assign.new(target: enable_name, expr: write_port.enable)
+
+            declaration_lines << format(
+              "  sync_write :%s, clock: :%s, enable: :%s, addr: :%s, data: :%s",
+              sanitize_name(write_port.memory),
+              sanitize_name(write_port.clock),
+              sanitize_name(enable_name),
+              sanitize_name(addr_name),
+              sanitize_name(data_name)
+            )
+
+            next unless memory
+          end
+
+          Array(mod.sync_read_ports).each_with_index do |read_port, idx|
+            addr_name = "#{sanitize_name(read_port.memory)}__read_addr_#{idx}"
+            enable_name = "#{sanitize_name(read_port.memory)}__read_enable_#{idx}"
+            bridge_wires << { name: addr_name, width: read_port.addr.width.to_i }
+            bridge_assignments << IR::Assign.new(target: addr_name, expr: read_port.addr)
+
+            read_line = +"  sync_read :#{sanitize_name(read_port.data)}, from: :#{sanitize_name(read_port.memory)},"
+            read_line << " clock: :#{sanitize_name(read_port.clock)}, addr: :#{sanitize_name(addr_name)}"
+
+            if read_port.enable
+              bridge_wires << { name: enable_name, width: 1 }
+              bridge_assignments << IR::Assign.new(target: enable_name, expr: read_port.enable)
+              read_line << ", enable: :#{sanitize_name(enable_name)}"
+            end
+
+            declaration_lines << read_line
+          end
+
+          {
+            lines: declaration_lines,
+            bridge_assignments: bridge_assignments,
+            bridge_wires: bridge_wires
+          }
+        end
+
+        def emit_memory_declarations(lines, memory_plan)
+          return if Array(memory_plan[:lines]).empty?
+
+          lines.concat(Array(memory_plan[:lines]))
+          lines << ''
         end
 
         def emit_internal_wires(lines, mod, extra_wires: [])
@@ -1306,25 +1381,10 @@ module RHDL
               expr.default ? expr_to_ruby_cached(expr.default, diagnostics, strict: strict, cache: cache) : '0'
             end
           when IR::MemoryRead
-            if strict
-              diagnostics << Diagnostic.new(
-                severity: :error,
-                message: 'Memory read lowering is unsupported in CIRCT->DSL strict raise',
-                line: nil,
-                column: nil,
-                op: 'raise.memory_read'
-              )
-              nil
-            else
-              diagnostics << Diagnostic.new(
-                severity: :warning,
-                message: 'Memory read lowering is unsupported in CIRCT->DSL v1',
-                line: nil,
-                column: nil,
-                op: 'raise.memory_read'
-              )
-              '0'
-            end
+            addr = expr_to_ruby_cached(expr.addr, diagnostics, strict: strict, cache: cache)
+            return nil if addr.nil?
+
+            "mem_read_expr(:#{sanitize_name(expr.memory)}, #{addr}, width: #{expr.width.to_i})"
           else
             if strict
               diagnostics << Diagnostic.new(

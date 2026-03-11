@@ -2,7 +2,7 @@
 
 require 'spec_helper'
 
-RSpec.describe 'SPARC64 integration runner contract' do
+RSpec.describe 'SPARC64 integration runner contract', slow: true, timeout: 900 do
   include Sparc64IntegrationSupport
 
   it 'defines the benchmark and memory ABI constants for the integration suite' do

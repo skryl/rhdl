@@ -982,37 +982,51 @@ RSpec.describe RHDL::Codegen::CIRCT::Raise do
       expect(generated).not_to include('y <= 0')
     end
 
-    it 'fails raise when expression lowering has unsupported semantics' do
+    it 'emits MemoryRead expressions and memory write ports in strict mode' do
       mod = ir::ModuleOp.new(
         name: 'unsupported_expr',
-        ports: [ir::Port.new(name: :y, direction: :out, width: 8)],
+        ports: [
+          ir::Port.new(name: :clk, direction: :in, width: 1),
+          ir::Port.new(name: :addr, direction: :in, width: 8),
+          ir::Port.new(name: :din, direction: :in, width: 8),
+          ir::Port.new(name: :we, direction: :in, width: 1),
+          ir::Port.new(name: :y, direction: :out, width: 8)
+        ],
         nets: [],
         regs: [],
+        memories: [ir::Memory.new(name: :ram, depth: 16, width: 8, initial_data: [])],
         assigns: [
           ir::Assign.new(
             target: :y,
             expr: ir::MemoryRead.new(
               memory: :ram,
-              addr: ir::Literal.new(value: 0, width: 8),
+              addr: ir::Signal.new(name: :addr, width: 8),
               width: 8
             )
           )
         ],
         processes: [],
         instances: [],
-        memories: [],
-        write_ports: [],
+        write_ports: [
+          ir::MemoryWritePort.new(
+            memory: :ram,
+            clock: :clk,
+            addr: ir::Signal.new(name: :addr, width: 8),
+            data: ir::Signal.new(name: :din, width: 8),
+            enable: ir::Signal.new(name: :we, width: 1)
+          )
+        ],
         sync_read_ports: [],
         parameters: {}
       )
 
       result = described_class.to_dsl(mod, out_dir: tmp_dir, top: 'unsupported_expr', strict: true)
-      expect(result.success?).to be(false)
-      expect(
-        result.diagnostics.any? do |d|
-          d.op == 'raise.memory_read' && d.severity.to_s == 'error'
-        end
-      ).to be(true)
+      expect(result.success?).to be(true), result.diagnostics.map(&:message).join("\n")
+
+      generated = File.read(File.join(tmp_dir, 'unsupported_expr.rb'))
+      expect(generated).to include('memory :ram, depth: 16, width: 8')
+      expect(generated).to include('sync_write :ram, clock: :clk')
+      expect(generated).to include('mem_read_expr(:ram, addr, width: 8)')
     end
 
     it 'returns an error diagnostic when requested top module is missing' do

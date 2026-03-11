@@ -118,6 +118,9 @@ module RHDL
         RUNNER_PROBE_AO486_DOS_INT10_STATE = 23
         RUNNER_PROBE_AO486_DOS_INT16_STATE = 24
         RUNNER_PROBE_AO486_DOS_INT1A_STATE = 25
+        RUNNER_PROBE_AO486_DOS_INT13_BX = 26
+        RUNNER_PROBE_AO486_DOS_INT13_CX = 27
+        RUNNER_PROBE_AO486_DOS_INT13_DX = 28
 
         SIM_CAP_SIGNAL_INDEX = 1 << 0
         SIM_CAP_FORCED_CLOCK = 1 << 1
@@ -765,7 +768,11 @@ module RHDL
         def runner_ao486_dos_int13_state
           return nil unless ao486_mode?
 
-          unpack_ao486_dos_state(runner_probe(RUNNER_PROBE_AO486_DOS_INT13_STATE), with_flags: true)
+          unpack_ao486_dos_state(runner_probe(RUNNER_PROBE_AO486_DOS_INT13_STATE), with_flags: true).merge(
+            bx: runner_probe(RUNNER_PROBE_AO486_DOS_INT13_BX).to_i & 0xFFFF,
+            cx: runner_probe(RUNNER_PROBE_AO486_DOS_INT13_CX).to_i & 0xFFFF,
+            dx: runner_probe(RUNNER_PROBE_AO486_DOS_INT13_DX).to_i & 0xFFFF
+          )
         end
 
         def runner_ao486_dos_int10_state

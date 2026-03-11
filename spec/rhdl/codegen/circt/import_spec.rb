@@ -963,6 +963,190 @@ RSpec.describe RHDL::Codegen::CIRCT::Import do
       expect(select_terminal.call(expr, 3).value).to eq(1)
     end
 
+    it 'preserves seq.firreg array state as CIRCT memory IR' do
+      mlir = <<~MLIR
+        hw.module @array_mem(%clk: i1, %rd: i2, %wr: i2, %we: i1, %din: i8) -> (y: i8) {
+          %read = hw.array_get %mem[%rd] : !hw.array<4xi8>, i2
+          %next_arr = hw.array_inject %mem[%wr], %din : !hw.array<4xi8>, i2
+          %next = comb.mux %we, %next_arr, %mem : !hw.array<4xi8>
+          %clock = seq.to_clock %clk
+          %mem = seq.firreg %next clock %clock : !hw.array<4xi8>
+          hw.output %read : i8
+        }
+      MLIR
+
+      result = described_class.from_mlir(mlir, strict: true)
+      expect(result.success?).to be(true), result.diagnostics.map(&:message).join("\n")
+
+      mod = result.modules.first
+      expect(mod.memories.map(&:name)).to eq(['mem'])
+      expect(mod.memories.first.depth).to eq(4)
+      expect(mod.memories.first.width).to eq(8)
+      expect(mod.regs.map(&:name)).not_to include('mem')
+
+      expect(mod.write_ports.length).to eq(1)
+      write_port = mod.write_ports.first
+      expect(write_port.memory).to eq('mem')
+      expect(write_port.clock).to eq('clk')
+      expect(write_port.addr).to be_a(RHDL::Codegen::CIRCT::IR::Signal)
+      expect(write_port.addr.name).to eq('wr')
+      expect(write_port.data).to be_a(RHDL::Codegen::CIRCT::IR::Signal)
+      expect(write_port.data.name).to eq('din')
+      expect(write_port.enable).to be_a(RHDL::Codegen::CIRCT::IR::Signal)
+      expect(write_port.enable.name).to eq('we')
+
+      expect(mod.assigns.length).to eq(1)
+      expect(mod.assigns.first.target).to eq('y')
+      expect(mod.assigns.first.expr).to be_a(RHDL::Codegen::CIRCT::IR::MemoryRead)
+      expect(mod.assigns.first.expr.memory).to eq('mem')
+      expect(mod.assigns.first.expr.addr).to be_a(RHDL::Codegen::CIRCT::IR::Signal)
+      expect(mod.assigns.first.expr.addr.name).to eq('rd')
+    end
+
+    it 'recovers packed vector register files as CIRCT memory IR' do
+      mlir = <<~MLIR
+        hw.module @packed_mem(%clk: i1, %sel: i2, %wr: i2, %we: i1, %din: i8) -> (y: i8) {
+          %clock = seq.to_clock %clk
+          %c0 = hw.constant 0 : i2
+          %c1 = hw.constant 1 : i2
+          %c2 = hw.constant 2 : i2
+          %c3 = hw.constant 3 : i2
+          %slot3 = comb.extract %mem from 24 : (i32) -> i8
+          %slot2 = comb.extract %mem from 16 : (i32) -> i8
+          %slot1 = comb.extract %mem from 8 : (i32) -> i8
+          %slot0 = comb.extract %mem from 0 : (i32) -> i8
+          %w3 = comb.icmp eq %wr, %c3 : i2
+          %w2 = comb.icmp eq %wr, %c2 : i2
+          %w1 = comb.icmp eq %wr, %c1 : i2
+          %w0 = comb.icmp eq %wr, %c0 : i2
+          %p3 = comb.mux %w3, %din, %slot3 : i8
+          %p2 = comb.mux %w2, %din, %slot2 : i8
+          %p1 = comb.mux %w1, %din, %slot1 : i8
+          %p0 = comb.mux %w0, %din, %slot0 : i8
+          %packed = comb.concat %p3, %p2, %p1, %p0 : i8, i8, i8, i8
+          %next = comb.mux %we, %packed, %mem : i32
+          %mem = seq.compreg %next, %clock : i32
+          %read3 = comb.extract %mem from 24 : (i32) -> i8
+          hw.output %read3 : i8
+        }
+      MLIR
+
+      result = described_class.from_mlir(mlir, strict: true)
+      expect(result.success?).to be(true), result.diagnostics.map(&:message).join("\n")
+
+      mod = result.modules.first
+      expect(mod.memories.map(&:name)).to eq(['mem'])
+      expect(mod.memories.first.depth).to eq(4)
+      expect(mod.memories.first.width).to eq(8)
+      expect(mod.regs.map(&:name)).not_to include('mem')
+
+      expect(mod.write_ports.length).to eq(1)
+      expect(mod.write_ports.first.memory).to eq('mem')
+      expect(mod.write_ports.first.clock).to eq('clk')
+      expect(mod.write_ports.first.enable).to be_a(RHDL::Codegen::CIRCT::IR::Signal)
+      expect(mod.write_ports.first.enable.name).to eq('we')
+
+      expect(mod.assigns.first.expr).to be_a(RHDL::Codegen::CIRCT::IR::MemoryRead)
+      expect(mod.assigns.first.expr.memory).to eq('mem')
+      expect(mod.assigns.first.expr.addr).to be_a(RHDL::Codegen::CIRCT::IR::Literal)
+      expect(mod.assigns.first.expr.addr.value).to eq(3)
+    end
+
+    it 'parses seq.firmem read and write ports as CIRCT memory IR' do
+      mlir = <<~MLIR
+        hw.module @firmem_mod(%clk: i1, %addr: i2, %waddr: i2, %din: i8, %we: i1) -> (y: i8) {
+          %clock = seq.to_clock %clk
+          %ram = seq.firmem 0, 1, undefined, port_order : <4 x 8>
+          %rd = seq.firmem.read_port %ram[%addr], clock %clock : <4 x 8>
+          seq.firmem.write_port %ram[%waddr] = %din, clock %clock enable %we : <4 x 8>
+          hw.output %rd : i8
+        }
+      MLIR
+
+      result = described_class.from_mlir(mlir, strict: true)
+      expect(result.success?).to be(true), result.diagnostics.map(&:message).join("\n")
+
+      mod = result.modules.first
+      expect(mod.memories.map(&:name)).to eq(['ram'])
+      expect(mod.memories.first.depth).to eq(4)
+      expect(mod.memories.first.width).to eq(8)
+      expect(mod.write_ports.length).to eq(1)
+      expect(mod.write_ports.first.memory).to eq('ram')
+      expect(mod.write_ports.first.clock).to eq('clk')
+      expect(mod.assigns.first.expr).to be_a(RHDL::Codegen::CIRCT::IR::MemoryRead)
+      expect(mod.assigns.first.expr.memory).to eq('ram')
+      expect(mod.assigns.first.expr.addr).to be_a(RHDL::Codegen::CIRCT::IR::Signal)
+      expect(mod.assigns.first.expr.addr.name).to eq('addr')
+    end
+
+    it 'recovers llhd array state and shadow copies as CIRCT memories' do
+      mlir = <<~MLIR
+        hw.module @repro(in %clk : i1, in %addr : i5, in %din : i45, out y : i45) {
+          %0 = llhd.constant_time <0s, 0d, 1e>
+          %true = hw.constant true
+          %false = hw.constant false
+          %c0_i32 = hw.constant 0 : i32
+          %c1_i32 = hw.constant 1 : i32
+          %c32_i32 = hw.constant 32 : i32
+          %c31_i32 = hw.constant 31 : i32
+          %c0_i27 = hw.constant 0 : i27
+          %c-1_i5 = hw.constant -1 : i5
+          %c0_i1440 = hw.constant 0 : i1440
+          %1 = hw.bitcast %c0_i1440 : (i1440) -> !hw.array<32xi45>
+          %mem = llhd.sig %1 : !hw.array<32xi45>
+          %2 = llhd.prb %mem : !hw.array<32xi45>
+          %mem_d = llhd.sig %1 : !hw.array<32xi45>
+          %3:6 = llhd.process -> i32, i1, !hw.array<32xi45>, i1, !hw.array<32xi45>, i1 {
+            cf.br ^bb1(%clk, %1, %false, %c0_i32, %false, %1, %false : i1, !hw.array<32xi45>, i1, i32, i1, !hw.array<32xi45>, i1)
+          ^bb1(%51: i1, %52: !hw.array<32xi45>, %53: i1, %54: i32, %55: i1, %56: !hw.array<32xi45>, %57: i1):
+            llhd.wait yield (%54, %55, %52, %53, %56, %57 : i32, i1, !hw.array<32xi45>, i1, !hw.array<32xi45>, i1), (%clk : i1), ^bb2(%51 : i1)
+          ^bb2(%58: i1):
+            %59 = comb.xor bin %58, %true : i1
+            %60 = comb.and bin %59, %clk : i1
+            cf.cond_br %60, ^bb3, ^bb1(%clk, %2, %false, %c0_i32, %false, %4, %false : i1, !hw.array<32xi45>, i1, i32, i1, !hw.array<32xi45>, i1)
+          ^bb3:
+            %61 = comb.sub %c-1_i5, %addr : i5
+            %62 = hw.array_inject %2[%61], %din : !hw.array<32xi45>, i5
+            cf.br ^bb4(%c0_i32, %4, %false : i32, !hw.array<32xi45>, i1)
+          ^bb4(%63: i32, %64: !hw.array<32xi45>, %65: i1):
+            %66 = comb.icmp slt %63, %c32_i32 : i32
+            cf.cond_br %66, ^bb5, ^bb1(%clk, %62, %true, %63, %true, %64, %65 : i1, !hw.array<32xi45>, i1, i32, i1, !hw.array<32xi45>, i1)
+          ^bb5:
+            %67 = comb.sub %c31_i32, %63 : i32
+            %68 = comb.extract %67 from 5 : (i32) -> i27
+            %69 = comb.icmp eq %68, %c0_i27 : i27
+            %70 = comb.extract %67 from 0 : (i32) -> i5
+            %71 = comb.mux %69, %70, %c-1_i5 : i5
+            %72 = hw.array_get %2[%71] : !hw.array<32xi45>, i5
+            %73 = hw.array_inject %64[%71], %72 : !hw.array<32xi45>, i5
+            %74 = comb.add %63, %c1_i32 : i32
+            cf.br ^bb4(%74, %73, %true : i32, !hw.array<32xi45>, i1)
+          }
+          llhd.drv %mem, %3#2 after %0 if %3#3 : !hw.array<32xi45>
+          llhd.drv %mem_d, %3#4 after %0 if %3#5 : !hw.array<32xi45>
+          %4 = llhd.prb %mem_d : !hw.array<32xi45>
+          %5 = hw.array_get %4[%c-1_i5] : !hw.array<32xi45>, i5
+          hw.output %5 : i45
+        }
+      MLIR
+
+      result = described_class.from_mlir(mlir, strict: true)
+      expect(result.success?).to be(true), result.diagnostics.map(&:message).join("\n")
+
+      mod = result.modules.first
+      expect(mod.memories.map(&:name)).to include('mem', 'mem_d')
+      expect(mod.regs.none? { |reg| reg.width.to_i > 128 }).to be(true)
+
+      mem_write_ports = mod.write_ports.select { |port| port.memory == 'mem' }
+      expect(mem_write_ports.length).to eq(1)
+
+      shadow_write_ports = mod.write_ports.select { |port| port.memory == 'mem_d' }
+      expect(shadow_write_ports.length).to eq(32)
+      expect(shadow_write_ports.map { |port| port.addr.value }.sort).to eq((0...32).to_a)
+      expect(shadow_write_ports.map(&:data)).to all(be_a(RHDL::Codegen::CIRCT::IR::MemoryRead))
+      expect(shadow_write_ports.map { |port| port.data.memory }.uniq).to eq(['mem'])
+    end
+
     it 'parses hw.bitcast int<->array forms and llhd.sig.array_get' do
       mlir = <<~MLIR
         hw.module @array_llhd(%a: i16, %idx: i1) -> (y: i8, z: i16) {

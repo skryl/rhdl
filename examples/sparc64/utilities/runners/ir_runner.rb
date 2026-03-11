@@ -132,9 +132,9 @@ module RHDL
 
         def validate_compiler_width_support!(nodes_or_package)
           scan = scan_overwide_runtime_ir(nodes_or_package)
-          return if scan[:max_width] <= COMPILER_MAX_SIGNAL_WIDTH && scan[:literal].nil?
+          return if scan[:literal].nil?
 
-          message = +"Native IR compiler backend currently supports signals up to #{COMPILER_MAX_SIGNAL_WIDTH} bits"
+          message = +"Native IR compiler backend currently rejects non-zero literals wider than #{COMPILER_MAX_SIGNAL_WIDTH} bits"
           if scan[:max_width] > COMPILER_MAX_SIGNAL_WIDTH
             message << "; imported design reaches #{scan[:max_width]} bits"
             message << " at #{scan[:max_width_context]}" if scan[:max_width_context]

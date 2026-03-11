@@ -182,8 +182,7 @@ impl IrSimContext {
         {
             let needs_tick_helpers =
                 self.apple2.is_some() || self.gameboy.is_some() || self.mos6502.is_some();
-            let allow_runtime_only_fallback = self.sparc64.is_none();
-            if allow_runtime_only_fallback && self.core.should_use_runtime_only_compile(needs_tick_helpers) {
+            if self.core.should_use_runtime_only_compile(needs_tick_helpers) {
                 self.core.enable_runtime_only_compile();
                 return Ok(true);
             }
@@ -269,6 +268,9 @@ pub const RUNNER_PROBE_AO486_DOS_INT13_STATE: c_uint = 22;
 pub const RUNNER_PROBE_AO486_DOS_INT10_STATE: c_uint = 23;
 pub const RUNNER_PROBE_AO486_DOS_INT16_STATE: c_uint = 24;
 pub const RUNNER_PROBE_AO486_DOS_INT1A_STATE: c_uint = 25;
+pub const RUNNER_PROBE_AO486_DOS_INT13_BX: c_uint = 26;
+pub const RUNNER_PROBE_AO486_DOS_INT13_CX: c_uint = 27;
+pub const RUNNER_PROBE_AO486_DOS_INT13_DX: c_uint = 28;
 
 #[repr(C)]
 pub struct RunnerCaps {
@@ -1123,7 +1125,10 @@ pub unsafe extern "C" fn runner_get_caps(
         | bit(RUNNER_PROBE_AO486_DOS_INT13_STATE)
         | bit(RUNNER_PROBE_AO486_DOS_INT10_STATE)
         | bit(RUNNER_PROBE_AO486_DOS_INT16_STATE)
-        | bit(RUNNER_PROBE_AO486_DOS_INT1A_STATE);
+        | bit(RUNNER_PROBE_AO486_DOS_INT1A_STATE)
+        | bit(RUNNER_PROBE_AO486_DOS_INT13_BX)
+        | bit(RUNNER_PROBE_AO486_DOS_INT13_CX)
+        | bit(RUNNER_PROBE_AO486_DOS_INT13_DX);
 
     *caps_out = RunnerCaps {
         kind,
@@ -1468,6 +1473,21 @@ pub unsafe extern "C" fn runner_probe(ctx: *const IrSimContext, op: c_uint, arg0
             .ao486
             .as_ref()
             .map(|ext| ext.dos_int1a_state_probe())
+            .unwrap_or(0),
+        RUNNER_PROBE_AO486_DOS_INT13_BX => ctx_ref
+            .ao486
+            .as_ref()
+            .map(|ext| ext.dos_int13_bx_probe())
+            .unwrap_or(0),
+        RUNNER_PROBE_AO486_DOS_INT13_CX => ctx_ref
+            .ao486
+            .as_ref()
+            .map(|ext| ext.dos_int13_cx_probe())
+            .unwrap_or(0),
+        RUNNER_PROBE_AO486_DOS_INT13_DX => ctx_ref
+            .ao486
+            .as_ref()
+            .map(|ext| ext.dos_int13_dx_probe())
             .unwrap_or(0),
         _ => 0,
     }

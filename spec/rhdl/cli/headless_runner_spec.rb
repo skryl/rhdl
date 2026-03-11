@@ -334,6 +334,24 @@ RSpec.describe 'Headless Runners', :slow do
         expect(cpu_state).to have_key(:halted)
         expect(cpu_state).to have_key(:simulator_type)
       end
+
+      it 'delegates optional runtime helpers to the underlying runner' do
+        backend = instance_double(
+          'GameBoyBackend',
+          load_boot_rom: nil,
+          read_framebuffer: [[1, 2], [3, 4]],
+          frame_count: 7,
+          close: true
+        )
+
+        runner = RHDL::Examples::GameBoy::HeadlessRunner.allocate
+        runner.instance_variable_set(:@runner, backend)
+
+        expect(runner.load_boot_rom).to be(true)
+        expect(runner.read_framebuffer).to eq([[1, 2], [3, 4]])
+        expect(runner.frame_count).to eq(7)
+        expect(runner.close).to be(true)
+      end
     end
   end
 

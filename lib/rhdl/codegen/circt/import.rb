@@ -30,6 +30,7 @@ module RHDL
         LLHD_VALUE_TOKEN_PATTERN = '%[A-Za-z0-9_$.\\-]+(?:#\\d+)?'
         ARRAY_TYPE_PATTERN = /!hw\.array<(?<len>\d+)xi(?<width>\d+)>/
         LLHD_ARRAY_TYPE_PATTERN = /<\s*!hw\.array<(?<len>\d+)xi(?<width>\d+)>\s*>/
+        FIRMEM_TYPE_PATTERN = /<\s*(?<depth>\d+)\s*x\s*(?<width>\d+)\s*>/
 
         ArrayValue = Struct.new(:elements, :length, :element_width, keyword_init: true) do
           def width
@@ -38,6 +39,38 @@ module RHDL
         end
         ArrayMeta = Struct.new(:token, :name, :length, :element_width, keyword_init: true)
         ArrayElementRef = Struct.new(:array_token, :array_name, :length, :element_width, :index_expr, keyword_init: true)
+        ArrayForwardRef = Struct.new(:token, :name, :length, :element_width, keyword_init: true) do
+          def width
+            length.to_i * element_width.to_i
+          end
+        end
+        ArrayWriteCandidate = Struct.new(
+          :base_value,
+          :base_token,
+          :base_name,
+          :index_expr,
+          :new_element,
+          :length,
+          :element_width,
+          :enable_expr,
+          keyword_init: true
+        ) do
+          def width
+            length.to_i * element_width.to_i
+          end
+        end
+        class DeferredArrayRead < IR::Expr
+          attr_reader :base_token, :base_name, :addr, :length, :element_width
+
+          def initialize(base_token:, base_name:, addr:, length:, element_width:)
+            @base_token = base_token
+            @base_name = base_name
+            @addr = addr
+            @length = length
+            @element_width = element_width
+            super(width: element_width.to_i)
+          end
+        end
 
         def from_mlir(text, strict: false, top: nil, extern_modules: [], resolve_forward_refs: true)
           previous_array_elements_cache = Thread.current[:rhdl_circt_import_array_elements_cache]
@@ -84,6 +117,9 @@ module RHDL
             nets = []
             processes = []
             instances = []
+            memories = []
+            write_ports = []
+            sync_read_ports = []
             module_start_line = header[:line_no]
 
             idx = header[:next_idx]
@@ -194,6 +230,9 @@ module RHDL
                       assigns: assigns,
                       regs: regs,
                       nets: nets,
+                      memories: memories,
+                      write_ports: write_ports,
+                      sync_read_ports: sync_read_ports,
                       processes: processes,
                       instances: instances,
                       output_ports: output_ports,
@@ -236,6 +275,9 @@ module RHDL
                       assigns: assigns,
                       regs: regs,
                       nets: nets,
+                      memories: memories,
+                      write_ports: write_ports,
+                      sync_read_ports: sync_read_ports,
                       processes: processes,
                       instances: instances,
                       output_ports: output_ports,
@@ -261,6 +303,9 @@ module RHDL
                   assigns: assigns,
                   regs: regs,
                   nets: nets,
+                  memories: memories,
+                  write_ports: write_ports,
+                  sync_read_ports: sync_read_ports,
                   processes: processes,
                   instances: instances,
                   output_ports: output_ports,
@@ -283,6 +328,9 @@ module RHDL
                   assigns: assigns,
                   regs: regs,
                   nets: nets,
+                  memories: memories,
+                  write_ports: write_ports,
+                  sync_read_ports: sync_read_ports,
                   processes: processes,
                   instances: instances,
                   output_ports: output_ports,
@@ -303,6 +351,9 @@ module RHDL
                 assigns: assigns,
                 regs: regs,
                 nets: nets,
+                memories: memories,
+                write_ports: write_ports,
+                sync_read_ports: sync_read_ports,
                 processes: processes,
                 instances: instances,
                 output_ports: output_ports,
@@ -330,7 +381,8 @@ module RHDL
 
             if resolve_forward_refs && Thread.current[:rhdl_circt_import_forward_refs_seen]
               resolution_state = {
-                declared_names: declared_signal_names(input_ports, output_ports, nets, regs),
+                declared_names: declared_signal_names(input_ports, output_ports, nets, regs, memories),
+                memory_names: Array(memories).map { |memory| memory.name.to_s }.to_set,
                 signal_memo: {},
                 expr_memo: {}
               }
@@ -342,6 +394,16 @@ module RHDL
               )
               processes = resolve_forward_refs_in_processes(
                 processes,
+                value_map: value_map,
+                **resolution_state
+              )
+              write_ports = resolve_forward_refs_in_write_ports(
+                write_ports,
+                value_map: value_map,
+                **resolution_state
+              )
+              sync_read_ports = resolve_forward_refs_in_sync_read_ports(
+                sync_read_ports,
                 value_map: value_map,
                 **resolution_state
               )
@@ -361,9 +423,9 @@ module RHDL
               assigns: assigns,
               processes: processes,
               instances: instances,
-              memories: [],
-              write_ports: [],
-              sync_read_ports: [],
+              memories: memories,
+              write_ports: write_ports,
+              sync_read_ports: sync_read_ports,
               parameters: module_parameters
             )
           end
@@ -378,6 +440,7 @@ module RHDL
           )
 
           modules = normalize_instance_port_connections(modules)
+          modules = recover_memory_like_registers(modules)
 
           ImportResult.new(
             modules: modules,
@@ -1493,13 +1556,15 @@ module RHDL
             next unless m
 
             type = m[2].to_s.strip
+            array_type = array_type_from_string(type)
             width =
+              array_type&.dig(:total_width) ||
               integer_type_width(type) ||
               type.match(/!llhd\.ref<i(\d+)>/)&.captures&.first&.to_i ||
               type.match(/<i(\d+)>/)&.captures&.first&.to_i ||
               1
 
-            { name: m[1], width: width }
+            { name: m[1], width: width, array_type: array_type }
           end
         end
 
@@ -1526,8 +1591,12 @@ module RHDL
             arg_spec = block_args[idx]
             next unless arg_spec
 
-            width = [arg_spec[:width].to_i, 1].max
-            mapped[arg_spec[:name]] = lookup_value(value_map, arg_token, width: width)
+            if arg_spec[:array_type]
+              mapped[arg_spec[:name]] = lookup_array_value(value_map, arg_token, arg_spec[:array_type])
+            else
+              width = [arg_spec[:width].to_i, 1].max
+              mapped[arg_spec[:name]] = lookup_value(value_map, arg_token, width: width)
+            end
           end
           mapped
         end
@@ -1659,6 +1728,9 @@ module RHDL
           temp_assigns = []
           temp_regs = []
           temp_nets = []
+          temp_memories = []
+          temp_write_ports = []
+          temp_sync_read_ports = []
           temp_processes = []
           temp_instances = []
           parse_body_line(
@@ -1669,6 +1741,9 @@ module RHDL
             assigns: temp_assigns,
             regs: temp_regs,
             nets: temp_nets,
+            memories: temp_memories,
+            write_ports: temp_write_ports,
+            sync_read_ports: temp_sync_read_ports,
             processes: temp_processes,
             instances: temp_instances,
             output_ports: [],
@@ -1773,6 +1848,44 @@ module RHDL
           end
         end
 
+        def lookup_array_value(value_map, token, array_type)
+          normalized = normalize_value_token(token)
+          return value_map[normalized] if value_map.key?(normalized)
+
+          if normalized.start_with?('%')
+            Thread.current[:rhdl_circt_import_forward_refs_seen] = true
+            return ArrayForwardRef.new(
+              token: normalized,
+              name: normalized.sub('%', ''),
+              length: array_type[:len],
+              element_width: array_type[:element_width]
+            )
+          end
+
+          lookup_value(value_map, normalized, width: array_type[:total_width])
+        end
+
+        def parse_firmem_type(text)
+          match = text.to_s.match(FIRMEM_TYPE_PATTERN)
+          raise ArgumentError, "Invalid seq.firmem type: #{text}" unless match
+
+          {
+            depth: match[:depth].to_i,
+            width: match[:width].to_i
+          }
+        end
+
+        def array_base_matches?(value, base_token:, base_name:, total_width:)
+          case value
+          when ArrayForwardRef
+            value.token.to_s == base_token.to_s
+          when IR::Signal
+            value.name.to_s == base_name.to_s && value.width.to_i == total_width.to_i
+          else
+            false
+          end
+        end
+
         def write_array_elements(elements:, index_expr:, new_element:, element_width:)
           entries = Array(elements)
           return entries if entries.empty?
@@ -1805,6 +1918,15 @@ module RHDL
           case value
           when ArrayValue
             IR::Concat.new(parts: Array(value.elements).reverse, width: value.length.to_i * value.element_width.to_i)
+          when ArrayForwardRef
+            import_signal(name: value.name, width: value.width)
+          when ArrayWriteCandidate
+            IR::Concat.new(
+              parts: Array(
+                array_elements_from_value(value, length: value.length.to_i, element_width: value.element_width.to_i)
+              ).reverse,
+              width: value.width
+            )
           else
             value
           end
@@ -1932,6 +2054,9 @@ module RHDL
           temp_assigns = []
           temp_regs = []
           temp_nets = []
+          temp_memories = []
+          temp_write_ports = []
+          temp_sync_read_ports = []
           temp_processes = []
           temp_instances = []
 
@@ -1952,6 +2077,9 @@ module RHDL
               assigns: temp_assigns,
               regs: temp_regs,
               nets: temp_nets,
+              memories: temp_memories,
+              write_ports: temp_write_ports,
+              sync_read_ports: temp_sync_read_ports,
               processes: temp_processes,
               instances: temp_instances,
               output_ports: [],
@@ -2036,8 +2164,9 @@ module RHDL
           end
         end
 
-        def parse_body_line(body, value_map:, array_meta:, array_element_refs:, assigns:, regs:, nets:, processes:,
-                            instances:, output_ports:, diagnostics:, line_no:, strict: false)
+        def parse_body_line(body, value_map:, array_meta:, array_element_refs:, assigns:, regs:, nets:,
+                            memories:, write_ports:, sync_read_ports:, processes:, instances:, output_ports:,
+                            diagnostics:, line_no:, strict: false)
           body = normalize_body_line(body)
           return if body.empty? || body.start_with?('//')
           return if body.start_with?('dbg.variable ')
@@ -2182,38 +2311,65 @@ module RHDL
           if (m = body.match(/\A(#{SSA_TOKEN_PATTERN})\s*=\s*hw\.array_get\s+(#{SSA_TOKEN_PATTERN})\[(#{SSA_TOKEN_PATTERN})\]\s*:\s*(!hw\.array<\d+xi\d+>)\s*,\s*i(\d+)\z/))
             array_type = parse_array_type(m[4])
             index_width = m[5].to_i
-            array_value = lookup_value(value_map, m[2], width: array_type[:total_width])
+            array_value = lookup_array_value(value_map, m[2], array_type)
             index_expr = lookup_value(value_map, m[3], width: index_width)
-            elements = array_elements_from_value(array_value, length: array_type[:len], element_width: array_type[:element_width])
-            value_map[m[1]] = select_array_element(
-              elements: elements,
-              index_expr: index_expr,
-              element_width: array_type[:element_width]
-            )
+            value_map[m[1]] = if array_value.is_a?(ArrayForwardRef)
+                                DeferredArrayRead.new(
+                                  base_token: array_value.token,
+                                  base_name: array_value.name,
+                                  addr: ensure_expr_with_width(index_expr, width: index_width),
+                                  length: array_type[:len],
+                                  element_width: array_type[:element_width]
+                                )
+                              else
+                                elements = array_elements_from_value(
+                                  array_value,
+                                  length: array_type[:len],
+                                  element_width: array_type[:element_width]
+                                )
+                                select_array_element(
+                                  elements: elements,
+                                  index_expr: index_expr,
+                                  element_width: array_type[:element_width]
+                                )
+                              end
             return
           end
 
           if (m = body.match(/\A(#{SSA_TOKEN_PATTERN})\s*=\s*hw\.array_inject\s+(#{SSA_TOKEN_PATTERN})\[(#{SSA_TOKEN_PATTERN})\],\s*(.+)\s*:\s*(!hw\.array<\d+xi\d+>)\s*,\s*i(\d+)\z/))
             array_type = parse_array_type(m[5])
-            array_value = lookup_value(value_map, m[2], width: array_type[:total_width])
+            array_value = lookup_array_value(value_map, m[2], array_type)
             index_expr = lookup_value(value_map, m[3], width: m[6].to_i)
             new_element = lookup_value(value_map, m[4], width: array_type[:element_width])
-            old_elements = array_elements_from_value(
-              array_value,
-              length: array_type[:len],
-              element_width: array_type[:element_width]
-            )
-            updated_elements = write_array_elements(
-              elements: old_elements,
-              index_expr: index_expr,
-              new_element: new_element,
-              element_width: array_type[:element_width]
-            )
-            value_map[m[1]] = ArrayValue.new(
-              elements: updated_elements,
-              length: array_type[:len],
-              element_width: array_type[:element_width]
-            )
+            value_map[m[1]] = if array_value.is_a?(ArrayForwardRef)
+                                ArrayWriteCandidate.new(
+                                  base_value: array_value,
+                                  base_token: array_value.token,
+                                  base_name: array_value.name,
+                                  index_expr: ensure_expr_with_width(index_expr, width: m[6].to_i),
+                                  new_element: ensure_expr_with_width(new_element, width: array_type[:element_width]),
+                                  length: array_type[:len],
+                                  element_width: array_type[:element_width],
+                                  enable_expr: nil
+                                )
+                              else
+                                old_elements = array_elements_from_value(
+                                  array_value,
+                                  length: array_type[:len],
+                                  element_width: array_type[:element_width]
+                                )
+                                updated_elements = write_array_elements(
+                                  elements: old_elements,
+                                  index_expr: index_expr,
+                                  new_element: new_element,
+                                  element_width: array_type[:element_width]
+                                )
+                                ArrayValue.new(
+                                  elements: updated_elements,
+                                  length: array_type[:len],
+                                  element_width: array_type[:element_width]
+                                )
+                              end
             return
           end
 
@@ -2486,11 +2642,44 @@ module RHDL
           end
 
           if (m = body.match(/\A(#{SSA_TOKEN_PATTERN})\s*=\s*comb\.mux(?:\s+bin)?\s+(#{SSA_TOKEN_PATTERN}),\s*(#{SSA_TOKEN_PATTERN}),\s*(#{SSA_TOKEN_PATTERN})\s*:\s*(.+)\z/))
+            condition = lookup_value(value_map, m[2], width: 1)
+            if (array_type = array_type_from_string(m[5]))
+              when_true = lookup_array_value(value_map, m[3], array_type)
+              when_false = lookup_array_value(value_map, m[4], array_type)
+              candidate =
+                if when_true.is_a?(ArrayWriteCandidate) &&
+                   array_base_matches?(
+                     when_false,
+                     base_token: when_true.base_token,
+                     base_name: when_true.base_name,
+                     total_width: array_type[:total_width]
+                   )
+                  ArrayWriteCandidate.new(
+                    base_value: when_true.base_value,
+                    base_token: when_true.base_token,
+                    base_name: when_true.base_name,
+                    index_expr: when_true.index_expr,
+                    new_element: when_true.new_element,
+                    length: when_true.length,
+                    element_width: when_true.element_width,
+                    enable_expr: condition
+                  )
+                end
+
+              value_map[m[1]] = candidate || IR::Mux.new(
+                condition: condition,
+                when_true: pack_array_value(when_true),
+                when_false: pack_array_value(when_false),
+                width: array_type[:total_width]
+              )
+              return
+            end
+
             width = mlir_type_width(m[5])
             return unless width
 
             value_map[m[1]] = IR::Mux.new(
-              condition: lookup_value(value_map, m[2], width: 1),
+              condition: condition,
               when_true: lookup_expr_value(value_map, m[3], width: width),
               when_false: lookup_expr_value(value_map, m[4], width: width),
               width: width
@@ -2606,6 +2795,57 @@ module RHDL
             return
           end
 
+          if body.match?(/\A#{SSA_TOKEN_PATTERN}\s*=\s*seq\.firmem\.read_port\b/)
+            return if parse_seq_firmem_read_port_line(
+              body,
+              value_map: value_map
+            )
+
+            diagnostics << Diagnostic.new(
+              severity: strict ? :error : :warning,
+              message: "Unsupported seq.firmem.read_port syntax, skipped: #{body}",
+              line: line_no,
+              column: 1,
+              op: 'seq.firmem.read_port'
+            )
+            return
+          end
+
+          if body.match?(/\Aseq\.firmem\.write_port\b/)
+            return if parse_seq_firmem_write_port_line(
+              body,
+              value_map: value_map,
+              memories: memories,
+              write_ports: write_ports
+            )
+
+            diagnostics << Diagnostic.new(
+              severity: strict ? :error : :warning,
+              message: "Unsupported seq.firmem.write_port syntax, skipped: #{body}",
+              line: line_no,
+              column: 1,
+              op: 'seq.firmem.write_port'
+            )
+            return
+          end
+
+          if body.match?(/\A#{SSA_TOKEN_PATTERN}\s*=\s*seq\.firmem\b/)
+            return if parse_seq_firmem_line(
+              body,
+              value_map: value_map,
+              memories: memories
+            )
+
+            diagnostics << Diagnostic.new(
+              severity: strict ? :error : :warning,
+              message: "Unsupported seq.firmem syntax, skipped: #{body}",
+              line: line_no,
+              column: 1,
+              op: 'seq.firmem'
+            )
+            return
+          end
+
           if body.match?(/\A#{SSA_TOKEN_PATTERN}\s*=\s*seq\.compreg\b/)
             return if parse_seq_compreg_line(
               body,
@@ -2631,6 +2871,8 @@ module RHDL
               body,
               value_map: value_map,
               regs: regs,
+              memories: memories,
+              write_ports: write_ports,
               processes: processes,
               diagnostics: diagnostics,
               line_no: line_no
@@ -2793,6 +3035,7 @@ module RHDL
         def fast_parse_comb_mux_line(body, value_map:)
           m = body.match(/\A(#{SSA_TOKEN_PATTERN})\s*=\s*comb\.mux(?:\s+bin)?\s+(#{SSA_TOKEN_PATTERN}),\s*(#{SSA_TOKEN_PATTERN}),\s*(#{SSA_TOKEN_PATTERN})\s*:\s*(.+)\z/)
           return false unless m
+          return false if array_type_from_string(m[5])
 
           width = mlir_type_width(m[5])
           return true unless width
@@ -3353,13 +3596,92 @@ module RHDL
           true
         end
 
-        def parse_seq_firreg_line(body, value_map:, regs:, processes:, diagnostics:, line_no:)
+        def parse_seq_firmem_line(body, value_map:, memories:)
+          m = body.match(/\A(#{SSA_TOKEN_PATTERN})\s*=\s*seq\.firmem\s+.+\s*:\s*(<\s*\d+\s*x\s*\d+\s*>)\z/)
+          return false unless m
+
+          mem_type = parse_firmem_type(m[2])
+          mem_name = m[1].sub('%', '')
+          unless Array(memories).any? { |memory| memory.name.to_s == mem_name }
+            memories << IR::Memory.new(
+              name: mem_name,
+              depth: mem_type[:depth],
+              width: mem_type[:width],
+              initial_data: []
+            )
+          end
+          value_map[m[1]] = ArrayForwardRef.new(
+            token: m[1],
+            name: mem_name,
+            length: mem_type[:depth],
+            element_width: mem_type[:width]
+          )
+          true
+        end
+
+        def parse_seq_firmem_read_port_line(body, value_map:)
+          m = body.match(
+            /\A(#{SSA_TOKEN_PATTERN})\s*=\s*seq\.firmem\.read_port\s+(#{SSA_TOKEN_PATTERN})\[(#{SSA_TOKEN_PATTERN})\],\s*clock\s+(#{SSA_TOKEN_PATTERN})(?:\s+enable\s+(#{SSA_TOKEN_PATTERN}))?\s*:\s*(<\s*\d+\s*x\s*\d+\s*>)\z/
+          )
+          return false unless m
+
+          mem_type = parse_firmem_type(m[6])
+          memory_name = m[2].sub('%', '')
+          addr_width = [Math.log2(mem_type[:depth]).ceil, 1].max
+          read_expr = IR::MemoryRead.new(
+            memory: memory_name,
+            addr: lookup_value(value_map, m[3], width: addr_width),
+            width: mem_type[:width]
+          )
+          if m[5]
+            enable = lookup_value(value_map, m[5], width: 1)
+            read_expr = IR::Mux.new(
+              condition: enable,
+              when_true: read_expr,
+              when_false: IR::Literal.new(value: 0, width: mem_type[:width]),
+              width: mem_type[:width]
+            )
+          end
+          value_map[m[1]] = read_expr
+          true
+        end
+
+        def parse_seq_firmem_write_port_line(body, value_map:, memories:, write_ports:)
+          m = body.match(
+            /\Aseq\.firmem\.write_port\s+(#{SSA_TOKEN_PATTERN})\[(#{SSA_TOKEN_PATTERN})\]\s*=\s*(#{SSA_TOKEN_PATTERN}),\s*clock\s+(#{SSA_TOKEN_PATTERN})\s+enable\s+(#{SSA_TOKEN_PATTERN})\s*:\s*(<\s*\d+\s*x\s*\d+\s*>)\z/
+          )
+          return false unless m
+
+          mem_type = parse_firmem_type(m[6])
+          memory_name = m[1].sub('%', '')
+          unless Array(memories).any? { |memory| memory.name.to_s == memory_name }
+            memories << IR::Memory.new(
+              name: memory_name,
+              depth: mem_type[:depth],
+              width: mem_type[:width],
+              initial_data: []
+            )
+          end
+          addr_width = [Math.log2(mem_type[:depth]).ceil, 1].max
+          write_ports << IR::MemoryWritePort.new(
+            memory: memory_name,
+            clock: clock_name_for_token(value_map, m[4]),
+            addr: lookup_value(value_map, m[2], width: addr_width),
+            data: lookup_value(value_map, m[3], width: mem_type[:width]),
+            enable: lookup_value(value_map, m[5], width: 1)
+          )
+          true
+        end
+
+        def parse_seq_firreg_line(body, value_map:, regs:, memories:, write_ports:, processes:, diagnostics:, line_no:)
           m = body.match(/\A(#{SSA_TOKEN_PATTERN})\s*=\s*seq\.firreg\s+(.+)\s*:\s*(.+)\z/)
           return false unless m
 
           out_token = m[1]
           args = strip_trailing_attr_dict(m[2].strip)
-          width = mlir_type_width(m[3])
+          type = m[3].strip
+          array_type = array_type_from_string(type)
+          width = mlir_type_width(type)
           return false unless width
 
           parsed = if (plain = args.match(/\A(.+?)\s+clock\s+(#{SSA_TOKEN_PATTERN})\s*\z/))
@@ -3379,8 +3701,39 @@ module RHDL
                    end
           return false unless parsed
 
-          data_expr = lookup_expr_value(value_map, parsed[:data], width: width)
           reg_name = out_token.sub('%', '')
+          if array_type
+            return false if parsed[:reset]
+
+            array_value = lookup_array_value(value_map, parsed[:data], array_type)
+            if array_value.is_a?(ArrayWriteCandidate) && array_value.base_name.to_s == reg_name
+              memories << IR::Memory.new(
+                name: reg_name,
+                depth: array_type[:len],
+                width: array_type[:element_width],
+                initial_data: []
+              )
+              write_ports << IR::MemoryWritePort.new(
+                memory: reg_name,
+                clock: clock_name_for_token(value_map, parsed[:clock]),
+                addr: ensure_expr_with_width(
+                  array_value.index_expr,
+                  width: [[Math.log2(array_type[:len]).ceil, 1].max, 1].max
+                ),
+                data: ensure_expr_with_width(array_value.new_element, width: array_type[:element_width]),
+                enable: ensure_expr_with_width(array_value.enable_expr || import_literal(value: 1, width: 1), width: 1)
+              )
+              value_map[out_token] = ArrayForwardRef.new(
+                token: out_token,
+                name: reg_name,
+                length: array_type[:len],
+                element_width: array_type[:element_width]
+              )
+              return true
+            end
+          end
+
+          data_expr = lookup_expr_value(value_map, parsed[:data], width: width)
           reset_expr = parsed[:reset_value] ? lookup_value(value_map, parsed[:reset_value], width: width) : nil
           reg_reset = case reset_expr
                       when IR::Literal then reset_expr.value
@@ -3515,6 +3868,27 @@ module RHDL
                          elems + Array.new(length - elems.length) { import_literal(value: 0, width: element_width) }
                        else
                          elems
+                       end
+                     when ArrayWriteCandidate
+                       base_elements = array_elements_from_value(
+                         value.base_value,
+                         length: length,
+                         element_width: element_width
+                       )
+                       write_array_elements(
+                         elements: base_elements,
+                         index_expr: ensure_expr_with_width(
+                           value.index_expr,
+                           width: [[Math.log2(length.to_i).ceil, 1].max, 1].max
+                         ),
+                         new_element: ensure_expr_with_width(value.new_element, width: element_width),
+                         element_width: element_width
+                       )
+                     when ArrayForwardRef
+                       base = import_signal(name: value.name, width: value.width)
+                       Array.new(length) do |idx|
+                         low = idx * element_width
+                         IR::Slice.new(base: base, range: (low..(low + element_width - 1)), width: element_width)
                        end
                      else
                        base = ensure_expr_with_width(value, width: length * element_width)
@@ -3657,16 +4031,17 @@ module RHDL
           end
         end
 
-        def declared_signal_names(input_ports, output_ports, nets, regs)
+        def declared_signal_names(input_ports, output_ports, nets, regs, memories = [])
           names = Set.new
           Array(input_ports).each { |port| names << port.name.to_s }
           Array(output_ports).each { |port| names << port.name.to_s }
           Array(nets).each { |net| names << net.name.to_s }
           Array(regs).each { |reg| names << reg.name.to_s }
+          Array(memories).each { |memory| names << memory.name.to_s }
           names
         end
 
-        def resolve_forward_refs_in_assigns(assigns, value_map:, declared_names:, signal_memo:, expr_memo:)
+        def resolve_forward_refs_in_assigns(assigns, value_map:, declared_names:, memory_names:, signal_memo:, expr_memo:)
           Array(assigns).map do |assign|
             IR::Assign.new(
               target: assign.target,
@@ -3674,6 +4049,7 @@ module RHDL
                 assign.expr,
                 value_map: value_map,
                 declared_names: declared_names,
+                memory_names: memory_names,
                 signal_memo: signal_memo,
                 expr_memo: expr_memo
               )
@@ -3681,13 +4057,14 @@ module RHDL
           end
         end
 
-        def resolve_forward_refs_in_processes(processes, value_map:, declared_names:, signal_memo:, expr_memo:)
+        def resolve_forward_refs_in_processes(processes, value_map:, declared_names:, memory_names:, signal_memo:, expr_memo:)
           Array(processes).map do |process|
             statements = Array(process.statements).map do |stmt|
               resolve_forward_statement(
                 stmt,
                 value_map: value_map,
                 declared_names: declared_names,
+                memory_names: memory_names,
                 signal_memo: signal_memo,
                 expr_memo: expr_memo
               )
@@ -3703,7 +4080,68 @@ module RHDL
           end
         end
 
-        def resolve_forward_refs_in_instances(instances, value_map:, declared_names:, signal_memo:, expr_memo:)
+        def resolve_forward_refs_in_write_ports(write_ports, value_map:, declared_names:, memory_names:, signal_memo:, expr_memo:)
+          Array(write_ports).map do |write_port|
+            IR::MemoryWritePort.new(
+              memory: write_port.memory,
+              clock: write_port.clock,
+              addr: resolve_forward_expr(
+                write_port.addr,
+                value_map: value_map,
+                declared_names: declared_names,
+                memory_names: memory_names,
+                signal_memo: signal_memo,
+                expr_memo: expr_memo
+              ),
+              data: resolve_forward_expr(
+                write_port.data,
+                value_map: value_map,
+                declared_names: declared_names,
+                memory_names: memory_names,
+                signal_memo: signal_memo,
+                expr_memo: expr_memo
+              ),
+              enable: resolve_forward_expr(
+                write_port.enable,
+                value_map: value_map,
+                declared_names: declared_names,
+                memory_names: memory_names,
+                signal_memo: signal_memo,
+                expr_memo: expr_memo
+              )
+            )
+          end
+        end
+
+        def resolve_forward_refs_in_sync_read_ports(sync_read_ports, value_map:, declared_names:, memory_names:,
+                                                    signal_memo:, expr_memo:)
+          Array(sync_read_ports).map do |read_port|
+            IR::MemorySyncReadPort.new(
+              memory: read_port.memory,
+              clock: read_port.clock,
+              addr: resolve_forward_expr(
+                read_port.addr,
+                value_map: value_map,
+                declared_names: declared_names,
+                memory_names: memory_names,
+                signal_memo: signal_memo,
+                expr_memo: expr_memo
+              ),
+              data: read_port.data,
+              enable: read_port.enable && resolve_forward_expr(
+                read_port.enable,
+                value_map: value_map,
+                declared_names: declared_names,
+                memory_names: memory_names,
+                signal_memo: signal_memo,
+                expr_memo: expr_memo
+              )
+            )
+          end
+        end
+
+        def resolve_forward_refs_in_instances(instances, value_map:, declared_names:, memory_names:, signal_memo:,
+                                              expr_memo:)
           Array(instances).map do |inst|
             connections = Array(inst.connections).map do |conn|
               signal = conn.signal
@@ -3712,6 +4150,7 @@ module RHDL
                                     signal,
                                     value_map: value_map,
                                     declared_names: declared_names,
+                                    memory_names: memory_names,
                                     signal_memo: signal_memo,
                                     expr_memo: expr_memo
                                   )
@@ -3735,7 +4174,7 @@ module RHDL
           end
         end
 
-        def resolve_forward_statement(stmt, value_map:, declared_names:, signal_memo:, expr_memo:)
+        def resolve_forward_statement(stmt, value_map:, declared_names:, memory_names:, signal_memo:, expr_memo:)
           case stmt
           when IR::SeqAssign
             IR::SeqAssign.new(
@@ -3744,6 +4183,7 @@ module RHDL
                 stmt.expr,
                 value_map: value_map,
                 declared_names: declared_names,
+                memory_names: memory_names,
                 signal_memo: signal_memo,
                 expr_memo: expr_memo
               )
@@ -3754,6 +4194,7 @@ module RHDL
                 stmt.condition,
                 value_map: value_map,
                 declared_names: declared_names,
+                memory_names: memory_names,
                 signal_memo: signal_memo,
                 expr_memo: expr_memo
               ),
@@ -3762,6 +4203,7 @@ module RHDL
                   inner,
                   value_map: value_map,
                   declared_names: declared_names,
+                  memory_names: memory_names,
                   signal_memo: signal_memo,
                   expr_memo: expr_memo
                 )
@@ -3771,6 +4213,7 @@ module RHDL
                   inner,
                   value_map: value_map,
                   declared_names: declared_names,
+                  memory_names: memory_names,
                   signal_memo: signal_memo,
                   expr_memo: expr_memo
                 )
@@ -3781,7 +4224,8 @@ module RHDL
           end
         end
 
-        def resolve_forward_expr(expr, value_map:, declared_names:, signal_memo:, expr_memo:, visiting: Set.new)
+        def resolve_forward_expr(expr, value_map:, declared_names:, memory_names:, signal_memo:, expr_memo:,
+                                 visiting: Set.new)
           expr_key = expr.object_id
           return expr_memo[expr_key] if expr_memo.key?(expr_key)
           return expr if visiting.include?(expr_key)
@@ -3806,6 +4250,7 @@ module RHDL
                              candidate,
                              value_map: value_map,
                              declared_names: declared_names,
+                             memory_names: memory_names,
                              signal_memo: signal_memo,
                              expr_memo: expr_memo,
                              visiting: visiting
@@ -3823,6 +4268,7 @@ module RHDL
                 expr.operand,
                 value_map: value_map,
                 declared_names: declared_names,
+                memory_names: memory_names,
                 signal_memo: signal_memo,
                 expr_memo: expr_memo,
                 visiting: visiting
@@ -3836,6 +4282,7 @@ module RHDL
                 expr.left,
                 value_map: value_map,
                 declared_names: declared_names,
+                memory_names: memory_names,
                 signal_memo: signal_memo,
                 expr_memo: expr_memo,
                 visiting: visiting
@@ -3844,6 +4291,7 @@ module RHDL
                 expr.right,
                 value_map: value_map,
                 declared_names: declared_names,
+                memory_names: memory_names,
                 signal_memo: signal_memo,
                 expr_memo: expr_memo,
                 visiting: visiting
@@ -3856,6 +4304,7 @@ module RHDL
                 expr.condition,
                 value_map: value_map,
                 declared_names: declared_names,
+                memory_names: memory_names,
                 signal_memo: signal_memo,
                 expr_memo: expr_memo,
                 visiting: visiting
@@ -3864,6 +4313,7 @@ module RHDL
                 expr.when_true,
                 value_map: value_map,
                 declared_names: declared_names,
+                memory_names: memory_names,
                 signal_memo: signal_memo,
                 expr_memo: expr_memo,
                 visiting: visiting
@@ -3872,6 +4322,7 @@ module RHDL
                 expr.when_false,
                 value_map: value_map,
                 declared_names: declared_names,
+                memory_names: memory_names,
                 signal_memo: signal_memo,
                 expr_memo: expr_memo,
                 visiting: visiting
@@ -3884,6 +4335,7 @@ module RHDL
                 expr.base,
                 value_map: value_map,
                 declared_names: declared_names,
+                memory_names: memory_names,
                 signal_memo: signal_memo,
                 expr_memo: expr_memo,
                 visiting: visiting
@@ -3898,6 +4350,7 @@ module RHDL
                   part,
                   value_map: value_map,
                   declared_names: declared_names,
+                  memory_names: memory_names,
                   signal_memo: signal_memo,
                   expr_memo: expr_memo,
                   visiting: visiting
@@ -3911,6 +4364,7 @@ module RHDL
                 expr.expr,
                 value_map: value_map,
                 declared_names: declared_names,
+                memory_names: memory_names,
                 signal_memo: signal_memo,
                 expr_memo: expr_memo,
                 visiting: visiting
@@ -3923,6 +4377,7 @@ module RHDL
                 expr.selector,
                 value_map: value_map,
                 declared_names: declared_names,
+                memory_names: memory_names,
                 signal_memo: signal_memo,
                 expr_memo: expr_memo,
                 visiting: visiting
@@ -3934,6 +4389,7 @@ module RHDL
                     value,
                     value_map: value_map,
                     declared_names: declared_names,
+                    memory_names: memory_names,
                     signal_memo: signal_memo,
                     expr_memo: expr_memo,
                     visiting: visiting
@@ -3944,12 +4400,45 @@ module RHDL
                 expr.default,
                 value_map: value_map,
                 declared_names: declared_names,
+                memory_names: memory_names,
                 signal_memo: signal_memo,
                 expr_memo: expr_memo,
                 visiting: visiting
               ),
               width: expr.width
             )
+          when DeferredArrayRead
+            resolved_addr = resolve_forward_expr(
+              expr.addr,
+              value_map: value_map,
+              declared_names: declared_names,
+              memory_names: memory_names,
+              signal_memo: signal_memo,
+              expr_memo: expr_memo,
+              visiting: visiting
+            )
+            if memory_names.include?(expr.base_name.to_s)
+              resolved = IR::MemoryRead.new(
+                memory: expr.base_name,
+                addr: resolved_addr,
+                width: expr.width
+              )
+            else
+              base_signal = import_signal(name: expr.base_name, width: expr.length.to_i * expr.element_width.to_i)
+              elements = Array.new(expr.length.to_i) do |idx|
+                low = idx * expr.element_width.to_i
+                IR::Slice.new(
+                  base: base_signal,
+                  range: (low..(low + expr.element_width.to_i - 1)),
+                  width: expr.element_width.to_i
+                )
+              end
+              resolved = select_array_element(
+                elements: elements,
+                index_expr: resolved_addr,
+                element_width: expr.element_width.to_i
+              )
+            end
           when IR::MemoryRead
             resolved = IR::MemoryRead.new(
               memory: expr.memory,
@@ -3957,6 +4446,7 @@ module RHDL
                 expr.addr,
                 value_map: value_map,
                 declared_names: declared_names,
+                memory_names: memory_names,
                 signal_memo: signal_memo,
                 expr_memo: expr_memo,
                 visiting: visiting
@@ -4098,6 +4588,348 @@ module RHDL
               sync_read_ports: mod.sync_read_ports,
               parameters: mod.parameters
             )
+          end
+        end
+
+        def recover_memory_like_registers(modules)
+          current = Array(modules)
+
+          loop do
+            changed = false
+            current = current.map do |mod|
+              next_mod, mod_changed = recover_memory_like_registers_in_module(mod)
+              changed ||= mod_changed
+              next_mod
+            end
+            break current unless changed
+          end
+        end
+
+        def recover_memory_like_registers_in_module(mod)
+          recovered = {}
+          remaining_processes = []
+
+          Array(mod.processes).each do |process|
+            candidate = nil
+            if process.clocked && Array(process.statements).length == 1
+              stmt = process.statements.first
+              if stmt.is_a?(IR::SeqAssign)
+                candidate = extract_packed_vector_memory_write(stmt.target.to_s, stmt.expr)
+                candidate ||= extract_packed_vector_memory_copy(stmt.target.to_s, stmt.expr)
+                if candidate
+                  recovered[stmt.target.to_s] = candidate.merge(memory: stmt.target.to_s, clock: process.clock.to_s)
+                end
+              end
+            end
+
+            remaining_processes << process unless candidate
+          end
+
+          return [mod, false] if recovered.empty?
+
+          memories = Array(mod.memories).dup
+          write_ports = Array(mod.write_ports).dup
+
+          recovered.each_value do |info|
+            memories << IR::Memory.new(
+              name: info[:memory],
+              depth: info[:depth],
+              width: info[:element_width],
+              initial_data: []
+            )
+
+            if info[:copy_from_memory]
+              addr_width = [Math.log2(info[:depth]).ceil, 1].max
+              info[:depth].times do |slot|
+                addr = IR::Literal.new(value: slot, width: addr_width)
+                write_ports << IR::MemoryWritePort.new(
+                  memory: info[:memory],
+                  clock: info[:clock],
+                  addr: addr,
+                  data: IR::MemoryRead.new(
+                    memory: info[:copy_from_memory],
+                    addr: addr,
+                    width: info[:element_width]
+                  ),
+                  enable: info[:enable]
+                )
+              end
+            else
+              write_ports << IR::MemoryWritePort.new(
+                memory: info[:memory],
+                clock: info[:clock],
+                addr: info[:addr],
+                data: info[:data],
+                enable: info[:enable]
+              )
+            end
+          end
+
+          [
+            IR::ModuleOp.new(
+              name: mod.name,
+              ports: mod.ports,
+              nets: mod.nets,
+              regs: Array(mod.regs).reject { |reg| recovered.key?(reg.name.to_s) },
+              assigns: Array(mod.assigns).map do |assign|
+                IR::Assign.new(
+                  target: assign.target,
+                  expr: rewrite_memory_like_register_reads(assign.expr, recovered)
+                )
+              end,
+              processes: Array(remaining_processes).map do |process|
+                IR::Process.new(
+                  name: process.name,
+                  statements: rewrite_memory_like_register_statements(process.statements, recovered),
+                  clocked: process.clocked,
+                  clock: process.clock,
+                  sensitivity_list: process.sensitivity_list
+                )
+              end,
+              instances: mod.instances,
+              memories: memories,
+              write_ports: write_ports,
+              sync_read_ports: mod.sync_read_ports,
+              parameters: mod.parameters
+            ),
+            true
+          ]
+        end
+
+        def extract_packed_vector_memory_write(target_name, expr)
+          packed_write, write_enable_expr = extract_packed_vector_update(target_name, expr)
+          return nil unless packed_write
+
+          parts = Array(packed_write.parts)
+          return nil if parts.empty?
+
+          element_width = parts.first.width.to_i
+          return nil unless element_width.positive? && parts.all? { |part| part.width.to_i == element_width }
+
+          addr_expr = nil
+          data_expr = nil
+
+          parts.each_with_index do |part, part_index|
+            slot_index = parts.length - 1 - part_index
+            current = extract_packed_vector_memory_part(
+              part,
+              target_name: target_name,
+              slot_index: slot_index,
+              element_width: element_width
+            )
+            return nil unless current
+
+            addr_expr ||= current[:addr]
+            data_expr ||= current[:data]
+            return nil unless expr_equivalent?(addr_expr, current[:addr])
+            return nil unless expr_equivalent?(data_expr, current[:data])
+          end
+
+          {
+            depth: parts.length,
+            element_width: element_width,
+            addr: ensure_expr_with_width(addr_expr, width: [addr_expr.width.to_i, 1].max),
+            data: ensure_expr_with_width(data_expr, width: element_width),
+            enable: ensure_expr_with_width(write_enable_expr, width: 1)
+          }
+        end
+
+        def extract_packed_vector_memory_copy(target_name, expr)
+          packed_write, write_enable_expr = extract_packed_vector_update(target_name, expr)
+          return nil unless packed_write
+
+          parts = Array(packed_write.parts)
+          return nil if parts.empty?
+
+          element_width = parts.first.width.to_i
+          return nil unless element_width.positive? && parts.all? { |part| part.width.to_i == element_width }
+
+          source_memory = nil
+
+          parts.each_with_index do |part, part_index|
+            slot_index = parts.length - 1 - part_index
+            current = extract_packed_vector_memory_copy_part(
+              part,
+              slot_index: slot_index,
+              element_width: element_width
+            )
+            return nil unless current
+
+            source_memory ||= current[:memory]
+            return nil unless source_memory == current[:memory]
+          end
+
+          {
+            depth: parts.length,
+            element_width: element_width,
+            copy_from_memory: source_memory,
+            enable: ensure_expr_with_width(write_enable_expr, width: 1)
+          }
+        end
+
+        def extract_packed_vector_update(target_name, expr)
+          case expr
+          when IR::Mux
+            if signal_ref_to_target?(expr.when_true, target_name) && expr.when_false.is_a?(IR::Concat)
+              [expr.when_false, invert_boolean_expr(expr.condition)]
+            elsif signal_ref_to_target?(expr.when_false, target_name) && expr.when_true.is_a?(IR::Concat)
+              [expr.when_true, expr.condition]
+            else
+              nil
+            end
+          when IR::Concat
+            [expr, import_literal(value: 1, width: 1)]
+          else
+            nil
+          end
+        end
+
+        def extract_packed_vector_memory_part(part, target_name:, slot_index:, element_width:)
+          case part
+          when IR::Mux
+            return nil unless slice_matches_packed_memory_slot?(part.when_false, target_name, slot_index, element_width)
+
+            addr, literal = equality_selector_for_expr(part.condition)
+            return nil unless literal == slot_index
+
+            { addr: addr, data: part.when_true }
+          when IR::Slice
+            return nil unless slice_matches_packed_memory_slot?(part, target_name, slot_index, element_width)
+
+            {
+              addr: import_literal(value: slot_index, width: [Math.log2(slot_index + 1).ceil, 1].max),
+              data: part
+            }
+          else
+            nil
+          end
+        end
+
+        def extract_packed_vector_memory_copy_part(part, slot_index:, element_width:)
+          return nil unless part.is_a?(IR::MemoryRead)
+          return nil unless part.width.to_i == element_width.to_i
+          return nil unless part.addr.is_a?(IR::Literal)
+          return nil unless part.addr.value.to_i == slot_index.to_i
+
+          { memory: part.memory.to_s }
+        end
+
+        def equality_selector_for_expr(expr)
+          return nil unless expr.is_a?(IR::BinaryOp) && expr.op.to_sym == :==
+
+          if expr.left.is_a?(IR::Literal)
+            [expr.right, expr.left.value.to_i]
+          elsif expr.right.is_a?(IR::Literal)
+            [expr.left, expr.right.value.to_i]
+          end
+        end
+
+        def signal_ref_to_target?(expr, target_name)
+          expr.is_a?(IR::Signal) && expr.name.to_s == target_name.to_s
+        end
+
+        def slice_matches_packed_memory_slot?(expr, target_name, slot_index, element_width)
+          return false unless expr.is_a?(IR::Slice)
+          return false unless signal_ref_to_target?(expr.base, target_name)
+
+          low = expr.range.begin.to_i
+          high = expr.range.end.to_i
+          low == slot_index.to_i * element_width.to_i &&
+            high == low + element_width.to_i - 1 &&
+            expr.width.to_i == element_width.to_i
+        end
+
+        def invert_boolean_expr(expr)
+          IR::BinaryOp.new(
+            op: :^,
+            left: ensure_expr_with_width(expr, width: 1),
+            right: IR::Literal.new(value: 1, width: 1),
+            width: 1
+          )
+        end
+
+        def rewrite_memory_like_register_statements(statements, recovered)
+          Array(statements).map do |stmt|
+            case stmt
+            when IR::SeqAssign
+              IR::SeqAssign.new(
+                target: stmt.target,
+                expr: rewrite_memory_like_register_reads(stmt.expr, recovered)
+              )
+            when IR::If
+              IR::If.new(
+                condition: rewrite_memory_like_register_reads(stmt.condition, recovered),
+                then_statements: rewrite_memory_like_register_statements(stmt.then_statements, recovered),
+                else_statements: rewrite_memory_like_register_statements(stmt.else_statements, recovered)
+              )
+            else
+              stmt
+            end
+          end
+        end
+
+        def rewrite_memory_like_register_reads(expr, recovered)
+          return expr if expr.nil?
+
+          if expr.is_a?(IR::Slice) && (info = recovered[expr.base.name.to_s] if expr.base.is_a?(IR::Signal))
+            if slice_matches_packed_memory_slot?(expr, expr.base.name.to_s, expr.range.begin.to_i / info[:element_width].to_i, info[:element_width].to_i)
+              return IR::MemoryRead.new(
+                memory: expr.base.name.to_s,
+                addr: IR::Literal.new(
+                  value: expr.range.begin.to_i / info[:element_width].to_i,
+                  width: [Math.log2(info[:depth]).ceil, 1].max
+                ),
+                width: info[:element_width].to_i
+              )
+            end
+          end
+
+          case expr
+          when IR::UnaryOp
+            IR::UnaryOp.new(
+              op: expr.op,
+              operand: rewrite_memory_like_register_reads(expr.operand, recovered),
+              width: expr.width.to_i
+            )
+          when IR::BinaryOp
+            IR::BinaryOp.new(
+              op: expr.op,
+              left: rewrite_memory_like_register_reads(expr.left, recovered),
+              right: rewrite_memory_like_register_reads(expr.right, recovered),
+              width: expr.width.to_i
+            )
+          when IR::Mux
+            IR::Mux.new(
+              condition: rewrite_memory_like_register_reads(expr.condition, recovered),
+              when_true: rewrite_memory_like_register_reads(expr.when_true, recovered),
+              when_false: rewrite_memory_like_register_reads(expr.when_false, recovered),
+              width: expr.width.to_i
+            )
+          when IR::Concat
+            IR::Concat.new(
+              parts: Array(expr.parts).map { |part| rewrite_memory_like_register_reads(part, recovered) },
+              width: expr.width.to_i
+            )
+          when IR::Slice
+            IR::Slice.new(
+              base: rewrite_memory_like_register_reads(expr.base, recovered),
+              range: expr.range,
+              width: expr.width.to_i
+            )
+          when IR::Resize
+            IR::Resize.new(
+              expr: rewrite_memory_like_register_reads(expr.expr, recovered),
+              width: expr.width.to_i
+            )
+          when IR::Case
+            IR::Case.new(
+              selector: rewrite_memory_like_register_reads(expr.selector, recovered),
+              cases: expr.cases.transform_values { |value| rewrite_memory_like_register_reads(value, recovered) },
+              default: rewrite_memory_like_register_reads(expr.default, recovered),
+              width: expr.width.to_i
+            )
+          else
+            expr
           end
         end
 

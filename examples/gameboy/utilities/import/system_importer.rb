@@ -1042,8 +1042,6 @@ module RHDL
                 input :is_gbc
                 input :is_sgb
                 input :cart_do, width: 8
-                input :cart_oe
-                input :cart_ram_size, width: 8
                 output :ext_bus_addr, width: 15
                 output :ext_bus_a15
                 output :cart_rd
@@ -1100,7 +1098,7 @@ module RHDL
                 port :const_zero => [:gb_core, :real_cgb_boot]
                 port :const_zero => [:gb_core, :extra_spr_en]
                 port :cart_do => [:gb_core, :cart_do]
-                port :cart_oe => [:gb_core, :cart_oe]
+                port :const_one => [:gb_core, :cart_oe]
                 port :const_zero => [:gb_core, :cgb_boot_download]
                 port :core_dmg_boot_download => [:gb_core, :dmg_boot_download]
                 port :const_zero => [:gb_core, :sgb_boot_download]
@@ -1119,7 +1117,7 @@ module RHDL
                 port :const_zero => [:gb_core, :serial_clk_in]
                 port :const_zero => [:gb_core, :serial_data_in]
                 port :const_one => [:gb_core, :increaseSSHeaderCount]
-                port :cart_ram_size => [:gb_core, :cart_ram_size]
+                port :const_zero_8 => [:gb_core, :cart_ram_size]
                 port :const_zero => [:gb_core, :save_state]
                 port :const_zero => [:gb_core, :load_state]
                 port :const_zero_2 => [:gb_core, :savestate_number]
@@ -1225,8 +1223,6 @@ module RHDL
                 input :is_gbc
                 input :is_sgb
                 input :cart_do, width: 8
-                input :cart_oe
-                input :cart_ram_size, width: 8
                 output :ext_bus_addr, width: 15
                 output :ext_bus_a15
                 output :cart_rd
@@ -1299,7 +1295,7 @@ module RHDL
                 port :const_zero => [:gb_core, :real_cgb_boot]
                 port :const_zero => [:gb_core, :extra_spr_en]
                 port :cart_do => [:gb_core, :cart_do]
-                port :cart_oe => [:gb_core, :cart_oe]
+                port :const_one => [:gb_core, :cart_oe]
                 port :const_zero => [:gb_core, :cgb_boot_download]
                 port :core_dmg_boot_download => [:gb_core, :dmg_boot_download]
                 port :const_zero => [:gb_core, :sgb_boot_download]
@@ -1318,7 +1314,7 @@ module RHDL
                 port :const_zero => [:gb_core, :serial_clk_in]
                 port :const_one => [:gb_core, :serial_data_in]
                 port :const_zero => [:gb_core, :increaseSSHeaderCount]
-                port :cart_ram_size => [:gb_core, :cart_ram_size]
+                port :const_zero_8 => [:gb_core, :cart_ram_size]
                 port :const_zero => [:gb_core, :save_state]
                 port :const_zero => [:gb_core, :load_state]
                 port :const_zero_2 => [:gb_core, :savestate_number]

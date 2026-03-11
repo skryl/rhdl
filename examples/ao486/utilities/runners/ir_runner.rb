@@ -24,7 +24,7 @@ module RHDL
         DOS_RELOCATED_BOOT_SECTOR_ADDR = 0x27A00
         DOS_INT19_STUB_ADDR = 0x0500
         DOS_INT19_VECTOR_ADDR = 0x19 * 4
-        DOS_INT10_STUB_ADDR = 0x05A0
+        DOS_INT10_STUB_ADDR = 0x05B0
         DOS_INT10_VECTOR_ADDR = 0x10 * 4
         DOS_INT13_STUB_ADDR = 0x0540
         DOS_INT1A_STUB_OFFSET = 0x1130
@@ -430,7 +430,7 @@ module RHDL
         def dos_int13_bootstrap_bytes
           [
             0x80, 0xFC, 0x08,       # cmp ah, 0x08
-            0x75, 0x14,             # jne generic
+            0x75, 0x1E,             # jne generic
             0x5E,                   # pop si ; return IP
             0x5F,                   # pop di ; return CS
             0x58,                   # pop ax ; saved FLAGS
@@ -442,6 +442,12 @@ module RHDL
             0xBB, 0x00, 0x04,       # mov bx, 0x0400
             0xB9, 0x12, 0x4F,       # mov cx, 0x4f12
             0xBA, 0x02, 0x01,       # mov dx, 0x0102
+            0x50,                   # push ax
+            0xB8, 0x00, 0xF0,       # mov ax, 0xf000
+            0x8E, 0xC0,             # mov es, ax
+            0x58,                   # pop ax
+            0xBF,                   # mov di, 0xefde
+            DOS_DISKETTE_PARAM_TABLE_OFFSET & 0xFF, (DOS_DISKETTE_PARAM_TABLE_OFFSET >> 8) & 0xFF,
             0xCF,                   # iret
             0x52,                   # push dx
             0xBA, 0xD0, 0x0E,       # mov dx, 0x0ed0
@@ -466,6 +472,15 @@ module RHDL
             0xBA, 0xDC, 0x0E,       # mov dx, 0x0edc
             0xED,                   # in ax, dx
             0x50,                   # push ax ; preserve AX result while patching caller FLAGS
+            0xBA, 0x10, 0x0F,       # mov dx, 0x0f10
+            0xED,                   # in ax, dx
+            0x93,                   # xchg ax, bx
+            0xBA, 0x12, 0x0F,       # mov dx, 0x0f12
+            0xED,                   # in ax, dx
+            0x91,                   # xchg ax, cx
+            0xBA, 0x14, 0x0F,       # mov dx, 0x0f14
+            0xED,                   # in ax, dx
+            0x89, 0xC2,             # mov dx, ax
             0xBA, 0x16, 0x0F,       # mov dx, 0x0f16
             0xEC,                   # in al, dx
             0x88, 0xC3,             # mov bl, al

@@ -13,7 +13,7 @@ module RHDL
         class << self
           def native_lib_candidates(base)
             case RbConfig::CONFIG['host_os']
-            when /darwin/ then ["#{base}.bundle", "#{base}.dylib"]
+            when /darwin/ then ["#{base}.dylib", "#{base}.bundle"]
             when /mswin|mingw/ then ["#{base}.dll"]
             else ["#{base}.so"]
             end
