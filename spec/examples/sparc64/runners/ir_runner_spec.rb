@@ -17,6 +17,7 @@ RSpec.describe RHDL::Examples::SPARC64::IrRunner do
 
       def initialize
         @memory = Hash.new(0)
+        @signals = {}
         @runner_kind = :sparc64
         @clock = 0
         @rom_loads = []
@@ -72,6 +73,18 @@ RSpec.describe RHDL::Examples::SPARC64::IrRunner do
         @memory_writes << [offset, bytes]
         bytes.length
       end
+
+      def has_signal?(name)
+        @signals.key?(name.to_s)
+      end
+
+      def peek(name)
+        @signals.fetch(name.to_s, 0)
+      end
+
+      def set_signal(name, value)
+        @signals[name.to_s] = value
+      end
     end.new
   end
 
@@ -91,7 +104,13 @@ RSpec.describe RHDL::Examples::SPARC64::IrRunner do
     runner.load_images(boot_image: [0xAA, 0xBB], program_image: [0x11, 0x22, 0x33])
 
     expect(sim.rom_loads).to eq([[RHDL::Examples::SPARC64::Integration::FLASH_BOOT_BASE, [0xAA, 0xBB]]])
-    expect(sim.memory_loads).to eq([[RHDL::Examples::SPARC64::Integration::PROGRAM_BASE, [0x11, 0x22, 0x33]]])
+    expect(sim.memory_loads).to eq(
+      [
+        [0, [0xAA, 0xBB]],
+        [RHDL::Examples::SPARC64::Integration::BOOT_PROM_ALIAS_BASE, [0xAA, 0xBB]],
+        [RHDL::Examples::SPARC64::Integration::PROGRAM_BASE, [0x11, 0x22, 0x33]]
+      ]
+    )
   end
 
   it 'decodes mailbox values as big-endian 64-bit words' do
@@ -221,6 +240,76 @@ RSpec.describe RHDL::Examples::SPARC64::IrRunner do
         sim_factory: -> { non_sparc_sim }
       )
     end.to raise_error(RuntimeError, /requires native :sparc64 runner support/)
+  end
+
+  it 'captures a structured debug snapshot from the underlying simulator' do
+    sim.set_signal('os2wb_inst__state', 7)
+    sim.set_signal('os2wb_inst__wb_cycle', 1)
+    sim.set_signal('os2wb_inst__wb_addr', 0x1000)
+    sim.set_signal('sparc_0__ifu__errdp__fdp_erb_pc_f', 0x2000)
+    sim.set_signal('sparc_0__tlu__misctl__ifu_npc_w', 0x2004)
+    sim.set_signal('sparc_0__ifu__swl__thrfsm0__thr_state', 3)
+    sim.set_signal('sparc_1__ifu__swl__thrfsm0__thr_state', 4)
+    sim.set_signal('sparc_0__ifu__ifqctl__lsu_ifu_pcxpkt_ack_d', 1)
+    sim.set_signal('sparc_0__ifu__ifqctl__ifu_lsu_pcxreq_d', 0)
+    sim.set_signal('sparc_0__exu__irf__bw_r_irf_core__old_agp_d1', 2)
+    sim.set_signal('sparc_0__exu__irf__bw_r_irf_core__new_agp_d2', 5)
+    sim.set_signal('sparc_0__exu__irf__bw_r_irf_core__register02__wrens', 0xA)
+    sim.set_signal('sparc_0__exu__irf__bw_r_irf_core__register02__rd_thread', 1)
+    sim.set_signal('sparc_0__exu__irf__bw_r_irf_core__register02__save', 1)
+    sim.set_signal('sparc_0__exu__irf__bw_r_irf_core__register02__wr_data', 0x1234)
+
+    runner = described_class.new(
+      component_class: double('component'),
+      sim_factory: -> { sim }
+    )
+    sim.runner_write_memory(
+      RHDL::Examples::SPARC64::Integration::MAILBOX_STATUS,
+      encode_u64_be(1),
+      mapped: false
+    )
+    sim.runner_write_memory(
+      RHDL::Examples::SPARC64::Integration::MAILBOX_VALUE,
+      encode_u64_be(0x55AA),
+      mapped: false
+    )
+
+    runner.run_cycles(12)
+
+    expect(runner.debug_snapshot).to include(
+      reset: {
+        cycle_counter: 12,
+        mailbox_status: 1,
+        mailbox_value: 0x55AA
+      },
+      bridge: include(
+        state: 7,
+        wb_cycle: true,
+        wb_addr: 0x1000
+      ),
+      thread0: include(
+        fetch_pc_f: 0x2000,
+        npc_w: 0x2004,
+        thread_states: [3]
+      ),
+      thread1: include(
+        thread_states: [4]
+      ),
+      ifq: include(
+        lsu_ifu_pcxpkt_ack_d: true,
+        ifu_lsu_pcxreq_d: false
+      ),
+      irf: include(
+        old_agp: 2,
+        new_agp: 5,
+        register02: include(
+          wrens: 0xA,
+          rd_thread: 1,
+          save: true,
+          wr_data: 0x1234
+        )
+      )
+    )
   end
 
   it 'loads the component class through the importer-managed fast-boot path when requested' do
@@ -486,6 +575,76 @@ RSpec.describe RHDL::Examples::SPARC64::IrRunner do
       ENV.delete('RHDL_IR_COMPILER_FORCE_RUSTC')
     else
       ENV['RHDL_IR_COMPILER_FORCE_RUSTC'] = previous
+    end
+  end
+
+  it 'can force the compiler backend down the runtime-only path when requested' do
+    component_class = Class.new do
+      define_singleton_method(:to_flat_circt_nodes) do
+        RHDL::Codegen::CIRCT::IR::ModuleOp.new(
+          name: 'tiny_top',
+          ports: [
+            RHDL::Codegen::CIRCT::IR::Port.new(name: 'clk', direction: :in, width: 1),
+            RHDL::Codegen::CIRCT::IR::Port.new(name: 'out', direction: :out, width: 1)
+          ],
+          nets: [],
+          regs: [],
+          assigns: [
+            RHDL::Codegen::CIRCT::IR::Assign.new(
+              target: 'out',
+              expr: RHDL::Codegen::CIRCT::IR::Literal.new(value: 1, width: 1)
+            )
+          ],
+          processes: [],
+          instances: [],
+          memories: [],
+          write_ports: [],
+          sync_read_ports: [],
+          parameters: {}
+        )
+      end
+    end
+
+    simulator = instance_double(
+      RHDL::Sim::Native::IR::Simulator,
+      native?: true,
+      simulator_type: :ir_compile,
+      runner_kind: :sparc64
+    )
+    previous = ENV['RHDL_IR_COMPILER_FORCE_RUSTC']
+    previous_runtime_only = ENV['RHDL_IR_COMPILER_FORCE_RUNTIME_ONLY']
+    ENV.delete('RHDL_IR_COMPILER_FORCE_RUSTC')
+    ENV.delete('RHDL_IR_COMPILER_FORCE_RUNTIME_ONLY')
+
+    expect(RHDL::Sim::Native::IR).to receive(:sim_json).and_return('{"circt_json_version":1,"modules":[{"name":"tiny_top"}]}')
+    expect(RHDL::Sim::Native::IR::Simulator).to receive(:new) do |json, backend:|
+      expect(json).to eq('{"circt_json_version":1,"modules":[{"name":"tiny_top"}]}')
+      expect(backend).to eq(:compile)
+      expect(ENV['RHDL_IR_COMPILER_FORCE_RUSTC']).to be_nil
+      expect(ENV['RHDL_IR_COMPILER_FORCE_RUNTIME_ONLY']).to eq('1')
+      simulator
+    end
+
+    runner = described_class.new(
+      component_class: component_class,
+      backend: :compile,
+      strict_runner_kind: false,
+      compiler_mode: :runtime_only
+    )
+
+    expect(runner.sim).to eq(simulator)
+    expect(ENV['RHDL_IR_COMPILER_FORCE_RUSTC']).to eq(previous)
+    expect(ENV['RHDL_IR_COMPILER_FORCE_RUNTIME_ONLY']).to eq(previous_runtime_only)
+  ensure
+    if previous.nil?
+      ENV.delete('RHDL_IR_COMPILER_FORCE_RUSTC')
+    else
+      ENV['RHDL_IR_COMPILER_FORCE_RUSTC'] = previous
+    end
+    if previous_runtime_only.nil?
+      ENV.delete('RHDL_IR_COMPILER_FORCE_RUNTIME_ONLY')
+    else
+      ENV['RHDL_IR_COMPILER_FORCE_RUNTIME_ONLY'] = previous_runtime_only
     end
   end
 

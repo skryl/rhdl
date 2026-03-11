@@ -66,6 +66,7 @@ pub struct Sparc64Extension {
 
     pending_response: Option<PendingResponse>,
     deferred_request: Option<Sparc64WishboneRequest>,
+    protected_dram_limit: u64,
     reset_cycles_remaining: usize,
     cycle_count: u64,
 }
@@ -95,6 +96,7 @@ impl Sparc64Extension {
 
             pending_response: None,
             deferred_request: None,
+            protected_dram_limit: 0,
             reset_cycles_remaining: 4,
             cycle_count: 0,
         }
@@ -152,6 +154,9 @@ impl Sparc64Extension {
         let base = canonical_bus_addr(offset as u64);
         for (index, value) in data.iter().enumerate() {
             self.write_dram_byte(base + index as u64, *value);
+        }
+        if base == 0 {
+            self.protected_dram_limit = self.protected_dram_limit.max(data.len() as u64);
         }
         data.len()
     }
@@ -257,7 +262,11 @@ impl Sparc64Extension {
             core.tick();
 
             self.deferred_request = if next_response.is_none() && !reset_active {
-                self.sample_request(core).filter(|request| !same_as_acked(request))
+                // A legitimately new transaction can first become visible only
+                // after the rising edge updates IFU/LSU state. Filtering it
+                // solely because it matches the just-acked request drops
+                // repeated identical fetches, which stalls real SPARC64 code.
+                self.sample_request(core)
             } else {
                 None
             };
@@ -386,6 +395,10 @@ impl Sparc64Extension {
             let byte_addr = canonical_bus_addr(addr.wrapping_add(lane as u64));
             if self.is_flash_addr(byte_addr) {
                 return false;
+            }
+            if byte_addr < self.protected_dram_limit {
+                mapped = true;
+                continue;
             }
 
             let byte = ((data >> ((7 - lane) * 8)) & 0xFF) as u8;

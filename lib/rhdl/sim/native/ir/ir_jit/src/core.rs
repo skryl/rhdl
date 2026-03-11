@@ -20,6 +20,7 @@ use crate::signal_value::{
     SignalValue,
     SignedSignalValue,
 };
+use crate::runtime_value::RuntimeValue;
 
 type SimValue = u128;
 
@@ -1358,7 +1359,7 @@ pub struct CoreSimulator {
     /// Signal values
     pub signals: Vec<u64>,
     /// Full-width signal values used by the runtime evaluator
-    wide_signals: Vec<SimValue>,
+    wide_signals: Vec<RuntimeValue>,
     /// Signal widths
     pub widths: Vec<usize>,
     /// Signal name to index mapping
@@ -1372,7 +1373,7 @@ pub struct CoreSimulator {
     /// Register count
     reg_count: usize,
     /// Next register values buffer
-    pub next_regs: Vec<SimValue>,
+    pub next_regs: Vec<RuntimeValue>,
     /// Original combinational assignments for runtime evaluation
     comb_assigns: Vec<(usize, ExprDef)>,
     /// Sequential assignment target indices
@@ -1393,12 +1394,14 @@ pub struct CoreSimulator {
 
     /// Memory arrays (for mem_read operations)
     pub memory_arrays: Vec<Vec<u64>>,
+    /// Declared memory widths
+    memory_widths: Vec<usize>,
     /// Full-width memory arrays used by the runtime evaluator
-    wide_memory_arrays: Vec<Vec<SimValue>>,
+    wide_memory_arrays: Vec<Vec<RuntimeValue>>,
     /// Memory reset snapshots
     memory_reset_arrays: Vec<Vec<u64>>,
     /// Full-width memory reset snapshots
-    wide_memory_reset_arrays: Vec<Vec<SimValue>>,
+    wide_memory_reset_arrays: Vec<Vec<RuntimeValue>>,
     /// Memory name to index mapping
     pub memory_name_to_idx: HashMap<String, usize>,
     /// Memory write ports
@@ -1407,7 +1410,7 @@ pub struct CoreSimulator {
     sync_read_ports: Vec<ResolvedSyncReadPort>,
 
     /// Reset values for registers (signal index -> reset value)
-    reset_values: Vec<(usize, SimValue)>,
+    reset_values: Vec<(usize, RuntimeValue)>,
 }
 
 impl CoreSimulator {
@@ -1442,7 +1445,7 @@ impl CoreSimulator {
 
         // Registers (with reset values)
         let reg_count = ir.regs.len();
-        let mut reset_values: Vec<(usize, SimValue)> = Vec::new();
+        let mut reset_values: Vec<(usize, RuntimeValue)> = Vec::new();
         for reg in &ir.regs {
             let idx = signals.len();
             let reset_val = reg.reset_value.unwrap_or(0) as SimValue;
@@ -1450,7 +1453,7 @@ impl CoreSimulator {
             widths.push(reg.width);
             name_to_idx.insert(reg.name.clone(), idx);
             if reset_val != 0 {
-                reset_values.push((idx, reset_val));
+                reset_values.push((idx, RuntimeValue::from_u128(reset_val, reg.width)));
             }
         }
 
@@ -1484,7 +1487,10 @@ impl CoreSimulator {
         let prev_clock_values = vec![0u64; clock_indices.len()];
 
         let seq_exprs: Vec<ExprDef> = seq_assigns.iter().map(|(_, expr)| expr.clone()).collect();
-        let next_regs = vec![0u128; seq_targets.len()];
+        let next_regs = seq_targets
+            .iter()
+            .map(|&target_idx| RuntimeValue::zero(widths.get(target_idx).copied().unwrap_or(0)))
+            .collect();
 
         // Build memory arrays
         let mut memory_arrays: Vec<Vec<u64>> = Vec::new();
@@ -1505,9 +1511,14 @@ impl CoreSimulator {
             mem_widths.push(mem.width);
         }
 
-        let wide_signals: Vec<SimValue> = signals.iter().map(|&value| value as SimValue).collect();
-        let wide_memory_arrays: Vec<Vec<SimValue>> = memory_arrays.iter()
-            .map(|mem| mem.iter().map(|&value| value as SimValue).collect())
+        let wide_signals: Vec<RuntimeValue> = signals.iter().enumerate()
+            .map(|(idx, &value)| RuntimeValue::from_u128(value as SimValue, widths.get(idx).copied().unwrap_or(0)))
+            .collect();
+        let wide_memory_arrays: Vec<Vec<RuntimeValue>> = memory_arrays.iter().enumerate()
+            .map(|(mem_idx, mem)| {
+                let width = *mem_widths.get(mem_idx).unwrap_or(&64);
+                mem.iter().map(|&value| RuntimeValue::from_u128(value as SimValue, width)).collect()
+            })
             .collect();
         let memory_reset_arrays = memory_arrays.clone();
         let wide_memory_reset_arrays = wide_memory_arrays.clone();
@@ -1585,6 +1596,7 @@ impl CoreSimulator {
             evaluate_fn,
             seq_sample_fn,
             memory_arrays,
+            memory_widths: mem_widths,
             wide_memory_arrays,
             memory_reset_arrays,
             wide_memory_reset_arrays,
@@ -1610,35 +1622,66 @@ impl CoreSimulator {
         (value & 0xFFFF_FFFF_FFFF_FFFF) as u64
     }
 
+    fn signal_runtime_value(&self, idx: usize, width: usize) -> RuntimeValue {
+        self.wide_signals
+            .get(idx)
+            .cloned()
+            .unwrap_or_else(|| RuntimeValue::zero(width))
+            .mask(width)
+    }
+
+    fn store_signal_runtime_value(&mut self, idx: usize, width: usize, value: RuntimeValue) {
+        let masked = value.mask(width);
+        if idx < self.wide_signals.len() {
+            self.wide_signals[idx] = masked.clone();
+        }
+        if idx < self.signals.len() {
+            self.signals[idx] = Self::low_word(masked.low_u128());
+        }
+    }
+
+    fn memory_runtime_value(&self, memory_idx: usize, width: usize, addr: usize) -> RuntimeValue {
+        self.wide_memory_arrays
+            .get(memory_idx)
+            .and_then(|mem| mem.get(addr))
+            .cloned()
+            .unwrap_or_else(|| RuntimeValue::zero(width))
+            .mask(width)
+    }
+
+    fn store_memory_runtime_value(&mut self, memory_idx: usize, width: usize, addr: usize, value: RuntimeValue) {
+        let masked = value.mask(width);
+        if let Some(mem) = self.wide_memory_arrays.get_mut(memory_idx) {
+            if addr < mem.len() {
+                mem[addr] = masked.clone();
+            }
+        }
+        if let Some(mem) = self.memory_arrays.get_mut(memory_idx) {
+            if addr < mem.len() {
+                mem[addr] = Self::low_word(masked.low_u128());
+            }
+        }
+    }
+
     #[inline(always)]
     pub fn peek_word_by_idx(&self, idx: usize, word_idx: usize) -> u64 {
-        if idx >= self.wide_signals.len() || word_idx > 1 {
+        if idx >= self.wide_signals.len() {
             return 0;
         }
         let width = self.widths.get(idx).copied().unwrap_or(0);
-        if word_idx * 64 >= width {
-            return 0;
-        }
-        let shift = (word_idx * 64) as u32;
-        ((self.wide_signals[idx] >> shift) & 0xFFFF_FFFF_FFFF_FFFF) as u64
+        self.signal_runtime_value(idx, width).word(width, word_idx)
     }
 
     #[inline(always)]
     pub fn poke_word_by_idx(&mut self, idx: usize, word_idx: usize, value: u64) {
-        if idx >= self.signals.len() || word_idx > 1 {
+        if idx >= self.signals.len() {
             return;
         }
 
         let width = self.widths.get(idx).copied().unwrap_or(0);
-        if width == 0 || word_idx * 64 >= width {
-            return;
-        }
-
-        let shift = (word_idx * 64) as u32;
-        let word_mask = (0xFFFF_FFFF_FFFF_FFFFu128) << shift;
-        let merged = (self.wide_signals[idx] & !word_mask) | ((value as SimValue) << shift);
-        self.wide_signals[idx] = merged & Self::compute_mask(width);
-        self.signals[idx] = Self::low_word(self.wide_signals[idx]);
+        let current = self.signal_runtime_value(idx, width);
+        let updated = current.with_word(width, word_idx, value);
+        self.store_signal_runtime_value(idx, width, updated);
     }
 
     fn sample_next_regs(&mut self) {
@@ -1667,93 +1710,110 @@ impl CoreSimulator {
         }
     }
 
-    fn eval_expr_runtime(&self, expr: &ExprDef) -> SimValue {
+    fn runtime_shift_amount(value: &RuntimeValue, width: usize) -> usize {
+        if width > 128 && !value.high_words(width).iter().all(|word| *word == 0) {
+            return usize::MAX;
+        }
+
+        let low = value.low_u128();
+        if low > usize::MAX as u128 {
+            usize::MAX
+        } else {
+            low as usize
+        }
+    }
+
+    fn eval_expr_runtime(&self, expr: &ExprDef) -> RuntimeValue {
         match expr {
             ExprDef::Signal { name, width } => {
-                let val = self.name_to_idx.get(name)
-                    .and_then(|&idx| self.wide_signals.get(idx).copied())
-                    .unwrap_or(0);
-                val & Self::compute_mask(*width)
+                let idx = self.name_to_idx.get(name).copied().unwrap_or(0);
+                self.signal_runtime_value(idx, *width)
             }
-            ExprDef::Literal { value, width } => (*value as i128 as SimValue) & Self::compute_mask(*width),
+            ExprDef::Literal { value, width } => RuntimeValue::from_signed_i128(*value, *width),
             ExprDef::UnaryOp { op, operand, width } => {
                 let src = self.eval_expr_runtime(operand);
-                let mask = Self::compute_mask(*width);
                 match op.as_str() {
-                    "~" | "not" => (!src) & mask,
+                    "~" | "not" => RuntimeValue::from_u128(Self::compute_mask(*width), *width)
+                        .bitxor(&src, *width),
                     "&" | "reduce_and" => {
                         let op_width = Self::runtime_expr_width(operand, &self.widths, &self.name_to_idx);
-                        let op_mask = Self::compute_mask(op_width);
-                        if (src & op_mask) == op_mask { 1 } else { 0 }
+                        RuntimeValue::from_u128(if src.reduce_and(op_width) { 1 } else { 0 }, *width)
                     }
-                    "|" | "reduce_or" => if src != 0 { 1 } else { 0 },
-                    "^" | "reduce_xor" => (src.count_ones() as SimValue) & 1,
-                    _ => src & mask,
+                    "|" | "reduce_or" => RuntimeValue::from_u128(if src.is_zero() { 0 } else { 1 }, *width),
+                    "^" | "reduce_xor" => RuntimeValue::from_u128(src.reduce_xor(), *width),
+                    _ => src.mask(*width),
                 }
             }
             ExprDef::BinaryOp { op, left, right, width } => {
                 let l = self.eval_expr_runtime(left);
                 let r = self.eval_expr_runtime(right);
-                let mask = Self::compute_mask(*width);
-                let result = match op.as_str() {
-                    "&" => l & r,
-                    "|" => l | r,
-                    "^" => l ^ r,
-                    "+" => l.wrapping_add(r),
-                    "-" => l.wrapping_sub(r),
-                    "*" => l.wrapping_mul(r),
-                    "/" => if r == 0 { 0 } else { l / r },
-                    "%" => if r == 0 { 0 } else { l % r },
-                    "<<" => if r >= 128 { 0 } else { l << (r as u32) },
-                    ">>" => if r >= 128 { 0 } else { l >> (r as u32) },
-                    "==" => if l == r { 1 } else { 0 },
-                    "!=" => if l != r { 1 } else { 0 },
-                    "<" => if l < r { 1 } else { 0 },
-                    ">" => if l > r { 1 } else { 0 },
-                    "<=" | "le" => if l <= r { 1 } else { 0 },
-                    ">=" => if l >= r { 1 } else { 0 },
-                    _ => l,
-                };
-                result & mask
+                match op.as_str() {
+                    "&" => l.bitand(&r, *width),
+                    "|" => l.bitor(&r, *width),
+                    "^" => l.bitxor(&r, *width),
+                    "+" => l.add(&r, *width),
+                    "-" => l.sub(&r, *width),
+                    "*" => l.mul(&r, *width),
+                    "/" => {
+                        let lhs = l.low_u128();
+                        let rhs = r.low_u128();
+                        RuntimeValue::from_u128(if rhs == 0 { 0 } else { lhs / rhs }, *width)
+                    }
+                    "%" => {
+                        let lhs = l.low_u128();
+                        let rhs = r.low_u128();
+                        RuntimeValue::from_u128(if rhs == 0 { 0 } else { lhs % rhs }, *width)
+                    }
+                    "<<" => {
+                        let shift = Self::runtime_shift_amount(&r, Self::runtime_expr_width(right, &self.widths, &self.name_to_idx));
+                        if shift == usize::MAX { RuntimeValue::zero(*width) } else { l.shl(shift, *width) }
+                    }
+                    ">>" => {
+                        let shift = Self::runtime_shift_amount(&r, Self::runtime_expr_width(right, &self.widths, &self.name_to_idx));
+                        if shift == usize::MAX { RuntimeValue::zero(*width) } else { l.shr(shift, *width) }
+                    }
+                    "==" => RuntimeValue::from_u128((l.cmp_unsigned(&r, Self::runtime_expr_width(left, &self.widths, &self.name_to_idx).max(Self::runtime_expr_width(right, &self.widths, &self.name_to_idx))) == std::cmp::Ordering::Equal) as u128, *width),
+                    "!=" => RuntimeValue::from_u128((l.cmp_unsigned(&r, Self::runtime_expr_width(left, &self.widths, &self.name_to_idx).max(Self::runtime_expr_width(right, &self.widths, &self.name_to_idx))) != std::cmp::Ordering::Equal) as u128, *width),
+                    "<" => RuntimeValue::from_u128((l.cmp_unsigned(&r, Self::runtime_expr_width(left, &self.widths, &self.name_to_idx).max(Self::runtime_expr_width(right, &self.widths, &self.name_to_idx))) == std::cmp::Ordering::Less) as u128, *width),
+                    ">" => RuntimeValue::from_u128((l.cmp_unsigned(&r, Self::runtime_expr_width(left, &self.widths, &self.name_to_idx).max(Self::runtime_expr_width(right, &self.widths, &self.name_to_idx))) == std::cmp::Ordering::Greater) as u128, *width),
+                    "<=" | "le" => RuntimeValue::from_u128((l.cmp_unsigned(&r, Self::runtime_expr_width(left, &self.widths, &self.name_to_idx).max(Self::runtime_expr_width(right, &self.widths, &self.name_to_idx))) != std::cmp::Ordering::Greater) as u128, *width),
+                    ">=" => RuntimeValue::from_u128((l.cmp_unsigned(&r, Self::runtime_expr_width(left, &self.widths, &self.name_to_idx).max(Self::runtime_expr_width(right, &self.widths, &self.name_to_idx))) != std::cmp::Ordering::Less) as u128, *width),
+                    _ => l.mask(*width),
+                }
             }
             ExprDef::Mux { condition, when_true, when_false, width } => {
                 let cond = self.eval_expr_runtime(condition);
-                let selected = if cond != 0 {
-                    self.eval_expr_runtime(when_true)
-                } else {
+                let selected = if cond.is_zero() {
                     self.eval_expr_runtime(when_false)
+                } else {
+                    self.eval_expr_runtime(when_true)
                 };
-                selected & Self::compute_mask(*width)
+                selected.mask(*width)
             }
             ExprDef::Slice { base, low, width, .. } => {
                 let base_val = self.eval_expr_runtime(base);
-                let shifted = if *low >= 128 { 0 } else { base_val >> (*low as u32) };
-                shifted & Self::compute_mask(*width)
+                base_val.slice(*low, *width)
             }
             ExprDef::Concat { parts, width } => {
-                let mut result = 0u128;
-                for part in parts {
-                    let part_width = Self::runtime_expr_width(part, &self.widths, &self.name_to_idx);
-                    let part_val = self.eval_expr_runtime(part) & Self::compute_mask(part_width);
-                    result = if part_width >= 128 { 0 } else { result << part_width };
-                    result |= part_val;
-                    result &= Self::compute_mask(*width);
-                }
-                result & Self::compute_mask(*width)
+                let values = parts.iter()
+                    .map(|part| (self.eval_expr_runtime(part), Self::runtime_expr_width(part, &self.widths, &self.name_to_idx)))
+                    .collect::<Vec<_>>();
+                let refs = values.iter().map(|(value, part_width)| (value, *part_width)).collect::<Vec<_>>();
+                RuntimeValue::concat(&refs, *width)
             }
-            ExprDef::Resize { expr, width } => self.eval_expr_runtime(expr) & Self::compute_mask(*width),
+            ExprDef::Resize { expr, width } => self.eval_expr_runtime(expr).resize(*width),
             ExprDef::MemRead { memory, addr, width } => {
                 let Some(&memory_idx) = self.memory_name_to_idx.get(memory) else {
-                    return 0;
+                    return RuntimeValue::zero(*width);
                 };
                 let Some(mem) = self.wide_memory_arrays.get(memory_idx) else {
-                    return 0;
+                    return RuntimeValue::zero(*width);
                 };
                 if mem.is_empty() {
-                    return 0;
+                    return RuntimeValue::zero(*width);
                 }
-                let addr_val = self.eval_expr_runtime(addr) as usize % mem.len();
-                mem[addr_val] & Self::compute_mask(*width)
+                let addr_val = self.eval_expr_runtime(addr).low_u128() as usize % mem.len();
+                self.memory_runtime_value(memory_idx, *width, addr_val)
             }
         }
     }
@@ -1763,29 +1823,25 @@ impl CoreSimulator {
             return;
         }
 
-        let mut writes: Vec<(usize, usize, SimValue)> = Vec::new();
+        let mut writes: Vec<(usize, usize, usize, RuntimeValue)> = Vec::new();
         for wp in &self.write_ports {
-            if self.wide_signals.get(wp.clock_idx).copied().unwrap_or(0) == 0 {
+            if self.signal_runtime_value(wp.clock_idx, self.widths.get(wp.clock_idx).copied().unwrap_or(0)).is_zero() {
                 continue;
             }
-            if (self.eval_expr_runtime(&wp.enable) & 1) == 0 {
+            if (self.eval_expr_runtime(&wp.enable).low_u128() & 1) == 0 {
                 continue;
             }
             if wp.memory_depth == 0 {
                 continue;
             }
 
-            let addr = (self.eval_expr_runtime(&wp.addr) as usize) % wp.memory_depth;
-            let data = self.eval_expr_runtime(&wp.data) & Self::compute_mask(wp.memory_width);
-            writes.push((wp.memory_idx, addr, data));
+            let addr = (self.eval_expr_runtime(&wp.addr).low_u128() as usize) % wp.memory_depth;
+            let data = self.eval_expr_runtime(&wp.data).mask(wp.memory_width);
+            writes.push((wp.memory_idx, addr, wp.memory_width, data));
         }
 
-        for (memory_idx, addr, data) in writes {
-            if let Some(mem) = self.wide_memory_arrays.get_mut(memory_idx) {
-                if addr < mem.len() {
-                    mem[addr] = data;
-                }
-            }
+        for (memory_idx, addr, width, value) in writes {
+            self.store_memory_runtime_value(memory_idx, width, addr, value);
         }
     }
 
@@ -1794,13 +1850,13 @@ impl CoreSimulator {
             return;
         }
 
-        let mut updates: Vec<(usize, SimValue)> = Vec::new();
+        let mut updates: Vec<(usize, RuntimeValue)> = Vec::new();
         for rp in &self.sync_read_ports {
-            if self.wide_signals.get(rp.clock_idx).copied().unwrap_or(0) == 0 {
+            if self.signal_runtime_value(rp.clock_idx, self.widths.get(rp.clock_idx).copied().unwrap_or(0)).is_zero() {
                 continue;
             }
             if let Some(enable) = &rp.enable {
-                if (self.eval_expr_runtime(enable) & 1) == 0 {
+                if (self.eval_expr_runtime(enable).low_u128() & 1) == 0 {
                     continue;
                 }
             }
@@ -1812,14 +1868,15 @@ impl CoreSimulator {
                 continue;
             }
 
-            let addr = (self.eval_expr_runtime(&rp.addr) as usize) % mem.len();
-            let data = mem[addr] & Self::compute_mask(rp.memory_width);
-            updates.push((rp.data_idx, data & Self::compute_mask(rp.data_width)));
+            let addr = (self.eval_expr_runtime(&rp.addr).low_u128() as usize) % mem.len();
+            let data = self.memory_runtime_value(rp.memory_idx, rp.memory_width, addr).resize(rp.data_width);
+            updates.push((rp.data_idx, data));
         }
 
         for (idx, value) in updates {
             if idx < self.wide_signals.len() {
-                self.wide_signals[idx] = value;
+                let width = self.widths.get(idx).copied().unwrap_or(0);
+                self.store_signal_runtime_value(idx, width, value);
             }
         }
     }
@@ -1831,9 +1888,8 @@ impl CoreSimulator {
     pub fn poke_wide(&mut self, name: &str, value: SimValue) -> Result<(), String> {
         let idx = *self.name_to_idx.get(name)
             .ok_or_else(|| format!("Unknown signal: {}", name))?;
-        let mask = Self::compute_mask(self.widths[idx]);
-        self.wide_signals[idx] = value & mask;
-        self.signals[idx] = Self::low_word(self.wide_signals[idx]);
+        let width = self.widths.get(idx).copied().unwrap_or(0);
+        self.store_signal_runtime_value(idx, width, RuntimeValue::from_u128(value, width));
         Ok(())
     }
 
@@ -1851,7 +1907,8 @@ impl CoreSimulator {
     pub fn peek_wide(&self, name: &str) -> Result<SimValue, String> {
         let idx = *self.name_to_idx.get(name)
             .ok_or_else(|| format!("Unknown signal: {}", name))?;
-        Ok(self.wide_signals[idx])
+        let width = self.widths.get(idx).copied().unwrap_or(0);
+        Ok(self.signal_runtime_value(idx, width).low_u128())
     }
 
     pub fn peek_word_by_name(&self, name: &str, word_idx: usize) -> Result<u64, String> {
@@ -1868,9 +1925,8 @@ impl CoreSimulator {
     #[inline(always)]
     pub fn poke_wide_by_idx(&mut self, idx: usize, value: SimValue) {
         if idx < self.wide_signals.len() {
-            let mask = Self::compute_mask(self.widths[idx]);
-            self.wide_signals[idx] = value & mask;
-            self.signals[idx] = Self::low_word(self.wide_signals[idx]);
+            let width = self.widths.get(idx).copied().unwrap_or(0);
+            self.store_signal_runtime_value(idx, width, RuntimeValue::from_u128(value, width));
         }
     }
 
@@ -1882,7 +1938,8 @@ impl CoreSimulator {
     #[inline(always)]
     pub fn peek_wide_by_idx(&self, idx: usize) -> SimValue {
         if idx < self.signals.len() {
-            self.wide_signals[idx]
+            let width = self.widths.get(idx).copied().unwrap_or(0);
+            self.signal_runtime_value(idx, width).low_u128()
         } else {
             0
         }
@@ -1895,46 +1952,48 @@ impl CoreSimulator {
     fn sync_wide_from_low_views(&mut self) {
         for (idx, &value) in self.signals.iter().enumerate() {
             if idx < self.wide_signals.len() && self.widths.get(idx).copied().unwrap_or(0) <= 64 {
-                self.wide_signals[idx] = Self::set_low_word(self.wide_signals[idx], self.widths[idx], value);
+                self.wide_signals[idx] = RuntimeValue::from_u128(value as SimValue, self.widths[idx]);
             }
         }
 
-        for (low_mem, wide_mem) in self.memory_arrays.iter().zip(self.wide_memory_arrays.iter_mut()) {
+        for ((low_mem, wide_mem), &width) in self
+            .memory_arrays
+            .iter()
+            .zip(self.wide_memory_arrays.iter_mut())
+            .zip(self.memory_widths.iter())
+        {
             for (idx, &value) in low_mem.iter().enumerate() {
                 if idx < wide_mem.len() {
-                    wide_mem[idx] = value as SimValue;
+                    wide_mem[idx] = RuntimeValue::from_u128(value as SimValue, width);
                 }
             }
         }
     }
 
     fn sync_low_views_from_wide(&mut self) {
-        for (idx, value) in self.wide_signals.iter().copied().enumerate() {
+        for (idx, value) in self.wide_signals.iter().enumerate() {
             if idx < self.signals.len() {
-                self.signals[idx] = Self::low_word(value);
+                self.signals[idx] = Self::low_word(value.low_u128());
             }
         }
 
         for (wide_mem, low_mem) in self.wide_memory_arrays.iter().zip(self.memory_arrays.iter_mut()) {
-            for (idx, &value) in wide_mem.iter().enumerate() {
+            for (idx, value) in wide_mem.iter().enumerate() {
                 if idx < low_mem.len() {
-                    low_mem[idx] = Self::low_word(value);
+                    low_mem[idx] = Self::low_word(value.low_u128());
                 }
             }
         }
     }
 
     #[inline(always)]
-    fn set_low_word(current: SimValue, width: usize, value: u64) -> SimValue {
-        let merged = (current & !0xFFFF_FFFF_FFFF_FFFFu128) | (value as SimValue);
-        merged & Self::compute_mask(width)
-    }
-
-    #[inline(always)]
     fn evaluate_no_clock_capture(&mut self) {
         self.sync_wide_from_low_views();
-        for (target_idx, expr) in &self.comb_assigns {
-            self.wide_signals[*target_idx] = self.eval_expr_runtime(expr) & Self::compute_mask(self.widths[*target_idx]);
+        let comb_assigns = self.comb_assigns.clone();
+        for (target_idx, expr) in comb_assigns {
+            let width = self.widths.get(target_idx).copied().unwrap_or(0);
+            let value = self.eval_expr_runtime(&expr);
+            self.store_signal_runtime_value(target_idx, width, value);
         }
     }
 
@@ -1976,10 +2035,12 @@ impl CoreSimulator {
         }
 
         // Apply updates for clocks that rose
-        for (i, &target_idx) in self.seq_targets.iter().enumerate() {
+        for i in 0..self.seq_targets.len() {
+            let target_idx = self.seq_targets[i];
             let clk_idx = self.seq_clocks[i];
             if rising_clocks[clk_idx] && !updated[i] {
-                self.wide_signals[target_idx] = self.next_regs[i];
+                let width = self.widths.get(target_idx).copied().unwrap_or(0);
+                self.store_signal_runtime_value(target_idx, width, self.next_regs[i].clone());
                 updated[i] = true;
             }
         }
@@ -2010,10 +2071,12 @@ impl CoreSimulator {
                 break;
             }
 
-            for (i, &target_idx) in self.seq_targets.iter().enumerate() {
+            for i in 0..self.seq_targets.len() {
+                let target_idx = self.seq_targets[i];
                 let clk_idx = self.seq_clocks[i];
                 if rising_clocks[clk_idx] && !updated[i] {
-                    self.wide_signals[target_idx] = self.next_regs[i];
+                    let width = self.widths.get(target_idx).copied().unwrap_or(0);
+                    self.store_signal_runtime_value(target_idx, width, self.next_regs[i].clone());
                     updated[i] = true;
                 }
             }
@@ -2061,10 +2124,12 @@ impl CoreSimulator {
         }
 
         // Apply updates for clocks that rose
-        for (i, &target_idx) in self.seq_targets.iter().enumerate() {
+        for i in 0..self.seq_targets.len() {
+            let target_idx = self.seq_targets[i];
             let clk_idx = self.seq_clocks[i];
             if rising_clocks[clk_idx] && !updated[i] {
-                self.wide_signals[target_idx] = self.next_regs[i];
+                let width = self.widths.get(target_idx).copied().unwrap_or(0);
+                self.store_signal_runtime_value(target_idx, width, self.next_regs[i].clone());
                 updated[i] = true;
             }
         }
@@ -2095,10 +2160,12 @@ impl CoreSimulator {
                 break;
             }
 
-            for (i, &target_idx) in self.seq_targets.iter().enumerate() {
+            for i in 0..self.seq_targets.len() {
+                let target_idx = self.seq_targets[i];
                 let clk_idx = self.seq_clocks[i];
                 if rising_clocks[clk_idx] && !updated[i] {
-                    self.wide_signals[target_idx] = self.next_regs[i];
+                    let width = self.widths.get(target_idx).copied().unwrap_or(0);
+                    self.store_signal_runtime_value(target_idx, width, self.next_regs[i].clone());
                     updated[i] = true;
                 }
             }
@@ -2120,10 +2187,10 @@ impl CoreSimulator {
         for val in self.signals.iter_mut() {
             *val = 0;
         }
-        for val in self.wide_signals.iter_mut() {
-            *val = 0;
+        for (idx, val) in self.wide_signals.iter_mut().enumerate() {
+            *val = RuntimeValue::zero(self.widths.get(idx).copied().unwrap_or(0));
         }
-        for &(idx, reset_val) in &self.reset_values {
+        for (idx, reset_val) in self.reset_values.clone() {
             self.wide_signals[idx] = reset_val;
         }
         for val in self.prev_clock_values.iter_mut() {

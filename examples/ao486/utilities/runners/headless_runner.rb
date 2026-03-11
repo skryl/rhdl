@@ -32,7 +32,27 @@ module RHDL
 
         attr_reader :runner, :mode, :sim_backend, :speed, :debug, :headless, :cycles
 
-        def initialize(mode: DEFAULT_MODE, sim: DEFAULT_SIM, debug: false, speed: nil, headless: false, cycles: nil)
+        def self.build_from_cleaned_mlir(cleaned_mlir, mode: DEFAULT_MODE, sim: DEFAULT_SIM, debug: false, speed: nil, headless: true, cycles: nil, work_dir: nil)
+          instance = new(mode: mode, sim: sim, debug: debug, speed: speed, headless: headless, cycles: cycles, runner: nil)
+          backend_runner = case instance.effective_mode
+                           when :ir
+                             IrRunner.build_from_cleaned_mlir(cleaned_mlir, backend: sim || DEFAULT_SIM)
+                           when :verilog
+                             raise ArgumentError, 'work_dir is required for AO486 Verilator parity runner builds' if work_dir.nil?
+
+                             VerilatorRunner.build_from_cleaned_mlir(cleaned_mlir, work_dir: work_dir)
+                           when :circt
+                             raise ArgumentError, 'work_dir is required for AO486 Arcilator parity runner builds' if work_dir.nil?
+
+                             ArcilatorRunner.build_from_cleaned_mlir(cleaned_mlir, work_dir: work_dir)
+                           else
+                             raise ArgumentError, "Unsupported AO486 mode: #{mode.inspect}"
+                           end
+          instance.instance_variable_set(:@runner, backend_runner)
+          instance
+        end
+
+        def initialize(mode: DEFAULT_MODE, sim: DEFAULT_SIM, debug: false, speed: nil, headless: false, cycles: nil, runner: :auto)
           @mode = mode.to_sym
           @sim_backend = sim&.to_sym
           @debug = !!debug
@@ -40,7 +60,7 @@ module RHDL
           @headless = !!headless
           @cycles = cycles
           @display_adapter = DisplayAdapter.new
-          @runner = build_runner
+          @runner = runner == :auto ? build_runner : runner
         end
 
         def software_path(path = nil)
@@ -86,6 +106,36 @@ module RHDL
           self
         end
 
+        def clear_memory!
+          @runner.clear_memory! if @runner.respond_to?(:clear_memory!)
+          self
+        end
+
+        def read_bytes(base, length, mapped: true)
+          @runner.read_bytes(base, length, mapped: mapped)
+        end
+
+        def memory
+          @runner.memory
+        end
+
+        def sim
+          @runner.sim if @runner.respond_to?(:sim)
+        end
+
+        def peek(signal_name)
+          @runner.peek(signal_name)
+        end
+
+        def reset
+          @runner.reset
+          self
+        end
+
+        def step(cycle)
+          @runner.step(cycle)
+        end
+
         def send_keys(text)
           @runner.send_keys(text)
           self
@@ -112,8 +162,42 @@ module RHDL
           )
         end
 
-        def run
+        def run(max_cycles: nil)
+          return @runner.run(max_cycles: max_cycles) if !max_cycles.nil? && @runner.respond_to?(:run)
+
           headless ? run_headless : run_interactive
+        end
+
+        def run_fetch_words(max_cycles:)
+          @runner.run_fetch_words(max_cycles: max_cycles)
+        end
+
+        def run_fetch_trace(max_cycles:)
+          @runner.run_fetch_trace(max_cycles: max_cycles)
+        end
+
+        def run_fetch_groups(max_cycles:)
+          @runner.run_fetch_groups(max_cycles: max_cycles)
+        end
+
+        def run_fetch_pc_groups(max_cycles:)
+          @runner.run_fetch_pc_groups(max_cycles: max_cycles)
+        end
+
+        def run_step_trace(max_cycles:)
+          @runner.run_step_trace(max_cycles: max_cycles)
+        end
+
+        def run_final_state(max_cycles:)
+          @runner.run_final_state(max_cycles: max_cycles)
+        end
+
+        def final_state_snapshot
+          @runner.final_state_snapshot
+        end
+
+        def last_run_stats
+          @runner.last_run_stats if @runner.respond_to?(:last_run_stats)
         end
 
         def state
@@ -123,7 +207,8 @@ module RHDL
             sim_backend: sim_backend,
             speed: speed,
             debug: debug,
-            headless: headless
+            headless: headless,
+            last_run_stats: last_run_stats
           )
         end
 

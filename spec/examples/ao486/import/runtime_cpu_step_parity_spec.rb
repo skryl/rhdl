@@ -10,6 +10,8 @@ require_relative '../../../../examples/ao486/utilities/import/cpu_parity_runtime
 require_relative '../../../../examples/ao486/utilities/import/cpu_parity_verilator_runtime'
 
 RSpec.describe 'AO486 CPU parity-package current write-trace parity', slow: true do
+  include AO486SpecSupport::HeadlessImportRunnerHelper
+
   def flatten_step_trace(trace)
     trace.flat_map do |event|
       Array(event.bytes).each_with_index.map { |byte, idx| [event.eip + idx, byte] }
@@ -58,13 +60,10 @@ RSpec.describe 'AO486 CPU parity-package current write-trace parity', slow: true
       Dir.mktmpdir('ao486_cpu_step_parity_ws') do |workspace|
         result = run_importer(out_dir: out_dir, workspace: workspace)
         cleaned_mlir = File.read(result.normalized_core_mlir_path)
-        ir_runtime = RHDL::Examples::AO486::Import::CpuParityRuntime.build_from_cleaned_mlir(cleaned_mlir, backend: backend)
+        ir_runtime = build_ao486_import_headless_runner(cleaned_mlir, mode: :ir, sim: backend)
 
         Dir.mktmpdir('ao486_cpu_step_parity_vl') do |build_dir|
-          verilator_runtime = RHDL::Examples::AO486::Import::CpuParityVerilatorRuntime.build_from_cleaned_mlir(
-            cleaned_mlir,
-            work_dir: build_dir
-          )
+          verilator_runtime = build_ao486_import_headless_runner(cleaned_mlir, mode: :verilog, work_dir: build_dir)
 
           parity_programs.each do |program|
             program.load_into(ir_runtime)

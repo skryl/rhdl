@@ -511,6 +511,33 @@ RSpec.describe RHDL::Examples::GameBoy::VerilogRunner do
         expect(source).to include('ctx->cart_do_latched = cart_read_byte(ctx, ctx->cart_read_pipeline[5]);')
       end
     end
+
+    it 'reads real internal VRAM for direct imported gameboy wrappers' do
+      Dir.mktmpdir('rhdl_gb_cpp_wrapper') do |dir|
+        header = File.join(dir, 'sim_wrapper.h')
+        cpp = File.join(dir, 'sim_wrapper.cpp')
+
+        runner.instance_variable_set(:@verilator_prefix, 'Vgameboy')
+        runner.instance_variable_set(:@top_module_name, 'gameboy')
+        runner.instance_variable_set(:@output_port_aliases, {})
+        runner.instance_variable_set(:@input_port_aliases, {})
+        runner.instance_variable_set(
+          :@direct_verilog_source_plan,
+          {
+            resolved_root: '/tmp/import',
+            source_verilog_path: '/tmp/import/.mixed_import/pure_verilog_entry.v'
+          }
+        )
+
+        allow(runner).to receive(:resolve_port_name).and_return(nil)
+        allow(runner).to receive(:write_file_if_changed) { |path, content| File.write(path, content) }
+
+        runner.send(:create_cpp_wrapper, cpp, header)
+
+        source = File.read(cpp)
+        expect(source).to include('return ctx->dut->rootp->gameboy__DOT__gb_core__DOT__vram0__DOT__altsyncram_component__DOT__mem[addr];')
+      end
+    end
   end
 
   describe '#c_peek_dispatch_lines' do
@@ -621,6 +648,33 @@ RSpec.describe RHDL::Examples::GameBoy::VerilogRunner do
       expect(lines).to include('strcmp(name, "boot_upload_active_internal") == 0) return ctx->dut->rootp->gameboy__DOT__boot_upload_active;')
     end
 
+    it 'uses wrapped gb_core internals for staged direct gameboy wrapper tops' do
+      runner.instance_variable_set(:@top_module_name, 'gameboy')
+      runner.instance_variable_set(
+        :@direct_verilog_source_plan,
+        {
+          resolved_root: '/tmp/import',
+          source_verilog_path: '/tmp/import/.mixed_import/pure_verilog_entry.v'
+        }
+      )
+      runner.instance_variable_set(:@output_port_aliases, {})
+
+      lines = runner.send(:c_peek_dispatch_lines)
+
+      expect(lines).to include('strcmp(name, "cpu_pc_internal") == 0) return ctx->dut->rootp->gameboy__DOT__gb_core__DOT__cpu__DOT__u0__DOT__pc;')
+      expect(lines).to include('strcmp(name, "cpu_addr_internal") == 0) return ctx->dut->rootp->gameboy__DOT__gb_core__DOT__cpu_addr;')
+      expect(lines).to include('strcmp(name, "cpu_addr_raw_internal") == 0) return ctx->dut->rootp->gameboy__DOT__gb_core__DOT__cpu_addr_raw;')
+      expect(lines).to include('strcmp(name, "boot_rom_enabled_internal") == 0) return ctx->dut->rootp->gameboy__DOT__gb_core__DOT__boot_rom_enabled;')
+      expect(lines).to include('strcmp(name, "boot_rom_q_internal") == 0) return ctx->dut->rootp->gameboy__DOT__gb_core__DOT__boot_do;')
+      expect(lines).to include('strcmp(name, "cpu_wr_n_internal") == 0) return ctx->dut->rootp->gameboy__DOT__gb_core__DOT__cpu_wr_n;')
+      expect(lines).to include('strcmp(name, "cpu_rd_n_internal") == 0) return ctx->dut->rootp->gameboy__DOT__gb_core__DOT__cpu_rd_n;')
+      expect(lines).to include('strcmp(name, "video_irq_internal") == 0) return ctx->dut->rootp->gameboy__DOT__gb_core__DOT__video_irq;')
+      expect(lines).to include('strcmp(name, "video_vblank_irq_internal") == 0) return ctx->dut->rootp->gameboy__DOT__gb_core__DOT__vblank_irq;')
+      expect(lines).to include('strcmp(name, "sel_ff50_internal") == 0) return ctx->dut->rootp->gameboy__DOT__gb_core__DOT__sel_FF50;')
+      expect(lines).to include('strcmp(name, "ce_internal") == 0) return ctx->dut->rootp->gameboy__DOT__ce;')
+      expect(lines).to include('strcmp(name, "boot_upload_active_internal") == 0) return ctx->dut->rootp->gameboy__DOT__boot_upload_active;')
+    end
+
     it 'uses wrapped gb_core internals for component-mode gameboy wrapper tops' do
       runner.instance_variable_set(:@top_module_name, 'game_boy_gameboy')
       runner.instance_variable_set(:@direct_verilog_source_plan, nil)
@@ -657,6 +711,25 @@ RSpec.describe RHDL::Examples::GameBoy::VerilogRunner do
 
       expect(lines).not_to include('gameboy__DOT__gb_core__DOT___cpu_A')
       expect(lines).not_to include('gameboy__DOT__gb_core__DOT__cpu__DOT__u0__DOT__pc')
+    end
+  end
+
+  describe '#c_cpu_write_watch_lines' do
+    it 'uses wrapped gb_core write probes for staged direct gameboy wrapper tops' do
+      runner.instance_variable_set(:@top_module_name, 'gameboy')
+      runner.instance_variable_set(
+        :@direct_verilog_source_plan,
+        {
+          resolved_root: '/tmp/import',
+          source_verilog_path: '/tmp/import/.mixed_import/pure_verilog_entry.v'
+        }
+      )
+
+      lines = runner.send(:c_cpu_write_watch_lines, indent: '  ')
+
+      expect(lines).to include('write_active = (ctx->dut->rootp->gameboy__DOT__gb_core__DOT__cpu_wr_n == 0u);')
+      expect(lines).to include('write_addr = ctx->dut->rootp->gameboy__DOT__gb_core__DOT__cpu_addr;')
+      expect(lines).to include('write_data = ctx->dut->rootp->gameboy__DOT__gb_core__DOT__cpu_do & 0xFFu;')
     end
   end
 

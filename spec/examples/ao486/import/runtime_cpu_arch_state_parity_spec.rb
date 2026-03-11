@@ -11,6 +11,8 @@ require_relative '../../../../examples/ao486/utilities/import/cpu_parity_runtime
 require_relative '../../../../examples/ao486/utilities/import/cpu_parity_verilator_runtime'
 
 RSpec.describe 'AO486 CPU parity-package final architectural state parity', slow: true do
+  include AO486SpecSupport::HeadlessImportRunnerHelper
+
   def require_import_tool!
     tool = RHDL::Codegen::CIRCT::Tooling::DEFAULT_VERILOG_IMPORT_TOOL
     skip "#{tool} not available" unless HdlToolchain.which(tool)
@@ -58,15 +60,17 @@ RSpec.describe 'AO486 CPU parity-package final architectural state parity', slow
       Dir.mktmpdir('ao486_cpu_arch_state_parity_ws') do |workspace|
         result = run_importer(out_dir: out_dir, workspace: workspace)
         cleaned_mlir = File.read(result.normalized_core_mlir_path)
-        ir_runtime = RHDL::Examples::AO486::Import::CpuParityRuntime.build_from_cleaned_mlir(cleaned_mlir, backend: backend)
+        ir_runtime = build_ao486_import_headless_runner(cleaned_mlir, mode: :ir, sim: backend)
 
         Dir.mktmpdir('ao486_cpu_arch_state_parity_vl') do |build_dir|
-          verilator_runtime = RHDL::Examples::AO486::Import::CpuParityVerilatorRuntime.build_from_cleaned_mlir(
+          verilator_runtime = build_ao486_import_headless_runner(
             cleaned_mlir,
+            mode: :verilog,
             work_dir: File.join(build_dir, 'verilator')
           )
-          arcilator_runtime = RHDL::Examples::AO486::Import::CpuParityArcilatorRuntime.build_from_cleaned_mlir(
+          arcilator_runtime = build_ao486_import_headless_runner(
             cleaned_mlir,
+            mode: :circt,
             work_dir: File.join(build_dir, 'arcilator')
           )
 

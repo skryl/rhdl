@@ -313,6 +313,28 @@ RSpec.describe 'Headless Runners', :slow do
       end
     end
 
+    describe 'CIRCT mode' do
+      it 'routes to ArcilatorRunner and reports hdl_arcilator simulator type' do
+        require_relative '../../../examples/gameboy/utilities/runners/arcilator_runner'
+        fake_runner = instance_double(
+          'RHDL::Examples::GameBoy::ArcilatorRunner',
+          native?: true,
+          simulator_type: :hdl_arcilator
+        )
+        allow(RHDL::Examples::GameBoy::ArcilatorRunner).to receive(:new).and_return(fake_runner)
+
+        runner = RHDL::Examples::GameBoy::HeadlessRunner.new(mode: :circt, hdl_dir: '/tmp/gameboy_import')
+
+        expect(RHDL::Examples::GameBoy::ArcilatorRunner).to have_received(:new).with(
+          hdl_dir: '/tmp/gameboy_import',
+          top: nil
+        )
+        expect(runner.mode).to eq(:circt)
+        expect(runner.backend).to be_nil
+        expect(runner.simulator_type).to eq(:hdl_arcilator)
+      end
+    end
+
     describe 'runner interface' do
       it 'returns all required fields' do
         runner = RHDL::Examples::GameBoy::HeadlessRunner.with_test_rom

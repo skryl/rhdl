@@ -529,6 +529,104 @@ module RHDL
 	                  end
 	                endmodule
 	              VERILOG
+	            when 'bw_r_tlb_fpga'
+	              <<~VERILOG
+	                module bw_r_tlb_fpga(
+	                  tlb_pgnum_crit, tlb_rd_tte_tag, tlb_rd_tte_data, tlb_pgnum,
+	                  tlb_cam_hit, cache_way_hit, cache_hit, so, rclk, rst_tri_en,
+	                  tlb_cam_vld, tlb_cam_key, tlb_cam_pid, tlb_demap_key,
+	                  tlb_addr_mask_l, tlb_ctxt, tlb_wr_vld, tlb_wr_tte_tag,
+	                  tlb_wr_tte_data, tlb_rd_tag_vld, tlb_rd_data_vld,
+	                  tlb_rw_index_vld, tlb_rw_index, tlb_demap, tlb_demap_all,
+	                  tlb_demap_auto, cache_ptag_w3, cache_ptag_w2, cache_ptag_w1,
+	                  cache_ptag_w0, cache_set_vld, tlb_bypass, tlb_bypass_va, si,
+	                  se, hold, adj, arst_l, rst_soft_l
+	                );
+	                  output [39:10] tlb_pgnum_crit;
+	                  output [58:0] tlb_rd_tte_tag;
+	                  output [42:0] tlb_rd_tte_data;
+	                  output [39:10] tlb_pgnum;
+	                  output tlb_cam_hit;
+	                  output [3:0] cache_way_hit;
+	                  output cache_hit;
+	                  output so;
+	                  input rclk;
+	                  input rst_tri_en;
+	                  input tlb_cam_vld;
+	                  input [40:0] tlb_cam_key;
+	                  input [2:0] tlb_cam_pid;
+	                  input [40:0] tlb_demap_key;
+	                  input tlb_addr_mask_l;
+	                  input [12:0] tlb_ctxt;
+	                  input tlb_wr_vld;
+	                  input [58:0] tlb_wr_tte_tag;
+	                  input [42:0] tlb_wr_tte_data;
+	                  input tlb_rd_tag_vld;
+	                  input tlb_rd_data_vld;
+	                  input tlb_rw_index_vld;
+	                  input [5:0] tlb_rw_index;
+	                  input tlb_demap;
+	                  input tlb_demap_all;
+	                  input tlb_demap_auto;
+	                  input [39:10] cache_ptag_w3;
+	                  input [39:10] cache_ptag_w2;
+	                  input [39:10] cache_ptag_w1;
+	                  input [39:10] cache_ptag_w0;
+	                  input [3:0] cache_set_vld;
+	                  input tlb_bypass;
+	                  input [12:10] tlb_bypass_va;
+	                  input si;
+	                  input se;
+	                  input hold;
+	                  input [7:0] adj;
+	                  input arst_l;
+	                  input rst_soft_l;
+
+	                  reg [29:0] pgnum_g;
+	                  reg [3:0] cache_way_hit_g;
+	                  reg cache_hit_g;
+
+	                  wire [29:0] virtual_pgnum;
+	                  wire [7:0] masked_va_39_32;
+	                  wire [3:0] next_cache_way_hit;
+
+	                  assign masked_va_39_32 = {8{tlb_addr_mask_l}} & tlb_cam_key[32:25];
+	                  assign virtual_pgnum = {
+	                    masked_va_39_32,
+	                    tlb_cam_key[24:21],
+	                    tlb_cam_key[19:14],
+	                    tlb_cam_key[12:7],
+	                    tlb_cam_key[5:3],
+	                    tlb_bypass_va
+	                  };
+
+	                  assign next_cache_way_hit[0] = cache_set_vld[0] & (cache_ptag_w0 == virtual_pgnum);
+	                  assign next_cache_way_hit[1] = cache_set_vld[1] & (cache_ptag_w1 == virtual_pgnum);
+	                  assign next_cache_way_hit[2] = cache_set_vld[2] & (cache_ptag_w2 == virtual_pgnum);
+	                  assign next_cache_way_hit[3] = cache_set_vld[3] & (cache_ptag_w3 == virtual_pgnum);
+
+	                  assign tlb_pgnum_crit = virtual_pgnum;
+	                  assign tlb_pgnum = pgnum_g;
+	                  assign tlb_rd_tte_tag = 59'b0;
+	                  assign tlb_rd_tte_data = 43'b0;
+	                  assign tlb_cam_hit = 1'b1;
+	                  assign cache_way_hit = cache_way_hit_g;
+	                  assign cache_hit = cache_hit_g;
+	                  assign so = si;
+
+	                  always @(posedge rclk or negedge arst_l) begin
+	                    if (!arst_l || !rst_soft_l) begin
+	                      pgnum_g <= 30'b0;
+	                      cache_way_hit_g <= 4'b0;
+	                      cache_hit_g <= 1'b0;
+	                    end else if (!hold) begin
+	                      pgnum_g <= virtual_pgnum;
+	                      cache_way_hit_g <= rst_tri_en ? 4'b0 : next_cache_way_hit;
+	                      cache_hit_g <= rst_tri_en ? 1'b0 : |next_cache_way_hit;
+	                    end
+	                  end
+	                endmodule
+	              VERILOG
 	            end
 	          end
 

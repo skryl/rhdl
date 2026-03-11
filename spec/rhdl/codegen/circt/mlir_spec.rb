@@ -221,6 +221,48 @@ RSpec.describe RHDL::Codegen::CIRCT::MLIR do
       expect(mlir).to include('hw.output')
     end
 
+    it 'resizes sequential next-state expressions to the declared register width before seq.compreg' do
+      mod = ir::ModuleOp.new(
+        name: 'seq_width_trim',
+        ports: [
+          ir::Port.new(name: :clk, direction: :in, width: 1),
+          ir::Port.new(name: :a, direction: :in, width: 8),
+          ir::Port.new(name: :q, direction: :out, width: 8)
+        ],
+        nets: [],
+        regs: [ir::Reg.new(name: :q, width: 8)],
+        assigns: [],
+        processes: [
+          ir::Process.new(
+            name: :seq_logic,
+            clocked: true,
+            clock: :clk,
+            statements: [
+              ir::SeqAssign.new(
+                target: :q,
+                expr: ir::BinaryOp.new(
+                  op: :+,
+                  left: ir::Signal.new(name: :q, width: 8),
+                  right: ir::Signal.new(name: :a, width: 8),
+                  width: 9
+                )
+              )
+            ]
+          )
+        ],
+        instances: [],
+        memories: [],
+        write_ports: [],
+        sync_read_ports: [],
+        parameters: {}
+      )
+
+      mlir = described_class.generate(mod)
+      expect(mlir).to include('comb.extract')
+      expect(mlir).to match(/seq\.compreg .* : i8/)
+      expect(mlir).not_to match(/%q_8 = seq\.compreg .* : i9/)
+    end
+
     it 'emits divu and modu for division and modulo binary ops' do
       mod = ir::ModuleOp.new(
         name: 'arith_div_mod',

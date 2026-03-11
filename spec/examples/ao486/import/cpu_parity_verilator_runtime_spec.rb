@@ -11,6 +11,8 @@ require_relative '../../../../examples/ao486/utilities/import/cpu_parity_runtime
 require_relative '../../../../examples/ao486/utilities/import/cpu_parity_verilator_runtime'
 
 RSpec.describe 'AO486 CPU parity runtime across IR, Verilator, and Arcilator' do
+  include AO486SpecSupport::HeadlessImportRunnerHelper
+
   def flatten_step_trace(trace)
     trace.flat_map do |event|
       Array(event.bytes).each_with_index.map { |byte, idx| [event.eip + idx, byte] }
@@ -19,6 +21,24 @@ RSpec.describe 'AO486 CPU parity runtime across IR, Verilator, and Arcilator' do
 
   def normalize_memory(memory)
     memory.to_h.sort.to_h
+  end
+
+  def benchmark_result(program, runner)
+    stats = runner.last_run_stats
+    raise "missing headless-runner benchmark stats for #{runner.backend} #{program.name}" if stats.nil?
+
+    stats.merge(program_name: program.name, backend_name: runner.backend)
+  end
+
+  def print_benchmark_summary(results)
+    puts
+    puts 'AO486 three-way complex-program throughput (cyc/s)'
+    results.group_by { |result| result.fetch(:program_name) }.sort_by { |program_name, _| program_name.to_s }.each do |program_name, program_results|
+      program_line = program_results.sort_by { |result| result.fetch(:backend_name).to_s }.map do |result|
+        "#{result.fetch(:backend_name)}=#{format('%.2f', result.fetch(:cycles_per_second))}"
+      end.join('  ')
+      puts "  #{program_name}: #{program_line}"
+    end
   end
 
   def require_import_tool!
@@ -69,15 +89,17 @@ RSpec.describe 'AO486 CPU parity runtime across IR, Verilator, and Arcilator' do
         result = run_importer(out_dir: out_dir, workspace: workspace)
         cleaned_mlir = File.read(result.normalized_core_mlir_path)
 
-        ir_runtime = RHDL::Examples::AO486::Import::CpuParityRuntime.build_from_cleaned_mlir(cleaned_mlir, backend: backend)
+        ir_runtime = build_ao486_import_headless_runner(cleaned_mlir, mode: :ir, sim: backend)
 
         Dir.mktmpdir('ao486_cpu_parity_verilator_build') do |build_dir|
-          verilator_runtime = RHDL::Examples::AO486::Import::CpuParityVerilatorRuntime.build_from_cleaned_mlir(
+          verilator_runtime = build_ao486_import_headless_runner(
             cleaned_mlir,
+            mode: :verilog,
             work_dir: File.join(build_dir, 'verilator')
           )
-          arcilator_runtime = RHDL::Examples::AO486::Import::CpuParityArcilatorRuntime.build_from_cleaned_mlir(
+          arcilator_runtime = build_ao486_import_headless_runner(
             cleaned_mlir,
+            mode: :circt,
             work_dir: File.join(build_dir, 'arcilator')
           )
 
@@ -118,22 +140,24 @@ RSpec.describe 'AO486 CPU parity runtime across IR, Verilator, and Arcilator' do
         cleaned_mlir = File.read(result.normalized_core_mlir_path)
         program = RHDL::Examples::AO486::Import::CpuParityPrograms.fetch(:reset_smoke)
 
-        ir_runtime = RHDL::Examples::AO486::Import::CpuParityRuntime.build_from_cleaned_mlir(cleaned_mlir, backend: backend)
+        ir_runtime = build_ao486_import_headless_runner(cleaned_mlir, mode: :ir, sim: backend)
         program.load_into(ir_runtime)
         ir_trace = ir_runtime.run(max_cycles: program.max_cycles).map { |event| [event.eip, event.bytes] }
         expect(ir_trace).not_to be_empty
 
         Dir.mktmpdir('ao486_cpu_step_verilator_build') do |build_dir|
-          verilator_runtime = RHDL::Examples::AO486::Import::CpuParityVerilatorRuntime.build_from_cleaned_mlir(
+          verilator_runtime = build_ao486_import_headless_runner(
             cleaned_mlir,
+            mode: :verilog,
             work_dir: File.join(build_dir, 'verilator')
           )
           program.load_into(verilator_runtime)
           verilator_trace = verilator_runtime.run_step_trace(max_cycles: program.max_cycles).map { |event| [event.eip, event.bytes] }
           expect(verilator_trace).not_to be_empty
 
-          arcilator_runtime = RHDL::Examples::AO486::Import::CpuParityArcilatorRuntime.build_from_cleaned_mlir(
+          arcilator_runtime = build_ao486_import_headless_runner(
             cleaned_mlir,
+            mode: :circt,
             work_dir: File.join(build_dir, 'arcilator')
           )
           program.load_into(arcilator_runtime)
@@ -162,15 +186,17 @@ RSpec.describe 'AO486 CPU parity runtime across IR, Verilator, and Arcilator' do
       Dir.mktmpdir('ao486_cpu_step_byte_ws') do |workspace|
         result = run_importer(out_dir: out_dir, workspace: workspace)
         cleaned_mlir = File.read(result.normalized_core_mlir_path)
-        ir_runtime = RHDL::Examples::AO486::Import::CpuParityRuntime.build_from_cleaned_mlir(cleaned_mlir, backend: backend)
+        ir_runtime = build_ao486_import_headless_runner(cleaned_mlir, mode: :ir, sim: backend)
 
         Dir.mktmpdir('ao486_cpu_step_byte_build') do |build_dir|
-          verilator_runtime = RHDL::Examples::AO486::Import::CpuParityVerilatorRuntime.build_from_cleaned_mlir(
+          verilator_runtime = build_ao486_import_headless_runner(
             cleaned_mlir,
+            mode: :verilog,
             work_dir: File.join(build_dir, 'verilator')
           )
-          arcilator_runtime = RHDL::Examples::AO486::Import::CpuParityArcilatorRuntime.build_from_cleaned_mlir(
+          arcilator_runtime = build_ao486_import_headless_runner(
             cleaned_mlir,
+            mode: :circt,
             work_dir: File.join(build_dir, 'arcilator')
           )
 
@@ -195,7 +221,7 @@ RSpec.describe 'AO486 CPU parity runtime across IR, Verilator, and Arcilator' do
     end
   end
 
-  it 'matches the selected IR backend, Verilator, and Arcilator on the final memory image for the compact benchmark set', timeout: 600 do
+  it 'matches the selected IR backend, Verilator, and Arcilator on the final memory image for the compact benchmark set', timeout: 600, noisy_output: true do
     require_import_tool!
     require_program_assembler!
     require_arcilator_toolchain!
@@ -205,41 +231,51 @@ RSpec.describe 'AO486 CPU parity runtime across IR, Verilator, and Arcilator' do
     backend = require_ir_backend!
 
     benchmark_programs = RHDL::Examples::AO486::Import::CpuParityPrograms.benchmark_programs
+    benchmark_results = []
 
-    Dir.mktmpdir('ao486_cpu_memory_out') do |out_dir|
-      Dir.mktmpdir('ao486_cpu_memory_ws') do |workspace|
-        result = run_importer(out_dir: out_dir, workspace: workspace)
-        cleaned_mlir = File.read(result.normalized_core_mlir_path)
-        ir_runtime = RHDL::Examples::AO486::Import::CpuParityRuntime.build_from_cleaned_mlir(cleaned_mlir, backend: backend)
+    begin
+      Dir.mktmpdir('ao486_cpu_memory_out') do |out_dir|
+        Dir.mktmpdir('ao486_cpu_memory_ws') do |workspace|
+          result = run_importer(out_dir: out_dir, workspace: workspace)
+          cleaned_mlir = File.read(result.normalized_core_mlir_path)
+          ir_runtime = build_ao486_import_headless_runner(cleaned_mlir, mode: :ir, sim: backend)
 
-        Dir.mktmpdir('ao486_cpu_memory_build') do |build_dir|
-          verilator_runtime = RHDL::Examples::AO486::Import::CpuParityVerilatorRuntime.build_from_cleaned_mlir(
-            cleaned_mlir,
-            work_dir: File.join(build_dir, 'verilator')
-          )
-          arcilator_runtime = RHDL::Examples::AO486::Import::CpuParityArcilatorRuntime.build_from_cleaned_mlir(
-            cleaned_mlir,
-            work_dir: File.join(build_dir, 'arcilator')
-          )
+          Dir.mktmpdir('ao486_cpu_memory_build') do |build_dir|
+            verilator_runtime = build_ao486_import_headless_runner(
+              cleaned_mlir,
+              mode: :verilog,
+              work_dir: File.join(build_dir, 'verilator')
+            )
+            arcilator_runtime = build_ao486_import_headless_runner(
+              cleaned_mlir,
+              mode: :circt,
+              work_dir: File.join(build_dir, 'arcilator')
+            )
 
-          benchmark_programs.each do |program|
-            program.load_into(ir_runtime)
-            ir_runtime.run(max_cycles: program.max_cycles)
-            ir_memory = normalize_memory(ir_runtime.memory)
+            benchmark_programs.each do |program|
+              program.load_into(ir_runtime)
+              ir_runtime.run(max_cycles: program.max_cycles)
+              benchmark_results << benchmark_result(program, ir_runtime)
+              ir_memory = normalize_memory(ir_runtime.memory)
 
-            program.load_into(verilator_runtime)
-            verilator_runtime.run_final_state(max_cycles: program.max_cycles)
-            verilator_memory = normalize_memory(verilator_runtime.memory)
+              program.load_into(verilator_runtime)
+              verilator_runtime.run_final_state(max_cycles: program.max_cycles)
+              benchmark_results << benchmark_result(program, verilator_runtime)
+              verilator_memory = normalize_memory(verilator_runtime.memory)
 
-            program.load_into(arcilator_runtime)
-            arcilator_runtime.run_final_state(max_cycles: program.max_cycles)
-            arcilator_memory = normalize_memory(arcilator_runtime.memory)
+              program.load_into(arcilator_runtime)
+              arcilator_runtime.run_final_state(max_cycles: program.max_cycles)
+              benchmark_results << benchmark_result(program, arcilator_runtime)
+              arcilator_memory = normalize_memory(arcilator_runtime.memory)
 
-            expect(verilator_memory).to eq(ir_memory), "program=#{program.name}"
-            expect(arcilator_memory).to eq(ir_memory), "program=#{program.name}"
+              expect(verilator_memory).to eq(ir_memory), "program=#{program.name}"
+              expect(arcilator_memory).to eq(ir_memory), "program=#{program.name}"
+            end
           end
         end
       end
+    ensure
+      print_benchmark_summary(benchmark_results) unless benchmark_results.empty?
     end
   end
 end

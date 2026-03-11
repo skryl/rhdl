@@ -344,7 +344,7 @@ module RHDL
             target_order.each do |target|
               next unless seq_state.key?(target)
               expr = seq_state[target]
-              width = expr.respond_to?(:width) ? expr.width : find_width(target)
+              width = find_width(target)
               reg_tokens[target] = shared_reg_tokens&.fetch(target, nil) || fresh(width)
               # Make current-cycle register values available while emitting next-state logic.
               @values[target.to_s] = reg_tokens[target]
@@ -353,8 +353,10 @@ module RHDL
             target_order.each do |target|
               next unless seq_state.key?(target)
               expr = seq_state[target]
-              width = expr.respond_to?(:width) ? expr.width : find_width(target)
-              input_value = emit_expr(expr)
+              width = find_width(target)
+              input_raw = emit_expr(expr)
+              input_raw_width = expr.respond_to?(:width) ? expr.width : find_value_width(input_raw)
+              input_value = resize_value(input_raw, input_raw_width, width)
               reg = reg_tokens[target] || fresh(width)
               @lines << "  #{reg} = seq.compreg #{input_value}, #{clock_value} : #{iwidth(width)}"
               @values[target.to_s] = reg

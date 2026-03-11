@@ -913,7 +913,8 @@ module RHDL
 
         def core_signal_wide(op, name: nil, idx: 0, value: 0)
           in_ptr = scratch_wide_in_ptr
-          low, high = split_wide_words(value)
+          low = value.to_i & 0xFFFF_FFFF_FFFF_FFFF
+          high = (value.to_i >> 64) & 0xFFFF_FFFF_FFFF_FFFF
           in_ptr[0, 16] = [low, high].pack('QQ')
 
           out = scratch_wide_out_ptr
@@ -922,7 +923,7 @@ module RHDL
           lo, hi = out[0, 16].unpack('QQ')
           {
             ok: rc != 0,
-            value: join_wide_words(lo, hi)
+            value: join_wide_words([lo, hi])
           }
         end
 
@@ -1224,66 +1225,71 @@ module RHDL
           width = width.to_i
           return 0 if width <= 0
 
-          mask = width >= 128 ? ((1 << 128) - 1) : ((1 << width) - 1)
-          value.to_i & mask
+          value.to_i & ((1 << width) - 1)
         end
 
-        def split_wide_words(value)
+        def wide_word_count(width)
+          (width.to_i + 63) / 64
+        end
+
+        def split_wide_words(value, width)
           normalized = value.to_i
-          [
-            normalized & 0xFFFF_FFFF_FFFF_FFFF,
-            (normalized >> 64) & 0xFFFF_FFFF_FFFF_FFFF
-          ]
+          Array.new(wide_word_count(width)) do |word_idx|
+            (normalized >> (word_idx * 64)) & 0xFFFF_FFFF_FFFF_FFFF
+          end
         end
 
-        def join_wide_words(low, high)
-          (high.to_i << 64) | low.to_i
+        def join_wide_words(words)
+          words.each_with_index.reduce(0) do |acc, (word, word_idx)|
+            acc | (word.to_i << (word_idx * 64))
+          end
+        end
+
+        def legacy_wide_signal_api?(width)
+          width.to_i <= 128 && @fn_sim_signal_wide
         end
 
         def poke_wide_by_name(name, value, width)
-          if @fn_sim_signal_wide
+          if legacy_wide_signal_api?(width)
             return core_signal_wide(SIM_SIGNAL_POKE, name: name, value: value)[:ok]
           end
           raise RangeError, "no wide signal API available for #{name}" unless @fn_sim_poke_word_by_name
 
-          low, high = split_wide_words(value)
-          rc_low = @fn_sim_poke_word_by_name.call(@ctx, name.to_s, 0, low)
-          rc_high = @fn_sim_poke_word_by_name.call(@ctx, name.to_s, 1, high)
-          rc_low != 0 && rc_high != 0
+          split_wide_words(value, width).each_with_index.all? do |word, word_idx|
+            @fn_sim_poke_word_by_name.call(@ctx, name.to_s, word_idx, word) != 0
+          end
         end
 
         def peek_wide_by_name(name, width)
-          if @fn_sim_signal_wide
+          if legacy_wide_signal_api?(width)
             return core_signal_wide(SIM_SIGNAL_PEEK, name: name)[:value]
           end
           raise RangeError, "no wide signal API available for #{name}" unless @fn_sim_peek_word_by_name
 
-          low = wide_word_by_name(name, 0)
-          high = width > 64 ? wide_word_by_name(name, 1) : 0
-          join_wide_words(low, high)
+          words = Array.new(wide_word_count(width)) { |word_idx| wide_word_by_name(name, word_idx) }
+          join_wide_words(words)
         end
 
         def poke_wide_by_idx(idx, value, width)
-          if @fn_sim_signal_wide
+          if legacy_wide_signal_api?(width)
             return core_signal_wide(SIM_SIGNAL_POKE_INDEX, idx: idx, value: value)
           end
           raise RangeError, "no wide signal API available for #{idx}" unless @fn_sim_poke_word_by_idx
 
-          low, high = split_wide_words(value)
-          rc_low = @fn_sim_poke_word_by_idx.call(@ctx, idx, 0, low)
-          rc_high = @fn_sim_poke_word_by_idx.call(@ctx, idx, 1, high)
-          { ok: rc_low != 0 && rc_high != 0, value: 0 }
+          ok = split_wide_words(value, width).each_with_index.all? do |word, word_idx|
+            @fn_sim_poke_word_by_idx.call(@ctx, idx, word_idx, word) != 0
+          end
+          { ok: ok, value: 0 }
         end
 
         def peek_wide_by_idx(idx, width)
-          if @fn_sim_signal_wide
+          if legacy_wide_signal_api?(width)
             return core_signal_wide(SIM_SIGNAL_PEEK_INDEX, idx: idx)[:value]
           end
           raise RangeError, "no wide signal API available for #{idx}" unless @fn_sim_peek_word_by_idx
 
-          low = wide_word_by_idx(idx, 0)
-          high = width > 64 ? wide_word_by_idx(idx, 1) : 0
-          join_wide_words(low, high)
+          words = Array.new(wide_word_count(width)) { |word_idx| wide_word_by_idx(idx, word_idx) }
+          join_wide_words(words)
         end
 
         def wide_word_by_name(name, word_idx)

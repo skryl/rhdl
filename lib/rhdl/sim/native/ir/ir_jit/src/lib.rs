@@ -14,6 +14,8 @@
 mod core;
 mod extensions;
 mod ffi;
+#[path = "../../ir_compiler/src/runtime_value.rs"]
+pub mod runtime_value;
 #[path = "../../common/signal_value.rs"]
 pub mod signal_value;
 mod vcd;

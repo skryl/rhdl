@@ -92,6 +92,85 @@ RSpec.describe 'IR compiler overwide runtime-only support' do
     )
   end
 
+  def build_packet256_probe_package
+    word3 = ir::Signal.new(name: :word3, width: 64)
+    word2 = ir::Signal.new(name: :word2, width: 64)
+    word1 = ir::Signal.new(name: :word1, width: 64)
+    word0 = ir::Signal.new(name: :word0, width: 64)
+    packet_reg = ir::Signal.new(name: :packet256_reg, width: 256)
+
+    packet_value = ir::Concat.new(
+      parts: [word3, word2, word1, word0],
+      width: 256
+    )
+
+    ir::Package.new(
+      modules: [
+        ir::ModuleOp.new(
+          name: 'compiler_overwide_packet256_probe',
+          ports: [
+            ir::Port.new(name: :clk, direction: :in, width: 1),
+            ir::Port.new(name: :rst, direction: :in, width: 1),
+            ir::Port.new(name: :load, direction: :in, width: 1),
+            ir::Port.new(name: :word3, direction: :in, width: 64),
+            ir::Port.new(name: :word2, direction: :in, width: 64),
+            ir::Port.new(name: :word1, direction: :in, width: 64),
+            ir::Port.new(name: :word0, direction: :in, width: 64),
+            ir::Port.new(name: :packet_word3, direction: :out, width: 64),
+            ir::Port.new(name: :packet_word2, direction: :out, width: 64),
+            ir::Port.new(name: :packet_word1, direction: :out, width: 64),
+            ir::Port.new(name: :packet_word0, direction: :out, width: 64)
+          ],
+          nets: [],
+          regs: [
+            ir::Reg.new(name: :packet256_reg, width: 256, reset_value: 0)
+          ],
+          assigns: [
+            ir::Assign.new(
+              target: :packet_word3,
+              expr: ir::Slice.new(base: packet_reg, range: 255..192, width: 64)
+            ),
+            ir::Assign.new(
+              target: :packet_word2,
+              expr: ir::Slice.new(base: packet_reg, range: 191..128, width: 64)
+            ),
+            ir::Assign.new(
+              target: :packet_word1,
+              expr: ir::Slice.new(base: packet_reg, range: 127..64, width: 64)
+            ),
+            ir::Assign.new(
+              target: :packet_word0,
+              expr: ir::Slice.new(base: packet_reg, range: 63..0, width: 64)
+            )
+          ],
+          processes: [
+            ir::Process.new(
+              name: 'capture_packet256',
+              clocked: true,
+              clock: 'clk',
+              statements: [
+                ir::SeqAssign.new(
+                  target: :packet256_reg,
+                  expr: ir::Mux.new(
+                    condition: ir::Signal.new(name: :load, width: 1),
+                    when_true: packet_value,
+                    when_false: packet_reg,
+                    width: 256
+                  )
+                )
+              ]
+            )
+          ],
+          instances: [],
+          memories: [],
+          write_ports: [],
+          sync_read_ports: [],
+          parameters: {}
+        )
+      ]
+    )
+  end
+
   def build_mul_acc_probe_package
     a = ir::Signal.new(name: :a, width: 65)
     b = ir::Signal.new(name: :b, width: 65)
@@ -325,6 +404,28 @@ RSpec.describe 'IR compiler overwide runtime-only support' do
       expect(sim.peek('packet_tag')).to eq(0xBEE)
       expect(sim.peek('packet_hi')).to eq(0x0123_4567_89AB_CDEF)
       expect(sim.peek('packet_lo')).to eq(0xFEDC_BA98_7654_3210)
+    end
+  end
+
+  it 'captures and slices a 256-bit packet register on the compiler backend' do
+    sim = create_compiler(build_packet256_probe_package)
+    sim.reset
+
+    sim.poke('rst', 0)
+    sim.poke('load', 1)
+    sim.poke('word3', 0x0123_4567_89AB_CDEF)
+    sim.poke('word2', 0x1111_2222_3333_4444)
+    sim.poke('word1', 0x5555_6666_7777_8888)
+    sim.poke('word0', 0x9999_AAAA_BBBB_CCCC)
+
+    step(sim)
+
+    aggregate_failures do
+      expect(sim.compiled?).to be(true)
+      expect(sim.peek('packet_word3')).to eq(0x0123_4567_89AB_CDEF)
+      expect(sim.peek('packet_word2')).to eq(0x1111_2222_3333_4444)
+      expect(sim.peek('packet_word1')).to eq(0x5555_6666_7777_8888)
+      expect(sim.peek('packet_word0')).to eq(0x9999_AAAA_BBBB_CCCC)
     end
   end
 

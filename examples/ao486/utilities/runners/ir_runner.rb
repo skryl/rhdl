@@ -9,6 +9,7 @@ require 'rhdl/sim/native/ir/simulator'
 require_relative 'backend_runner'
 require_relative '../import/cpu_importer'
 require_relative '../import/cpu_parity_package'
+require_relative '../import/cpu_parity_runtime'
 require_relative '../import/cpu_runner_package'
 
 module RHDL
@@ -129,10 +130,13 @@ module RHDL
           end
         end
 
-        attr_reader :sim
+        def self.build_from_cleaned_mlir(mlir_text, backend: RHDL::Examples::AO486::Import::CpuParityRuntime.preferred_backend)
+          runtime = RHDL::Examples::AO486::Import::CpuParityRuntime.build_from_cleaned_mlir(mlir_text, backend: backend)
+          new(backend: backend, import_runtime: runtime, headless: true)
+        end
 
-        def initialize(backend: :compile, **kwargs)
-          super(backend: :ir, sim: backend, **kwargs)
+        def initialize(backend: :compile, import_runtime: nil, **kwargs)
+          super(backend: :ir, sim: backend, import_runtime: import_runtime, **kwargs)
           @sim = nil
           @runtime_loaded = false
         end
@@ -198,8 +202,12 @@ module RHDL
           self
         end
 
-        def run(cycles: nil, speed: nil, headless: @headless)
+        def run(cycles: nil, speed: nil, headless: @headless, max_cycles: nil)
+          return super(cycles: cycles, speed: speed, headless: headless, max_cycles: max_cycles) if imported_runtime? || !max_cycles.nil?
+
           ensure_sim!
+          started_at = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+          start_cycles = @cycles_run
           chunk = cycles || @requested_cycles || speed || @speed || DEFAULT_UNLIMITED_CHUNK
           remaining = chunk.to_i
           text_dirty = false
@@ -222,15 +230,53 @@ module RHDL
           @last_io = @sim.runner_ao486_last_io_write || @sim.runner_ao486_last_io_read
           @last_irq = @sim.runner_ao486_last_irq_vector
           @shell_prompt_detected ||= render_display.match?(/[A-Z]:\\>/)
+          record_run_stats(operation: :run, cycles: @cycles_run - start_cycles, started_at: started_at)
           state.merge(cycles: @cycles_run, speed: speed || @speed, headless: headless)
         end
 
         def peek(signal_name)
+          return super if imported_runtime?
+
           ensure_sim!
           @sim.peek(signal_name)
         end
 
+        def sim
+          return @import_runtime.sim if imported_runtime? && @import_runtime.respond_to?(:sim)
+
+          @sim
+        end
+
+        def state
+          snapshot = super
+          return snapshot unless @sim
+
+          snapshot.merge(
+            pc: {
+              trace: snapshot_signal('trace_wr_eip'),
+              decode: snapshot_signal('pipeline_inst__decode_inst__eip'),
+              read: snapshot_signal('pipeline_inst__read_inst__rd_eip'),
+              execute: snapshot_signal('pipeline_inst__execute_inst__exe_eip'),
+              arch: snapshot_signal('trace_arch_eip')
+            },
+            exception_vector: snapshot_signal('exception_inst__exc_vector'),
+            active_video_page: memory_store.fetch(DisplayAdapter::VIDEO_PAGE_BDA, 0),
+            dos_bridge: {
+              int13: @sim.runner_ao486_dos_int13_state,
+              int10: @sim.runner_ao486_dos_int10_state,
+              int16: @sim.runner_ao486_dos_int16_state,
+              int1a: @sim.runner_ao486_dos_int1a_state
+            }
+          )
+        end
+
         private
+
+        def snapshot_signal(signal_name)
+          @sim.peek(signal_name)
+        rescue StandardError
+          nil
+        end
 
         def ensure_sim!
           return @sim if @sim

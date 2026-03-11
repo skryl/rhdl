@@ -14,21 +14,23 @@ module RHDL
         BOOT1_ADDR = 0xC0000
         CURSOR_BDA = DisplayAdapter::CURSOR_BDA
 
-        attr_reader :backend, :sim_backend, :memory, :cycles_run, :floppy_image
+        attr_reader :backend, :sim_backend, :cycles_run, :floppy_image, :import_runtime, :last_run_stats
 
-        def initialize(backend:, sim: nil, debug: false, speed: nil, headless: false, cycles: nil)
+        def initialize(backend:, sim: nil, debug: false, speed: nil, headless: false, cycles: nil, import_runtime: nil)
           @backend = backend.to_sym
           @sim_backend = sim&.to_sym
           @debug = !!debug
           @speed = speed
           @headless = !!headless
           @requested_cycles = cycles
+          @import_runtime = import_runtime
           @memory = Hash.new(0)
           @rom = {}
           @floppy_image = nil
           @cycles_run = 0
           @last_io = nil
           @last_irq = nil
+          @last_run_stats = nil
           @keyboard_buffer = +''
           @shell_prompt_detected = false
           @display_adapter = DisplayAdapter.new
@@ -88,6 +90,11 @@ module RHDL
         end
 
         def load_bytes(base, bytes, target: @memory)
+          if imported_runtime? && target.equal?(@memory)
+            @import_runtime.load_bytes(base, bytes)
+            return self
+          end
+
           normalized_bytes = bytes.is_a?(String) ? bytes.bytes : Array(bytes)
           normalized_bytes.each_with_index do |byte, idx|
             target[base + idx] = byte.to_i & 0xFF
@@ -96,6 +103,8 @@ module RHDL
         end
 
         def read_bytes(base, length, mapped: true)
+          return @import_runtime.read_bytes(base, length) if imported_runtime?
+
           Array.new(length) do |idx|
             addr = base + idx
             if mapped && @rom.key?(addr)
@@ -107,7 +116,18 @@ module RHDL
         end
 
         def write_memory(addr, value)
+          return load_bytes(addr, [value]) if imported_runtime?
+
           @memory[addr] = value.to_i & 0xFF
+        end
+
+        def clear_memory!
+          if imported_runtime?
+            @import_runtime.clear_memory! if @import_runtime.respond_to?(:clear_memory!)
+          else
+            @memory.clear
+          end
+          self
         end
 
         def bios_loaded?
@@ -128,6 +148,17 @@ module RHDL
 
         def display_buffer
           @display_buffer.dup
+        end
+
+        def memory
+          imported_runtime? ? @import_runtime.memory : @memory
+        end
+
+        def sim
+          return nil unless imported_runtime?
+          return nil unless @import_runtime.respond_to?(:sim)
+
+          @import_runtime.sim
         end
 
         def update_display_buffer(buffer)
@@ -153,16 +184,27 @@ module RHDL
         end
 
         def reset
+          @import_runtime.reset! if imported_runtime? && @import_runtime.respond_to?(:reset!)
           @cycles_run = 0
+          @last_run_stats = nil
           @keyboard_buffer.clear
           @shell_prompt_detected = false
           self
         end
 
-        def run(cycles: nil, speed: nil, headless: @headless)
+        def run(cycles: nil, speed: nil, headless: @headless, max_cycles: nil)
+          if imported_runtime? && !max_cycles.nil? && @import_runtime.respond_to?(:run)
+            return capture_run_stats(operation: :run, cycles: max_cycles) do
+              @import_runtime.run(max_cycles: max_cycles)
+            end
+          end
+
+          started_at = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+          start_cycles = @cycles_run
           chunk = cycles || @requested_cycles || speed || @speed || DEFAULT_UNLIMITED_CHUNK
           @cycles_run += tick_backend(chunk.to_i)
           @shell_prompt_detected ||= false
+          record_run_stats(operation: :run, cycles: @cycles_run - start_cycles, started_at: started_at)
 
           state.merge(cycles: @cycles_run, speed: speed || @speed, headless: headless)
         end
@@ -173,7 +215,7 @@ module RHDL
         end
 
         def state
-          {
+          snapshot = {
             backend: backend,
             sim_backend: sim_backend,
             simulator_type: simulator_type,
@@ -186,11 +228,106 @@ module RHDL
             last_irq: @last_irq,
             keyboard_buffer_size: @keyboard_buffer.bytesize,
             shell_prompt_detected: @shell_prompt_detected,
-            cursor: cursor_position
+            cursor: cursor_position,
+            last_run_stats: @last_run_stats
           }
+          snapshot[:import_runtime] = true if imported_runtime?
+          snapshot
+        end
+
+        def run_fetch_words(max_cycles: nil)
+          raise NoMethodError, "#{self.class} does not support fetch-word traces" unless imported_runtime?
+
+          capture_run_stats(operation: :run_fetch_words, cycles: max_cycles || DEFAULT_UNLIMITED_CHUNK) do
+            @import_runtime.run_fetch_words(max_cycles: max_cycles || DEFAULT_UNLIMITED_CHUNK)
+          end
+        end
+
+        def run_fetch_trace(max_cycles: nil)
+          raise NoMethodError, "#{self.class} does not support fetch traces" unless imported_runtime?
+
+          capture_run_stats(operation: :run_fetch_trace, cycles: max_cycles || DEFAULT_UNLIMITED_CHUNK) do
+            @import_runtime.run_fetch_trace(max_cycles: max_cycles || DEFAULT_UNLIMITED_CHUNK)
+          end
+        end
+
+        def run_fetch_groups(max_cycles: nil)
+          raise NoMethodError, "#{self.class} does not support fetch-group traces" unless imported_runtime?
+
+          capture_run_stats(operation: :run_fetch_groups, cycles: max_cycles || DEFAULT_UNLIMITED_CHUNK) do
+            @import_runtime.run_fetch_groups(max_cycles: max_cycles || DEFAULT_UNLIMITED_CHUNK)
+          end
+        end
+
+        def run_fetch_pc_groups(max_cycles: nil)
+          raise NoMethodError, "#{self.class} does not support fetch-pc traces" unless imported_runtime?
+
+          capture_run_stats(operation: :run_fetch_pc_groups, cycles: max_cycles || DEFAULT_UNLIMITED_CHUNK) do
+            @import_runtime.run_fetch_pc_groups(max_cycles: max_cycles || DEFAULT_UNLIMITED_CHUNK)
+          end
+        end
+
+        def run_step_trace(max_cycles: nil)
+          raise NoMethodError, "#{self.class} does not support step traces" unless imported_runtime?
+
+          capture_run_stats(operation: :run_step_trace, cycles: max_cycles || DEFAULT_UNLIMITED_CHUNK) do
+            @import_runtime.run_step_trace(max_cycles: max_cycles || DEFAULT_UNLIMITED_CHUNK)
+          end
+        end
+
+        def run_final_state(max_cycles: nil)
+          raise NoMethodError, "#{self.class} does not support final-state traces" unless imported_runtime?
+
+          capture_run_stats(operation: :run_final_state, cycles: max_cycles || DEFAULT_UNLIMITED_CHUNK) do
+            @import_runtime.run_final_state(max_cycles: max_cycles || DEFAULT_UNLIMITED_CHUNK)
+          end
+        end
+
+        def final_state_snapshot
+          raise NoMethodError, "#{self.class} does not support final-state snapshots" unless imported_runtime?
+          raise NoMethodError, "#{self.class} runtime does not expose final_state_snapshot" unless @import_runtime.respond_to?(:final_state_snapshot)
+
+          @import_runtime.final_state_snapshot
+        end
+
+        def step(cycle)
+          raise NoMethodError, "#{self.class} does not support single-cycle stepping" unless imported_runtime?
+          raise NoMethodError, "#{self.class} runtime does not expose step" unless @import_runtime.respond_to?(:step)
+
+          @import_runtime.step(cycle)
+        end
+
+        def peek(signal_name)
+          current_sim = sim
+          raise NoMethodError, "#{self.class} does not expose signal peeks" unless current_sim&.respond_to?(:peek)
+
+          current_sim.peek(signal_name)
         end
 
         protected
+
+        def imported_runtime?
+          !@import_runtime.nil?
+        end
+
+        def capture_run_stats(operation:, cycles:)
+          started_at = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+          result = yield
+          record_run_stats(operation: operation, cycles: cycles, started_at: started_at)
+          result
+        end
+
+        def record_run_stats(operation:, cycles:, started_at:)
+          elapsed_seconds = Process.clock_gettime(Process::CLOCK_MONOTONIC) - started_at
+          cycles_per_second = elapsed_seconds.positive? ? (cycles.to_f / elapsed_seconds) : Float::INFINITY
+          @last_run_stats = {
+            backend: backend,
+            operation: operation,
+            cycles: cycles.to_i,
+            elapsed_seconds: elapsed_seconds,
+            cycles_per_second: cycles_per_second
+          }
+        end
 
         def tick_backend(cycles)
           [cycles, 0].max

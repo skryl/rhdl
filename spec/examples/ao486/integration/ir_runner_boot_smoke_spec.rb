@@ -508,6 +508,93 @@ RSpec.describe RHDL::Examples::AO486::IrRunner, timeout: 240 do
     expect(runner.peek('exception_inst__exc_vector')).to eq(0)
   end
 
+  it 'decodes FAT12 next-cluster entries on the relocated DOS path', timeout: 240 do
+    skip 'IR Compiler not available' unless RHDL::Sim::Native::IR::COMPILER_AVAILABLE
+
+    runner = described_class.new(backend: :compile, headless: true)
+    runner.load_bios
+    runner.load_dos
+
+    fat = File.binread(runner.dos_path, 10 * 512).byteslice(512, 9 * 512).bytes
+    runner.load_bytes(0x0800, fat)
+    payload = [
+      0x31, 0xC0,             # xor ax, ax
+      0x8E, 0xC0,             # mov es, ax
+      0xB8, 0x80, 0x00,       # mov ax, 0x0080
+      0x8E, 0xD8,             # mov ds, ax
+      0xBF, 0x00, 0x06,       # mov di, 0x0600
+      0xB8, 0x02, 0x00,       # mov ax, 2
+      0x89, 0xC6,             # mov si, ax
+      0x01, 0xF6,             # add si, si
+      0x01, 0xC6,             # add si, ax
+      0xD1, 0xEE,             # shr si, 1
+      0xAD,                   # lodsw
+      0x80, 0xE4, 0x0F,       # and ah, 0x0f
+      0xAB,                   # stosw
+      0x31, 0xD2,             # xor dx, dx
+      0xB9, 0x10, 0x00,       # mov cx, 16
+      0xB8, 0x03, 0x00,       # mov ax, 3
+      0x89, 0xC6,             # mov si, ax
+      0x01, 0xF6,             # add si, si
+      0x01, 0xC6,             # add si, ax
+      0xD1, 0xEE,             # shr si, 1
+      0xAD,                   # lodsw
+      0x73, 0x03,             # jae +3
+      0xF7, 0xF1,             # div cx
+      0x80, 0xE4, 0x0F,       # and ah, 0x0f
+      0xAB,                   # stosw
+      0xEB, 0xFE              # jmp $
+    ]
+    base = described_class::DOS_RELOCATED_BOOT_SECTOR_ADDR + 0x5E
+    payload.each_with_index do |byte, idx|
+      runner.write_memory(base + idx, byte)
+    end
+
+    runner.run(cycles: 3_000)
+
+    expect(runner.read_bytes(0x0600, 4, mapped: false)).to eq([0x03, 0x00, 0x04, 0x00])
+    expect(runner.peek('exception_inst__exc_vector')).to eq(0)
+  end
+
+  it 'loads the first KERNEL.SYS cluster through the boot-sector disk helper', timeout: 240 do
+    skip 'IR Compiler not available' unless RHDL::Sim::Native::IR::COMPILER_AVAILABLE
+
+    runner = described_class.new(backend: :compile, headless: true)
+    runner.load_bios
+    runner.load_dos
+
+    base = described_class::DOS_RELOCATED_BOOT_SECTOR_ADDR + 0x5E
+    target = described_class::DOS_RELOCATED_BOOT_SECTOR_ADDR + 0x16C
+    payload = [
+      0x31, 0xC0,             # xor ax, ax
+      0x8E, 0xD8,             # mov ds, ax
+      0x8E, 0xD0,             # mov ss, ax
+      0x8E, 0xC0,             # mov es, ax
+      0xBC, 0x00, 0x7B,       # mov sp, 0x7b00
+      0xBD, 0x00, 0x07,       # mov bp, 0x0700
+      0xC7, 0x46, 0x0B, 0x00, 0x02, # mov word [bp+0x0b], 512
+      0xC6, 0x46, 0x18, 0x12, # mov byte [bp+0x18], 18
+      0xC6, 0x46, 0x1A, 0x02, # mov byte [bp+0x1a], 2
+      0xC6, 0x46, 0x24, 0x00, # mov byte [bp+0x24], 0
+      0xC7, 0x46, 0xC0, 0x10, 0x00, # mov word [bp-0x40], 16
+      0x31, 0xD2,             # xor dx, dx
+      0xB8, 0x21, 0x00,       # mov ax, 33 ; first data sector / cluster 2
+      0xBB, 0x00, 0x22,       # mov bx, 0x2200
+      0xBF, 0x01, 0x00        # mov di, 1
+    ]
+    rel = target - (base + payload.length + 3)
+    payload.concat([0xE8, rel & 0xFF, (rel >> 8) & 0xFF]) # call 0x7d6c helper
+    payload.concat([0xEB, 0xFE])                           # jmp $
+    payload.each_with_index do |byte, idx|
+      runner.write_memory(base + idx, byte)
+    end
+
+    runner.run(cycles: 3_000)
+
+    expected_cluster = File.binread(runner.dos_path, 16, 33 * 512).bytes
+    expect(runner.read_bytes(0x2200, 16, mapped: false)).to eq(expected_cluster)
+  end
+
   it 'installs the DOS INT 1Ah bridge vector during the DOS handoff', timeout: 240 do
     skip 'IR Compiler not available' unless RHDL::Sim::Native::IR::COMPILER_AVAILABLE
 

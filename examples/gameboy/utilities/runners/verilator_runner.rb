@@ -1057,7 +1057,7 @@ module RHDL
           lines << "else if (strcmp(name, \"video_lcd_vsync_internal\") == 0) return ctx->dut->rootp->game_boy_gameboy__DOT__gb_core__DOT__lcd_vsync;"
           lines << "else if (strcmp(name, \"video_vblank_irq_internal\") == 0) return ctx->dut->rootp->game_boy_gameboy__DOT__gb_core__DOT___video_unit_vblank_irq;"
           lines << "else if (strcmp(name, \"video_irq_internal\") == 0) return ctx->dut->rootp->game_boy_gameboy__DOT__gb_core__DOT___video_unit_irq;"
-        elsif direct_verilog_import_wrapper_gameboy?
+        elsif normalized_direct_verilog_import_wrapper_gameboy?
           lines << "#{keyword} (strcmp(name, \"cpu_pc_internal\") == 0) return ctx->dut->rootp->gameboy__DOT__gb_core__DOT__cpu__DOT__u0__DOT__pc;"
           lines << "else if (strcmp(name, \"cpu_addr_internal\") == 0) return ctx->dut->rootp->gameboy__DOT__gb_core__DOT___md_swizz_a_out;"
           lines << "else if (strcmp(name, \"cpu_addr_raw_internal\") == 0) return ctx->dut->rootp->gameboy__DOT__gb_core__DOT___cpu_A;"
@@ -1110,6 +1110,42 @@ module RHDL
           lines << "else if (strcmp(name, \"boot_upload_active_internal\") == 0) return ctx->dut->rootp->gameboy__DOT__boot_upload_active;"
           lines << "else if (strcmp(name, \"boot_upload_phase_internal\") == 0) return ctx->dut->rootp->gameboy__DOT__boot_upload_phase;"
           lines << "else if (strcmp(name, \"boot_upload_index_internal\") == 0) return ctx->dut->rootp->gameboy__DOT__boot_upload_index;"
+        elsif staged_direct_verilog_import_wrapper_gameboy?
+          lines << "#{keyword} (strcmp(name, \"cpu_pc_internal\") == 0) return ctx->dut->rootp->gameboy__DOT__gb_core__DOT__cpu__DOT__u0__DOT__pc;"
+          lines << "else if (strcmp(name, \"cpu_addr_internal\") == 0) return ctx->dut->rootp->gameboy__DOT__gb_core__DOT__cpu_addr;"
+          lines << "else if (strcmp(name, \"cpu_addr_raw_internal\") == 0) return ctx->dut->rootp->gameboy__DOT__gb_core__DOT__cpu_addr_raw;"
+          lines << "else if (strcmp(name, \"cpu_di_reg_internal\") == 0) return ctx->dut->rootp->gameboy__DOT__gb_core__DOT__cpu__DOT__di_reg;"
+          lines << "else if (strcmp(name, \"cpu_t80_di_reg_internal\") == 0) return ctx->dut->rootp->gameboy__DOT__gb_core__DOT__cpu__DOT__u0__DOT__di_reg;"
+          lines << "else if (strcmp(name, \"cpu_set_addr_to_internal\") == 0) return ctx->dut->rootp->gameboy__DOT__gb_core__DOT__cpu__DOT__u0__DOT__set_addr_to;"
+          lines << "else if (strcmp(name, \"cpu_iorq_internal\") == 0) return ctx->dut->rootp->gameboy__DOT__gb_core__DOT__cpu__DOT__u0__DOT__iorq_i;"
+          lines << "else if (strcmp(name, \"cpu_mcycle_internal\") == 0) return ctx->dut->rootp->gameboy__DOT__gb_core__DOT__cpu__DOT__mcycle;"
+          lines << "else if (strcmp(name, \"cpu_tstate_internal\") == 0) return ctx->dut->rootp->gameboy__DOT__gb_core__DOT__cpu__DOT__tstate;"
+          lines << "else if (strcmp(name, \"cpu_regbusc_internal\") == 0) return ctx->dut->rootp->gameboy__DOT__gb_core__DOT__cpu__DOT__u0__DOT__regbusc;"
+          lines << "else if (strcmp(name, \"cpu_tmpaddr_internal\") == 0) return ctx->dut->rootp->gameboy__DOT__gb_core__DOT__cpu__DOT__u0__DOT__tmpaddr;"
+          lines << "else if (strcmp(name, \"boot_rom_enabled_internal\") == 0) return ctx->dut->rootp->gameboy__DOT__gb_core__DOT__boot_rom_enabled;"
+          lines << "else if (strcmp(name, \"boot_rom_q_internal\") == 0) return ctx->dut->rootp->gameboy__DOT__gb_core__DOT__boot_do;"
+          lines << "else if (strcmp(name, \"cpu_di_internal\") == 0) return ctx->dut->rootp->gameboy__DOT__gb_core__DOT__cpu_di;"
+          lines << "else if (strcmp(name, \"cpu_do_internal\") == 0) return ctx->dut->rootp->gameboy__DOT__gb_core__DOT__cpu_do;"
+          lines << "else if (strcmp(name, \"cpu_rd_n_internal\") == 0) return ctx->dut->rootp->gameboy__DOT__gb_core__DOT__cpu_rd_n;"
+          lines << "else if (strcmp(name, \"cpu_wr_n_internal\") == 0) return ctx->dut->rootp->gameboy__DOT__gb_core__DOT__cpu_wr_n;"
+          lines << "else if (strcmp(name, \"cpu_m1_n_internal\") == 0) return ctx->dut->rootp->gameboy__DOT__gb_core__DOT__cpu_m1_n;"
+          lines << "else if (strcmp(name, \"interrupt_flags_internal\") == 0) return ctx->dut->rootp->gameboy__DOT__gb_core__DOT__if_r;"
+          lines << "else if (strcmp(name, \"interrupt_enable_internal\") == 0) return ctx->dut->rootp->gameboy__DOT__gb_core__DOT__ie_r;"
+          lines << "else if (strcmp(name, \"old_vblank_irq_internal\") == 0) return ctx->dut->rootp->gameboy__DOT__gb_core__DOT__old_vblank_irq;"
+          lines << "else if (strcmp(name, \"old_video_irq_internal\") == 0) return ctx->dut->rootp->gameboy__DOT__gb_core__DOT__old_video_irq;"
+          lines << "else if (strcmp(name, \"irq_ack_internal\") == 0) return ctx->dut->rootp->gameboy__DOT__gb_core__DOT__irq_ack;"
+          lines << "else if (strcmp(name, \"video_irq_internal\") == 0) return ctx->dut->rootp->gameboy__DOT__gb_core__DOT__video_irq;"
+          lines << "else if (strcmp(name, \"video_vblank_irq_internal\") == 0) return ctx->dut->rootp->gameboy__DOT__gb_core__DOT__vblank_irq;"
+          lines << "else if (strcmp(name, \"sel_ff50_internal\") == 0) return ctx->dut->rootp->gameboy__DOT__gb_core__DOT__sel_FF50;"
+          lines << "else if (strcmp(name, \"video_lcd_on_internal\") == 0) return ctx->dut->rootp->gameboy__DOT__gb_core__DOT__video__DOT__lcd_on;"
+          lines << "else if (strcmp(name, \"video_lcd_clkena_internal\") == 0) return ctx->dut->rootp->gameboy__DOT__gb_core__DOT__video__DOT__lcd_clkena;"
+          lines << "else if (strcmp(name, \"video_lcd_vsync_internal\") == 0) return ctx->dut->rootp->gameboy__DOT__gb_core__DOT__video__DOT__lcd_vsync;"
+          lines << "else if (strcmp(name, \"ce_internal\") == 0) return ctx->dut->rootp->gameboy__DOT__ce;"
+          lines << "else if (strcmp(name, \"ce_n_internal\") == 0) return ctx->dut->rootp->gameboy__DOT__ce_n;"
+          lines << "else if (strcmp(name, \"ce_2x_internal\") == 0) return ctx->dut->rootp->gameboy__DOT__ce_2x;"
+          lines << "else if (strcmp(name, \"boot_upload_active_internal\") == 0) return ctx->dut->rootp->gameboy__DOT__boot_upload_active;"
+          lines << "else if (strcmp(name, \"boot_upload_phase_internal\") == 0) return ctx->dut->rootp->gameboy__DOT__boot_upload_phase;"
+          lines << "else if (strcmp(name, \"boot_upload_index_internal\") == 0) return ctx->dut->rootp->gameboy__DOT__boot_upload_index;"
         elsif @top_module_name == 'gameboy'
           lines << "#{keyword} (strcmp(name, \"cpu_pc_internal\") == 0) return ctx->last_fetch_addr;"
           lines << "else if (strcmp(name, \"boot_rom_enabled_internal\") == 0) return 0;"
@@ -1151,11 +1187,17 @@ module RHDL
               "#{indent}write_addr = ctx->dut->rootp->game_boy_gameboy__DOT__gb_core__DOT___cpu_addr_bus;",
               "#{indent}write_data = ctx->dut->rootp->game_boy_gameboy__DOT__gb_core__DOT___cpu_data_out & 0xFFu;"
             ]
-          elsif direct_verilog_import_wrapper_gameboy?
+          elsif normalized_direct_verilog_import_wrapper_gameboy?
             [
               "#{indent}write_active = (ctx->dut->rootp->gameboy__DOT__gb_core__DOT___cpu_WR_n == 0u);",
               "#{indent}write_addr = ctx->dut->rootp->gameboy__DOT__gb_core__DOT___md_swizz_a_out;",
               "#{indent}write_data = ctx->dut->rootp->gameboy__DOT__gb_core__DOT___cpu_DO & 0xFFu;"
+            ]
+          elsif staged_direct_verilog_import_wrapper_gameboy?
+            [
+              "#{indent}write_active = (ctx->dut->rootp->gameboy__DOT__gb_core__DOT__cpu_wr_n == 0u);",
+              "#{indent}write_addr = ctx->dut->rootp->gameboy__DOT__gb_core__DOT__cpu_addr;",
+              "#{indent}write_data = ctx->dut->rootp->gameboy__DOT__gb_core__DOT__cpu_do & 0xFFu;"
             ]
           else
             []
@@ -1355,12 +1397,19 @@ module RHDL
         File.basename(source_path).end_with?('.normalized.v')
       end
 
-      def direct_verilog_import_wrapper_gameboy?
+      def normalized_direct_verilog_import_wrapper_gameboy?
         return false unless direct_verilog_mode?
         return false unless @top_module_name == 'gameboy'
 
-        source_path = @direct_verilog_source_plan[:source_verilog_path].to_s
-        File.basename(source_path).end_with?('.normalized.v')
+        source_name = File.basename(@direct_verilog_source_plan[:source_verilog_path].to_s)
+        source_name.end_with?('.normalized.v')
+      end
+
+      def staged_direct_verilog_import_wrapper_gameboy?
+        return false unless direct_verilog_mode?
+        return false unless @top_module_name == 'gameboy'
+
+        File.basename(@direct_verilog_source_plan[:source_verilog_path].to_s) == 'pure_verilog_entry.v'
       end
 
       def immediate_cartridge_response?
@@ -1992,6 +2041,15 @@ module RHDL
 
           unsigned char sim_read_vram(void* sim, unsigned int addr) {
               SimContext* ctx = static_cast<SimContext*>(sim);
+      #{if normalized_direct_verilog_import_wrapper_gameboy? || staged_direct_verilog_import_wrapper_gameboy?
+          <<~CPP.chomp
+              if (addr < 8192u) {
+                  return ctx->dut->rootp->gameboy__DOT__gb_core__DOT__vram0__DOT__altsyncram_component__DOT__mem[addr];
+              }
+          CPP
+        else
+          ''
+        end}
               if (addr < sizeof(ctx->vram)) {
                   return ctx->vram[addr];
               }

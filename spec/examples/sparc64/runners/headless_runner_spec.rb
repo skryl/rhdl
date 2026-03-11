@@ -61,6 +61,10 @@ RSpec.describe RHDL::Examples::SPARC64::HeadlessRunner do
       def unmapped_accesses
         []
       end
+
+      def debug_snapshot
+        { reset: { cycle_counter: 0 }, bridge: { state: 7 } }
+      end
     end
   end
 
@@ -108,6 +112,7 @@ RSpec.describe RHDL::Examples::SPARC64::HeadlessRunner do
 
     expect(runner.runner.loaded_images).to eq([[11], [0xA0]])
     expect(runner.mailbox_value).to eq(0xA0)
+    expect(runner.debug_snapshot).to eq(reset: { cycle_counter: 0 }, bridge: { state: 7 })
   end
 
   it 'creates a verilog-backed runner when requested' do
@@ -253,5 +258,74 @@ RSpec.describe RHDL::Examples::SPARC64::HeadlessRunner do
     )
 
     expect(capturing_runner_class.last_kwargs).to include(backend: :compile, compiler_mode: :rustc)
+  end
+
+  it 'forwards runtime-only compiler mode to the IR runner' do
+    capturing_runner_class = Class.new do
+      class << self
+        attr_reader :last_kwargs
+      end
+
+      attr_reader :clock_count
+
+      def initialize(**kwargs)
+        self.class.instance_variable_set(:@last_kwargs, kwargs)
+        @clock_count = 0
+      end
+
+      def native?
+        true
+      end
+
+      def simulator_type
+        :ir_compile
+      end
+
+      def backend
+        :compile
+      end
+
+      def reset!
+        @clock_count = 0
+      end
+
+      def load_images(**)
+      end
+
+      def run_until_complete(**)
+        {}
+      end
+
+      def read_memory(_addr, length)
+        Array.new(length, 0)
+      end
+
+      def write_memory(_addr, _bytes)
+      end
+
+      def wishbone_trace
+        []
+      end
+
+      def mailbox_status
+        0
+      end
+
+      def mailbox_value
+        0
+      end
+
+      def unmapped_accesses
+        []
+      end
+    end
+
+    described_class.new(
+      ir_runner_class: capturing_runner_class,
+      builder: builder,
+      compile_mode: :runtime_only
+    )
+
+    expect(capturing_runner_class.last_kwargs).to include(backend: :compile, compiler_mode: :runtime_only)
   end
 end

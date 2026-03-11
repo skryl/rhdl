@@ -7,6 +7,11 @@ require 'tmpdir'
 require 'rbconfig'
 
 RSpec.describe 'IR native wide signal support' do
+  OVERWIDE_INPUT = (0x8899_AABB_CCDD_EEFF << 192) |
+                   (0x0123_4567_89AB_CDEF << 128) |
+                   (0xFEDC_BA98_7654_3210 << 64) |
+                   0x0F1E_2D3C_4B5A_6978
+
   let(:ir) { RHDL::Codegen::CIRCT::IR }
 
   def build_wide_probe_package
@@ -217,7 +222,7 @@ RSpec.describe 'IR native wide signal support' do
         sim = RHDL::Sim::Native::IR::Simulator.new(File.read(json_path), backend: backend)
         sim.reset
         sim.poke('rst', 0)
-        sim.poke('wide_in', 0x0123_4567_89AB_CDEF_FEDC_BA98_7654_3210)
+        sim.poke('wide_in', #{OVERWIDE_INPUT})
         sim.evaluate
 
         puts JSON.generate(
@@ -240,6 +245,13 @@ RSpec.describe 'IR native wide signal support' do
     end
   end
 
+  def expect_overwide_slice_probe(backend)
+    expect(run_overwide_slice_probe(backend)).to eq(
+      slice_above_128: 0x0123_4567_89AB_CDEF,
+      slice_low: 0x0F1E_2D3C_4B5A_6978
+    )
+  end
+
   it 'round-trips 128-bit signals on the interpreter backend', timeout: 0 do
     skip 'IR interpreter backend unavailable' unless RHDL::Sim::Native::IR::INTERPRETER_AVAILABLE
 
@@ -252,12 +264,21 @@ RSpec.describe 'IR native wide signal support' do
     expect_probe_to_round_trip_128_bits(:jit)
   end
 
-  it 'zeros slices that start above bit 127 on the compiler backend', timeout: 0 do
+  it 'supports slices above bit 127 on the interpreter backend', timeout: 0 do
+    skip 'IR interpreter backend unavailable' unless RHDL::Sim::Native::IR::INTERPRETER_AVAILABLE
+
+    expect_overwide_slice_probe(:interpreter)
+  end
+
+  it 'supports slices above bit 127 on the JIT backend', timeout: 0 do
+    skip 'IR JIT backend unavailable' unless RHDL::Sim::Native::IR::JIT_AVAILABLE
+
+    expect_overwide_slice_probe(:jit)
+  end
+
+  it 'supports slices above bit 127 on the compiler backend', timeout: 0 do
     skip 'IR compiler backend unavailable' unless RHDL::Sim::Native::IR::COMPILER_AVAILABLE
 
-    expect(run_overwide_slice_probe(:compiler)).to eq(
-      slice_above_128: 0,
-      slice_low: 0xFEDC_BA98_7654_3210
-    )
+    expect_overwide_slice_probe(:compiler)
   end
 end

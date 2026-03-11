@@ -81,6 +81,12 @@ module RHDL
           @runner.unmapped_accesses
         end
 
+        def debug_snapshot
+          return {} unless @runner.respond_to?(:debug_snapshot)
+
+          @runner.debug_snapshot
+        end
+
         private
 
         def build_runner(ir_runner_class:, verilator_runner_class:)

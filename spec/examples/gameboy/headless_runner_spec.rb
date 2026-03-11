@@ -141,6 +141,51 @@ RSpec.describe RHDL::Examples::GameBoy::HeadlessRunner, :slow do
     end
   end
 
+  describe 'CIRCT mode' do
+    it 'passes imported HDL options to ArcilatorRunner' do
+      require_relative '../../../examples/gameboy/utilities/runners/arcilator_runner'
+      fake_runner = instance_double(
+        'RHDL::Examples::GameBoy::ArcilatorRunner',
+        native?: true,
+        simulator_type: :hdl_arcilator
+      )
+      allow(RHDL::Examples::GameBoy::ArcilatorRunner).to receive(:new).and_return(fake_runner)
+
+      runner = described_class.new(
+        mode: :circt,
+        hdl_dir: '/tmp/gameboy_import',
+        top: 'Gameboy'
+      )
+
+      expect(RHDL::Examples::GameBoy::ArcilatorRunner).to have_received(:new).with(
+        hdl_dir: '/tmp/gameboy_import',
+        top: 'Gameboy'
+      )
+      expect(runner.mode).to eq(:circt)
+      expect(runner.backend).to be_nil
+      expect(runner.simulator_type).to eq(:hdl_arcilator)
+    end
+
+    it 'accepts :arcilator as an alias for :circt' do
+      require_relative '../../../examples/gameboy/utilities/runners/arcilator_runner'
+      fake_runner = instance_double(
+        'RHDL::Examples::GameBoy::ArcilatorRunner',
+        native?: true,
+        simulator_type: :hdl_arcilator
+      )
+      allow(RHDL::Examples::GameBoy::ArcilatorRunner).to receive(:new).and_return(fake_runner)
+
+      runner = described_class.new(mode: :arcilator)
+
+      expect(RHDL::Examples::GameBoy::ArcilatorRunner).to have_received(:new).with(
+        hdl_dir: nil,
+        top: nil
+      )
+      expect(runner.mode).to eq(:arcilator)
+      expect(runner.simulator_type).to eq(:hdl_arcilator)
+    end
+  end
+
   describe 'runner interface' do
     it 'returns all cpu_state fields' do
       runner = described_class.with_test_rom

@@ -15,7 +15,7 @@ module RHDL
       attr_reader :runner, :mode, :sim_backend, :hdl_dir, :verilog_dir, :top, :use_staged_verilog
 
       # Create a headless runner with the specified options
-      # @param mode [Symbol] Simulation mode: :ruby, :ir, :verilog
+      # @param mode [Symbol] Simulation mode: :ruby, :ir, :verilog, :circt
       # @param sim [Symbol] Simulator backend for :ir mode: :interpret, :jit, :compile
       # @param hdl_dir [String, nil] Optional HDL directory override.
       # @param verilog_dir [String, nil] Optional direct Verilog directory/file override for :verilog mode.
@@ -48,8 +48,14 @@ module RHDL
                       top: @top,
                       use_staged_verilog: @use_staged_verilog
                     )
+                  when :circt, :arcilator
+                    require_relative 'arcilator_runner'
+                    RHDL::Examples::GameBoy::ArcilatorRunner.new(
+                      hdl_dir: @hdl_dir,
+                      top: @top
+                    )
                   else
-                    raise ArgumentError, "Unknown mode: #{mode}. Valid modes: ruby, ir, verilog"
+                    raise ArgumentError, "Unknown mode: #{mode}. Valid modes: ruby, ir, verilog, circt"
                   end
       end
 
@@ -127,7 +133,7 @@ module RHDL
         case @mode
         when :ruby, :ir
           @sim_backend
-        when :verilog
+        when :verilog, :circt, :arcilator
           nil
         else
           @sim_backend
@@ -231,9 +237,9 @@ module RHDL
         case mode
         when :ruby then :ruby
         when :ir then :compile
-        when :verilog then nil
+        when :verilog, :circt, :arcilator then nil
         else
-          raise ArgumentError, "Unknown mode: #{mode}. Valid modes: ruby, ir, verilog"
+          raise ArgumentError, "Unknown mode: #{mode}. Valid modes: ruby, ir, verilog, circt"
         end
       end
       end

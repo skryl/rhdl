@@ -10,6 +10,8 @@ require_relative '../../../../examples/ao486/utilities/import/cpu_parity_runtime
 require_relative '../../../../examples/ao486/utilities/import/cpu_trace_package'
 
 RSpec.describe RHDL::Examples::AO486::Import::CpuTracePackage do
+  include AO486SpecSupport::HeadlessImportRunnerHelper
+
   def require_import_tool!
     tool = RHDL::Codegen::CIRCT::Tooling::DEFAULT_VERILOG_IMPORT_TOOL
     skip "#{tool} not available" unless HdlToolchain.which(tool)
@@ -179,34 +181,33 @@ RSpec.describe RHDL::Examples::AO486::Import::CpuTracePackage do
     Dir.mktmpdir('ao486_cpu_trace_runtime_out') do |out_dir|
       Dir.mktmpdir('ao486_cpu_trace_runtime_ws') do |workspace|
         result = run_importer(out_dir: out_dir, workspace: workspace)
-        runtime = RHDL::Examples::AO486::Import::CpuParityRuntime.build_from_cleaned_mlir(
+        runtime = build_ao486_import_headless_runner(
           File.read(result.normalized_core_mlir_path),
-          backend: backend
+          mode: :ir,
+          sim: backend
         )
         RHDL::Examples::AO486::Import::CpuParityPrograms.fetch(:prime_sieve).load_into(runtime)
-        runtime.reset!
+        runtime.reset
 
         saw_fetch = false
         saw_write = false
 
         32.times do |cycle|
           runtime.step(cycle)
-          sim = runtime.sim
-
-          if sim.peek('pipeline_inst__trace_fetch_valid') > 0
-            expect(sim.peek('trace_prefetch_eip')).to eq(sim.peek('pipeline_inst__trace_prefetch_eip'))
-            expect(sim.peek('trace_fetch_valid')).to eq(sim.peek('pipeline_inst__trace_fetch_valid'))
-            expect(sim.peek('trace_fetch_accept_length')).to eq(sim.peek('pipeline_inst__trace_fetch_accept_length'))
+          if runtime.peek('pipeline_inst__trace_fetch_valid') > 0
+            expect(runtime.peek('trace_prefetch_eip')).to eq(runtime.peek('pipeline_inst__trace_prefetch_eip'))
+            expect(runtime.peek('trace_fetch_valid')).to eq(runtime.peek('pipeline_inst__trace_fetch_valid'))
+            expect(runtime.peek('trace_fetch_accept_length')).to eq(runtime.peek('pipeline_inst__trace_fetch_accept_length'))
             saw_fetch = true
           end
 
-          if sim.peek('pipeline_inst.wr_eip') > 0
-            expect(sim.peek('trace_wr_eip')).to eq(sim.peek('pipeline_inst.wr_eip'))
-            expect(sim.peek('trace_wr_consumed')).to eq(sim.peek('pipeline_inst.wr_consumed'))
-            expect(sim.peek('trace_retired')).to eq(sim.peek('pipeline_inst__trace_retired'))
-            expect(sim.peek('trace_arch_eax')).to eq(sim.peek('pipeline_inst__trace_arch_eax'))
-            expect(sim.peek('trace_arch_edi')).to eq(sim.peek('pipeline_inst__trace_arch_edi'))
-            expect(sim.peek('trace_arch_eip')).to eq(sim.peek('pipeline_inst__trace_arch_eip'))
+          if runtime.peek('pipeline_inst.wr_eip') > 0
+            expect(runtime.peek('trace_wr_eip')).to eq(runtime.peek('pipeline_inst.wr_eip'))
+            expect(runtime.peek('trace_wr_consumed')).to eq(runtime.peek('pipeline_inst.wr_consumed'))
+            expect(runtime.peek('trace_retired')).to eq(runtime.peek('pipeline_inst__trace_retired'))
+            expect(runtime.peek('trace_arch_eax')).to eq(runtime.peek('pipeline_inst__trace_arch_eax'))
+            expect(runtime.peek('trace_arch_edi')).to eq(runtime.peek('pipeline_inst__trace_arch_edi'))
+            expect(runtime.peek('trace_arch_eip')).to eq(runtime.peek('pipeline_inst__trace_arch_eip'))
             saw_write = true
           end
         end

@@ -9,6 +9,8 @@ require_relative '../../../../examples/ao486/utilities/import/cpu_parity_program
 require_relative '../../../../examples/ao486/utilities/import/cpu_parity_runtime'
 
 RSpec.describe RHDL::Examples::AO486::Import::CpuParityRuntime do
+  include AO486SpecSupport::HeadlessImportRunnerHelper
+
   def require_import_tool!
     tool = RHDL::Codegen::CIRCT::Tooling::DEFAULT_VERILOG_IMPORT_TOOL
     skip "#{tool} not available" unless HdlToolchain.which(tool)
@@ -44,11 +46,11 @@ RSpec.describe RHDL::Examples::AO486::Import::CpuParityRuntime do
     Dir.mktmpdir('ao486_cpu_parity_runtime_out') do |out_dir|
       Dir.mktmpdir('ao486_cpu_parity_runtime_ws') do |workspace|
         result = run_importer(out_dir: out_dir, workspace: workspace)
-        runtime = described_class.build_from_cleaned_mlir(File.read(result.normalized_core_mlir_path), backend: backend)
+        runtime = build_ao486_import_headless_runner(File.read(result.normalized_core_mlir_path), mode: :ir, sim: backend)
         reset_program = RHDL::Examples::AO486::Import::CpuParityPrograms.fetch(:reset_smoke)
 
         reset_program.load_into(runtime)
-        runtime.reset!
+        runtime.reset
 
         fetched = runtime.run_fetch_pc_groups(max_cycles: 24).first(3).map do |event|
           [event.pc, event.bytes]
@@ -82,11 +84,11 @@ RSpec.describe RHDL::Examples::AO486::Import::CpuParityRuntime do
     Dir.mktmpdir('ao486_cpu_parity_runtime_out') do |out_dir|
       Dir.mktmpdir('ao486_cpu_parity_runtime_ws') do |workspace|
         result = run_importer(out_dir: out_dir, workspace: workspace)
-        runtime = described_class.build_from_cleaned_mlir(File.read(result.normalized_core_mlir_path), backend: backend)
+        runtime = build_ao486_import_headless_runner(File.read(result.normalized_core_mlir_path), mode: :ir, sim: backend)
         bytes = RHDL::Examples::AO486::Import::CpuParityPrograms.assemble(source, label: 'decode_regs_latch_probe')
 
         runtime.load_bytes(RHDL::Examples::AO486::Import::CpuParityPrograms::RESET_VECTOR_PHYSICAL, bytes)
-        runtime.reset!
+        runtime.reset
 
         saw_fetch_word = false
         saw_decoder_word = false
@@ -94,10 +96,10 @@ RSpec.describe RHDL::Examples::AO486::Import::CpuParityRuntime do
         8.times do |cycle|
           runtime.step(cycle)
           saw_fetch_word ||= (
-            runtime.sim.peek('pipeline_inst__decode_inst__decode_regs_inst__fetch_valid') == 4 &&
-            runtime.sim.peek('pipeline_inst__decode_inst__decode_regs_inst__fetch') == 0xF41234B8
+            runtime.peek('pipeline_inst__decode_inst__decode_regs_inst__fetch_valid') == 4 &&
+            runtime.peek('pipeline_inst__decode_inst__decode_regs_inst__fetch') == 0xF41234B8
           )
-          saw_decoder_word ||= (runtime.sim.peek('pipeline_inst__decode_inst__decode_regs_inst__decoder') != 0)
+          saw_decoder_word ||= (runtime.peek('pipeline_inst__decode_inst__decode_regs_inst__decoder') != 0)
         end
 
         expect(saw_fetch_word).to be(true)
@@ -126,19 +128,19 @@ RSpec.describe RHDL::Examples::AO486::Import::CpuParityRuntime do
     Dir.mktmpdir('ao486_cpu_parity_runtime_out') do |out_dir|
       Dir.mktmpdir('ao486_cpu_parity_runtime_ws') do |workspace|
         result = run_importer(out_dir: out_dir, workspace: workspace)
-        runtime = described_class.build_from_cleaned_mlir(File.read(result.normalized_core_mlir_path), backend: backend)
+        runtime = build_ao486_import_headless_runner(File.read(result.normalized_core_mlir_path), mode: :ir, sim: backend)
         bytes = RHDL::Examples::AO486::Import::CpuParityPrograms.assemble(source, label: 'aligned_write_hlt_probe')
 
         runtime.load_bytes(RHDL::Examples::AO486::Import::CpuParityPrograms::RESET_VECTOR_PHYSICAL, bytes)
-        runtime.reset!
+        runtime.reset
 
         saw_hlt = false
 
         128.times do |cycle|
           runtime.step(cycle)
           saw_hlt ||= (
-            runtime.sim.peek('trace_wr_hlt_in_progress') == 1 &&
-            runtime.sim.peek('trace_wr_ready') == 1
+            runtime.peek('trace_wr_hlt_in_progress') == 1 &&
+            runtime.peek('trace_wr_ready') == 1
           )
           break if saw_hlt
         end
@@ -158,7 +160,7 @@ RSpec.describe RHDL::Examples::AO486::Import::CpuParityRuntime do
     Dir.mktmpdir('ao486_cpu_parity_runtime_out') do |out_dir|
       Dir.mktmpdir('ao486_cpu_parity_runtime_ws') do |workspace|
         result = run_importer(out_dir: out_dir, workspace: workspace)
-        runtime = described_class.build_from_cleaned_mlir(File.read(result.normalized_core_mlir_path), backend: backend)
+        runtime = build_ao486_import_headless_runner(File.read(result.normalized_core_mlir_path), mode: :ir, sim: backend)
 
         RHDL::Examples::AO486::Import::CpuParityPrograms.benchmark_programs.each do |program|
           program.load_into(runtime)
@@ -179,7 +181,7 @@ RSpec.describe RHDL::Examples::AO486::Import::CpuParityRuntime do
     Dir.mktmpdir('ao486_cpu_parity_runtime_out') do |out_dir|
       Dir.mktmpdir('ao486_cpu_parity_runtime_ws') do |workspace|
         result = run_importer(out_dir: out_dir, workspace: workspace)
-        runtime = described_class.build_from_cleaned_mlir(File.read(result.normalized_core_mlir_path), backend: backend)
+        runtime = build_ao486_import_headless_runner(File.read(result.normalized_core_mlir_path), mode: :ir, sim: backend)
 
         RHDL::Examples::AO486::Import::CpuParityPrograms.benchmark_programs.each do |program|
           program.load_into(runtime)
@@ -202,19 +204,19 @@ RSpec.describe RHDL::Examples::AO486::Import::CpuParityRuntime do
     Dir.mktmpdir('ao486_cpu_parity_runtime_out') do |out_dir|
       Dir.mktmpdir('ao486_cpu_parity_runtime_ws') do |workspace|
         result = run_importer(out_dir: out_dir, workspace: workspace)
-        runtime = described_class.build_from_cleaned_mlir(File.read(result.normalized_core_mlir_path), backend: backend)
+        runtime = build_ao486_import_headless_runner(File.read(result.normalized_core_mlir_path), mode: :ir, sim: backend)
 
         RHDL::Examples::AO486::Import::CpuParityPrograms.benchmark_programs.each do |program|
           program.load_into(runtime)
-          runtime.reset!
+          runtime.reset
 
           saw_hlt = false
 
           program.max_cycles.times do |cycle|
             runtime.step(cycle)
             saw_hlt ||= (
-              runtime.sim.peek('trace_wr_hlt_in_progress') == 1 &&
-              runtime.sim.peek('trace_wr_ready') == 1
+              runtime.peek('trace_wr_hlt_in_progress') == 1 &&
+              runtime.peek('trace_wr_ready') == 1
             )
             break if saw_hlt
           end
@@ -241,7 +243,7 @@ RSpec.describe RHDL::Examples::AO486::Import::CpuParityRuntime do
     Dir.mktmpdir('ao486_cpu_parity_runtime_out') do |out_dir|
       Dir.mktmpdir('ao486_cpu_parity_runtime_ws') do |workspace|
         result = run_importer(out_dir: out_dir, workspace: workspace)
-        runtime = described_class.build_from_cleaned_mlir(File.read(result.normalized_core_mlir_path), backend: backend)
+        runtime = build_ao486_import_headless_runner(File.read(result.normalized_core_mlir_path), mode: :ir, sim: backend)
         program = RHDL::Examples::AO486::Import::CpuParityPrograms.fetch(:prime_sieve)
 
         program.load_into(runtime)
@@ -249,9 +251,9 @@ RSpec.describe RHDL::Examples::AO486::Import::CpuParityRuntime do
 
         expect(trace.length).to be >= program.initial_fetch_pc_groups.length
         expect(trace.map(&:pc).max).to be >= 0x1000C
-        expect(runtime.sim.peek('memory_inst__prefetch_inst__limit')).to be > 0
-        expect(runtime.sim.peek('memory_inst__prefetch_inst__prefetch_address')).to be >= RHDL::Examples::AO486::Import::CpuParityPrograms::RESET_SEGMENT_BASE
-        expect(runtime.sim.peek('memory_inst__prefetch_inst__prefetch_address')).not_to eq(RHDL::Examples::AO486::Import::CpuParityPrograms::RESET_VECTOR_PHYSICAL)
+        expect(runtime.peek('memory_inst__prefetch_inst__limit')).to be > 0
+        expect(runtime.peek('memory_inst__prefetch_inst__prefetch_address')).to be >= RHDL::Examples::AO486::Import::CpuParityPrograms::RESET_SEGMENT_BASE
+        expect(runtime.peek('memory_inst__prefetch_inst__prefetch_address')).not_to eq(RHDL::Examples::AO486::Import::CpuParityPrograms::RESET_VECTOR_PHYSICAL)
       end
     end
   end

@@ -141,6 +141,32 @@ RSpec.describe RHDL::Examples::SPARC64::Import::SystemImporter do
     end
   end
 
+  describe '#write_import_source_bundle' do
+    it 'emits a semantic bw_r_tlb_fpga hierarchy stub for the import path' do
+      require_reference_tree!
+
+      Dir.mktmpdir('sparc64_import_bundle_out') do |out_dir|
+        Dir.mktmpdir('sparc64_import_bundle_ws') do |workspace|
+          importer = new_importer(output_dir: out_dir, workspace_dir: workspace)
+          resolved = importer.resolve_sources(workspace: workspace)
+          bundle = importer.write_import_source_bundle(workspace: workspace, resolved: resolved)
+          support_stubs_path = bundle.fetch(:tool_args).grep(/__rhdl_sparc64_hierarchy_stubs\.v\z/).fetch(0)
+          support_stubs_source = File.read(support_stubs_path)
+
+          aggregate_failures do
+            expect(support_stubs_source).to include('module bw_r_tlb_fpga(')
+            expect(support_stubs_source).to include('output [39:10] tlb_pgnum_crit;')
+            expect(support_stubs_source).to include('output [39:10] tlb_pgnum;')
+            expect(support_stubs_source).to include('wire [29:0] virtual_pgnum;')
+            expect(support_stubs_source).to include('assign virtual_pgnum = {')
+            expect(support_stubs_source).to include('assign tlb_cam_hit = 1\'b1;')
+            expect(support_stubs_source).to include('assign next_cache_way_hit[0] = cache_set_vld[0] & (cache_ptag_w0 == virtual_pgnum);')
+          end
+        end
+      end
+    end
+  end
+
   describe 'patch directory support' do
     it 'rejects a missing patches_dir' do
       expect do

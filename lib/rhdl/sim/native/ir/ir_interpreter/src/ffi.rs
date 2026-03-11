@@ -1291,6 +1291,27 @@ unsafe fn ir_sim_poke_wide(
     }
 }
 
+unsafe fn ir_sim_poke_word_by_name(
+    ctx: *mut IrSimContext,
+    name: *const c_char,
+    word_idx: c_uint,
+    value: c_ulong,
+) -> c_int {
+    if ctx.is_null() || name.is_null() {
+        return -1;
+    }
+    let ctx = &mut *ctx;
+    let name = match CStr::from_ptr(name).to_str() {
+        Ok(s) => s,
+        Err(_) => return -1,
+    };
+    let Some(idx) = ctx.core.get_signal_idx(name) else {
+        return -1;
+    };
+    ctx.core.poke_word_by_idx(idx, word_idx as usize, value as u64);
+    0
+}
+
 /// Peek a signal value
 /// Returns the value, or 0 on error (check return value of ir_sim_has_signal)
 unsafe fn ir_sim_peek(ctx: *const IrSimContext, name: *const c_char) -> c_ulong {
@@ -1308,6 +1329,25 @@ unsafe fn ir_sim_peek_wide(ctx: *const IrSimContext, name: *const c_char) -> Sig
     };
 
     ctx.core.peek_wide(name).unwrap_or(0)
+}
+
+unsafe fn ir_sim_peek_word_by_name(
+    ctx: *const IrSimContext,
+    name: *const c_char,
+    word_idx: c_uint,
+) -> c_ulong {
+    if ctx.is_null() || name.is_null() {
+        return 0;
+    }
+    let ctx = &*ctx;
+    let name = match CStr::from_ptr(name).to_str() {
+        Ok(s) => s,
+        Err(_) => return 0,
+    };
+    let Some(idx) = ctx.core.get_signal_idx(name) else {
+        return 0;
+    };
+    ctx.core.peek_word_by_idx(idx, word_idx as usize) as c_ulong
 }
 
 /// Check if a signal exists
@@ -1512,11 +1552,15 @@ unsafe fn ir_sim_poke_by_idx_wide(ctx: *mut IrSimContext, idx: c_int, value: Sig
         return;
     }
     let ctx = &mut *ctx;
-    let i = idx as usize;
-    if i < ctx.core.signals.len() {
-        let mask = crate::core::CoreSimulator::compute_mask(ctx.core.widths[i]);
-        ctx.core.signals[i] = value & mask;
+    ctx.core.poke_wide_by_idx(idx as usize, value);
+}
+
+unsafe fn ir_sim_poke_word_by_idx(ctx: *mut IrSimContext, idx: c_int, word_idx: c_uint, value: c_ulong) -> c_int {
+    if ctx.is_null() || idx < 0 {
+        return -1;
     }
+    (*ctx).core.poke_word_by_idx(idx as usize, word_idx as usize, value as u64);
+    0
 }
 
 /// Peek a signal value by index (faster than by name)
@@ -1528,13 +1572,14 @@ unsafe fn ir_sim_peek_by_idx_wide(ctx: *const IrSimContext, idx: c_int) -> Signa
     if ctx.is_null() || idx < 0 {
         return 0;
     }
-    let ctx = &*ctx;
-    let i = idx as usize;
-    if i < ctx.core.signals.len() {
-        ctx.core.signals[i]
-    } else {
-        0
+    (*ctx).core.peek_wide_by_idx(idx as usize)
+}
+
+unsafe fn ir_sim_peek_word_by_idx(ctx: *const IrSimContext, idx: c_int, word_idx: c_uint) -> c_ulong {
+    if ctx.is_null() || idx < 0 {
+        return 0;
     }
+    (*ctx).core.peek_word_by_idx(idx as usize, word_idx as usize) as c_ulong
 }
 
 /// Run multiple ticks (for batched execution)
@@ -1986,6 +2031,48 @@ pub unsafe extern "C" fn sim_signal_wide(
         }
         _ => 0,
     }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn sim_poke_word_by_name(
+    ctx: *mut IrSimContext,
+    name: *const c_char,
+    word_idx: c_uint,
+    value: c_ulong,
+) -> c_int {
+    (ir_sim_poke_word_by_name(ctx, name, word_idx, value) == 0) as c_int
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn sim_peek_word_by_name(
+    ctx: *const IrSimContext,
+    name: *const c_char,
+    word_idx: c_uint,
+    out_value: *mut c_ulong,
+) -> c_int {
+    write_out_ulong(out_value, ir_sim_peek_word_by_name(ctx, name, word_idx));
+    1
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn sim_poke_word_by_idx(
+    ctx: *mut IrSimContext,
+    idx: c_uint,
+    word_idx: c_uint,
+    value: c_ulong,
+) -> c_int {
+    (ir_sim_poke_word_by_idx(ctx, idx as c_int, word_idx, value) == 0) as c_int
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn sim_peek_word_by_idx(
+    ctx: *const IrSimContext,
+    idx: c_uint,
+    word_idx: c_uint,
+    out_value: *mut c_ulong,
+) -> c_int {
+    write_out_ulong(out_value, ir_sim_peek_word_by_idx(ctx, idx as c_int, word_idx));
+    1
 }
 
 #[no_mangle]

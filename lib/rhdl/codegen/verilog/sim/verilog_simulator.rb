@@ -36,8 +36,8 @@ module RHDL
           @backend = backend.to_sym
           @build_dir = build_dir
           @verilog_dir = File.join(build_dir, 'verilog')
-          @obj_dir = File.join(build_dir, 'obj_dir')
           @library_basename = library_basename
+          @obj_dir = File.join(build_dir, 'obj_dir', sanitize_path_component(@library_basename))
           @top_module = top_module
           @verilator_prefix = verilator_prefix
           @cxx = cxx
@@ -127,6 +127,10 @@ module RHDL
         end
 
         private
+
+        def sanitize_path_component(value)
+          value.to_s.gsub(/[^A-Za-z0-9_.-]/, '_')
+        end
 
         def compile_verilator(verilog_file: nil, verilog_files: nil, wrapper_file:, log_file:)
           sources = Array(verilog_files || verilog_file).compact

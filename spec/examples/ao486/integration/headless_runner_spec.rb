@@ -37,6 +37,102 @@ RSpec.describe RHDL::Examples::AO486::HeadlessRunner do
     expect(runner.state[:floppy_image_size]).to eq(File.size(runner.dos_path))
   end
 
+  it 'passes through backend PC snapshot fields in headless state' do
+    runner = described_class.new(headless: true)
+    backend = instance_double(
+      'AO486Backend',
+      last_run_stats: nil,
+      state: {
+        backend: :ir,
+        sim_backend: :compile,
+        cycles_run: 12_345,
+        bios_loaded: true,
+        dos_loaded: true,
+        floppy_image_size: 1_474_560,
+        keyboard_buffer_size: 0,
+        shell_prompt_detected: false,
+        native: true,
+        cursor: { row: 0, col: 7, page: 0 },
+        pc: {
+          trace: 0x7DCE,
+          decode: 0x7DD0,
+          read: 0x7DD0,
+          execute: 0x7DD0,
+          arch: 0x7DD0
+        },
+        exception_vector: 0x13,
+        active_video_page: 0,
+        dos_bridge: {
+          int13: { ax: 0x0201, bx: 0x0000, cx: 0x0013, dx: 0x0100, es: 0x01C0, result_ax: 0x0001, flags: 0 },
+          int10: { ax: 0x0E46, result_ax: 0x0E46 },
+          int16: { ax: 0x0000, result_ax: 0x0000, flags: 0 },
+          int1a: { ax: 0x0000, result_ax: 0x0000, flags: 0 }
+        }
+      }
+    )
+    runner.instance_variable_set(:@runner, backend)
+
+    snapshot = runner.state
+
+    expect(snapshot[:pc]).to eq(
+      trace: 0x7DCE,
+      decode: 0x7DD0,
+      read: 0x7DD0,
+      execute: 0x7DD0,
+      arch: 0x7DD0
+    )
+    expect(snapshot[:exception_vector]).to eq(0x13)
+    expect(snapshot[:active_video_page]).to eq(0)
+    expect(snapshot[:dos_bridge]).to eq(
+      int13: { ax: 0x0201, bx: 0x0000, cx: 0x0013, dx: 0x0100, es: 0x01C0, result_ax: 0x0001, flags: 0 },
+      int10: { ax: 0x0E46, result_ax: 0x0E46 },
+      int16: { ax: 0x0000, result_ax: 0x0000, flags: 0 },
+      int1a: { ax: 0x0000, result_ax: 0x0000, flags: 0 }
+    )
+  end
+
+  it 'passes through backend cyc/s benchmark stats in headless state' do
+    runner = described_class.new(headless: true)
+    backend = instance_double(
+      'AO486Backend',
+      last_run_stats: {
+        backend: :compile,
+        operation: :run_final_state,
+        cycles: 256,
+        elapsed_seconds: 0.002,
+        cycles_per_second: 128_000.0
+      },
+      state: {
+        backend: :ir,
+        sim_backend: :compile,
+        cycles_run: 256,
+        bios_loaded: false,
+        dos_loaded: false,
+        floppy_image_size: 0,
+        keyboard_buffer_size: 0,
+        shell_prompt_detected: false,
+        native: true,
+        cursor: { row: 0, col: 0, page: 0 }
+      }
+    )
+    runner.instance_variable_set(:@runner, backend)
+
+    expect(runner.last_run_stats).to eq(
+      backend: :compile,
+      operation: :run_final_state,
+      cycles: 256,
+      elapsed_seconds: 0.002,
+      cycles_per_second: 128_000.0
+    )
+    expect(runner.state[:last_run_stats]).to eq(
+      backend: :compile,
+      operation: :run_final_state,
+      cycles: 256,
+      elapsed_seconds: 0.002,
+      cycles_per_second: 128_000.0
+    )
+  end
+
   it 'renders text mode content with debug state below the display' do
     runner = described_class.new(headless: true, debug: true, speed: 1234)
     runner.load_bytes(text_base, ['O'.ord, 0x07, 'K'.ord, 0x07])
@@ -70,6 +166,7 @@ RSpec.describe RHDL::Examples::AO486::HeadlessRunner do
     backend = instance_double(
       'AO486Backend',
       cycles_run: 20_000,
+      last_run_stats: nil,
       state: {
         backend: :verilator,
         cycles_run: 20_000,

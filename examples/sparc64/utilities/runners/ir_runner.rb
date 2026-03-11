@@ -62,6 +62,11 @@ module RHDL
         def load_images(boot_image:, program_image:)
           reset!
           load_flash(boot_image, base_addr: Integration::FLASH_BOOT_BASE)
+          # Match the staged-Verilog harness: the boot shim is mirrored into
+          # low DRAM as well as the 0x8000 boot-prom alias so early uncached
+          # startup fetches see the same bytes on both runner paths.
+          load_memory(boot_image, base_addr: 0)
+          load_memory(boot_image, base_addr: Integration::BOOT_PROM_ALIAS_BASE)
           load_memory(program_image, base_addr: Integration::PROGRAM_BASE)
           self
         end
@@ -122,6 +127,58 @@ module RHDL
         def unmapped_accesses
           @unmapped_accesses = Array(@fault_reader.call(@sim))
           Array(@unmapped_accesses).dup
+        end
+
+        def debug_snapshot
+          {
+            reset: {
+              cycle_counter: clock_count,
+              mailbox_status: mailbox_status,
+              mailbox_value: mailbox_value
+            },
+            bridge: compact_hash({
+              state: peek_first('os2wb_inst__state', 'os2wb_inst_state'),
+              cpu: peek_first('os2wb_inst__cpu', 'os2wb_inst_cpu'),
+              cpx_ready: peek_bool('os2wb_inst__cpx_ready', 'os2wb_inst_cpx_ready'),
+              pcx_req_d: peek_first('os2wb_inst__pcx_req_d', 'os2wb_inst_pcx_req_d'),
+              wb_cycle: peek_bool('os2wb_inst__wb_cycle', 'os2wb_inst_wb_cycle'),
+              wb_strobe: peek_bool('os2wb_inst__wb_strobe', 'os2wb_inst_wb_strobe'),
+              wb_we: peek_bool('os2wb_inst__wb_we', 'os2wb_inst_wb_we'),
+              wb_sel: peek_first('os2wb_inst__wb_sel', 'os2wb_inst_wb_sel'),
+              wb_addr: peek_first('os2wb_inst__wb_addr', 'os2wb_inst_wb_addr'),
+              wb_data_o: peek_first('os2wb_inst__wb_data_o', 'os2wb_inst_wb_data_o')
+            }),
+            thread0: thread_debug_snapshot(0),
+            thread1: thread_debug_snapshot(1),
+            ifq: compact_hash({
+              lsu_ifu_pcxpkt_ack_d: peek_bool(
+                'sparc_0__ifu__ifqctl__lsu_ifu_pcxpkt_ack_d',
+                'sparc_0__ifu__lsu_ifu_pcxpkt_ack_d',
+                'sparc_0__lsu__qctl1__lsu_ifu_pcxpkt_ack_d'
+              ),
+              ifu_lsu_pcxreq_d: peek_bool(
+                'sparc_0__ifu__ifqctl__ifu_lsu_pcxreq_d',
+                'sparc_0__ifu__ifu_lsu_pcxreq_d',
+                'sparc_0__lsu__qctl1__ifu_lsu_pcxreq_d'
+              ),
+              mil0_state: peek_first(
+                'sparc_0__ifu__ifqctl__mil0_state',
+                'sparc_0__ifu__ifqdp__mil0_state'
+              )
+            }),
+            irf: compact_hash({
+              old_agp: peek_first(
+                'sparc_0__exu__irf__old_agp_d1',
+                'sparc_0__exu__irf__bw_r_irf_core__old_agp_d1'
+              ),
+              new_agp: peek_first(
+                'sparc_0__exu__irf__new_agp_d2',
+                'sparc_0__exu__irf__bw_r_irf_core__new_agp_d2'
+              ),
+              register02: register_debug_snapshot(2),
+              register03: register_debug_snapshot(3)
+            })
+          }
         end
 
         private
@@ -275,22 +332,38 @@ module RHDL
 
         def normalize_compiler_mode(value)
           mode = (value || :auto).to_sym
-          return mode if %i[auto rustc].include?(mode)
+          return mode if %i[auto rustc runtime_only].include?(mode)
 
-          raise ArgumentError, "Unsupported SPARC64 compiler mode #{value.inspect}. Use :auto or :rustc."
+          raise ArgumentError, "Unsupported SPARC64 compiler mode #{value.inspect}. Use :auto, :rustc, or :runtime_only."
         end
 
         def with_compiler_env
-          return yield unless backend.to_sym == :compile && compiler_mode == :rustc
+          return yield unless backend.to_sym == :compile
 
           previous = ENV['RHDL_IR_COMPILER_FORCE_RUSTC']
-          ENV['RHDL_IR_COMPILER_FORCE_RUSTC'] = '1'
+          previous_runtime_only = ENV['RHDL_IR_COMPILER_FORCE_RUNTIME_ONLY']
+          case compiler_mode
+          when :rustc
+            ENV['RHDL_IR_COMPILER_FORCE_RUSTC'] = '1'
+            ENV.delete('RHDL_IR_COMPILER_FORCE_RUNTIME_ONLY')
+          when :runtime_only
+            ENV.delete('RHDL_IR_COMPILER_FORCE_RUSTC')
+            ENV['RHDL_IR_COMPILER_FORCE_RUNTIME_ONLY'] = '1'
+          else
+            ENV.delete('RHDL_IR_COMPILER_FORCE_RUSTC')
+            ENV.delete('RHDL_IR_COMPILER_FORCE_RUNTIME_ONLY')
+          end
           yield
         ensure
           if previous.nil?
             ENV.delete('RHDL_IR_COMPILER_FORCE_RUSTC')
           else
             ENV['RHDL_IR_COMPILER_FORCE_RUSTC'] = previous
+          end
+          if previous_runtime_only.nil?
+            ENV.delete('RHDL_IR_COMPILER_FORCE_RUNTIME_ONLY')
+          else
+            ENV['RHDL_IR_COMPILER_FORCE_RUNTIME_ONLY'] = previous_runtime_only
           end
         end
 
@@ -351,6 +424,70 @@ module RHDL
           8.times.map do |index|
             shift = (7 - index) * 8
             (value.to_i >> shift) & 0xFF
+          end
+        end
+
+        def thread_debug_snapshot(cpu_index)
+          compact_hash({
+            fetch_pc_f: peek_first(
+              "sparc_#{cpu_index}__ifu__errdp__fdp_erb_pc_f",
+              "sparc_#{cpu_index}__ifu__fdp__fdp_erb_pc_f",
+              "sparc_#{cpu_index}__ifu__fdp_fdp_erb_pc_f"
+            ),
+            npc_w: peek_first(
+              "sparc_#{cpu_index}__tlu__misctl__ifu_npc_w",
+              "sparc_#{cpu_index}__tlu__tcl__ifu_npc_w",
+              "sparc_#{cpu_index}__tlu__tcl_ifu_npc_w"
+            ),
+            thread_states: (0..3).map do |thread_idx|
+              peek_first(
+                "sparc_#{cpu_index}__ifu__swl__thrfsm#{thread_idx}__thr_state",
+                "sparc_#{cpu_index}__ifu__swl__thrfsm#{thread_idx}_thr_state"
+              )
+            end.compact
+          })
+        end
+
+        def register_debug_snapshot(register_index)
+          base = format('sparc_0__exu__irf__bw_r_irf_core__register%02d', register_index)
+          compact_hash({
+            wrens: peek_first("#{base}__wrens"),
+            rd_thread: peek_first("#{base}__rd_thread"),
+            save: peek_bool("#{base}__save"),
+            restore: peek_bool("#{base}__restore"),
+            wr_data: peek_first("#{base}__wr_data"),
+            rd_data: peek_first("#{base}__rd_data")
+          })
+        end
+
+        def peek_first(*candidates)
+          return nil unless sim.respond_to?(:has_signal?) && sim.respond_to?(:peek)
+
+          name = candidates.find { |candidate| sim.has_signal?(candidate) }
+          return nil unless name
+
+          sim.peek(name)
+        end
+
+        def peek_bool(*candidates)
+          value = peek_first(*candidates)
+          return nil if value.nil?
+
+          !value.to_i.zero?
+        end
+
+        def compact_hash(hash)
+          hash.each_with_object({}) do |(key, value), acc|
+            next if value.nil?
+            next if value.respond_to?(:empty?) && value.empty?
+
+            acc[key] =
+              case value
+              when Hash
+                compact_hash(value)
+              else
+                value
+              end
           end
         end
       end

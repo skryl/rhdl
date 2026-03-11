@@ -57,6 +57,10 @@ Each program must live in DRAM, execute through the real `s1_top` Wishbone maste
    - focused code review and explorer traces point at remaining thread / AGP / current-thread canonicalization around `sparc_ifu_fcl`, `sparc_ifu_swl`, and `tlu_tcl`, not at the memory ABI or runtime export path
 6a. Current unblocker work-in-progress:
    - hard thread-selection and AGP forcing in fast-boot patches `0011` (`sparc_ifu_fcl`), `0012` (`tlu_tcl`), and `0013` (`sparc.v`) has been relaxed to remove forced `thread0` defaults
+6b. The staged-Verilog runner now has a real benchmark-execution smoke gate:
+   - `HeadlessRunner(mode: :verilog)` completes `prime_sieve` through the normal memory-backed benchmark loader and reaches the expected mailbox value
+   - the new focused integration smoke is green with no unmapped accesses
+   - parity remains deferred; this checkpoint only locks “one runner executes a real program end to end”
 7. The current IR-side blocker is no longer just cold compile latency:
    - compiler-backed `S1Top` currently fails before simulation starts because the imported design still contains real over-`128`-bit state, starting with `145`-bit CPX literals in `os2wb` and reaching widths of `1440` bits in LSU paths
    - `IrRunner` now raises that blocker explicitly instead of surfacing a later compact-JSON parse failure
@@ -87,6 +91,16 @@ Each program must live in DRAM, execute through the real `s1_top` Wishbone maste
    - `HeadlessRunner.new(mode: :ir, sim: :compile, compile_mode: :rustc)` now constructs successfully on the current tree instead of failing immediately during setup
    - benchmark image load also succeeds on that forced compiled path
    - a full forced-compile startup probe still ran for multiple minutes without reaching a completion result, so the blocker has shifted from immediate compile rejection to runtime throughput / longer-path validation
+7g. The compiler backend now has a smaller fixed-width overwide path for `129..256` bits:
+   - the compiler runtime layer now uses a fixed `Wide256` representation for `129..256`-bit values instead of heap-allocating `Vec<u64>` limbs for every operation in that band
+   - the existing `<=128` `u128` path remains unchanged
+   - widths above `256` still use the old generic multiword fallback
+   - targeted compiler specs are green for `130`, `139`, `145`, and `256`-bit packet/memory/runtime cases, along with the focused SPARC64 runner unit specs
+   - a broad SPARC64 startup smoke rerun was still inconclusive, so this is a backend-internal improvement checkpoint rather than a proven end-to-end speed win yet
+7h. The same `129..256` signal access path now works across interpreter, JIT, and compiler backends:
+   - interpreter and JIT now share the same runtime-value representation and word-addressable signal access surface used by the compiler path for `>128`-bit signals
+   - the Ruby native IR wrapper now routes `>128`-bit poke/peek through per-word FFI instead of truncating to the legacy two-word `sim_signal_wide` API
+   - focused native IR specs are green for `128`-bit round-trip behavior on interpreter/JIT and `256`-bit slice access on interpreter/JIT/compiler
 8. Cold compile latency remains a secondary IR-side issue for imported `S1Top`:
    - compiler codegen was reduced from roughly `70 MB / 1.13M` lines to roughly `48 MB / 840k` lines by removing dead generic tick-helper emission and chunked evaluate duplication for large plain cores
    - a cold `rustc` compile for that generated unit still runs for multiple minutes, so the compiler-backed integration path is not yet practical for the slow suite without further work

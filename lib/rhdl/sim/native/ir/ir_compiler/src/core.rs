@@ -1210,16 +1210,9 @@ impl CoreSimulator {
     }
 
     fn signal_runtime_value(&self, idx: usize, width: usize) -> RuntimeValue {
-        if width <= 128 {
-            return RuntimeValue::from_u128(self.signals.get(idx).copied().unwrap_or(0), width);
-        }
-
-        let mut words = Vec::with_capacity(width.div_ceil(64));
         let low = self.signals.get(idx).copied().unwrap_or(0);
-        words.push(low as u64);
-        words.push((low >> 64) as u64);
-        words.extend(self.wide_signal_words.get(idx).cloned().unwrap_or_default());
-        RuntimeValue::Wide(words).mask(width)
+        let high_words = self.wide_signal_words.get(idx).map(Vec::as_slice).unwrap_or(&[]);
+        RuntimeValue::from_split_words(low, high_words, width).mask(width)
     }
 
     fn store_signal_runtime_value(&mut self, idx: usize, width: usize, value: RuntimeValue) {
@@ -1239,46 +1232,25 @@ impl CoreSimulator {
     }
 
     fn next_reg_runtime_value(&self, idx: usize, width: usize) -> RuntimeValue {
-        if width <= 128 {
-            return RuntimeValue::from_u128(self.next_regs.get(idx).copied().unwrap_or(0), width);
-        }
-
-        let mut words = Vec::with_capacity(width.div_ceil(64));
         let low = self.next_regs.get(idx).copied().unwrap_or(0);
-        words.push(low as u64);
-        words.push((low >> 64) as u64);
-        words.extend(self.wide_next_reg_words.get(idx).cloned().unwrap_or_default());
-        RuntimeValue::Wide(words).mask(width)
+        let high_words = self.wide_next_reg_words.get(idx).map(Vec::as_slice).unwrap_or(&[]);
+        RuntimeValue::from_split_words(low, high_words, width).mask(width)
     }
 
     fn memory_runtime_value(&self, memory_idx: usize, width: usize, addr: usize) -> RuntimeValue {
-        if width <= 128 {
-            let value = self
-                .memory_arrays
-                .get(memory_idx)
-                .and_then(|mem| mem.get(addr))
-                .copied()
-                .unwrap_or(0);
-            return RuntimeValue::from_u128(value, width);
-        }
-
         let low = self
             .memory_arrays
             .get(memory_idx)
             .and_then(|mem| mem.get(addr))
             .copied()
             .unwrap_or(0);
-        let mut words = Vec::with_capacity(width.div_ceil(64));
-        words.push(low as u64);
-        words.push((low >> 64) as u64);
-        words.extend(
-            self.wide_memory_words
-                .get(memory_idx)
-                .and_then(|mem| mem.get(addr))
-                .cloned()
-                .unwrap_or_default(),
-        );
-        RuntimeValue::Wide(words).mask(width)
+        let high_words = self
+            .wide_memory_words
+            .get(memory_idx)
+            .and_then(|mem| mem.get(addr))
+            .map(Vec::as_slice)
+            .unwrap_or(&[]);
+        RuntimeValue::from_split_words(low, high_words, width).mask(width)
     }
 
     fn store_memory_runtime_value(&mut self, memory_idx: usize, width: usize, addr: usize, value: RuntimeValue) {
@@ -1807,6 +1779,76 @@ impl CoreSimulator {
         } else {
             Err(format!("Unknown signal: {}", name))
         }
+    }
+
+    pub fn poke_word_by_name(&mut self, name: &str, word_idx: usize, value: u64) -> Result<(), String> {
+        if let Some(&idx) = self.name_to_idx.get(name) {
+            self.poke_word_by_idx(idx, word_idx, value);
+            Ok(())
+        } else {
+            Err(format!("Unknown signal: {}", name))
+        }
+    }
+
+    pub fn peek_word_by_name(&self, name: &str, word_idx: usize) -> Result<u64, String> {
+        if let Some(&idx) = self.name_to_idx.get(name) {
+            Ok(self.peek_word_by_idx(idx, word_idx))
+        } else {
+            Err(format!("Unknown signal: {}", name))
+        }
+    }
+
+    #[inline(always)]
+    pub fn poke_by_idx(&mut self, idx: usize, value: u64) {
+        self.poke_wide_by_idx(idx, value as SignalValue);
+    }
+
+    #[inline(always)]
+    pub fn poke_wide_by_idx(&mut self, idx: usize, value: SignalValue) {
+        if idx < self.signals.len() {
+            let width = self.widths.get(idx).copied().unwrap_or(64);
+            self.store_signal_runtime_value(idx, width, RuntimeValue::from_u128(value, width));
+        }
+    }
+
+    #[inline(always)]
+    pub fn poke_word_by_idx(&mut self, idx: usize, word_idx: usize, value: u64) {
+        if idx >= self.signals.len() {
+            return;
+        }
+        let width = self.widths.get(idx).copied().unwrap_or(0);
+        let current = self.signal_runtime_value(idx, width);
+        let updated = current.with_word(width, word_idx, value);
+        self.store_signal_runtime_value(idx, width, updated);
+    }
+
+    #[inline(always)]
+    pub fn peek_by_idx(&self, idx: usize) -> u64 {
+        self.peek_wide_by_idx(idx) as u64
+    }
+
+    #[inline(always)]
+    pub fn peek_wide_by_idx(&self, idx: usize) -> SignalValue {
+        if idx < self.signals.len() {
+            let width = self.widths.get(idx).copied().unwrap_or(64);
+            self.signal_runtime_value(idx, width).low_u128()
+        } else {
+            0
+        }
+    }
+
+    #[inline(always)]
+    pub fn peek_word_by_idx(&self, idx: usize, word_idx: usize) -> u64 {
+        if idx < self.signals.len() {
+            let width = self.widths.get(idx).copied().unwrap_or(0);
+            self.signal_runtime_value(idx, width).word(width, word_idx)
+        } else {
+            0
+        }
+    }
+
+    pub fn get_signal_idx(&self, name: &str) -> Option<usize> {
+        self.name_to_idx.get(name).copied()
     }
 
     pub fn tick(&mut self) {
