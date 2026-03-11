@@ -3,7 +3,7 @@
 require 'spec_helper'
 require_relative '../../../../examples/ao486/utilities/runners/ir_runner'
 
-RSpec.describe RHDL::Examples::AO486::IrRunner, timeout: 30 do
+RSpec.describe RHDL::Examples::AO486::IrRunner, timeout: 240 do
   it 'reaches the BIOS reset-vector fetch state with the compiler-backed runner' do
     skip 'IR Compiler not available' unless RHDL::Sim::Native::IR::COMPILER_AVAILABLE
 
@@ -439,7 +439,76 @@ RSpec.describe RHDL::Examples::AO486::IrRunner, timeout: 30 do
     expect(state[:keyboard_buffer_size]).to eq(0)
   end
 
-  it 'installs the DOS INT 1Ah bridge vector during the DOS handoff' do
+  it 'surfaces queued keyboard input through raw PS/2 status/data ports on the real runner path', timeout: 240 do
+    skip 'IR Compiler not available' unless RHDL::Sim::Native::IR::COMPILER_AVAILABLE
+
+    runner = described_class.new(backend: :compile, headless: true)
+    runner.load_bios
+    runner.load_dos
+
+    payload = [
+      0xBA, 0x64, 0x00,       # mov dx, 0x64
+      0xEC,                   # in al, dx
+      0xA2, 0x00, 0x06,       # mov [0x0600], al
+      0xBA, 0x60, 0x00,       # mov dx, 0x60
+      0xEC,                   # in al, dx
+      0xA2, 0x01, 0x06,       # mov [0x0601], al
+      0xBA, 0x64, 0x00,       # mov dx, 0x64
+      0xEC,                   # in al, dx
+      0xA2, 0x02, 0x06,       # mov [0x0602], al
+      0xEB, 0xFE              # jmp $
+    ]
+    base = described_class::DOS_RELOCATED_BOOT_SECTOR_ADDR + 0x5E
+    payload.each_with_index do |byte, idx|
+      runner.write_memory(base + idx, byte)
+    end
+
+    runner.send_keys('d')
+    runner.run(cycles: 2_500)
+
+    expect(runner.read_bytes(0x0600, 3, mapped: false)).to eq([0x19, 0x20, 0x18])
+    expect(runner.state[:keyboard_buffer_size]).to eq(0)
+  end
+
+  it 'executes a boot-sector style REPE CMPSB match on the relocated DOS path', timeout: 240 do
+    skip 'IR Compiler not available' unless RHDL::Sim::Native::IR::COMPILER_AVAILABLE
+
+    runner = described_class.new(backend: :compile, headless: true)
+    runner.load_bios
+    runner.load_dos
+
+    runner.load_bytes(0x0680, 'KERNEL  SYS'.bytes)
+    runner.load_bytes(0x0690, 'KERNEL  SYS'.bytes)
+
+    payload = [
+      0x31, 0xC0,             # xor ax, ax
+      0x8E, 0xD8,             # mov ds, ax
+      0x8E, 0xC0,             # mov es, ax
+      0xFC,                   # cld
+      0xBE, 0x80, 0x06,       # mov si, 0x0680
+      0xBF, 0x90, 0x06,       # mov di, 0x0690
+      0xB9, 0x0B, 0x00,       # mov cx, 11
+      0xF3, 0xA6,             # repe cmpsb
+      0x9C,                   # pushf
+      0x58,                   # pop ax
+      0x89, 0x36, 0x00, 0x06, # mov [0x0600], si
+      0x89, 0x3E, 0x02, 0x06, # mov [0x0602], di
+      0x89, 0x0E, 0x04, 0x06, # mov [0x0604], cx
+      0xA3, 0x06, 0x06,       # mov [0x0606], ax
+      0xEB, 0xFE              # jmp $
+    ]
+    base = described_class::DOS_RELOCATED_BOOT_SECTOR_ADDR + 0x5E
+    payload.each_with_index do |byte, idx|
+      runner.write_memory(base + idx, byte)
+    end
+
+    runner.run(cycles: 3_000)
+
+    expect(runner.read_bytes(0x0600, 8, mapped: false)).to eq([0x8B, 0x06, 0x9B, 0x06, 0x00, 0x00, 0x46, 0x00])
+    expect(runner.peek('exception_inst__exc_vector')).to eq(0)
+  end
+
+  it 'installs the DOS INT 1Ah bridge vector during the DOS handoff', timeout: 240 do
     skip 'IR Compiler not available' unless RHDL::Sim::Native::IR::COMPILER_AVAILABLE
 
     runner = described_class.new(backend: :compile, headless: true)

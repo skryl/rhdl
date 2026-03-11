@@ -14,12 +14,13 @@ RSpec.describe RHDL::Examples::GameBoy::Import::SystemImporter do
     skip 'GameBoy files.qip not available' unless File.file?(described_class::DEFAULT_QIP_PATH)
   end
 
-  def new_importer(output_dir:, maintain_directory_structure: true, stub_modules: [], auto_stub_modules: false)
+  def new_importer(output_dir:, maintain_directory_structure: true, stub_modules: [], auto_stub_modules: false, patches_dir: nil)
     described_class.new(
       output_dir: output_dir,
       maintain_directory_structure: maintain_directory_structure,
       auto_stub_modules: auto_stub_modules,
       stub_modules: stub_modules,
+      patches_dir: patches_dir,
       clean_output: false,
       keep_workspace: true,
       progress: ->(_msg) {}
@@ -66,6 +67,60 @@ RSpec.describe RHDL::Examples::GameBoy::Import::SystemImporter do
         first_paths = first.fetch(:files).map { |entry| entry[:path] }
         second_paths = second.fetch(:files).map { |entry| entry[:path] }
         expect(first_paths).to eq(second_paths)
+      end
+    end
+
+    it 'applies patches_dir in the workspace before staging sources' do
+      Dir.mktmpdir('gameboy_import_patch_root') do |root|
+        Dir.mktmpdir('gameboy_import_patch_out') do |out_dir|
+          Dir.mktmpdir('gameboy_import_patch_ws') do |workspace|
+            rtl_dir = File.join(root, 'rtl')
+            FileUtils.mkdir_p(rtl_dir)
+            qip_path = File.join(root, 'files.qip')
+            top_file = File.join(rtl_dir, 'gb.v')
+            File.write(top_file, "// original\nmodule gb;\nendmodule\n")
+            File.write(
+              qip_path,
+              "set_global_assignment -name VERILOG_FILE rtl/gb.v\n"
+            )
+
+            patches_dir = File.join(root, 'patches')
+            FileUtils.mkdir_p(patches_dir)
+            File.write(
+              File.join(patches_dir, '0001-gb.patch'),
+              <<~PATCH
+                diff --git a/rtl/gb.v b/rtl/gb.v
+                --- a/rtl/gb.v
+                +++ b/rtl/gb.v
+                @@ -1,3 +1,3 @@
+                -// original
+                +// patched
+                 module gb;
+                 endmodule
+              PATCH
+            )
+
+            importer = described_class.new(
+              reference_root: root,
+              qip_path: qip_path,
+              top_file: top_file,
+              output_dir: out_dir,
+              workspace_dir: workspace,
+              keep_workspace: true,
+              clean_output: false,
+              patches_dir: patches_dir,
+              progress: ->(_msg) {}
+            )
+
+            resolved = importer.resolve_sources(workspace: workspace)
+            manifest_path = importer.write_manifest(workspace: workspace, resolved: resolved)
+            manifest = YAML.safe_load(File.read(manifest_path))
+            staged_top = manifest.fetch('top').fetch('file')
+
+            expect(File.read(staged_top)).to include('// patched')
+            expect(File.read(top_file)).to include('// original')
+          end
+        end
       end
     end
   end
@@ -118,6 +173,12 @@ RSpec.describe RHDL::Examples::GameBoy::Import::SystemImporter do
   end
 
   describe '#run' do
+    it 'rejects a missing patches_dir' do
+      expect do
+        described_class.new(output_dir: '/tmp/rhdl_gameboy_out', patches_dir: '/tmp/does_not_exist')
+      end.to raise_error(ArgumentError, /patches_dir not found/)
+    end
+
     it 'delegates to mixed import task and cleans output contents before run' do
       require_reference_tree!
 

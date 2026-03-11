@@ -78,6 +78,15 @@ Each program must live in DRAM, execute through the real `s1_top` Wishbone maste
    - the remaining fresh-tree blocker is narrow and concrete: two `130`-bit FIFO memories in `os2wb`
      - `cpu__os2wb_inst__pcx_fifo_inst__mem`
      - `cpu__os2wb_inst__pcx_fifo_inst1__mem`
+7e. Shared importer memory recovery improved again on the real `s1_top` path:
+   - the shared CIRCT importer now rewrites dead packed shadow regs that only alias an existing `seq.firmem` into literal-address `MemoryRead`s
+   - that behavior is covered by a new focused importer spec
+   - on the real `s1_top.core.mlir`, `bw_r_scm` no longer leaves behind the synthetic `1440`-bit `rt_tmp_13_1440` state
+   - the remaining over-`128`-bit signals are now the true `145`/`151`/`155`-bit datapaths and packet registers, not the old packed-memory artifact
+7f. The forced compiled runner path has improved, but it is not green yet:
+   - `HeadlessRunner.new(mode: :ir, sim: :compile, compile_mode: :rustc)` now constructs successfully on the current tree instead of failing immediately during setup
+   - benchmark image load also succeeds on that forced compiled path
+   - a full forced-compile startup probe still ran for multiple minutes without reaching a completion result, so the blocker has shifted from immediate compile rejection to runtime throughput / longer-path validation
 8. Cold compile latency remains a secondary IR-side issue for imported `S1Top`:
    - compiler codegen was reduced from roughly `70 MB / 1.13M` lines to roughly `48 MB / 840k` lines by removing dead generic tick-helper emission and chunked evaluate duplication for large plain cores
    - a cold `rustc` compile for that generated unit still runs for multiple minutes, so the compiler-backed integration path is not yet practical for the slow suite without further work

@@ -6,6 +6,8 @@ require 'yaml'
 require 'json'
 require 'set'
 require 'pathname'
+require 'open3'
+require 'shellwords'
 
 module RHDL
   module Examples
@@ -96,6 +98,7 @@ module RHDL
           attr_reader :reference_root, :qip_path, :top, :top_file, :output_dir, :workspace_dir,
                       :keep_workspace, :clean_output, :strict, :progress_callback, :import_task_class,
                       :import_strategy, :maintain_directory_structure, :emit_runtime_json, :stub_modules,
+                      :patches_dir,
                       :auto_stub_modules
 
           def initialize(reference_root: DEFAULT_REFERENCE_ROOT,
@@ -110,6 +113,7 @@ module RHDL
                          emit_runtime_json: true,
                          auto_stub_modules: DEFAULT_AUTO_STUB_MODULES,
                          stub_modules: [],
+                         patches_dir: nil,
                          strict: true,
                          progress: nil,
                          import_task_class: nil,
@@ -126,12 +130,16 @@ module RHDL
             @emit_runtime_json = emit_runtime_json
             @auto_stub_modules = normalize_auto_stub_modules(auto_stub_modules)
             @stub_modules = Array(stub_modules)
+            @patches_dir = normalize_patches_dir(patches_dir)
             @strict = strict
             @progress_callback = progress
             @import_task_class = import_task_class
             @import_strategy = normalize_strategy(import_strategy)
             @selected_verilog_analysis_cache = {}
             @verilog_file_analysis_cache = {}
+            @prepared_reference_root = nil
+            @prepared_qip_path = nil
+            @prepared_top_file = nil
           end
 
           def run
@@ -141,7 +149,7 @@ module RHDL
             temp_workspace = workspace if workspace_dir.nil?
 
             emit_progress('resolve mixed sources from QIP')
-            resolved = resolve_sources
+            resolved = resolve_sources(workspace: workspace)
 
             emit_progress("prepare output directory: #{output_dir}")
             prepare_output_dir!
@@ -260,7 +268,8 @@ module RHDL
             FileUtils.rm_rf(temp_workspace) if defined?(temp_workspace) && temp_workspace && !keep_workspace
           end
 
-          def resolve_sources
+          def resolve_sources(workspace: nil)
+            prepare_import_source_tree!(workspace) if patches_dir
             validate_source_inputs!
 
             visited_qips = {}
@@ -268,14 +277,14 @@ module RHDL
             ordered_sources = []
             seen_sources = {}
             parse_qip_recursive(
-              qip_path,
+              active_qip_path,
               visited_qips: visited_qips,
               ordered_qips: ordered_qips,
               ordered_sources: ordered_sources,
               seen_sources: seen_sources
             )
 
-            normalized_top_file = File.expand_path(top_file)
+            normalized_top_file = File.expand_path(active_top_file)
             unless ordered_sources.any? { |entry| File.expand_path(entry[:path]) == normalized_top_file }
               top_lang = normalize_language(path: normalized_top_file)
               ordered_sources << { path: normalized_top_file, language: top_lang, library: nil }
@@ -452,8 +461,9 @@ module RHDL
           end
 
           def staged_path_for_source(path:, staged_root:)
-            relative = if path.start_with?(reference_root)
-                         path.delete_prefix("#{reference_root}/")
+            root = active_reference_root
+            relative = if path.start_with?(root)
+                         path.delete_prefix("#{root}/")
                        else
                          File.basename(path)
                        end
@@ -1579,7 +1589,7 @@ module RHDL
           end
 
           def source_relative_path(path)
-            root = File.expand_path(reference_root)
+            root = File.expand_path(active_reference_root)
             absolute = File.expand_path(path)
             prefix = "#{root}/"
             return absolute.delete_prefix(prefix) if absolute.start_with?(prefix)
@@ -1634,14 +1644,14 @@ module RHDL
             verilog_paths = resolved.fetch(:files)
               .select { |entry| entry.fetch(:language) == 'verilog' }
               .map { |entry| File.expand_path(entry.fetch(:path)) }
-            cache_key = [top.to_s, File.expand_path(top_file), verilog_paths].freeze
+            cache_key = [top.to_s, File.expand_path(active_top_file), verilog_paths].freeze
 
             @selected_verilog_analysis_cache[cache_key] ||= begin
               module_to_file = module_index(verilog_paths)
               refs = module_reference_graph(verilog_paths)
               closure_modules = module_closure(top, refs)
               selected_paths = closure_modules.filter_map { |name| module_to_file[name] }.map { |path| File.expand_path(path) }
-              top_path = File.expand_path(top_file)
+              top_path = File.expand_path(active_top_file)
               if File.extname(top_path).downcase.match?(/\A\.(v|sv)\z/) && File.file?(top_path)
                 selected_paths << top_path
               end
@@ -1799,9 +1809,99 @@ module RHDL
           end
 
           def validate_source_inputs!
-            raise ArgumentError, "GameBoy reference root not found: #{reference_root}" unless Dir.exist?(reference_root)
-            raise ArgumentError, "QIP file not found: #{qip_path}" unless File.file?(qip_path)
-            raise ArgumentError, "Top source file not found: #{top_file}" unless File.file?(top_file)
+            raise ArgumentError, "GameBoy reference root not found: #{active_reference_root}" unless Dir.exist?(active_reference_root)
+            raise ArgumentError, "QIP file not found: #{active_qip_path}" unless File.file?(active_qip_path)
+            raise ArgumentError, "Top source file not found: #{active_top_file}" unless File.file?(active_top_file)
+          end
+
+          def active_reference_root
+            @prepared_reference_root || reference_root
+          end
+
+          def active_qip_path
+            @prepared_qip_path || qip_path
+          end
+
+          def active_top_file
+            @prepared_top_file || top_file
+          end
+
+          def prepare_import_source_tree!(workspace)
+            raise ArgumentError, 'workspace is required when patches_dir is set' if workspace.to_s.strip.empty?
+
+            unless tool_available?('git')
+              raise ArgumentError, 'Required tool not found: git'
+            end
+
+            staged_root = File.join(workspace, 'patched_reference')
+            copy_directory_contents(reference_root, staged_root)
+
+            patch_series_files(patches_dir).each do |patch_path|
+              emit_progress("apply patch #{File.basename(patch_path)}")
+              check_result = run_command(['git', 'apply', '--check', patch_path], chdir: staged_root)
+              raise ArgumentError, check_result[:stderr].strip unless check_result[:success]
+
+              apply_result = run_command(['git', 'apply', patch_path], chdir: staged_root)
+              raise ArgumentError, apply_result[:stderr].strip unless apply_result[:success]
+            end
+
+            @prepared_reference_root = staged_root
+            @prepared_qip_path = File.join(staged_root, path_relative_to_root(qip_path, reference_root))
+            @prepared_top_file = File.join(staged_root, path_relative_to_root(top_file, reference_root))
+          end
+
+          def patch_series_files(root)
+            Dir.glob(File.join(root, '**', '*'))
+               .select { |path| File.file?(path) && %w[.patch .diff].include?(File.extname(path)) }
+               .sort
+          end
+
+          def copy_directory_contents(source_dir, destination_dir)
+            FileUtils.rm_rf(destination_dir) if File.exist?(destination_dir)
+            FileUtils.mkdir_p(destination_dir)
+            Dir.children(source_dir).sort.each do |entry|
+              FileUtils.cp_r(File.join(source_dir, entry), destination_dir)
+            end
+          end
+
+          def path_relative_to_root(path, root)
+            expanded_path = File.expand_path(path)
+            expanded_root = File.expand_path(root)
+            prefix = "#{expanded_root}/"
+            return expanded_path.delete_prefix(prefix) if expanded_path.start_with?(prefix)
+
+            File.basename(expanded_path)
+          end
+
+          def normalize_patches_dir(value)
+            return nil if value.nil? || value.to_s.strip.empty?
+
+            expanded = File.expand_path(value)
+            raise ArgumentError, "patches_dir not found: #{expanded}" unless Dir.exist?(expanded)
+
+            expanded
+          end
+
+          def run_command(cmd, chdir: nil)
+            stdout, stderr, status = if chdir
+              Open3.capture3(*cmd, chdir: chdir)
+            else
+              Open3.capture3(*cmd)
+            end
+
+            {
+              success: status.success?,
+              stdout: stdout,
+              stderr: stderr,
+              status: status.exitstatus,
+              command: cmd.map { |arg| Shellwords.escape(arg.to_s) }.join(' ')
+            }
+          end
+
+          def tool_available?(tool)
+            ENV.fetch('PATH', '').split(File::PATH_SEPARATOR).any? do |dir|
+              File.executable?(File.join(dir, tool))
+            end
           end
 
           def parse_qip_recursive(path, visited_qips:, ordered_qips:, ordered_sources:, seen_sources:)
