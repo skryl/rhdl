@@ -82,6 +82,44 @@ module RHDL
         )
       end
     end
+
+    class Sparc64WishbonePartialReadProbe < RHDL::HDL::SequentialComponent
+      include RHDL::DSL::Behavior
+      include RHDL::DSL::Sequential
+
+      FLASH_ADDR = Sparc64WishboneProbe::FLASH_ADDR
+
+      input :sys_clock_i
+      input :sys_reset_i
+      input :eth_irq_i
+      input :wbm_ack_i
+      input :wbm_data_i, width: 64
+
+      output :wbm_cycle_o
+      output :wbm_strobe_o
+      output :wbm_we_o
+      output :wbm_addr_o, width: 64
+      output :wbm_data_o, width: 64
+      output :wbm_sel_o, width: 8
+      output :done, width: 1
+      output :observed_read, width: 64
+
+      behavior do
+        request_active = local(:request_active, done == lit(0, width: 1), width: 1)
+
+        wbm_cycle_o <= request_active
+        wbm_strobe_o <= request_active
+        wbm_we_o <= lit(0, width: 1)
+        wbm_addr_o <= lit(FLASH_ADDR, width: 64)
+        wbm_data_o <= lit(0, width: 64)
+        wbm_sel_o <= lit(0xF0, width: 8)
+      end
+
+      sequential clock: :sys_clock_i, reset: :sys_reset_i, reset_values: { done: 0, observed_read: 0 } do
+        done <= mux(wbm_ack_i, lit(1, width: 1), done)
+        observed_read <= mux(wbm_ack_i, wbm_data_i, observed_read)
+      end
+    end
   end
 end
 
@@ -194,5 +232,32 @@ RSpec.describe 'IR compiler SPARC64 runner extension' do
 
     sim.runner_write_memory(DRAM_ADDR + 8, [0x10, 0x20, 0x30, 0x40], mapped: false)
     expect(sim.runner_read_memory(DRAM_ADDR + 8, 4, mapped: false)).to eq([0x10, 0x20, 0x30, 0x40])
+  end
+
+  it 'returns the full 64-bit bus word for partial read selects' do
+    sim = create_compiler(
+      RHDL::SpecFixtures::Sparc64WishbonePartialReadProbe.to_flat_circt_nodes(top_name: 'sparc64_wishbone_partial_read_probe')
+    )
+
+    sim.runner_load_rom(flash_bytes, FLASH_ADDR)
+    sim.reset
+    result = sim.runner_run_cycles(6)
+
+    expect(result[:cycles_run]).to eq(6)
+    expect(sim.peek('done')).to eq(1)
+    expect(sim.peek('observed_read')).to eq(FLASH_WORD)
+    expect(sim.runner_sparc64_wishbone_trace).to eq(
+      [
+        {
+          cycle: 5,
+          op: :read,
+          addr: FLASH_ADDR,
+          sel: 0xF0,
+          write_data: nil,
+          read_data: FLASH_WORD
+        }
+      ]
+    )
+    expect(sim.runner_sparc64_unmapped_accesses).to eq([])
   end
 end

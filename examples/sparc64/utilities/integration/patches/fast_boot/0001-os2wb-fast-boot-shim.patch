@@ -1,55 +1,8 @@
-diff --git a/os2wb/os2wb.v b/os2wb/os2wb.v
---- a/os2wb/os2wb.v
-+++ b/os2wb/os2wb.v
-@@ -118,9 +118,9 @@
- `define CPX_INT_VEC_DIS  5'b11110
- `define PCX_REQ_CAS_COMPARE 5'b11111
- 
--`define MEM_SIZE         64'h00000000_10000000
-+`define MEM_SIZE         64'h00000000_00000020
- 
--`define TEST_DRAM        1
-+`define TEST_DRAM        0
- `define DEBUGGING        1
- 
- reg        cache_init;
-diff --git a/os2wb/os2wb_dual.v b/os2wb/os2wb_dual.v
---- a/os2wb/os2wb_dual.v
-+++ b/os2wb/os2wb_dual.v
-@@ -108,9 +108,9 @@
- `define CPX_INT_VEC_DIS  5'b11110
- `define PCX_REQ_CAS_COMPARE 5'b11111
- 
--`define MEM_SIZE         64'h00000000_10000000
-+`define MEM_SIZE         64'h00000000_00000020
- 
--`define TEST_DRAM        1
-+`define TEST_DRAM        0
- `define DEBUGGING        1
- 
- reg        cache_init;
-@@ -329,9 +329,14 @@
-                end               
-          `WAKEUP:
-             begin
--               cpx_packet<=145'h1700000000000000000000000000000010001;
--               cpx_ready<=1;
--               state<=`PCX_IDLE;
-+               if(ready)
-+                  begin
-+                     cpx_packet<=145'h1700000000000000000000000000000030001;
-+                     cpx_ready<=1;
-+                     state<=`PCX_IDLE;
-+                  end
-+               else
-+                  cpx_ready<=0;
-             end
-          `PCX_IDLE:
-             begin
 diff --git a/T1-CPU/ifu/sparc_ifu_swl.v b/T1-CPU/ifu/sparc_ifu_swl.v
+index 8b918cb..331b79d 100644
 --- a/T1-CPU/ifu/sparc_ifu_swl.v
 +++ b/T1-CPU/ifu/sparc_ifu_swl.v
-@@ -196,10 +196,10 @@
+@@ -196,10 +196,10 @@ module sparc_ifu_swl(/*AUTOARG*/
  // Declarations
  //----------------------------------------------------------
     // local signals
@@ -57,14 +10,14 @@ diff --git a/T1-CPU/ifu/sparc_ifu_swl.v b/T1-CPU/ifu/sparc_ifu_swl.v
 -//	               count;
 -//   wire          proc0;
 -//   wire          start_on_rst;
-+   wire [7:0]    count_nxt,
++   wire [9:0]    count_nxt,
 +	               count;
 +   wire          proc0;
 +   wire          start_on_rst;
  
     wire          ibe_d,
                   ibe_e;
-@@ -526,23 +526,19 @@
+@@ -526,22 +526,19 @@ module sparc_ifu_swl(/*AUTOARG*/
     //---------------------------------------------
     // Start off thread on reset using this counter
     //---------------------------------------------
@@ -84,23 +37,23 @@ diff --git a/T1-CPU/ifu/sparc_ifu_swl.v b/T1-CPU/ifu/sparc_ifu_swl.v
 -//   assign proc0 = (const_cpuid == 4'b0000) ? 1'b1 : 1'b0;
 -//   assign start_on_rst = (~count[3] & count[2] & count[1] & count[0])
 -//                          & proc0;
-+   dffr_s #(8) thrrdy_ctr(.din (count_nxt),
++   dffr_s #(10) thrrdy_ctr(.din (count_nxt),
 +		                    .clk (clk),
 +		                    .q   (count),
 +		                    .rst (dtu_reset),
 +		                    .se (se), .si(), .so());
 +
-+   // count_nxt = count + 1, sticky at 128 = 11111111
-+   assign count_nxt[7:0] = count[7] ? 8'hFF :
-+                           (count[7:0] + 8'h01);
- 
-+   assign proc0 = (const_cpuid == 4'b0000) ? 1'b1 : 1'b0;
-+   assign start_on_rst = (~count[7]) & proc0;
++   // Delay core0 startup until the bridge has finished reset-time
++   // DRAM init and wakeup sequencing.
++   assign count_nxt[9:0] = (count[9:0] == 10'd1023) ? 10'd1023 :
++                           (count[9:0] + 10'd1);
 +
++   assign proc0 = (const_cpuid == 4'b0000) ? 1'b1 : 1'b0;
++   assign start_on_rst = (count[9:0] == 10'd320) & proc0;
+ 
  //`ifdef IFU_SAT   
  //   // temporary hack to start threads
- //   reg [3:0]  auto_start;
-@@ -949,8 +945,9 @@
+@@ -949,8 +946,9 @@ module sparc_ifu_swl(/*AUTOARG*/
  //   assign start_thread = {3'b0, start_on_rst} | auto_start | 
  //                         resum_thread & (~wm_imiss | ifq_dtu_thrrdy);
  //`else
@@ -112,14 +65,14 @@ diff --git a/T1-CPU/ifu/sparc_ifu_swl.v b/T1-CPU/ifu/sparc_ifu_swl.v
     assign thaw_thread = resum_thread & (wm_imiss & ~ifq_dtu_thrrdy |
                                          wm_stbwait & ~stb_retry);
     
-@@ -970,13 +967,13 @@
+@@ -970,13 +968,13 @@ module sparc_ifu_swl(/*AUTOARG*/
  `endif
  			     .thr_state	(thr0_state[4:0]),
  			     // Inputs
 -			     .completion(completion[0]),
 -			     .schedule	(schedule[0]),
 +			     .completion(completion[0] | start_on_rst),
-+			     .schedule	(schedule[0] | proc0),
++			     .schedule	(schedule[0] | start_on_rst),
  			     .spec_ld	(issue_spec_ld[0]),
  			     .ldhit	(ldhit_thr[0]),
 -			     .switch_out(switch_out),
@@ -131,41 +84,38 @@ diff --git a/T1-CPU/ifu/sparc_ifu_swl.v b/T1-CPU/ifu/sparc_ifu_swl.v
  
  			     .int_activate(int_activate[0]),
 diff --git a/T1-CPU/lsu/lsu_qctl2.v b/T1-CPU/lsu/lsu_qctl2.v
+index 2799263..ec9d0ad 100644
 --- a/T1-CPU/lsu/lsu_qctl2.v
 +++ b/T1-CPU/lsu/lsu_qctl2.v
-@@ -492,6 +492,10 @@
+@@ -492,6 +492,10 @@ wire          dfq_error_type ;
  wire          cpx_fwd_req_ic ;
  wire          dfq_fwd_req_ic_type ;
  wire          dfq_rd_vld_d1 ;
-+wire  [7:0]   fast_boot_count;
-+wire  [7:0]   fast_boot_count_nxt;
++wire  [9:0]   fast_boot_count;
++wire  [9:0]   fast_boot_count_nxt;
 +wire          fast_boot_proc0;
 +wire          fast_boot_stall_bypass;
  
  
      dffrl_async rstff(.din (grst_l),
-@@ -501,9 +505,20 @@
- 
+@@ -502,6 +506,16 @@ wire          dfq_rd_vld_d1 ;
  assign  reset  =  ~dbb_reset_l;
  assign  clk = rclk;
-+
-+dffr_s #(8) fast_boot_ctr(.din (fast_boot_count_nxt),
+ 
++dffr_s #(10) fast_boot_ctr(.din (fast_boot_count_nxt),
 +                          .clk (clk),
 +                          .q   (fast_boot_count),
 +                          .rst (reset),
 +                          .se  (se), .si(), .so());
- 
-+assign fast_boot_count_nxt[7:0] = fast_boot_count[7] ? 8'hFF :
-+                                  (fast_boot_count[7:0] + 8'h01);
-+assign fast_boot_proc0 = (const_cpuid[2:0] == 3'b000) ? 1'b1 : 1'b0;
-+assign fast_boot_stall_bypass = fast_boot_proc0 & ~fast_boot_count[7];
- 
- 
 +
- //wire                   lsu_bist_wvld_e;
- //wire                   lsu_bist_rvld_e;
++assign fast_boot_count_nxt[9:0] = (fast_boot_count[9:0] == 10'd1023) ? 10'd1023 :
++                                  (fast_boot_count[9:0] + 10'd1);
++assign fast_boot_proc0 = (const_cpuid[2:0] == 3'b000) ? 1'b1 : 1'b0;
++assign fast_boot_stall_bypass = fast_boot_proc0 & (fast_boot_count[9:0] < 10'd320);
  
-@@ -1777,6 +1792,7 @@
+ 
+ //wire                   lsu_bist_wvld_e;
+@@ -1777,6 +1791,7 @@ assign  dfq_vld_entries[5:0] = (dfq_wptr_w_wrap[5:0] - dfq_rptr_w_wrap[5:0]) ;
  // High water mark conservatively put at 16-4 = 12
  assign	dfq_stall = (dfq_vld_entries[5:0] >= 6'd4) ;
  assign  lsu_ifu_stallreq = 
@@ -173,3 +123,53 @@ diff --git a/T1-CPU/lsu/lsu_qctl2.v b/T1-CPU/lsu/lsu_qctl2.v
  	dfq_stall |  int_skid_stall | lsu_tlbop_force_swo ; 
  	//dfq_stall | dfq_stall_d1 | dfq_stall_d2 | int_skid_stall | lsu_tlbop_force_swo ; 
  
+diff --git a/os2wb/os2wb.v b/os2wb/os2wb.v
+index ebe60c0..d25ef46 100644
+--- a/os2wb/os2wb.v
++++ b/os2wb/os2wb.v
+@@ -118,9 +118,9 @@ wire [28:0] icache3_do;
+ `define CPX_INT_VEC_DIS  5'b11110
+ `define PCX_REQ_CAS_COMPARE 5'b11111
+ 
+-`define MEM_SIZE         64'h00000000_10000000
++`define MEM_SIZE         64'h00000000_00000020
+ 
+-`define TEST_DRAM        1
++`define TEST_DRAM        0
+ `define DEBUGGING        1
+ 
+ reg        cache_init;
+diff --git a/os2wb/os2wb_dual.v b/os2wb/os2wb_dual.v
+index 8744037..57f305c 100644
+--- a/os2wb/os2wb_dual.v
++++ b/os2wb/os2wb_dual.v
+@@ -108,9 +108,9 @@ wire [1:0] wayval1;
+ `define CPX_INT_VEC_DIS  5'b11110
+ `define PCX_REQ_CAS_COMPARE 5'b11111
+ 
+-`define MEM_SIZE         64'h00000000_10000000
++`define MEM_SIZE         64'h00000000_00000020
+ 
+-`define TEST_DRAM        1
++`define TEST_DRAM        0
+ `define DEBUGGING        1
+ 
+ reg        cache_init;
+@@ -329,9 +329,14 @@ always @(posedge clk or negedge rstn)
+                end               
+          `WAKEUP:
+             begin
+-               cpx_packet<=145'h1700000000000000000000000000000010001;
+-               cpx_ready<=1;
+-               state<=`PCX_IDLE;
++               if(ready)
++                  begin
++                     cpx_packet<=145'h1700000000000000000000000000000010001;
++                     cpx_ready<=1;
++                     state<=`PCX_IDLE;
++                  end
++               else
++                  cpx_ready<=0;
+             end
+          `PCX_IDLE:
+             begin

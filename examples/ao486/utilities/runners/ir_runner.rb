@@ -15,6 +15,79 @@ module RHDL
   module Examples
     module AO486
       class IrRunner < BackendRunner
+        DEFAULT_UNLIMITED_CHUNK = 100_000
+        POST_INIT_IVT_CALL_OFFSET = 0xE0C6
+        POST_INIT_IVT_CALL_PATCH = [0x90, 0x90, 0x90].freeze
+        DOS_POST_BOOTSTRAP_HELPER_OFFSET = 0x1080
+        DOS_POST_BOOTSTRAP_PATCH = [0xE9, 0xB7, 0x2F].freeze
+        DOS_BOOT_SECTOR_ADDR = 0x7C00
+        DOS_RELOCATED_BOOT_SECTOR_ADDR = 0x27A00
+        DOS_INT19_STUB_ADDR = 0x0500
+        DOS_INT19_VECTOR_ADDR = 0x19 * 4
+        DOS_INT10_STUB_ADDR = 0x05A0
+        DOS_INT10_VECTOR_ADDR = 0x10 * 4
+        DOS_INT13_STUB_ADDR = 0x0540
+        DOS_INT1A_STUB_OFFSET = 0x1130
+        DOS_INT1A_STUB_SEGMENT = 0xF000
+        DOS_INT1A_VECTOR_ADDR = 0x1A * 4
+        DOS_INT16_STUB_OFFSET = 0x1100
+        DOS_INT16_STUB_SEGMENT = 0xF000
+        DOS_INT16_VECTOR_ADDR = 0x16 * 4
+        DOS_DISKETTE_PARAM_VECTOR_ADDR = 0x1E * 4
+        DOS_DISKETTE_PARAM_TABLE_OFFSET = 0xEFDE
+        FLOPPY_POST_BDA_ADDR = 0x043E
+        BDA_EBDA_SEGMENT_ADDR = 0x040E
+        BDA_EQUIPMENT_WORD_ADDR = 0x0410
+        BDA_BASE_MEMORY_WORD_ADDR = 0x0413
+        BDA_HARD_DISK_COUNT_ADDR = 0x0475
+        DOS_EBDA_SEGMENT = 0x9FC0
+        DOS_BASE_MEMORY_KIB = 639
+        DOS_EQUIPMENT_WORD = 0x000D
+        POST_FAST_PATH_CALL_PATCH = [0x90, 0x90, 0x90].freeze
+        POST_FAST_PATH_CALL_OFFSETS = [
+          0xE134, # _keyboard_init
+          0xE14E, # detect_parport (LPT1)
+          0xE154, # detect_parport (LPT2)
+          0xE178, # detect_serial (COM1)
+          0xE17E, # detect_serial (COM2)
+          0xE184, # detect_serial (COM3)
+          0xE18A, # detect_serial (COM4)
+          0xE1BF, # timer_tick_post
+          0xE1FB, # VGA ROM init via rom_scan
+          0xE1FE, # _print_bios_banner
+          0xE204, # hard_drive_post
+          0xE207, # _ata_init
+          0xE20A, # _ata_detect
+          0xE20D, # _cdemu_init
+          0xE219  # late option ROM scan
+        ].freeze
+        POST_INIT_IVT_DEFAULT_SEGMENT = 0xF000
+        POST_INIT_IVT_DEFAULT_HANDLER = 0xFF53
+        POST_INIT_IVT_MASTER_PIC_HANDLER = 0xE9E6
+        POST_INIT_IVT_SLAVE_PIC_HANDLER = 0xE9EC
+        POST_INIT_IVT_RUNTIME_VECTORS = {
+          0x08 => 0xFEA5,
+          0x09 => 0xE987,
+          0x0E => 0xEF57,
+          0x10 => 0xF065,
+          0x13 => 0xE3FE,
+          0x14 => 0xE739,
+          0x16 => 0xE82E,
+          0x1A => 0xFE6E,
+          0x40 => 0xEC59,
+          0x70 => 0xFE6E,
+          0x71 => 0xE987,
+          0x75 => 0xE2C3
+        }.freeze
+        POST_INIT_IVT_SPECIAL_VECTORS = {
+          0x11 => 0xF84D,
+          0x12 => 0xF841,
+          0x15 => 0xF859,
+          0x17 => 0xEFD2,
+          0x18 => 0x8666,
+          0x19 => 0xE6F2
+        }.freeze
+
         class << self
           def runtime_bundle(backend:)
             mutex.synchronize do
@@ -69,22 +142,38 @@ module RHDL
 
         def load_bios(**kwargs)
           metadata = super
+          patch_runner_bios_post_init_ivt_call!
+          patch_runner_bios_post_fast_path!
+          seed_post_init_ivt_memory!
           if @sim
-            sync_rom_segment(File.binread(bios_paths.fetch(:boot0)).bytes, BOOT0_ADDR)
-            sync_rom_segment(File.binread(bios_paths.fetch(:boot1)).bytes, BOOT1_ADDR)
+            sync_rom_segment(POST_INIT_IVT_CALL_PATCH, BOOT0_ADDR + POST_INIT_IVT_CALL_OFFSET)
+            POST_FAST_PATH_CALL_OFFSETS.each do |offset|
+              sync_rom_segment(POST_FAST_PATH_CALL_PATCH, BOOT0_ADDR + offset)
+            end
           end
           metadata
         end
 
         def load_dos(**kwargs)
           metadata = super
+          seed_dos_boot_sector_memory!(metadata.fetch(:bytes))
+          seed_dos_bootstrap_helper_rom!
+          seed_dos_int19_stub_memory!
+          seed_dos_int10_stub_memory!
+          seed_dos_int13_stub_memory!
+          seed_dos_int1a_stub_rom!
+          seed_dos_int16_stub_rom!
+          seed_dos_post_state_memory!
+          seed_floppy_post_state_memory!
+          patch_runner_bios_dos_bootstrap!
           @sim&.runner_load_disk(metadata.fetch(:bytes), 0)
           metadata
         end
 
         def load_bytes(base, bytes, target: memory_store)
-          super
-          @sim&.runner_load_memory(Array(bytes), base, false)
+          normalized_bytes = bytes.is_a?(String) ? bytes.bytes : Array(bytes)
+          super(base, normalized_bytes, target: target)
+          @sim&.runner_load_memory(normalized_bytes, base, false)
           self
         end
 
@@ -110,10 +199,28 @@ module RHDL
 
         def run(cycles: nil, speed: nil, headless: @headless)
           ensure_sim!
-          chunk = cycles || @requested_cycles || speed || @speed || 0
-          result = @sim.runner_run_cycles(chunk.to_i, 0, false) || { cycles_run: 0 }
-          @cycles_run += result[:cycles_run].to_i
-          sync_runtime_windows!
+          chunk = cycles || @requested_cycles || speed || @speed || DEFAULT_UNLIMITED_CHUNK
+          remaining = chunk.to_i
+          text_dirty = false
+
+          while remaining.positive?
+            key_data = @keyboard_buffer.getbyte(0) || 0
+            key_ready = !@keyboard_buffer.empty?
+            run_chunk = key_ready ? 1 : remaining
+            result = @sim.runner_run_cycles(run_chunk, key_data, key_ready) || { cycles_run: 0 }
+            cycles_run = result[:cycles_run].to_i
+            break if cycles_run <= 0
+
+            remaining -= cycles_run
+            @cycles_run += cycles_run
+            text_dirty ||= result[:text_dirty]
+            @keyboard_buffer.slice!(0) if result[:key_cleared] && !@keyboard_buffer.empty?
+          end
+
+          sync_runtime_windows!(display: text_dirty || chunk.to_i != 1 || !headless || @debug)
+          @last_io = @sim.runner_ao486_last_io_write || @sim.runner_ao486_last_io_read
+          @last_irq = @sim.runner_ao486_last_irq_vector
+          @shell_prompt_detected ||= render_display.match?(/[A-Z]:\\>/)
           state.merge(cycles: @cycles_run, speed: speed || @speed, headless: headless)
         end
 
@@ -201,8 +308,360 @@ module RHDL
           @sim.runner_load_disk(@floppy_image.bytes, 0)
         end
 
-        def sync_runtime_windows!
-          sync_display_window!
+        def patch_runner_bios_post_init_ivt_call!
+          POST_INIT_IVT_CALL_PATCH.each_with_index do |byte, idx|
+            rom_store[BOOT0_ADDR + POST_INIT_IVT_CALL_OFFSET + idx] = byte
+          end
+        end
+
+        def patch_runner_bios_post_fast_path!
+          POST_FAST_PATH_CALL_OFFSETS.each do |offset|
+            POST_FAST_PATH_CALL_PATCH.each_with_index do |byte, idx|
+              rom_store[BOOT0_ADDR + offset + idx] = byte
+            end
+          end
+        end
+
+        def patch_runner_bios_dos_bootstrap!
+          DOS_POST_BOOTSTRAP_PATCH.each_with_index do |byte, idx|
+            rom_store[BOOT0_ADDR + POST_INIT_IVT_CALL_OFFSET + idx] = byte
+          end
+          sync_rom_segment(DOS_POST_BOOTSTRAP_PATCH, BOOT0_ADDR + POST_INIT_IVT_CALL_OFFSET)
+        end
+
+        def seed_post_init_ivt_memory!
+          load_bytes(0x0000, post_init_ivt_image)
+        end
+
+        def seed_dos_boot_sector_memory!(dos_bytes)
+          byte_slice = dos_bytes.is_a?(String) ? dos_bytes.bytes.first(512) : Array(dos_bytes).first(512)
+          load_bytes(DOS_BOOT_SECTOR_ADDR, byte_slice)
+          load_bytes(DOS_RELOCATED_BOOT_SECTOR_ADDR, byte_slice)
+        end
+
+        def seed_dos_int19_stub_memory!
+          load_bytes(DOS_INT19_STUB_ADDR, dos_bootstrap_bytes)
+          load_bytes(DOS_INT19_VECTOR_ADDR, [DOS_INT19_STUB_ADDR & 0xFF, (DOS_INT19_STUB_ADDR >> 8) & 0xFF, 0x00, 0x00])
+        end
+
+        def seed_dos_bootstrap_helper_rom!
+          dos_bootstrap_bytes.each_with_index do |byte, idx|
+            rom_store[BOOT0_ADDR + DOS_POST_BOOTSTRAP_HELPER_OFFSET + idx] = byte
+          end
+          sync_rom_segment(dos_bootstrap_bytes, BOOT0_ADDR + DOS_POST_BOOTSTRAP_HELPER_OFFSET)
+        end
+
+        def seed_dos_int13_stub_memory!
+          load_bytes(DOS_INT13_STUB_ADDR, dos_int13_bootstrap_bytes)
+        end
+
+        def seed_dos_int10_stub_memory!
+          load_bytes(DOS_INT10_STUB_ADDR, dos_int10_bootstrap_bytes)
+        end
+
+        def seed_dos_int1a_stub_rom!
+          dos_int1a_bootstrap_bytes.each_with_index do |byte, idx|
+            rom_store[BOOT0_ADDR + DOS_INT1A_STUB_OFFSET + idx] = byte
+          end
+          sync_rom_segment(dos_int1a_bootstrap_bytes, BOOT0_ADDR + DOS_INT1A_STUB_OFFSET)
+        end
+
+        def seed_dos_int16_stub_rom!
+          dos_int16_bootstrap_bytes.each_with_index do |byte, idx|
+            rom_store[BOOT0_ADDR + DOS_INT16_STUB_OFFSET + idx] = byte
+          end
+          sync_rom_segment(dos_int16_bootstrap_bytes, BOOT0_ADDR + DOS_INT16_STUB_OFFSET)
+        end
+
+        def seed_floppy_post_state_memory!
+          load_bytes(FLOPPY_POST_BDA_ADDR, floppy_post_bda_image)
+        end
+
+        def seed_dos_post_state_memory!
+          load_bytes(BDA_EBDA_SEGMENT_ADDR, [DOS_EBDA_SEGMENT & 0xFF, (DOS_EBDA_SEGMENT >> 8) & 0xFF])
+          load_bytes(BDA_EQUIPMENT_WORD_ADDR, [DOS_EQUIPMENT_WORD & 0xFF, (DOS_EQUIPMENT_WORD >> 8) & 0xFF])
+          load_bytes(BDA_BASE_MEMORY_WORD_ADDR, [DOS_BASE_MEMORY_KIB & 0xFF, (DOS_BASE_MEMORY_KIB >> 8) & 0xFF])
+          load_bytes(BDA_HARD_DISK_COUNT_ADDR, [0x00])
+          load_bytes(
+            DOS_DISKETTE_PARAM_VECTOR_ADDR,
+            [
+              DOS_DISKETTE_PARAM_TABLE_OFFSET & 0xFF,
+              (DOS_DISKETTE_PARAM_TABLE_OFFSET >> 8) & 0xFF,
+              POST_INIT_IVT_DEFAULT_SEGMENT & 0xFF,
+              (POST_INIT_IVT_DEFAULT_SEGMENT >> 8) & 0xFF
+            ]
+          )
+        end
+
+
+        def dos_bootstrap_bytes
+          [
+            0xFA,             # cli
+            0xFC,             # cld
+            0x31, 0xC0,       # xor ax, ax
+            0x8E, 0xD8,       # mov ds, ax
+            0xBD, 0x00, 0x7C, # mov bp, 0x7c00
+            0xC7, 0x06, 0x40, 0x00, DOS_INT10_STUB_ADDR & 0xFF, (DOS_INT10_STUB_ADDR >> 8) & 0xFF, # mov word ptr [0x0040], int10 stub
+            0xC7, 0x06, 0x42, 0x00, 0x00, 0x00, # mov word ptr [0x0042], 0x0000
+            0xC7, 0x06, 0x58, 0x00, DOS_INT16_STUB_OFFSET & 0xFF, (DOS_INT16_STUB_OFFSET >> 8) & 0xFF, # mov word ptr [0x0058], int16 stub
+            0xC7, 0x06, 0x5A, 0x00, DOS_INT16_STUB_SEGMENT & 0xFF, (DOS_INT16_STUB_SEGMENT >> 8) & 0xFF, # mov word ptr [0x005a], 0xf000
+            0xC7, 0x06, 0x4C, 0x00, DOS_INT13_STUB_ADDR & 0xFF, (DOS_INT13_STUB_ADDR >> 8) & 0xFF, # mov word ptr [0x004c], int13 stub
+            0xC7, 0x06, 0x4E, 0x00, 0x00, 0x00, # mov word ptr [0x004e], 0x0000
+            0xC7, 0x06, 0x68, 0x00, DOS_INT1A_STUB_OFFSET & 0xFF, (DOS_INT1A_STUB_OFFSET >> 8) & 0xFF, # mov word ptr [0x0068], int1a stub
+            0xC7, 0x06, 0x6A, 0x00, DOS_INT1A_STUB_SEGMENT & 0xFF, (DOS_INT1A_STUB_SEGMENT >> 8) & 0xFF, # mov word ptr [0x006a], 0xf000
+            0xC7, 0x06, BDA_EBDA_SEGMENT_ADDR & 0xFF, (BDA_EBDA_SEGMENT_ADDR >> 8) & 0xFF,
+            DOS_EBDA_SEGMENT & 0xFF, (DOS_EBDA_SEGMENT >> 8) & 0xFF, # mov word ptr [0x040e], 0x9fc0
+            0xC7, 0x06, BDA_EQUIPMENT_WORD_ADDR & 0xFF, (BDA_EQUIPMENT_WORD_ADDR >> 8) & 0xFF,
+            DOS_EQUIPMENT_WORD & 0xFF, (DOS_EQUIPMENT_WORD >> 8) & 0xFF, # mov word ptr [0x0410], 0x000d
+            0xC7, 0x06, BDA_BASE_MEMORY_WORD_ADDR & 0xFF, (BDA_BASE_MEMORY_WORD_ADDR >> 8) & 0xFF,
+            DOS_BASE_MEMORY_KIB & 0xFF, (DOS_BASE_MEMORY_KIB >> 8) & 0xFF, # mov word ptr [0x0413], 0x027f
+            0xC6, 0x06, BDA_HARD_DISK_COUNT_ADDR & 0xFF, (BDA_HARD_DISK_COUNT_ADDR >> 8) & 0xFF, 0x00, # mov byte ptr [0x0475], 0x00
+            0xC7, 0x06, DOS_DISKETTE_PARAM_VECTOR_ADDR & 0xFF, (DOS_DISKETTE_PARAM_VECTOR_ADDR >> 8) & 0xFF,
+            DOS_DISKETTE_PARAM_TABLE_OFFSET & 0xFF, (DOS_DISKETTE_PARAM_TABLE_OFFSET >> 8) & 0xFF, # mov word ptr [0x0078], 0xefde
+            0xC7, 0x06, (DOS_DISKETTE_PARAM_VECTOR_ADDR + 2) & 0xFF, ((DOS_DISKETTE_PARAM_VECTOR_ADDR + 2) >> 8) & 0xFF,
+            POST_INIT_IVT_DEFAULT_SEGMENT & 0xFF, (POST_INIT_IVT_DEFAULT_SEGMENT >> 8) & 0xFF, # mov word ptr [0x007a], 0xf000
+            0xB2, 0x00,       # mov dl, 0x00
+            0xB8, 0xE0, 0x1F, # mov ax, 0x1fe0
+            0x8E, 0xC0,       # mov es, ax
+            0xEA, 0x5E, 0x7C, 0xE0, 0x1F # jmp 0x1fe0:0x7c5e
+          ]
+        end
+
+        def dos_int13_bootstrap_bytes
+          [
+            0x80, 0xFC, 0x08,       # cmp ah, 0x08
+            0x75, 0x14,             # jne generic
+            0x5E,                   # pop si ; return IP
+            0x5F,                   # pop di ; return CS
+            0x58,                   # pop ax ; saved FLAGS
+            0x24, 0xFE,             # and al, 0xfe
+            0x50,                   # push ax
+            0x57,                   # push di
+            0x56,                   # push si
+            0x31, 0xC0,             # xor ax, ax
+            0xBB, 0x00, 0x04,       # mov bx, 0x0400
+            0xB9, 0x12, 0x4F,       # mov cx, 0x4f12
+            0xBA, 0x02, 0x01,       # mov dx, 0x0102
+            0xCF,                   # iret
+            0x52,                   # push dx
+            0xBA, 0xD0, 0x0E,       # mov dx, 0x0ed0
+            0xEF,                   # out dx, ax
+            0x93,                   # xchg ax, bx
+            0xBA, 0xD2, 0x0E,       # mov dx, 0x0ed2
+            0xEF,                   # out dx, ax
+            0x93,                   # xchg ax, bx
+            0x91,                   # xchg ax, cx
+            0xBA, 0xD4, 0x0E,       # mov dx, 0x0ed4
+            0xEF,                   # out dx, ax
+            0x91,                   # xchg ax, cx
+            0x8C, 0xC0,             # mov ax, es
+            0xBA, 0xD8, 0x0E,       # mov dx, 0x0ed8
+            0xEF,                   # out dx, ax
+            0x58,                   # pop ax ; original DX
+            0xBA, 0xD6, 0x0E,       # mov dx, 0x0ed6
+            0xEF,                   # out dx, ax
+            0xBA, 0xDA, 0x0E,       # mov dx, 0x0eda
+            0x30, 0xC0,             # xor al, al
+            0xEE,                   # out dx, al
+            0xBA, 0xDC, 0x0E,       # mov dx, 0x0edc
+            0xED,                   # in ax, dx
+            0x50,                   # push ax ; preserve AX result while patching caller FLAGS
+            0xBA, 0x16, 0x0F,       # mov dx, 0x0f16
+            0xEC,                   # in al, dx
+            0x88, 0xC3,             # mov bl, al
+            0x58,                   # pop ax ; restore AX result
+            0x5E,                   # pop si ; return IP
+            0x5F,                   # pop di ; return CS
+            0x5A,                   # pop dx ; saved FLAGS
+            0x80, 0xE2, 0xFE,       # and dl, 0xfe
+            0x08, 0xDA,             # or dl, bl
+            0x52,                   # push dx
+            0x57,                   # push di
+            0x56,                   # push si
+            0xCF                    # iret
+          ]
+        end
+
+        def dos_int10_bootstrap_bytes
+          [
+            0x55,
+            0x89, 0xE5,
+            0x50,
+            0x53,
+            0x51,
+            0x52,
+            0x06,
+            0x8B, 0x46, 0xFE,
+            0xBA, 0xE0, 0x0E,
+            0xEF,
+            0x8B, 0x46, 0xFC,
+            0xBA, 0xE2, 0x0E,
+            0xEF,
+            0x8B, 0x46, 0xFA,
+            0xBA, 0xE4, 0x0E,
+            0xEF,
+            0x8B, 0x46, 0xF8,
+            0xBA, 0xE6, 0x0E,
+            0xEF,
+            0x8B, 0x46, 0x00,
+            0xBA, 0xF2, 0x0E,
+            0xEF,
+            0x8B, 0x46, 0xF6,
+            0xBA, 0xF4, 0x0E,
+            0xEF,
+            0xBA, 0xE8, 0x0E,
+            0x30, 0xC0,
+            0xEE,
+            0xBA, 0xEA, 0x0E,
+            0xED,
+            0x89, 0x46, 0xFE,
+            0xBA, 0xEC, 0x0E,
+            0xED,
+            0x89, 0x46, 0xFC,
+            0xBA, 0xEE, 0x0E,
+            0xED,
+            0x89, 0x46, 0xFA,
+            0xBA, 0xF0, 0x0E,
+            0xED,
+            0x89, 0x46, 0xF8,
+            0x8B, 0x46, 0xFE,
+            0x8B, 0x5E, 0xFC,
+            0x8B, 0x4E, 0xFA,
+            0x8B, 0x56, 0xF8,
+            0x8E, 0x46, 0xF6,
+            0x83, 0xC4, 0x0A,
+            0x5D,
+            0xCF
+          ]
+        end
+
+        def dos_int1a_bootstrap_bytes
+          [
+            0x55,
+            0x89, 0xE5,
+            0x50,
+            0x51,
+            0x52,
+            0x8B, 0x46, 0xFE,
+            0xBA, 0x00, 0x0F,
+            0xEF,
+            0x8B, 0x46, 0xFC,
+            0xBA, 0x02, 0x0F,
+            0xEF,
+            0x8B, 0x46, 0xFA,
+            0xBA, 0x04, 0x0F,
+            0xEF,
+            0xBA, 0x06, 0x0F,
+            0x30, 0xC0,
+            0xEE,
+            0xBA, 0x08, 0x0F,
+            0xED,
+            0x89, 0x46, 0xFE,
+            0xBA, 0x0A, 0x0F,
+            0xED,
+            0x89, 0x46, 0xFC,
+            0xBA, 0x0C, 0x0F,
+            0xED,
+            0x89, 0x46, 0xFA,
+            0xBA, 0x0E, 0x0F,
+            0xEC,
+            0x84, 0xC0,
+            0x74, 0x06,
+            0x80, 0x4E, 0x06, 0x01,
+            0xEB, 0x04,
+            0x80, 0x66, 0x06, 0xFE,
+            0x8B, 0x46, 0xFE,
+            0x8B, 0x4E, 0xFC,
+            0x8B, 0x56, 0xFA,
+            0x83, 0xC4, 0x06,
+            0x5D,
+            0xCF
+          ]
+        end
+
+        def dos_int16_bootstrap_bytes
+          [
+            0x55,
+            0x89, 0xE5,
+            0x50,
+            0x52,
+            0xBA, 0xF8, 0x0E,
+            0xEF,
+            0xBA, 0xFA, 0x0E,
+            0x30, 0xC0,
+            0xEE,
+            0xBA, 0xFC, 0x0E,
+            0xED,
+            0x89, 0x46, 0xFE,
+            0xBA, 0xFE, 0x0E,
+            0xEC,
+            0xA8, 0x01,
+            0x75, 0x06,
+            0x80, 0x4E, 0x06, 0x40,
+            0xEB, 0x04,
+            0x80, 0x66, 0x06, 0xBF,
+            0x5A,
+            0x58,
+            0x5D,
+            0xCF
+          ]
+        end
+
+        def post_init_ivt_image
+          image = Array.new(0x400, 0)
+
+          0x00.upto(0x77) do |vector|
+            write_interrupt_vector!(image, vector, POST_INIT_IVT_DEFAULT_SEGMENT, POST_INIT_IVT_DEFAULT_HANDLER)
+          end
+
+          0x08.upto(0x0F) do |vector|
+            write_interrupt_vector!(image, vector, POST_INIT_IVT_DEFAULT_SEGMENT, POST_INIT_IVT_MASTER_PIC_HANDLER)
+          end
+
+          0x70.upto(0x77) do |vector|
+            write_interrupt_vector!(image, vector, POST_INIT_IVT_DEFAULT_SEGMENT, POST_INIT_IVT_SLAVE_PIC_HANDLER)
+          end
+
+          POST_INIT_IVT_SPECIAL_VECTORS.each do |vector, offset|
+            write_interrupt_vector!(image, vector, POST_INIT_IVT_DEFAULT_SEGMENT, offset)
+          end
+
+          POST_INIT_IVT_RUNTIME_VECTORS.each do |vector, offset|
+            write_interrupt_vector!(image, vector, POST_INIT_IVT_DEFAULT_SEGMENT, offset)
+          end
+
+          clear_interrupt_vector!(image, 0x1D)
+          clear_interrupt_vector!(image, 0x1F)
+
+          0x60.upto(0x67) do |vector|
+            clear_interrupt_vector!(image, vector)
+          end
+
+          image
+        end
+
+        def floppy_post_bda_image
+          image = Array.new(0x58, 0)
+          image[0x00] = 0x01 # 0x043e: drive0 recalibrated, no pending interrupt
+          image[0x51] = 0x07 # 0x048f: drive0 present, multi-rate, changed-line capable
+          image[0x52] = 0x17 # 0x0490: drive0 media state established as 1.44MB
+          image
+        end
+
+        def write_interrupt_vector!(image, vector, segment, offset)
+          base = vector * 4
+          image[base] = offset & 0xFF
+          image[base + 1] = (offset >> 8) & 0xFF
+          image[base + 2] = segment & 0xFF
+          image[base + 3] = (segment >> 8) & 0xFF
+        end
+
+        def clear_interrupt_vector!(image, vector)
+          write_interrupt_vector!(image, vector, 0x0000, 0x0000)
+        end
+
+        def sync_runtime_windows!(display: true)
+          sync_display_window! if display
           sync_cursor_window!
         end
 

@@ -163,6 +163,7 @@ module RHDL
             mode: mode,
             sim: sim,
             hdl_dir: options[:hdl_dir],
+            verilog_dir: options[:verilog_dir],
             top: options[:top],
             use_staged_verilog: options[:use_staged_verilog]
           )

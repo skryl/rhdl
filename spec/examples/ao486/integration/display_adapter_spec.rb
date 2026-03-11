@@ -31,6 +31,22 @@ RSpec.describe RHDL::Examples::AO486::DisplayAdapter do
     screen = adapter.render(memory: memory, debug_lines: ['backend=ir', 'cycles=12'])
 
     expect(screen).to include('A_  ')
-    expect(screen).to include("----\nbackend=ir\ncycles=12")
+    expect(screen).to include("+----------+\n|backend=ir|\n|cycles=12 |\n+----------+")
+  end
+
+  it 'renders the active text page selected in the BIOS data area' do
+    page_stride = described_class::DEFAULT_ROW_STRIDE * described_class::DEFAULT_HEIGHT
+    page1_base = text_base + page_stride
+    memory = {
+      page1_base => 'P'.ord,
+      page1_base + 1 => 0x07,
+      page1_base + 2 => '2'.ord,
+      page1_base + 3 => 0x07,
+      described_class::VIDEO_PAGE_BDA => 1
+    }
+
+    adapter = described_class.new(width: 4, height: 1)
+
+    expect(adapter.render(memory: memory, cursor: nil)).to eq('P2  ')
   end
 end

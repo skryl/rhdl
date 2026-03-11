@@ -261,6 +261,14 @@ pub const RUNNER_PROBE_LCD_PREV_CLKENA: c_uint = 14;
 pub const RUNNER_PROBE_LCD_PREV_VSYNC: c_uint = 15;
 pub const RUNNER_PROBE_LCD_FRAME_COUNT: c_uint = 16;
 pub const RUNNER_PROBE_RISCV_UART_TX_LEN: c_uint = 17;
+pub const RUNNER_PROBE_AO486_LAST_IO_READ: c_uint = 18;
+pub const RUNNER_PROBE_AO486_LAST_IO_WRITE_META: c_uint = 19;
+pub const RUNNER_PROBE_AO486_LAST_IO_WRITE_DATA: c_uint = 20;
+pub const RUNNER_PROBE_AO486_LAST_IRQ_VECTOR: c_uint = 21;
+pub const RUNNER_PROBE_AO486_DOS_INT13_STATE: c_uint = 22;
+pub const RUNNER_PROBE_AO486_DOS_INT10_STATE: c_uint = 23;
+pub const RUNNER_PROBE_AO486_DOS_INT16_STATE: c_uint = 24;
+pub const RUNNER_PROBE_AO486_DOS_INT1A_STATE: c_uint = 25;
 
 #[repr(C)]
 pub struct RunnerCaps {
@@ -1021,8 +1029,15 @@ unsafe fn runner_run_impl(
     }
 
     if let Some(ref mut ao486) = ctx.ao486 {
-        let cycles_run = ao486.run_cycles(&mut ctx.core, cycles);
-        write_runner_run_result(result_out, false, false, cycles_run, 0, 0);
+        let result = ao486.run_cycles(&mut ctx.core, cycles, key_data, key_ready);
+        write_runner_run_result(
+            result_out,
+            result.text_dirty,
+            result.key_cleared,
+            result.cycles_run,
+            0,
+            0,
+        );
         return 1;
     }
 
@@ -1100,7 +1115,15 @@ pub unsafe extern "C" fn runner_get_caps(
         | bit(RUNNER_PROBE_LCD_PREV_CLKENA)
         | bit(RUNNER_PROBE_LCD_PREV_VSYNC)
         | bit(RUNNER_PROBE_LCD_FRAME_COUNT)
-        | bit(RUNNER_PROBE_RISCV_UART_TX_LEN);
+        | bit(RUNNER_PROBE_RISCV_UART_TX_LEN)
+        | bit(RUNNER_PROBE_AO486_LAST_IO_READ)
+        | bit(RUNNER_PROBE_AO486_LAST_IO_WRITE_META)
+        | bit(RUNNER_PROBE_AO486_LAST_IO_WRITE_DATA)
+        | bit(RUNNER_PROBE_AO486_LAST_IRQ_VECTOR)
+        | bit(RUNNER_PROBE_AO486_DOS_INT13_STATE)
+        | bit(RUNNER_PROBE_AO486_DOS_INT10_STATE)
+        | bit(RUNNER_PROBE_AO486_DOS_INT16_STATE)
+        | bit(RUNNER_PROBE_AO486_DOS_INT1A_STATE);
 
     *caps_out = RunnerCaps {
         kind,
@@ -1405,6 +1428,46 @@ pub unsafe extern "C" fn runner_probe(ctx: *const IrSimContext, op: c_uint, arg0
             .riscv
             .as_ref()
             .map(|ext| ext.uart_tx_len() as u64)
+            .unwrap_or(0),
+        RUNNER_PROBE_AO486_LAST_IO_READ => ctx_ref
+            .ao486
+            .as_ref()
+            .map(|ext| ext.last_io_read_probe())
+            .unwrap_or(0),
+        RUNNER_PROBE_AO486_LAST_IO_WRITE_META => ctx_ref
+            .ao486
+            .as_ref()
+            .map(|ext| ext.last_io_write_meta_probe())
+            .unwrap_or(0),
+        RUNNER_PROBE_AO486_LAST_IO_WRITE_DATA => ctx_ref
+            .ao486
+            .as_ref()
+            .map(|ext| ext.last_io_write_data_probe())
+            .unwrap_or(0),
+        RUNNER_PROBE_AO486_LAST_IRQ_VECTOR => ctx_ref
+            .ao486
+            .as_ref()
+            .map(|ext| ext.last_irq_vector_probe())
+            .unwrap_or(0),
+        RUNNER_PROBE_AO486_DOS_INT13_STATE => ctx_ref
+            .ao486
+            .as_ref()
+            .map(|ext| ext.dos_int13_state_probe())
+            .unwrap_or(0),
+        RUNNER_PROBE_AO486_DOS_INT10_STATE => ctx_ref
+            .ao486
+            .as_ref()
+            .map(|ext| ext.dos_int10_state_probe())
+            .unwrap_or(0),
+        RUNNER_PROBE_AO486_DOS_INT16_STATE => ctx_ref
+            .ao486
+            .as_ref()
+            .map(|ext| ext.dos_int16_state_probe())
+            .unwrap_or(0),
+        RUNNER_PROBE_AO486_DOS_INT1A_STATE => ctx_ref
+            .ao486
+            .as_ref()
+            .map(|ext| ext.dos_int1a_state_probe())
             .unwrap_or(0),
         _ => 0,
     }

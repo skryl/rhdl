@@ -163,6 +163,7 @@ module RHDL
             mode: :ruby,
             sim: nil,
             hdl_dir: nil,
+            verilog_dir: nil,
             top: nil,
             use_staged_verilog: false,
             renderer: :color,
@@ -190,6 +191,10 @@ module RHDL
 
             opts.on('--hdl-dir DIR', 'Game Boy HDL directory override (default: examples/gameboy/hdl)') do |v|
               options[:hdl_dir] = File.expand_path(v)
+            end
+
+            opts.on('--verilog-dir DIR', 'Direct imported Verilog directory/file override for --mode verilog') do |v|
+              options[:verilog_dir] = File.expand_path(v)
             end
 
             opts.on('--top NAME', 'Imported top component/module name override for imported HDL trees') do |v|

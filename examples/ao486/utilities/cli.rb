@@ -15,11 +15,23 @@ require 'rhdl/cli/tasks/ao486_task'
 module RHDL
   module Examples
     module AO486
-        module CLI
+      module CLI
         module_function
 
-        RUN_MODES = %i[ir verilator arcilator].freeze
-        RUN_SIMS = %i[compile].freeze
+        PUBLIC_RUN_MODES = %i[ir verilog circt].freeze
+        RUN_MODE_ALIASES = {
+          'ir' => :ir,
+          'verilog' => :verilog,
+          'verilator' => :verilog,
+          'circt' => :circt,
+          'arcilator' => :circt
+        }.freeze
+        RUN_SIM_ALIASES = {
+          'interpret' => :interpret,
+          'jit' => :jit,
+          'compile' => :compile,
+          'compiler' => :compile
+        }.freeze
 
         def show_help(out:, program_name:)
           out.puts <<~HELP
@@ -32,13 +44,13 @@ module RHDL
                 Running without a subcommand starts the AO486 runner.
 
               Run options:
-                --mode ir|verilator|arcilator
-                --sim compile
+                -m, --mode ir|verilog|circt
+                --sim interpret|jit|compile
                 --bios
                 --dos
                 --headless
                 --cycles N
-                --speed CYCLES
+                -s, --speed CYCLES
                 -d, --debug
 
               Subcommands:
@@ -48,12 +60,26 @@ module RHDL
 
               Examples:
                 #{program_name} --bios --dos
-                #{program_name} --mode verilator --bios --dos --headless --cycles 100000
-                #{program_name} --mode arcilator --bios --dos -d --speed 5000
+                #{program_name} -m verilog --bios --dos --headless --cycles 100000
+                #{program_name} -m circt --bios --dos -d -s 5000
                 #{program_name} import --out examples/ao486/import
                 #{program_name} parity
                 #{program_name} verify
           HELP
+        end
+
+        def normalize_run_mode(value)
+          mode = RUN_MODE_ALIASES[value.to_s.strip.downcase]
+          raise OptionParser::InvalidArgument, value if mode.nil?
+
+          mode
+        end
+
+        def normalize_run_sim(value)
+          sim = RUN_SIM_ALIASES[value.to_s.strip.downcase]
+          raise OptionParser::InvalidArgument, value if sim.nil?
+
+          sim
         end
 
         def run(argv = ARGV,
@@ -139,13 +165,13 @@ module RHDL
               Options:
             BANNER
 
-            opts.on('--mode MODE', RUN_MODES,
-                    'Runner backend: ir (default), verilator, or arcilator') do |v|
-              options[:mode] = v
+            opts.on('-m', '--mode TYPE', String,
+                    'Simulation mode: ir (default), verilog, circt') do |v|
+              options[:mode] = normalize_run_mode(v)
             end
-            opts.on('--sim SIM', RUN_SIMS,
-                    'IR simulator backend: compile (default)') do |v|
-              options[:sim] = v
+            opts.on('--sim TYPE', String,
+                    'IR simulator backend: compile (default), interpret, jit') do |v|
+              options[:sim] = normalize_run_sim(v)
             end
             opts.on('--bios', 'Load BIOS ROMs from examples/ao486/software/rom') do
               options[:bios] = true
@@ -156,10 +182,10 @@ module RHDL
             opts.on('--headless', 'Run once without the interactive terminal loop') do
               options[:headless] = true
             end
-            opts.on('--cycles N', Integer, 'Headless cycle count override') do |v|
+            opts.on('--cycles N', Integer, 'Headless cycle count override (defaults to unlimited)') do |v|
               options[:cycles] = v
             end
-            opts.on('--speed CYCLES', Integer, 'Cycles per frame/chunk') do |v|
+            opts.on('-s', '--speed CYCLES', Integer, 'Cycles per frame/chunk (defaults to unlimited)') do |v|
               options[:speed] = v
             end
             opts.on('-d', '--debug', 'Show debug info below the display') do

@@ -507,5 +507,48 @@ RSpec.describe RHDL::Examples::SPARC64::Import::SystemImporter do
         expect(normalized).not_to include('parity[i] = parity[i] ^ data_in[j];')
       end
     end
+
+    it 'threads ifu_lsu_pcxpkt_e_b49 through the LSU fast-boot staging path' do
+      importer = new_importer(output_dir: Dir.pwd, workspace_dir: Dir.pwd)
+      lsu_source = File.read(File.join(described_class::DEFAULT_REFERENCE_ROOT, 'T1-CPU', 'lsu', 'lsu.v'))
+      lsu_qctl1_source = File.read(File.join(described_class::DEFAULT_REFERENCE_ROOT, 'T1-CPU', 'lsu', 'lsu_qctl1.v'))
+
+      normalized_lsu = importer.send(
+        :normalize_verilog_for_import,
+        lsu_source,
+        source_path: File.join(described_class::DEFAULT_REFERENCE_ROOT, 'T1-CPU', 'lsu', 'lsu.v')
+      )
+      normalized_lsu_qctl1 = importer.send(
+        :normalize_verilog_for_import,
+        lsu_qctl1_source,
+        source_path: File.join(described_class::DEFAULT_REFERENCE_ROOT, 'T1-CPU', 'lsu', 'lsu_qctl1.v')
+      )
+
+      aggregate_failures do
+        expect(normalized_lsu).to include('.ifu_lsu_pcxpkt_e_b49   (ifu_lsu_pcxpkt_e[49]),')
+        expect(normalized_lsu).to include('.ifu_lsu_pcxpkt_e_b49 (ifu_lsu_pcxpkt_e[49]),  // Templated')
+        expect(normalized_lsu_qctl1).to include('lsu_ld_inst_vld_g, asi_internal_m, ifu_lsu_pcxpkt_e_b49, ifu_lsu_pcxpkt_e_b50,')
+        expect(normalized_lsu_qctl1).to include("input\t\t\tifu_lsu_pcxpkt_e_b49 ;")
+        expect(normalized_lsu_qctl1).to include('assign	lsu_ifu_pcxpkt_ack_d = imiss_pcx_rq_sel_d2 & ~pcx_req_squash_d1 ;  // Keep real LSU acceptance timing for fast boot')
+      end
+    end
+
+    it 'adds Verilator public-flat annotations to staged IRF register thread flops' do
+      importer = new_importer(output_dir: Dir.pwd, workspace_dir: Dir.pwd)
+      original = File.read(File.join(described_class::DEFAULT_REFERENCE_ROOT, 'T1-common', 'srams', 'bw_r_irf_register.v'))
+
+      normalized = importer.send(
+        :normalize_verilog_for_import,
+        original,
+        source_path: File.join(described_class::DEFAULT_REFERENCE_ROOT, 'T1-common', 'srams', 'bw_r_irf_register.v')
+      )
+
+      aggregate_failures do
+        expect(normalized).to include('reg	[71:0]	reg_th0 /* verilator public_flat_rw */;')
+        expect(normalized).to include('reg	[71:0]	reg_th1 /* verilator public_flat_rw */;')
+        expect(normalized).to include('reg	[71:0]	reg_th2 /* verilator public_flat_rw */;')
+        expect(normalized).to include('reg	[71:0]	reg_th3 /* verilator public_flat_rw */;')
+      end
+    end
   end
 end

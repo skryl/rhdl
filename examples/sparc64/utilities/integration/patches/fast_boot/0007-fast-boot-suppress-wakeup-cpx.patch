@@ -1,28 +1,21 @@
-diff --git a/os2wb/os2wb.v b/os2wb/os2wb.v
---- a/os2wb/os2wb.v
-+++ b/os2wb/os2wb.v
-@@ -301,5 +301,7 @@
-            begin
--               cpx_packet<=145'h1700000000000000000000000000000010001;
--               cpx_ready<=1;
-+               // Fast boot must not inject the synthetic wakeup CPX packet
-+               // ahead of the first real IFILL.
-+               cpx_packet<=145'b0;
-+               cpx_ready<=0;
-                state<=`PCX_IDLE;
-            end
 diff --git a/os2wb/os2wb_dual.v b/os2wb/os2wb_dual.v
 --- a/os2wb/os2wb_dual.v
 +++ b/os2wb/os2wb_dual.v
-@@ -332,8 +332,10 @@
-                if(ready)
-                   begin
--                     cpx_packet<=145'h1700000000000000000000000000000030001;
+@@ -329,14 +329,9 @@ always @(posedge clk or negedge rstn)
+                end               
+          `WAKEUP:
+             begin
+-               if(ready)
+-                  begin
+-                     cpx_packet<=145'h1700000000000000000000000000000010001;
 -                     cpx_ready<=1;
-+                     // Fast boot must not inject the synthetic wakeup CPX packet
-+                     // ahead of the first real IFILL.
-+                     cpx_packet<=145'b0;
-+                     cpx_ready<=0;
-                      state<=`PCX_IDLE;
-                   end
-                else
+-                     state<=`PCX_IDLE;
+-                  end
+-               else
+-                  cpx_ready<=0;
++               cpx_packet<=145'b0;
++               cpx_ready<=0;
++               state<=`PCX_IDLE;
+             end
+          `PCX_IDLE:
+             begin

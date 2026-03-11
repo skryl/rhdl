@@ -1,6 +1,7 @@
 ## Status
 Completed (2026-03-06)
 Follow-up update - the original imported-design `ir_compiler` behavioral gate was later replaced in the default Game Boy import test flow by a Verilator-only parity check across three artifacts: staged source Verilog, normalized imported Verilog, and Verilog regenerated from raised RHDL. The imported compiler-backed gate remained operationally too expensive for routine local validation, so the default slow spec boundary was narrowed on March 9, 2026.
+Wrapper follow-up - on March 10, 2026 the runnable Game Boy import specs were moved off the bare `gb` core top and onto the generated import-local `Gameboy` wrapper. The default behavioral Verilator gate now uploads the DMG boot ROM through that generated wrapper and remains green locally (`1 example, 0 failures` in `3m20.1s`).
 
 ## Context
 Game Boy mixed HDL import coverage does not yet have the same end-to-end validation shape as AO486:

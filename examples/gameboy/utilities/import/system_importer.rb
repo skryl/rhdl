@@ -29,9 +29,14 @@ module RHDL
           DEFAULT_VHDL_SYNTH_ARGS = %w[-fsynopsys].freeze
           DEFAULT_VHDL_SYNTH_TARGETS = %w[
             GBse
+            T80
+            T80_ALU
+            T80_Reg
+            T80_MCode
             gbc_snd
             gb_savestates
             gb_statemanager
+            speedcontrol
             eReg_SavestateV
             spram
             dpram
@@ -49,7 +54,8 @@ module RHDL
               {
                 name: 'gb_savestates',
                 outputs: {
-                  'reset_out' => { signal: 'reset_in' }
+                  'reset_out' => { signal: 'reset_in' },
+                  'BUS_rst' => { signal: 'reset_in' }
                 }
               },
               'gb_statemanager__vhdl_2e2d161b9c1b',
@@ -178,6 +184,11 @@ module RHDL
                 components: component_manifest,
                 raised_files: files_written
               )
+              wrapper_path = write_import_wrapper(report: report)
+              if wrapper_path
+                files_written = (files_written + [wrapper_path]).uniq.sort
+                report = merge_import_wrapper_into_report(report_path: report_path, wrapper_path: wrapper_path)
+              end
               workspace_artifacts = stage_workspace_artifacts(
                 workspace: workspace,
                 artifacts: report.fetch('artifacts', {}),
@@ -410,6 +421,14 @@ module RHDL
             text = text.gsub(/\boutput\b(?!\s+(?:reg|logic)\b)/, 'output logic')
 
             case File.basename(source_path).downcase
+            when 'gb.v'
+              # The bundled MiSTer-compatible DMG boot ROM finishes with `E0 50`,
+              # writing A=0 to FF50. Match the handwritten Game Boy model and
+              # disable the boot ROM on any FF50 write so imported runs boot.
+              text = text.gsub(
+                /if\s*\(\(cpu_addr\s*==\s*16'hff50\)\s*&&\s*!cpu_wr_n_edge\s*&&\s*cpu_do\[0\]\)\s*begin/,
+                "if((cpu_addr == 16'hff50) && !cpu_wr_n_edge) begin"
+              )
             when 'video.v'
               text = rewrite_video_spr_extra_tile_array_text(text)
             when 'cheatcodes.sv'
@@ -950,6 +969,446 @@ module RHDL
             end
           end
 
+          def write_import_wrapper(report:)
+            return nil unless report.fetch('top', top).to_s == 'gb'
+
+            wrapper_path = File.join(output_dir, 'gameboy.rb')
+            File.write(wrapper_path, import_wrapper_source(report: report))
+            wrapper_path
+          end
+
+          def merge_import_wrapper_into_report(report_path:, wrapper_path:)
+            report = read_report(report_path)
+            return report if report.empty?
+
+            core_component = import_wrapper_component(report: report, module_name: 'gb')
+            speedcontrol_component = import_wrapper_component(report: report, module_name: 'speedcontrol')
+            report['artifacts'] ||= {}
+            report['artifacts']['wrapper_ruby_path'] = wrapper_path
+            report['import_wrapper'] = {
+              'class_name' => 'Gameboy',
+              'module_name' => 'gameboy',
+              'path' => wrapper_path,
+              'core_class_name' => core_component&.fetch('ruby_class_name', nil) || 'Gb',
+              'speedcontrol_class_name' => speedcontrol_component&.fetch('ruby_class_name', nil),
+              'uses_imported_speedcontrol' => !speedcontrol_component.nil?
+            }
+            report['mixed_import']['wrapper_ruby_path'] = wrapper_path if report['mixed_import'].is_a?(Hash)
+            File.write(report_path, JSON.pretty_generate(report))
+            report
+          end
+
+          def import_wrapper_component(report:, module_name:)
+            Array(report['components']).find do |entry|
+              entry['verilog_module_name'].to_s == module_name.to_s ||
+                entry['module_name'].to_s == module_name.to_s
+            end
+          end
+
+          def import_wrapper_source(report:)
+            core_component = import_wrapper_component(report: report, module_name: 'gb')
+            core_class_name = core_component&.fetch('ruby_class_name', nil).to_s
+            core_class_name = 'Gb' if core_class_name.empty?
+
+            speedcontrol_component = import_wrapper_component(report: report, module_name: 'speedcontrol')
+            speedcontrol_class_name = speedcontrol_component&.fetch('ruby_class_name', nil).to_s
+
+            return import_wrapper_source_with_speedcontrol(
+              core_class_name: core_class_name,
+              speedcontrol_class_name: speedcontrol_class_name
+            ) unless speedcontrol_class_name.empty?
+
+            import_wrapper_source_without_speedcontrol(core_class_name: core_class_name)
+          end
+
+          def import_wrapper_source_without_speedcontrol(core_class_name:)
+            <<~RUBY
+              # frozen_string_literal: true
+
+              class Gameboy < RHDL::Sim::SequentialComponent
+                include RHDL::DSL::Behavior
+                include RHDL::DSL::Sequential
+
+                def self.verilog_module_name
+                  'gameboy'
+                end
+
+                input :reset
+                input :clk_sys
+                input :ce
+                input :ce_n
+                input :ce_2x
+                input :joystick, width: 8
+                input :is_gbc
+                input :is_sgb
+                input :cart_do, width: 8
+                input :cart_oe
+                input :cart_ram_size, width: 8
+                output :ext_bus_addr, width: 15
+                output :ext_bus_a15
+                output :cart_rd
+                output :cart_wr
+                output :cart_di, width: 8
+                output :audio_l, width: 16
+                output :audio_r, width: 16
+                output :lcd_clkena
+                output :lcd_data, width: 15
+                output :lcd_data_gb, width: 2
+                output :lcd_mode, width: 2
+                output :lcd_on
+                output :lcd_vsync
+                input :boot_rom_do, width: 8
+                output :boot_rom_addr, width: 8
+
+                wire :const_zero
+                wire :const_one
+                wire :const_zero_2, width: 2
+                wire :const_zero_8, width: 8
+                wire :const_zero_16, width: 16
+                wire :const_zero_17, width: 17
+                wire :const_zero_25, width: 25
+                wire :const_zero_64, width: 64
+                wire :const_zero_129, width: 129
+
+                wire :joy_p54, width: 2
+                wire :joy_din_computed, width: 4
+                wire :joy_dir, width: 4
+                wire :joy_btn, width: 4
+                wire :joy_dir_masked, width: 4
+                wire :joy_btn_masked, width: 4
+
+                wire :boot_upload_active
+                wire :boot_upload_phase
+                wire :boot_upload_index, width: 8
+                wire :boot_upload_low_byte, width: 8
+                wire :core_reset
+                wire :core_dmg_boot_download
+                wire :core_ioctl_wr
+                wire :core_ioctl_addr, width: 25
+                wire :core_ioctl_dout, width: 16
+
+                instance :gb_core, #{core_class_name}
+
+                port :core_reset => [:gb_core, :reset]
+                port :clk_sys => [:gb_core, :clk_sys]
+                port :ce => [:gb_core, :ce]
+                port :ce_n => [:gb_core, :ce_n]
+                port :ce_2x => [:gb_core, :ce_2x]
+                port :joystick => [:gb_core, :joystick]
+                port :is_gbc => [:gb_core, :isGBC]
+                port :is_sgb => [:gb_core, :isSGB]
+                port :const_zero => [:gb_core, :real_cgb_boot]
+                port :const_zero => [:gb_core, :extra_spr_en]
+                port :cart_do => [:gb_core, :cart_do]
+                port :cart_oe => [:gb_core, :cart_oe]
+                port :const_zero => [:gb_core, :cgb_boot_download]
+                port :core_dmg_boot_download => [:gb_core, :dmg_boot_download]
+                port :const_zero => [:gb_core, :sgb_boot_download]
+                port :core_ioctl_wr => [:gb_core, :ioctl_wr]
+                port :core_ioctl_addr => [:gb_core, :ioctl_addr]
+                port :core_ioctl_dout => [:gb_core, :ioctl_dout]
+                port :const_zero => [:gb_core, :boot_gba_en]
+                port :const_one => [:gb_core, :fast_boot_en]
+                port :const_zero => [:gb_core, :audio_no_pops]
+                port :const_zero => [:gb_core, :megaduck]
+                port :joy_din_computed => [:gb_core, :joy_din]
+                port [:gb_core, :joy_p54] => :joy_p54
+                port :reset => [:gb_core, :gg_reset]
+                port :const_zero => [:gb_core, :gg_en]
+                port :const_zero_129 => [:gb_core, :gg_code]
+                port :const_zero => [:gb_core, :serial_clk_in]
+                port :const_zero => [:gb_core, :serial_data_in]
+                port :const_one => [:gb_core, :increaseSSHeaderCount]
+                port :cart_ram_size => [:gb_core, :cart_ram_size]
+                port :const_zero => [:gb_core, :save_state]
+                port :const_zero => [:gb_core, :load_state]
+                port :const_zero_2 => [:gb_core, :savestate_number]
+                port :const_zero_64 => [:gb_core, :SaveStateExt_Dout]
+                port :const_zero_8 => [:gb_core, :Savestate_CRAMReadData]
+                port :const_zero_64 => [:gb_core, :SAVE_out_Dout]
+                port :const_one => [:gb_core, :SAVE_out_done]
+                port :const_zero => [:gb_core, :rewind_on]
+                port :const_zero => [:gb_core, :rewind_active]
+
+                port [:gb_core, :ext_bus_addr] => :ext_bus_addr
+                port [:gb_core, :ext_bus_a15] => :ext_bus_a15
+                port [:gb_core, :cart_rd] => :cart_rd
+                port [:gb_core, :cart_wr] => :cart_wr
+                port [:gb_core, :cart_di] => :cart_di
+                port [:gb_core, :audio_l] => :audio_l
+                port [:gb_core, :audio_r] => :audio_r
+                port [:gb_core, :lcd_clkena] => :lcd_clkena
+                port [:gb_core, :lcd_data] => :lcd_data
+                port [:gb_core, :lcd_data_gb] => :lcd_data_gb
+                port [:gb_core, :lcd_mode] => :lcd_mode
+                port [:gb_core, :lcd_on] => :lcd_on
+                port [:gb_core, :lcd_vsync] => :lcd_vsync
+
+                behavior do
+                  const_zero <= lit(0, width: 1)
+                  const_one <= lit(1, width: 1)
+                  const_zero_2 <= lit(0, width: 2)
+                  const_zero_8 <= lit(0, width: 8)
+                  const_zero_16 <= lit(0, width: 16)
+                  const_zero_17 <= lit(0, width: 17)
+                  const_zero_25 <= lit(0, width: 25)
+                  const_zero_64 <= lit(0, width: 64)
+                  const_zero_129 <= lit(0, width: 129)
+
+                  joy_dir <= joystick[3..0]
+                  joy_btn <= joystick[7..4]
+                  joy_dir_masked <= joy_dir | cat(joy_p54[0], joy_p54[0], joy_p54[0], joy_p54[0])
+                  joy_btn_masked <= joy_btn | cat(joy_p54[1], joy_p54[1], joy_p54[1], joy_p54[1])
+                  joy_din_computed <= joy_dir_masked & joy_btn_masked
+
+                  core_reset <= reset | boot_upload_active
+                  core_dmg_boot_download <= boot_upload_active
+                  core_ioctl_wr <= boot_upload_active & boot_upload_phase
+                  core_ioctl_addr <= cat(const_zero_17, boot_upload_index)
+                  core_ioctl_dout <= cat(boot_rom_do, boot_upload_low_byte)
+                  boot_rom_addr <= mux(
+                    boot_upload_active,
+                    mux(boot_upload_phase, (boot_upload_index + lit(1, width: 8))[7..0], boot_upload_index),
+                    lit(0, width: 8)
+                  )
+                end
+
+                sequential clock: :clk_sys, reset: :reset, reset_values: {
+                  boot_upload_active: 1,
+                  boot_upload_phase: 0,
+                  boot_upload_index: 0,
+                  boot_upload_low_byte: 0
+                } do
+                  boot_upload_low_byte <= mux(
+                    boot_upload_active & ~boot_upload_phase,
+                    boot_rom_do,
+                    boot_upload_low_byte
+                  )
+
+                  boot_upload_phase <= mux(
+                    boot_upload_active,
+                    ~boot_upload_phase,
+                    boot_upload_phase
+                  )
+
+                  boot_upload_index <= mux(
+                    boot_upload_active & boot_upload_phase & (boot_upload_index != lit(0xFE, width: 8)),
+                    (boot_upload_index + lit(2, width: 8))[7..0],
+                    boot_upload_index
+                  )
+
+                  boot_upload_active <= mux(
+                    boot_upload_active & boot_upload_phase & (boot_upload_index == lit(0xFE, width: 8)),
+                    lit(0, width: 1),
+                    boot_upload_active
+                  )
+                end
+              end
+            RUBY
+          end
+
+          def import_wrapper_source_with_speedcontrol(core_class_name:, speedcontrol_class_name:)
+            <<~RUBY
+              # frozen_string_literal: true
+
+              class Gameboy < RHDL::Sim::SequentialComponent
+                include RHDL::DSL::Behavior
+                include RHDL::DSL::Sequential
+
+                def self.verilog_module_name
+                  'gameboy'
+                end
+
+                input :reset
+                input :clk_sys
+                input :joystick, width: 8
+                input :is_gbc
+                input :is_sgb
+                input :cart_do, width: 8
+                input :cart_oe
+                input :cart_ram_size, width: 8
+                output :ext_bus_addr, width: 15
+                output :ext_bus_a15
+                output :cart_rd
+                output :cart_wr
+                output :cart_di, width: 8
+                output :audio_l, width: 16
+                output :audio_r, width: 16
+                output :lcd_clkena
+                output :lcd_data, width: 15
+                output :lcd_data_gb, width: 2
+                output :lcd_mode, width: 2
+                output :lcd_on
+                output :lcd_vsync
+                input :boot_rom_do, width: 8
+                output :boot_rom_addr, width: 8
+
+                wire :const_zero
+                wire :const_one
+                wire :const_zero_2, width: 2
+                wire :const_zero_8, width: 8
+                wire :const_zero_16, width: 16
+                wire :const_zero_17, width: 17
+                wire :const_zero_25, width: 25
+                wire :const_zero_64, width: 64
+                wire :const_zero_129, width: 129
+
+                wire :ce
+                wire :ce_n
+                wire :ce_2x
+                wire :cart_act
+                wire :dma_on
+                wire :sleep_savestate
+                wire :joy_p54, width: 2
+                wire :joy_din_computed, width: 4
+                wire :joy_dir, width: 4
+                wire :joy_btn, width: 4
+                wire :joy_dir_masked, width: 4
+                wire :joy_btn_masked, width: 4
+
+                wire :boot_upload_active
+                wire :boot_upload_phase
+                wire :boot_upload_index, width: 8
+                wire :boot_upload_low_byte, width: 8
+                wire :core_reset
+                wire :core_dmg_boot_download
+                wire :core_ioctl_wr
+                wire :core_ioctl_addr, width: 25
+                wire :core_ioctl_dout, width: 16
+
+                instance :speed_ctrl, #{speedcontrol_class_name}
+                instance :gb_core, #{core_class_name}
+
+                port :clk_sys => [:speed_ctrl, :clk_sys]
+                port :const_zero => [:speed_ctrl, :pause]
+                port :const_zero => [:speed_ctrl, :speedup]
+                port :cart_act => [:speed_ctrl, :cart_act]
+                port :const_zero => [:speed_ctrl, :DMA_on]
+                port [:speed_ctrl, :ce] => :ce
+                port [:speed_ctrl, :ce_n] => :ce_n
+                port [:speed_ctrl, :ce_2x] => :ce_2x
+
+                port :core_reset => [:gb_core, :reset]
+                port :clk_sys => [:gb_core, :clk_sys]
+                port :ce => [:gb_core, :ce]
+                port :ce_n => [:gb_core, :ce_n]
+                port :ce_2x => [:gb_core, :ce_2x]
+                port :joystick => [:gb_core, :joystick]
+                port :is_gbc => [:gb_core, :isGBC]
+                port :is_sgb => [:gb_core, :isSGB]
+                port :const_zero => [:gb_core, :real_cgb_boot]
+                port :const_zero => [:gb_core, :extra_spr_en]
+                port :cart_do => [:gb_core, :cart_do]
+                port :cart_oe => [:gb_core, :cart_oe]
+                port :const_zero => [:gb_core, :cgb_boot_download]
+                port :core_dmg_boot_download => [:gb_core, :dmg_boot_download]
+                port :const_zero => [:gb_core, :sgb_boot_download]
+                port :core_ioctl_wr => [:gb_core, :ioctl_wr]
+                port :core_ioctl_addr => [:gb_core, :ioctl_addr]
+                port :core_ioctl_dout => [:gb_core, :ioctl_dout]
+                port :const_zero => [:gb_core, :boot_gba_en]
+                port :const_zero => [:gb_core, :fast_boot_en]
+                port :const_zero => [:gb_core, :audio_no_pops]
+                port :const_zero => [:gb_core, :megaduck]
+                port :joy_din_computed => [:gb_core, :joy_din]
+                port [:gb_core, :joy_p54] => :joy_p54
+                port :const_zero => [:gb_core, :gg_reset]
+                port :const_zero => [:gb_core, :gg_en]
+                port :const_zero_129 => [:gb_core, :gg_code]
+                port :const_zero => [:gb_core, :serial_clk_in]
+                port :const_one => [:gb_core, :serial_data_in]
+                port :const_zero => [:gb_core, :increaseSSHeaderCount]
+                port :cart_ram_size => [:gb_core, :cart_ram_size]
+                port :const_zero => [:gb_core, :save_state]
+                port :const_zero => [:gb_core, :load_state]
+                port :const_zero_2 => [:gb_core, :savestate_number]
+                port :const_zero_64 => [:gb_core, :SaveStateExt_Dout]
+                port :const_zero_8 => [:gb_core, :Savestate_CRAMReadData]
+                port :const_zero_64 => [:gb_core, :SAVE_out_Dout]
+                port :const_one => [:gb_core, :SAVE_out_done]
+                port :const_zero => [:gb_core, :rewind_on]
+                port :const_zero => [:gb_core, :rewind_active]
+
+                port [:gb_core, :ext_bus_addr] => :ext_bus_addr
+                port [:gb_core, :ext_bus_a15] => :ext_bus_a15
+                port [:gb_core, :cart_rd] => :cart_rd
+                port [:gb_core, :cart_wr] => :cart_wr
+                port [:gb_core, :cart_di] => :cart_di
+                port [:gb_core, :audio_l] => :audio_l
+                port [:gb_core, :audio_r] => :audio_r
+                port [:gb_core, :lcd_clkena] => :lcd_clkena
+                port [:gb_core, :lcd_data] => :lcd_data
+                port [:gb_core, :lcd_data_gb] => :lcd_data_gb
+                port [:gb_core, :lcd_mode] => :lcd_mode
+                port [:gb_core, :lcd_on] => :lcd_on
+                port [:gb_core, :lcd_vsync] => :lcd_vsync
+                port [:gb_core, :DMA_on] => :dma_on
+                port [:gb_core, :sleep_savestate] => :sleep_savestate
+
+                behavior do
+                  const_zero <= lit(0, width: 1)
+                  const_one <= lit(1, width: 1)
+                  const_zero_2 <= lit(0, width: 2)
+                  const_zero_8 <= lit(0, width: 8)
+                  const_zero_16 <= lit(0, width: 16)
+                  const_zero_17 <= lit(0, width: 17)
+                  const_zero_25 <= lit(0, width: 25)
+                  const_zero_64 <= lit(0, width: 64)
+                  const_zero_129 <= lit(0, width: 129)
+
+                  joy_dir <= joystick[3..0]
+                  joy_btn <= joystick[7..4]
+                  joy_dir_masked <= joy_dir | cat(joy_p54[0], joy_p54[0], joy_p54[0], joy_p54[0])
+                  joy_btn_masked <= joy_btn | cat(joy_p54[1], joy_p54[1], joy_p54[1], joy_p54[1])
+                  joy_din_computed <= joy_dir_masked & joy_btn_masked
+                  cart_act <= cart_rd | cart_wr
+
+                  core_reset <= reset | boot_upload_active
+                  core_dmg_boot_download <= boot_upload_active
+                  core_ioctl_wr <= boot_upload_active & boot_upload_phase
+                  core_ioctl_addr <= cat(const_zero_17, boot_upload_index)
+                  core_ioctl_dout <= cat(boot_rom_do, boot_upload_low_byte)
+                  boot_rom_addr <= mux(
+                    boot_upload_active,
+                    mux(boot_upload_phase, (boot_upload_index + lit(1, width: 8))[7..0], boot_upload_index),
+                    lit(0, width: 8)
+                  )
+                end
+
+                sequential clock: :clk_sys, reset: :reset, reset_values: {
+                  boot_upload_active: 1,
+                  boot_upload_phase: 0,
+                  boot_upload_index: 0,
+                  boot_upload_low_byte: 0
+                } do
+                  boot_upload_low_byte <= mux(
+                    boot_upload_active & ~boot_upload_phase,
+                    boot_rom_do,
+                    boot_upload_low_byte
+                  )
+
+                  boot_upload_phase <= mux(
+                    boot_upload_active,
+                    ~boot_upload_phase,
+                    boot_upload_phase
+                  )
+
+                  boot_upload_index <= mux(
+                    boot_upload_active & boot_upload_phase & (boot_upload_index != lit(0xFE, width: 8)),
+                    (boot_upload_index + lit(2, width: 8))[7..0],
+                    boot_upload_index
+                  )
+
+                  boot_upload_active <= mux(
+                    boot_upload_active & boot_upload_phase & (boot_upload_index == lit(0xFE, width: 8)),
+                    lit(0, width: 1),
+                    boot_upload_active
+                  )
+                end
+              end
+            RUBY
+          end
+
           def relative_output_path(path)
             Pathname.new(File.expand_path(path)).relative_path_from(Pathname.new(output_dir)).to_s
           end
@@ -966,7 +1425,11 @@ module RHDL
               base_origin_kind = 'source_vhdl_generated' if base_origin_kind.empty? && generated
               original_source_path = entry['original_source_path'] || entry[:original_source_path]
 
-              parse_verilog_module_names(path).each do |module_name|
+              module_names =
+                Array(entry['declared_modules'] || entry[:declared_modules]).map(&:to_s).reject(&:empty?)
+              module_names = parse_verilog_module_names(path) if module_names.empty?
+
+              module_names.each do |module_name|
                 existing = acc[module_name]
                 if existing && File.expand_path(existing[:path]) != File.expand_path(path)
                   raise "Ambiguous staged module mapping for #{module_name}: #{existing[:path]} and #{path}"

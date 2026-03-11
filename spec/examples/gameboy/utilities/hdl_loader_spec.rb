@@ -40,4 +40,41 @@ RSpec.describe RHDL::Examples::GameBoy::HdlLoader do
     Object.send(:remove_const, :RhdlLoaderSpecA) if Object.const_defined?(:RhdlLoaderSpecA)
     Object.send(:remove_const, :RhdlLoaderSpecB) if Object.const_defined?(:RhdlLoaderSpecB)
   end
+
+  it 'loads imported-style component trees without pulling handwritten support code' do
+    Dir.mktmpdir('rhdl_gameboy_import_loader') do |dir|
+      gb_file = File.join(dir, 'gb.rb')
+      wrapper_file = File.join(dir, 'gameboy.rb')
+
+      File.write(gb_file, <<~RUBY)
+        class Gb < RHDL::Sim::SequentialComponent
+          include RHDL::DSL::Behavior
+          include RHDL::DSL::Sequential
+
+          def self.verilog_module_name
+            'gb'
+          end
+        end
+      RUBY
+
+      File.write(wrapper_file, <<~RUBY)
+        class Gameboy < RHDL::Sim::SequentialComponent
+          DEP = Gb
+
+          def self.verilog_module_name
+            'gameboy'
+          end
+        end
+      RUBY
+
+      expect { described_class.load_component_tree!(hdl_dir: dir) }.not_to raise_error
+      expect(defined?(Gb)).to eq('constant')
+      expect(defined?(Gameboy)).to eq('constant')
+      expect(Gameboy::DEP).to eq(Gb)
+    end
+  ensure
+    Object.send(:remove_const, :Gb) if Object.const_defined?(:Gb)
+    Object.send(:remove_const, :GB) if Object.const_defined?(:GB)
+    Object.send(:remove_const, :Gameboy) if Object.const_defined?(:Gameboy)
+  end
 end

@@ -12,18 +12,20 @@ module RHDL
   module Examples
     module GameBoy
       class HeadlessRunner
-      attr_reader :runner, :mode, :sim_backend, :hdl_dir, :top, :use_staged_verilog
+      attr_reader :runner, :mode, :sim_backend, :hdl_dir, :verilog_dir, :top, :use_staged_verilog
 
       # Create a headless runner with the specified options
       # @param mode [Symbol] Simulation mode: :ruby, :ir, :verilog
       # @param sim [Symbol] Simulator backend for :ir mode: :interpret, :jit, :compile
       # @param hdl_dir [String, nil] Optional HDL directory override.
+      # @param verilog_dir [String, nil] Optional direct Verilog directory/file override for :verilog mode.
       # @param top [String, nil] Imported top component/module override for imported HDL trees.
       # @param use_staged_verilog [Boolean] Use the staged imported Verilog artifact when available.
-      def initialize(mode: :ruby, sim: nil, hdl_dir: nil, top: nil, use_staged_verilog: false)
+      def initialize(mode: :ruby, sim: nil, hdl_dir: nil, verilog_dir: nil, top: nil, use_staged_verilog: false)
         @mode = mode
         @sim_backend = sim || default_backend(mode)
         @hdl_dir = hdl_dir
+        @verilog_dir = verilog_dir
         @top = top
         @use_staged_verilog = use_staged_verilog
 
@@ -42,6 +44,7 @@ module RHDL
                     require_relative 'verilator_runner'
                     RHDL::Examples::GameBoy::VerilogRunner.new(
                       hdl_dir: @hdl_dir,
+                      verilog_dir: @verilog_dir,
                       top: @top,
                       use_staged_verilog: @use_staged_verilog
                     )
@@ -174,8 +177,15 @@ module RHDL
       end
 
       # Create a headless runner with test ROM loaded
-      def self.with_test_rom(mode: :ruby, sim: nil, hdl_dir: nil, top: nil, use_staged_verilog: false)
-        runner = new(mode: mode, sim: sim, hdl_dir: hdl_dir, top: top, use_staged_verilog: use_staged_verilog)
+      def self.with_test_rom(mode: :ruby, sim: nil, hdl_dir: nil, verilog_dir: nil, top: nil, use_staged_verilog: false)
+        runner = new(
+          mode: mode,
+          sim: sim,
+          hdl_dir: hdl_dir,
+          verilog_dir: verilog_dir,
+          top: top,
+          use_staged_verilog: use_staged_verilog
+        )
         test_rom = create_test_rom
         runner.load_rom(test_rom)
         runner

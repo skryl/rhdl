@@ -110,6 +110,14 @@ module RHDL
         RUNNER_PROBE_LCDC_ON = 10
         RUNNER_PROBE_H_DIV_CNT = 11
         RUNNER_PROBE_RISCV_UART_TX_LEN = 17
+        RUNNER_PROBE_AO486_LAST_IO_READ = 18
+        RUNNER_PROBE_AO486_LAST_IO_WRITE_META = 19
+        RUNNER_PROBE_AO486_LAST_IO_WRITE_DATA = 20
+        RUNNER_PROBE_AO486_LAST_IRQ_VECTOR = 21
+        RUNNER_PROBE_AO486_DOS_INT13_STATE = 22
+        RUNNER_PROBE_AO486_DOS_INT10_STATE = 23
+        RUNNER_PROBE_AO486_DOS_INT16_STATE = 24
+        RUNNER_PROBE_AO486_DOS_INT1A_STATE = 25
 
         SIM_CAP_SIGNAL_INDEX = 1 << 0
         SIM_CAP_FORCED_CLOCK = 1 << 1
@@ -725,6 +733,60 @@ module RHDL
         end
 
         # ====================================================================
+        # AO486 Extension Methods
+        # ====================================================================
+
+        def ao486_mode?
+          runner_kind == :ao486
+        end
+
+        def runner_ao486_last_io_read
+          return nil unless ao486_mode?
+
+          unpack_ao486_io_meta(runner_probe(RUNNER_PROBE_AO486_LAST_IO_READ))
+        end
+
+        def runner_ao486_last_io_write
+          return nil unless ao486_mode?
+
+          meta = unpack_ao486_io_meta(runner_probe(RUNNER_PROBE_AO486_LAST_IO_WRITE_META))
+          return nil unless meta
+
+          meta.merge(data: runner_probe(RUNNER_PROBE_AO486_LAST_IO_WRITE_DATA).to_i & 0xFFFF_FFFF)
+        end
+
+        def runner_ao486_last_irq_vector
+          return nil unless ao486_mode?
+
+          value = runner_probe(RUNNER_PROBE_AO486_LAST_IRQ_VECTOR).to_i & 0xFF
+          value.zero? ? nil : value
+        end
+
+        def runner_ao486_dos_int13_state
+          return nil unless ao486_mode?
+
+          unpack_ao486_dos_state(runner_probe(RUNNER_PROBE_AO486_DOS_INT13_STATE), with_flags: true)
+        end
+
+        def runner_ao486_dos_int10_state
+          return nil unless ao486_mode?
+
+          unpack_ao486_dos_state(runner_probe(RUNNER_PROBE_AO486_DOS_INT10_STATE), with_flags: false)
+        end
+
+        def runner_ao486_dos_int16_state
+          return nil unless ao486_mode?
+
+          unpack_ao486_dos_state(runner_probe(RUNNER_PROBE_AO486_DOS_INT16_STATE), with_flags: true)
+        end
+
+        def runner_ao486_dos_int1a_state
+          return nil unless ao486_mode?
+
+          unpack_ao486_dos_state(runner_probe(RUNNER_PROBE_AO486_DOS_INT1A_STATE), with_flags: true)
+        end
+
+        # ====================================================================
         # Game Boy Extension Methods
         # ====================================================================
 
@@ -909,6 +971,27 @@ module RHDL
 
         def runner_probe(op, arg0 = 0)
           @fn_runner_probe.call(@ctx, op, arg0)
+        end
+
+        def unpack_ao486_io_meta(packed)
+          value = packed.to_i
+          length = value & 0xFF
+          return nil if length.zero?
+
+          {
+            address: (value >> 8) & 0xFFFF,
+            length: length
+          }
+        end
+
+        def unpack_ao486_dos_state(packed, with_flags:)
+          value = packed.to_i
+          state = {
+            ax: value & 0xFFFF,
+            result_ax: (value >> 16) & 0xFFFF
+          }
+          state[:flags] = (value >> 32) & 0xFF if with_flags
+          state
         end
 
         def backend_candidates(requested)

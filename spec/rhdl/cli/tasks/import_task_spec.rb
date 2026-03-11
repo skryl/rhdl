@@ -420,6 +420,51 @@ RSpec.describe RHDL::CLI::Tasks::ImportTask do
     expect(text).not_to match(/\bdo\b/)
   end
 
+  it 'restores the missing DI_Reg alias in generated T80 Verilog' do
+    out_path = File.join(tmp_dir, 'T80.v')
+    File.write(out_path, <<~VERILOG)
+      module T80(
+        input [7:0] DI,
+        output [15:0] A
+      );
+        wire [7:0] di_reg;
+        assign A = {8'hFF, di_reg};
+      endmodule
+    VERILOG
+    task = described_class.new(mode: :mixed, out: tmp_dir)
+
+    task.send(:postprocess_generated_vhdl_verilog!, entity: 'T80', out_path: out_path)
+
+    text = File.read(out_path)
+    expect(text).to include('assign di_reg = DI;')
+  end
+
+  it 'restores the missing DI_Reg alias inside GBse embedded T80 modules' do
+    out_path = File.join(tmp_dir, 'GBse.v')
+    File.write(out_path, <<~VERILOG)
+      module t80_specialized(
+        input [7:0] di,
+        output [15:0] a
+      );
+        wire [7:0] di_reg;
+        assign a = {8'hFF, di_reg};
+      endmodule
+
+      module GBse(
+        input clk,
+        output done
+      );
+        assign done = clk;
+      endmodule
+    VERILOG
+    task = described_class.new(mode: :mixed, out: tmp_dir)
+
+    task.send(:postprocess_generated_vhdl_verilog!, entity: 'GBse', out_path: out_path)
+
+    text = File.read(out_path)
+    expect(text).to include('assign di_reg = di;')
+  end
+
   it 'renames synthesized VHDL modules when a specialized module name is requested' do
     out_path = File.join(tmp_dir, 'dpram.v')
     File.write(out_path, "module dpram (\n  input clk\n);\nendmodule\n")
@@ -696,9 +741,42 @@ RSpec.describe RHDL::CLI::Tasks::ImportTask do
     rewritten = task.send(:runtime_dpram_dif_module_block, 'dpram_dif__vhdl_test')
 
     expect(rewritten).to include('module dpram_dif__vhdl_test')
+    expect(rewritten).to include('wire enable_a_active = (enable_a !== 1\'b0);')
+    expect(rewritten).to include('wire cs_b_active = (cs_b !== 1\'b0);')
+    expect(rewritten).to include('wire wren_b_active = (wren_b === 1\'b1);')
     expect(rewritten).to include('wire [10:0] word_addr_a = address_a[11:1];')
     expect(rewritten).to include('wire [7:0]  read_byte_a = byte_sel_a ? word_data_a[15:8] : word_data_a[7:0];')
-    expect(rewritten).to include('if (wren_b & cs_b)')
+    expect(rewritten).to include('if (wren_b_active & cs_b_active)')
+  end
+
+  it 'overlays staged generated dpram_dif modules with the byte-addressed runtime model after import' do
+    task = described_class.new(mode: :mixed, out: tmp_dir)
+    pure_root = File.join(tmp_dir, '.mixed_import', 'pure_verilog')
+    generated_dir = File.join(pure_root, 'generated_vhdl')
+    FileUtils.mkdir_p(generated_dir)
+    out_path = File.join(generated_dir, 'dpram_dif__vhdl_deadbeef.v')
+    File.write(out_path, <<~VERILOG)
+      module altsyncram_hash(input clk);
+      endmodule
+
+      module dpram_dif__vhdl_deadbeef(
+        input clock,
+        input [11:0] address_a,
+        output [7:0] q_a
+      );
+        altsyncram_hash ram(.clk(clock));
+      endmodule
+    VERILOG
+
+    replaced = task.send(:overlay_runtime_generated_vhdl_modules!, pure_verilog_root: pure_root)
+    text = File.read(out_path)
+
+    expect(replaced).to eq(['dpram_dif__vhdl_deadbeef'])
+    expect(text).to include('module dpram_dif__vhdl_deadbeef')
+    expect(text).to include('wire enable_b_active = (enable_b !== 1\'b0);')
+    expect(text).to include('wire [10:0] word_addr_a = address_a[11:1];')
+    expect(text).to include('wire [7:0]  read_byte_a = byte_sel_a ? word_data_a[15:8] : word_data_a[7:0];')
+    expect(text).not_to include('altsyncram_hash')
   end
 
   describe 'mixed mode' do

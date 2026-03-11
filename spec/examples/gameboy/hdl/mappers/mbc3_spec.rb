@@ -7,7 +7,7 @@ require 'spec_helper'
 
 RSpec.describe 'RHDL::Examples::GameBoy::MBC3' do
   before(:all) do
-    require_relative '../../../../../examples/gameboy/gameboy'
+    require_relative '../../../../../examples/gameboy/hdl/gameboy'
   end
 
   # Helper to clock the component

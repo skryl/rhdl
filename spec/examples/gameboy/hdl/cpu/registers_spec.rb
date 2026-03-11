@@ -19,7 +19,7 @@ require 'spec_helper'
 RSpec.describe 'SM83 Registers' do
   before(:all) do
     begin
-      require_relative '../../../../../examples/gameboy/gameboy'
+      require_relative '../../../../../examples/gameboy/hdl/gameboy'
       @gameboy_available = true
     rescue LoadError => e
       @gameboy_available = false

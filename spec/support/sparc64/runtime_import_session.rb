@@ -299,6 +299,8 @@ module Sparc64UnitSupport
       files = Dir.glob(File.join(output_dir, '**', '*.rb')).sort
       raise ArgumentError, "No generated Ruby HDL files found in #{output_dir}" if files.empty?
 
+      clear_existing_generated_component_classes!(files)
+
       pending = files
       last_errors = {}
 
@@ -326,6 +328,35 @@ module Sparc64UnitSupport
 
         pending = still_pending
       end
+    end
+
+    def clear_existing_generated_component_classes!(files)
+      files.each do |path|
+        source = File.read(path)
+        class_name = source[/^\s*class\s+([A-Za-z_][A-Za-z0-9_:]*)\s*</, 1]
+        next unless class_name
+
+        remove_component_constant(class_name)
+      end
+    end
+
+    def remove_component_constant(constant_path)
+      names = constant_path.to_s.split('::')
+      return if names.empty?
+
+      scope = Object
+      *parents, leaf = names
+
+      parents.each do |name|
+        break unless scope.const_defined?(name, false)
+        value = scope.const_get(name, false)
+        return unless value.is_a?(Module)
+        scope = value
+      end
+
+      scope.send(:remove_const, leaf.to_sym) if scope.const_defined?(leaf, false)
+    rescue NameError
+      nil
     end
 
     def build_inventory(selected_records)

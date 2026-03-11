@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 require 'spec_helper'
-require_relative '../../../../examples/gameboy/gameboy'
+require_relative '../../../../examples/gameboy/hdl/gameboy'
 
 # Game Boy Timer Unit Tests
 # Tests the Timer component (DIV, TIMA, TMA, TAC registers)

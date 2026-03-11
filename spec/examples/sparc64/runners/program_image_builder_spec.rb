@@ -33,16 +33,19 @@ RSpec.describe RHDL::Examples::SPARC64::Integration::ProgramImageBuilder do
 
     RHDL::Examples::SPARC64::Integration::Programs.all.each do |program|
       result = builder.build(program)
+      boot_linker_path = File.join(result.build_dir, 'boot.ld')
 
       expect(result.boot_bytes.bytesize).to be > 0
       expect(result.program_bytes.bytesize).to be > 0
       expect(File).to exist(result.boot_bin_path)
       expect(File).to exist(result.program_bin_path)
-      expect(File.read(result.boot_source_path)).to include('PROGRAM_BASE')
-      expect(File.read(result.boot_source_path)).to include('jmpl %g1, %g0')
-      expect(File.read(result.boot_source_path)).not_to include('ba PROGRAM_BASE')
-      expect(result.boot_bytes.bytesize).to be >= 16
+      expect(File).to exist(boot_linker_path)
+      expect(File.read(result.boot_source_path).scan(/^  \.word 0x[0-9A-F]{8}$/).size).to eq(4)
+      expect(File.read(result.boot_source_path).scan(/^  nop$/).size).to eq(12)
+      expect(File.read(boot_linker_path)).to include('program_entry = 0x10000;')
+      expect(result.boot_bytes.bytesize).to eq(64)
       expect(File.read(result.program_source_path)).to include('MAILBOX_STATUS')
+      expect(File.read(result.program_source_path)).to match(/\.section \.text\n(?:nop\n){8}/)
     end
   end
 

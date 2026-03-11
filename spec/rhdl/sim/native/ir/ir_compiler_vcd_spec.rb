@@ -21,7 +21,7 @@ RSpec.describe 'IrCompiler VCD Tracing' do
   end
 
   def create_gameboy_simulator
-    require_relative '../../../../../examples/gameboy/gameboy'
+    require_relative '../../../../../examples/gameboy/hdl/gameboy'
     require_relative '../../../../../examples/gameboy/utilities/runners/ir_runner'
 
     runner = RHDL::Examples::GameBoy::IrRunner.new(backend: :compile)

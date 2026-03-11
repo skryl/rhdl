@@ -5,7 +5,7 @@
     "order": 50,
     "topClassName": "RHDL::Examples::GameBoy::Gameboy",
     "requires": [
-      "examples/gameboy/gameboy"
+      "examples/gameboy/hdl/gameboy"
     ],
     "simIrPath": "./assets/fixtures/gameboy/ir/gameboy.json",
     "explorerIrPath": "./assets/fixtures/gameboy/ir/gameboy_hier.json",

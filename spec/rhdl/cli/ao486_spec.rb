@@ -43,13 +43,13 @@ RSpec.describe 'rhdl examples ao486 command' do
     expect(stdout).to include('Usage: rhdl examples ao486 [options]')
     expect(stdout).to include('Default mode:')
     expect(stdout).to include('Run options:')
-    expect(stdout).to include('--mode ir|verilator|arcilator')
-    expect(stdout).to include('--sim compile')
+    expect(stdout).to include('-m, --mode ir|verilog|circt')
+    expect(stdout).to include('--sim interpret|jit|compile')
     expect(stdout).to include('--bios')
     expect(stdout).to include('--dos')
     expect(stdout).to include('--headless')
     expect(stdout).to include('--cycles N')
-    expect(stdout).to include('--speed CYCLES')
+    expect(stdout).to include('-s, --speed CYCLES')
     expect(stdout).to include('-d, --debug')
     expect(stdout).to include('Subcommands:')
     expect(stdout).to include('import')
@@ -66,15 +66,29 @@ RSpec.describe 'rhdl examples ao486 command' do
   end
 
   it 'parses run-mode help without requiring a subcommand' do
-    stdout, stderr, status = run_cli('examples', 'ao486', '--mode', 'ir', '--help')
+    stdout, stderr, status = run_cli('examples', 'ao486', '-m', 'verilog', '--help')
 
     expect(status.success?).to be(true)
     expect(stderr).not_to include('Unknown examples ao486 subcommand')
     expect(stdout).to include('Run the AO486 CPU-top environment.')
     expect(stdout).to include('--bios')
     expect(stdout).to include('--dos')
-    expect(stdout).to include('--speed CYCLES')
+    expect(stdout).to include('-s, --speed CYCLES')
     expect(stdout).to include('-d, --debug')
+  end
+
+  it 'accepts compiler as a direct IR sim backend option' do
+    _stdout, stderr, status = run_cli('examples', 'ao486', '--mode', 'ir', '--sim', 'compiler', '--help')
+
+    expect(status.success?).to be(true)
+    expect(stderr).not_to include('invalid option: --sim compiler')
+  end
+
+  it 'accepts circt as the shared public mode name' do
+    _stdout, stderr, status = run_cli('examples', 'ao486', '-m', 'circt', '--help')
+
+    expect(status.success?).to be(true)
+    expect(stderr).not_to include('invalid argument: circt')
   end
 
   it 'rejects unexpected positional arguments in default run mode' do

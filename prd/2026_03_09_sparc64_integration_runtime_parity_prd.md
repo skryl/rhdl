@@ -38,13 +38,29 @@ Each program must live in DRAM, execute through the real `s1_top` Wishbone maste
    - the duplicate-top regression is covered in the SPARC64 importer spec
    - the patched import tree now gets through Verilog->CIRCT->RHDL generation cleanly
 4. The current staged-Verilog Phase 3 blocker is still the boot shim itself:
-   - staged `prime_sieve` now fetches the correct boot words from `0x0` and `0x8`
-   - it still never fetches from `PROGRAM_BASE`, never reaches the mailbox, and spins on the reset-vector fetches instead
-   - this points to missing RED-state exit / parked-core startup logic rather than a memory-load failure
-5. The current IR-side blocker is no longer just cold compile latency:
+   - the importer-managed fast-boot patch series was tightened so the synthetic WAKEUP CPX packet is no longer suppressed in the staged bundle
+   - the staged-bundle regression is green with the current patch-set shape, but the real sequential Verilator smoke spec is still red
+   - the low-address boot line now reaches the staged wrapper with the expected instruction words, and the current fast-boot tree no longer fails on patch application, importer staging, or malformed runtime export
+   - the remaining red is specific to IFU startup control: the shim line is re-fetched from low alias `0x0/0x8/0x10/0x18`, but control-transfer out of that line still does not redirect fetch into the DRAM benchmark image
+   - focused code review of the IFU path points to two structural issues still open:
+     - the `0001` startup patch was originally stretching `start_on_rst` into a long mode rather than a one-shot pulse, which risks violating the normal `load_bpc`/`load_pcp4` exclusivity around branch redirection
+     - even after narrowing that pulse, the boot-shim line is still not handing off, which leaves the uncached fast-boot IFILL semantics themselves as the likely remaining control-path blocker
+   - a competing debug mode that mirrors the full program at low alias `0` does fetch the real program bytes, but it still stores to address `0` instead of `MAILBOX_STATUS`; focused code review suggests that mode is fighting the hardcoded fast-boot PC rewrite patches rather than exposing a generic LSU effective-address bug
+5. The staged fast-boot path has now been simplified away from executing uncached boot-PROM code:
+   - the fast-boot reset vector now targets DRAM directly at `PROGRAM_BASE`
+   - the benchmark image builder now prefixes four `nop` instructions so the first useful `_start` instruction lands where the current reset path actually begins decoding
+   - the always-on thread-0 next-thread override was narrowed to the startup pulse only
+   - focused staged-bundle and image-builder specs are green with this shape
+6. The current staged-Verilog blocker is no longer control-transfer into DRAM:
+   - direct probes now show the core executing real DRAM program instructions, including the benchmark `sethi` prologue
+   - the remaining red is early architectural state after reset: address-building still collapses into a store at address `0`, so mailbox completion never occurs
+   - focused code review and explorer traces point at remaining thread / AGP / current-thread canonicalization around `sparc_ifu_fcl`, `sparc_ifu_swl`, and `tlu_tcl`, not at the memory ABI or runtime export path
+6a. Current unblocker work-in-progress:
+   - hard thread-selection and AGP forcing in fast-boot patches `0011` (`sparc_ifu_fcl`), `0012` (`tlu_tcl`), and `0013` (`sparc.v`) has been relaxed to remove forced `thread0` defaults
+7. The current IR-side blocker is no longer just cold compile latency:
    - compiler-backed `S1Top` currently fails before simulation starts because the imported design still contains real over-`128`-bit state, starting with `145`-bit CPX literals in `os2wb` and reaching widths of `1440` bits in LSU paths
    - `IrRunner` now raises that blocker explicitly instead of surfacing a later compact-JSON parse failure
-6. Cold compile latency remains a secondary IR-side issue for imported `S1Top`:
+8. Cold compile latency remains a secondary IR-side issue for imported `S1Top`:
    - compiler codegen was reduced from roughly `70 MB / 1.13M` lines to roughly `48 MB / 840k` lines by removing dead generic tick-helper emission and chunked evaluate duplication for large plain cores
    - a cold `rustc` compile for that generated unit still runs for multiple minutes, so the compiler-backed integration path is not yet practical for the slow suite without further work
 

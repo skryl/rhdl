@@ -7,7 +7,7 @@ require_relative '../../../../examples/sparc64/utilities/integration/programs'
 require_relative '../../../../examples/sparc64/utilities/integration/toolchain'
 require_relative '../../../../examples/sparc64/utilities/runners/verilator_runner'
 
-RSpec.describe RHDL::Examples::SPARC64::VerilogRunner, :slow, timeout: 1800 do
+RSpec.describe RHDL::Examples::SPARC64::VerilatorRunner, :slow, timeout: 1800 do
   let(:image_cache_root) { Dir.mktmpdir('sparc64_verilator_smoke_images') }
   let(:bundle_cache_root) { Dir.mktmpdir('sparc64_verilator_smoke_bundle') }
 
@@ -31,15 +31,15 @@ RSpec.describe RHDL::Examples::SPARC64::VerilogRunner, :slow, timeout: 1800 do
         .section .text
         .global _start
       _start:
-        sethi %hi(MAILBOX_STATUS), %g1
-        or %g1, %lo(MAILBOX_STATUS), %g1
+        sethi %hi(MAILBOX_STATUS), %g3
+        or %g3, %lo(MAILBOX_STATUS), %g3
         mov 1, %g2
-        stx %g2, [%g1]
-        sethi %hi(MAILBOX_VALUE), %g1
-        or %g1, %lo(MAILBOX_VALUE), %g1
+        stx %g2, [%g3]
+        sethi %hi(MAILBOX_VALUE), %g3
+        or %g3, %lo(MAILBOX_VALUE), %g3
         sethi %hi(0x55AA), %g2
         or %g2, %lo(0x55AA), %g2
-        stx %g2, [%g1]
+        stx %g2, [%g3]
       spin:
         ba,a spin
         nop
@@ -51,12 +51,8 @@ RSpec.describe RHDL::Examples::SPARC64::VerilogRunner, :slow, timeout: 1800 do
     ).build(program)
 
     runner = described_class.new(
-      adapter_factory: lambda {
-        described_class::DefaultAdapter.new(
-          source_bundle_options: { cache_root: bundle_cache_root },
-          fast_boot: true
-        )
-      }
+      source_bundle_options: { cache_root: bundle_cache_root },
+      fast_boot: true
     )
 
     runner.load_images(
@@ -71,9 +67,21 @@ RSpec.describe RHDL::Examples::SPARC64::VerilogRunner, :slow, timeout: 1800 do
         images.boot_bytes.bytesize
       )
     ).to eq(images.boot_bytes.bytes)
+    expect(
+      runner.read_memory(
+        RHDL::Examples::SPARC64::Integration::BOOT_PROM_ALIAS_BASE,
+        images.boot_bytes.bytesize
+      )
+    ).to eq(images.boot_bytes.bytes)
+    expect(
+      runner.read_memory(
+        RHDL::Examples::SPARC64::Integration::PROGRAM_BASE,
+        images.program_bytes.bytesize
+      )
+    ).to eq(images.program_bytes.bytes)
 
     result = runner.run_until_complete(max_cycles: 1_000, batch_cycles: 250)
-    boot_words = images.boot_bytes.bytes.each_slice(8).first(2).map do |slice|
+    program_words = images.program_bytes.bytes.each_slice(8).first(2).map do |slice|
       slice.reduce(0) { |acc, byte| (acc << 8) | (byte & 0xFF) }
     end
 
@@ -83,16 +91,20 @@ RSpec.describe RHDL::Examples::SPARC64::VerilogRunner, :slow, timeout: 1800 do
     expect(result[:mailbox_value]).to eq(0x55AA)
     expect(result[:unmapped_accesses]).to be_empty
     expect(result[:wishbone_trace]).not_to be_empty
-    expect(result[:wishbone_trace].map(&:addr)).to include(0)
-    expect(result[:wishbone_trace].map(&:addr)).to include(8)
     expect(
       result[:wishbone_trace].any? { |event| event.addr >= RHDL::Examples::SPARC64::Integration::PROGRAM_BASE }
     ).to be(true)
     expect(
-      result[:wishbone_trace].any? { |event| event.addr == 0 && event.read_data == boot_words[0] }
+      result[:wishbone_trace].any? do |event|
+        event.addr == RHDL::Examples::SPARC64::Integration::PROGRAM_BASE &&
+          event.read_data == program_words[0]
+      end
     ).to be(true)
     expect(
-      result[:wishbone_trace].any? { |event| event.addr == 8 && event.read_data == boot_words[1] }
+      result[:wishbone_trace].any? do |event|
+        event.addr == (RHDL::Examples::SPARC64::Integration::PROGRAM_BASE + 8) &&
+          event.read_data == program_words[1]
+      end
     ).to be(true)
     expect(
       result[:wishbone_trace].any? do |event|

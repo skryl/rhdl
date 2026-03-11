@@ -368,6 +368,35 @@ RSpec.describe 'Rakefile interface' do
     end
   end
 
+  describe 'wrapped spec runner' do
+    after do
+      WRAPPED_SPEC_RESULTS.clear
+    end
+
+    it 'expands scope directories into spec files' do
+      files = spec_files_for_pattern('spec/rhdl/cli/')
+
+      expect(files).to include('spec/rhdl/cli/rakefile_interface_spec.rb')
+      expect(files).to all(end_with('_spec.rb'))
+    end
+
+    it 'spec task uses wrapped rspec execution for the requested scope' do
+      result = {
+        scope: :lib,
+        pattern: 'spec/rhdl/',
+        files: ['spec/rhdl/cli/rakefile_interface_spec.rb'],
+        failed_files: [],
+        crashed_files: []
+      }
+
+      expect_any_instance_of(Object).to receive(:run_wrapped_rspec).with(:lib, 'spec/rhdl/').and_return(result)
+
+      Rake::Task['spec'].invoke('lib')
+
+      expect(WRAPPED_SPEC_RESULTS.last).to eq(result)
+    end
+  end
+
   describe 'ao486 tasks' do
     it 'ao486:import invokes CLI AO486Task with action: :import' do
       require_relative '../../../lib/rhdl/cli/tasks/ao486_task'

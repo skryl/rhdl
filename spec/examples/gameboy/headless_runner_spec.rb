@@ -113,7 +113,7 @@ RSpec.describe RHDL::Examples::GameBoy::HeadlessRunner, :slow do
       expect(runner.rom_size).to be > 0
     end
 
-    it 'passes imported top and staged-verilog options to VerilogRunner' do
+    it 'passes direct verilog and staged-verilog options to VerilogRunner' do
       require_relative '../../../examples/gameboy/utilities/runners/verilator_runner'
       fake_runner = instance_double(
         'RHDL::Examples::GameBoy::VerilogRunner',
@@ -122,14 +122,21 @@ RSpec.describe RHDL::Examples::GameBoy::HeadlessRunner, :slow do
       )
       allow(RHDL::Examples::GameBoy::VerilogRunner).to receive(:new).and_return(fake_runner)
 
-      runner = described_class.new(mode: :verilog, hdl_dir: '/tmp/gameboy_import', top: 'gb', use_staged_verilog: true)
-
-      expect(RHDL::Examples::GameBoy::VerilogRunner).to have_received(:new).with(
-        hdl_dir: '/tmp/gameboy_import',
-        top: 'gb',
+      runner = described_class.new(
+        mode: :verilog,
+        verilog_dir: '/tmp/gameboy_import',
+        top: 'Gameboy',
         use_staged_verilog: true
       )
-      expect(runner.top).to eq('gb')
+
+      expect(RHDL::Examples::GameBoy::VerilogRunner).to have_received(:new).with(
+        hdl_dir: nil,
+        verilog_dir: '/tmp/gameboy_import',
+        top: 'Gameboy',
+        use_staged_verilog: true
+      )
+      expect(runner.verilog_dir).to eq('/tmp/gameboy_import')
+      expect(runner.top).to eq('Gameboy')
       expect(runner.use_staged_verilog).to eq(true)
     end
   end

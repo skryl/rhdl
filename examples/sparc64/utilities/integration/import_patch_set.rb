@@ -11,6 +11,8 @@ module RHDL
           FAST_BOOT_PATCH_TARGETS = %w[
             os2wb/os2wb.v
             os2wb/os2wb_dual.v
+            T1-CPU/exu/sparc_exu_rml.v
+            T1-CPU/ifu/sparc_ifu.v
             T1-CPU/ifu/sparc_ifu_swl.v
             T1-CPU/ifu/sparc_ifu_fdp.v
             T1-CPU/lsu/lsu_qctl1.v

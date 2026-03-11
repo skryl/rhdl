@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require_relative '../../../lib/rhdl'
+
 module RHDL
   module Examples
     module GameBoy
@@ -115,11 +117,6 @@ module RHDL
             if Object.const_defined?(:Gb, false) && !Object.const_defined?(:GB, false)
               Object.const_set(:GB, Object.const_get(:Gb, false))
             end
-
-            return if Object.const_defined?(:SpeedControl, false)
-
-            speedcontrol_path = File.join(DEFAULT_HDL_DIR, 'speedcontrol.rb')
-            require speedcontrol_path if File.file?(speedcontrol_path)
           end
         end
       end

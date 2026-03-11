@@ -10,6 +10,10 @@ RSpec.describe RHDL::Examples::Apple2::NetlistRunner do
 
   describe 'backend initialization' do
     describe 'interpret backend' do
+      before(:each) do
+        skip 'Netlist interpreter backend unavailable' unless netlist_interpreter_available?
+      end
+
       subject(:runner) { described_class.new(backend: :interpret) }
 
       it 'initializes with interpreter backend' do
@@ -31,6 +35,10 @@ RSpec.describe RHDL::Examples::Apple2::NetlistRunner do
     end
 
     describe 'jit backend' do
+      before(:each) do
+        skip 'Netlist jit backend unavailable' unless netlist_jit_available?
+      end
+
       subject(:runner) { described_class.new(backend: :jit) }
 
       it 'initializes with JIT backend' do
@@ -98,6 +106,10 @@ RSpec.describe RHDL::Examples::Apple2::NetlistRunner do
   end
 
   describe 'netlist properties' do
+    before(:each) do
+      skip 'Netlist interpreter backend unavailable' unless netlist_interpreter_available?
+    end
+
     subject(:runner) { described_class.new(backend: :interpret) }
 
     it 'has a non-trivial Apple II gate count' do
@@ -119,6 +131,10 @@ RSpec.describe RHDL::Examples::Apple2::NetlistRunner do
   end
 
   describe 'basic operations' do
+    before(:each) do
+      skip 'Netlist interpreter backend unavailable' unless netlist_interpreter_available?
+    end
+
     # Use interpret backend for faster test startup
     subject(:runner) { described_class.new(backend: :interpret) }
 
@@ -201,6 +217,11 @@ RSpec.describe RHDL::Examples::Apple2::NetlistRunner do
     # Quick smoke test to verify each backend can run
     [:interpret, :jit].each do |backend|
       context "with #{backend} backend" do
+        before(:each) do
+          available = backend == :interpret ? netlist_interpreter_available? : netlist_jit_available?
+          skip "Netlist #{backend} backend unavailable" unless available
+        end
+
         it 'can run 100 cycles' do
           runner = described_class.new(backend: backend)
           runner.reset
@@ -215,6 +236,18 @@ RSpec.describe RHDL::Examples::Apple2::NetlistRunner do
 
   def netlist_compiler_available?
     RHDL::Sim::Native::Netlist::COMPILER_AVAILABLE
+  rescue LoadError, NameError
+    false
+  end
+
+  def netlist_interpreter_available?
+    RHDL::Sim::Native::Netlist::INTERPRETER_AVAILABLE
+  rescue LoadError, NameError
+    false
+  end
+
+  def netlist_jit_available?
+    RHDL::Sim::Native::Netlist::JIT_AVAILABLE
   rescue LoadError, NameError
     false
   end

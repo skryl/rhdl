@@ -75,6 +75,7 @@ rescue LoadError
   # Bundler not available, skip gem tasks
 end
 require 'rbconfig'
+require 'timeout'
 
 # =============================================================================
 # CLI Task Loading
@@ -87,6 +88,127 @@ end
 
 def load_ao486_tasks
   require_relative 'lib/rhdl/cli/tasks/ao486_task'
+end
+
+WRAPPED_SPEC_RESULTS = []
+WRAPPED_SPEC_TIMEOUT_SECONDS = Integer(ENV.fetch('RHDL_WRAPPED_SPEC_TIMEOUT_SECONDS', '600'))
+
+def rspec_cmd
+  binstub = File.expand_path('bin/rspec', __dir__)
+  return [binstub] if File.executable?(binstub)
+
+  ['ruby', '-Ilib', '-S', 'rspec']
+end
+
+def spec_files_for_pattern(pattern)
+  return [pattern] if File.file?(pattern)
+
+  Dir.glob(File.join(pattern, '**', '*_spec.rb')).sort
+end
+
+def run_wrapped_rspec(scope, pattern)
+  files = spec_files_for_pattern(pattern)
+  result = {
+    scope: scope,
+    pattern: pattern,
+    files: files,
+    failed_files: [],
+    crashed_files: []
+  }
+
+  if files.empty?
+    result[:crashed_files] << {
+      file: pattern,
+      status: nil,
+      reason: 'no files matched'
+    }
+    puts "No spec files matched '#{pattern}'."
+    return result
+  end
+
+  files.each do |file|
+    puts "==> #{file}"
+    pid = spawn(*rspec_cmd, file, '--format', 'progress')
+    status = nil
+    timed_out = false
+
+    begin
+      Timeout.timeout(WRAPPED_SPEC_TIMEOUT_SECONDS) do
+        _, status = Process.wait2(pid)
+      end
+    rescue Timeout::Error
+      timed_out = true
+      begin
+        Process.kill('TERM', pid)
+      rescue Errno::ESRCH
+        nil
+      end
+      begin
+        Timeout.timeout(5) do
+          _, status = Process.wait2(pid)
+        end
+      rescue Timeout::Error
+        begin
+          Process.kill('KILL', pid)
+        rescue Errno::ESRCH
+          nil
+        end
+        _, status = Process.wait2(pid) rescue [nil, nil]
+      rescue Errno::ECHILD
+        nil
+      end
+    end
+
+    next if !timed_out && status&.success?
+
+    entry = { file: file, status: status }
+    if timed_out
+      entry[:reason] = "timeout after #{WRAPPED_SPEC_TIMEOUT_SECONDS}s"
+      result[:crashed_files] << entry
+    elsif status&.signaled? || (status&.exitstatus && status.exitstatus != 1)
+      result[:crashed_files] << entry
+    else
+      result[:failed_files] << entry
+    end
+  end
+
+  return result if result[:failed_files].empty? && result[:crashed_files].empty?
+
+  puts "\nWrapped spec summary for #{scope}:"
+  puts "  failed files: #{result[:failed_files].size}"
+  result[:failed_files].each do |entry|
+    puts "    FAIL  #{entry[:file]}"
+  end
+  puts "  crashed files: #{result[:crashed_files].size}"
+  result[:crashed_files].each do |entry|
+    status = entry[:status]
+    detail =
+      if status&.signaled?
+        "signal #{status.termsig}"
+      elsif status&.exitstatus
+        "exit #{status.exitstatus}"
+      else
+        entry[:reason] || 'unknown'
+      end
+    puts "    CRASH #{entry[:file]} (#{detail})"
+  end
+
+  result
+end
+
+at_exit do
+  next if $!
+
+  failed_results = WRAPPED_SPEC_RESULTS.select do |result|
+    result[:failed_files].any? || result[:crashed_files].any?
+  end
+  next if failed_results.empty?
+
+  puts "\nAggregate wrapped spec failure summary:"
+  failed_results.each do |result|
+    puts "  #{result[:scope]}: #{result[:failed_files].size} failed files, #{result[:crashed_files].size} crashed files"
+  end
+  exit 1
 end
 
 # =============================================================================
@@ -189,7 +311,7 @@ begin
       exit 1
     end
 
-    sh "bin/rspec #{pattern} --format progress"
+    WRAPPED_SPEC_RESULTS << run_wrapped_rspec(scope, pattern)
   end
   
   namespace :spec do
@@ -265,7 +387,7 @@ rescue LoadError
       exit 1
     end
 
-    sh "ruby -Ilib -S rspec #{pattern} --format progress"
+    WRAPPED_SPEC_RESULTS << run_wrapped_rspec(scope, pattern)
   end
 
   namespace :spec do

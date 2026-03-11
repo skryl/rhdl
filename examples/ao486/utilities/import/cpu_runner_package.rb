@@ -26,8 +26,10 @@ module RHDL
             patch_icache_runner_bypass!(modules)
             patch_prefetch_fifo_runner_model!(modules)
             patch_prefetch_runner_flow!(modules)
+            patch_memory_runner_bridges!(modules)
             CpuParityPackage.patch_fetch_threshold_logic!(modules)
             patch_execute_call_relative_target!(modules)
+            patch_execute_call_return_push!(modules)
 
             package = CpuTracePackage.build_from_modules(modules)
 
@@ -53,6 +55,19 @@ module RHDL
 
             CpuParityPackage.ensure_reg(mod, 'runner_readcode_burst_active', 1, 0)
             CpuParityPackage.ensure_reg(mod, 'runner_readcode_beat_index', 4, 0)
+            CpuParityPackage.ensure_reg(mod, 'runner_readcode_drain_count', 4, 0)
+            CpuParityPackage.ensure_reg(mod, 'runner_readcode_request_pending', 1, 0)
+            CpuParityPackage.ensure_reg(mod, 'runner_readcode_request_armed', 1, 0)
+            CpuParityPackage.ensure_reg(mod, 'runner_readcode_request_addr', 32, 0)
+            CpuParityPackage.ensure_reg(mod, 'runner_readcode_drop_fill', 1, 0)
+            CpuParityPackage.ensure_reg(mod, 'runner_cache_valid', 1, 0)
+            CpuParityPackage.ensure_reg(mod, 'runner_cache_base', 32, 0)
+            CpuParityPackage.ensure_reg(mod, 'runner_output_active', 1, 0)
+            CpuParityPackage.ensure_reg(mod, 'runner_output_index', 4, 0)
+            CpuParityPackage.ensure_reg(mod, 'runner_outputs_remaining', 3, 0)
+            8.times do |index|
+              CpuParityPackage.ensure_reg(mod, "runner_cache_word_#{index}", 32, 0)
+            end
             cpu_valid_name = CpuParityPackage.output_signal_name!(inst, 'CPU_VALID')
             cpu_done_name = CpuParityPackage.output_signal_name!(inst, 'CPU_DONE')
             cpu_data_name = CpuParityPackage.output_signal_name!(inst, 'CPU_DATA')
@@ -61,108 +76,534 @@ module RHDL
             rst_n_expr = CpuTracePackage.signal('rst_n', 1)
             pr_reset_expr = CpuTracePackage.signal('pr_reset', 1)
             reset_prefetch_expr = CpuTracePackage.signal('reset_prefetch', 1)
-            reset_combined_expr = CpuTracePackage.binop(:|, pr_reset_expr, reset_prefetch_expr, 1)
-
             cpu_req_expr = CpuParityPackage.connection_expr!(inst, 'CPU_REQ')
             cpu_addr_expr = CpuParityPackage.connection_expr!(inst, 'CPU_ADDR')
             prefetched_length_expr = CpuTracePackage.signal('prefetched_length', 5)
             readcode_burst_active = CpuTracePackage.signal('runner_readcode_burst_active', 1)
             readcode_beat_index = CpuTracePackage.signal('runner_readcode_beat_index', 4)
+            readcode_drain_count = CpuTracePackage.signal('runner_readcode_drain_count', 4)
+            readcode_request_pending = CpuTracePackage.signal('runner_readcode_request_pending', 1)
+            readcode_request_armed = CpuTracePackage.signal('runner_readcode_request_armed', 1)
+            readcode_request_addr = CpuTracePackage.signal('runner_readcode_request_addr', 32)
+            readcode_drop_fill = CpuTracePackage.signal('runner_readcode_drop_fill', 1)
+            runner_cache_valid = CpuTracePackage.signal('runner_cache_valid', 1)
+            runner_cache_base = CpuTracePackage.signal('runner_cache_base', 32)
+            runner_output_active = CpuTracePackage.signal('runner_output_active', 1)
+            runner_output_index = CpuTracePackage.signal('runner_output_index', 4)
+            runner_outputs_remaining = CpuTracePackage.signal('runner_outputs_remaining', 3)
             readcode_word_valid = CpuTracePackage.signal('readcode_done', 1)
+            readcode_partial_expr = CpuTracePackage.signal('readcode_partial', 32)
+            cache_words = 8.times.map { |index| CpuTracePackage.signal("runner_cache_word_#{index}", 32) }
+            one1 = ir::Literal.new(value: 1, width: 1)
+            one3 = ir::Literal.new(value: 1, width: 3)
+            zero1 = ir::Literal.new(value: 0, width: 1)
+            zero3 = ir::Literal.new(value: 0, width: 3)
+            zero4 = ir::Literal.new(value: 0, width: 4)
+            eight4 = ir::Literal.new(value: 8, width: 4)
+            zero32 = ir::Literal.new(value: 0, width: 32)
+            four3 = ir::Literal.new(value: 4, width: 3)
+            seven4 = ir::Literal.new(value: 7, width: 4)
             has_pending_words = CpuTracePackage.binop(:!=, prefetched_length_expr, ir::Literal.new(value: 0, width: 5), 1)
-            in_cpu_window = CpuTracePackage.binop(
-              :<,
-              readcode_beat_index,
-              ir::Literal.new(value: 4, width: 4),
+            request_line_base = CpuTracePackage.binop(
+              :&,
+              cpu_addr_expr,
+              ir::Literal.new(value: 0xFFFF_FFE0, width: 32),
+              32
+            )
+            request_start_index = ir::Concat.new(
+              parts: [
+                zero1,
+                ir::Slice.new(base: cpu_addr_expr, range: 2..4, width: 3)
+              ],
+              width: 4
+            )
+            # Keep fetch windows serialized. Allowing a new request to start
+            # while the final visible word of the previous window is still
+            # active is faster, but it risks byte-count drift on partial words.
+            request_blocked_by_output = runner_output_active
+            request_start = CpuTracePackage.binop(
+              :&,
+              cpu_req_expr,
+              CpuTracePackage.binop(
+                :^,
+                request_blocked_by_output,
+                one1,
+                1
+              ),
               1
             )
-            cpu_visible_word = CpuTracePackage.binop(
+            cache_hit = CpuTracePackage.binop(
               :&,
-              readcode_word_valid,
+              runner_cache_valid,
+              CpuTracePackage.binop(:==, runner_cache_base, request_line_base, 1),
+              1
+            )
+            request_start_hit = CpuTracePackage.binop(:&, request_start, cache_hit, 1)
+            request_start_miss = CpuTracePackage.binop(
+              :&,
+              request_start,
               CpuTracePackage.binop(
                 :&,
-                CpuTracePackage.binop(:&, in_cpu_window, has_pending_words, 1),
-                CpuTracePackage.binop(:^, reset_combined_expr, ir::Literal.new(value: 1, width: 1), 1),
+                CpuTracePackage.binop(:^, cache_hit, one1, 1),
+                CpuTracePackage.binop(:^, readcode_burst_active, one1, 1),
                 1
               ),
               1
             )
-            cpu_window_complete = CpuTracePackage.binop(
+            request_retarget = CpuTracePackage.binop(
               :&,
-              cpu_visible_word,
-              CpuTracePackage.binop(:==, readcode_beat_index, ir::Literal.new(value: 3, width: 4), 1),
-              1
-            )
-            cpu_done_complete = CpuTracePackage.binop(
-              :&,
-              readcode_word_valid,
+              request_start,
               CpuTracePackage.binop(
-                :|,
-                CpuTracePackage.binop(:^, has_pending_words, ir::Literal.new(value: 1, width: 1), 1),
-                cpu_window_complete,
+                :&,
+                CpuTracePackage.binop(:^, cache_hit, one1, 1),
+                CpuTracePackage.binop(
+                  :&,
+                  readcode_burst_active,
+                  CpuTracePackage.binop(:!=, readcode_request_addr, request_line_base, 1),
+                  1
+                ),
                 1
               ),
+              1
+            )
+            output_last_word = CpuTracePackage.binop(
+              :&,
+              runner_output_active,
+              CpuTracePackage.binop(:==, runner_outputs_remaining, one3, 1),
+              1
+            )
+            output_crosses_line = CpuTracePackage.binop(
+              :&,
+              runner_output_active,
+              CpuTracePackage.binop(
+                :&,
+                CpuTracePackage.binop(:>, runner_outputs_remaining, one3, 1),
+                CpuTracePackage.binop(:==, runner_output_index, seven4, 1),
+                1
+              ),
+              1
+            )
+            fill_start = CpuTracePackage.binop(
+              :|,
+              request_start_miss,
+              output_crosses_line,
               1
             )
             reset_window = CpuTracePackage.binop(
-              :|,
-              CpuTracePackage.binop(:^, rst_n_expr, ir::Literal.new(value: 1, width: 1), 1),
-              reset_combined_expr,
+              :^,
+              rst_n_expr,
+              one1,
               1
             )
-            burst_active_next = ir::Mux.new(
+            flush_window = CpuTracePackage.binop(
+              :|,
+              reset_window,
+              CpuTracePackage.binop(:|, pr_reset_expr, reset_prefetch_expr, 1),
+              1
+            )
+            # The reference l1_icache treats reset_prefetch like an internal
+            # cache reset. Keep the queued prefetch FIFO bytes, but clear the
+            # runner-side request/cache window state so stale line metadata
+            # cannot leak across a redirect.
+            request_reset_window = flush_window
+            drain_active = CpuTracePackage.binop(:!=, readcode_drain_count, zero4, 1)
+            drain_count_next = ir::Mux.new(
               condition: reset_window,
-              when_true: ir::Literal.new(value: 0, width: 1),
+              when_true: zero4,
               when_false: ir::Mux.new(
-                condition: readcode_word_valid,
+                condition: pr_reset_expr,
                 when_true: ir::Mux.new(
                   condition: readcode_burst_active,
-                  when_true: ir::Mux.new(
-                    condition: CpuTracePackage.binop(:==, readcode_beat_index, ir::Literal.new(value: 7, width: 4), 1),
-                    when_true: ir::Literal.new(value: 0, width: 1),
-                    when_false: ir::Literal.new(value: 1, width: 1),
+                  when_true: CpuTracePackage.binop(:-, eight4, readcode_beat_index, 4),
+                  when_false: zero4,
+                  width: 4
+                ),
+                when_false: ir::Mux.new(
+                  condition: CpuTracePackage.binop(:&, drain_active, readcode_word_valid, 1),
+                  when_true: CpuTracePackage.binop(:-, readcode_drain_count, ir::Literal.new(value: 1, width: 4), 4),
+                  when_false: readcode_drain_count,
+                  width: 4
+                ),
+                width: 4
+              ),
+              width: 4
+            )
+            accepted_readcode_word = CpuTracePackage.binop(
+              :&,
+              CpuTracePackage.binop(:^, request_retarget, one1, 1),
+              CpuTracePackage.binop(
+                :&,
+                CpuTracePackage.binop(:^, drain_active, one1, 1),
+                CpuTracePackage.binop(
+                  :&,
+                  readcode_word_valid,
+                  ir::Mux.new(
+                    condition: readcode_request_pending,
+                    when_true: readcode_request_armed,
+                    when_false: one1,
                     width: 1
                   ),
-                  when_false: ir::Literal.new(value: 1, width: 1),
+                  1
+                ),
+                1
+              ),
+              1
+            )
+            fill_complete = CpuTracePackage.binop(
+              :&,
+              accepted_readcode_word,
+              CpuTracePackage.binop(
+                :&,
+                readcode_burst_active,
+                CpuTracePackage.binop(:==, readcode_beat_index, seven4, 1),
+                1
+              ),
+              1
+            )
+            speculative_fill = CpuTracePackage.binop(
+              :&,
+              request_start_miss,
+              request_blocked_by_output,
+              1
+            )
+            cache_word_store_do = CpuTracePackage.binop(
+              :&,
+              CpuTracePackage.binop(:&, accepted_readcode_word, readcode_burst_active, 1),
+              CpuTracePackage.binop(
+                :&,
+                CpuTracePackage.binop(:^, request_start_hit, one1, 1),
+                CpuTracePackage.binop(:^, readcode_drop_fill, one1, 1),
+                1
+              ),
+              1
+            )
+            request_pending_next = ir::Mux.new(
+              condition: request_reset_window,
+              when_true: zero1,
+              when_false: ir::Mux.new(
+                condition: request_start_hit,
+                when_true: zero1,
+                when_false: ir::Mux.new(
+                  condition: request_retarget,
+                  when_true: one1,
+                  when_false: ir::Mux.new(
+                    condition: fill_start,
+                    when_true: one1,
+                    when_false: ir::Mux.new(
+                    condition: readcode_word_valid,
+                    when_true: ir::Mux.new(
+                      condition: accepted_readcode_word,
+                      when_true: zero1,
+                      when_false: readcode_request_pending,
+                      width: 1
+                    ),
+                    when_false: readcode_request_pending,
+                    width: 1
+                    ),
+                    width: 1
+                  ),
                   width: 1
                 ),
-                when_false: ir::Literal.new(value: 0, width: 1),
+                width: 1
+              ),
+              width: 1
+            )
+            request_addr_next = ir::Mux.new(
+              condition: request_reset_window,
+              when_true: zero32,
+              when_false: ir::Mux.new(
+                condition: request_start_miss,
+                when_true: request_line_base,
+                when_false: ir::Mux.new(
+                  condition: request_retarget,
+                  when_true: request_line_base,
+                  when_false: ir::Mux.new(
+                    condition: output_crosses_line,
+                    when_true: CpuTracePackage.binop(
+                      :+,
+                      runner_cache_base,
+                      ir::Literal.new(value: 32, width: 32),
+                      32
+                    ),
+                    when_false: readcode_request_addr,
+                    width: 32
+                  ),
+                  width: 32
+                ),
+                width: 32
+              ),
+              width: 32
+            )
+            request_armed_next = ir::Mux.new(
+              condition: request_reset_window,
+              when_true: zero1,
+              when_false: ir::Mux.new(
+                condition: CpuTracePackage.binop(:|, request_start_hit, request_retarget, 1),
+                when_true: zero1,
+                when_false: ir::Mux.new(
+                  condition: fill_start,
+                  when_true: zero1,
+                  when_false: ir::Mux.new(
+                    condition: request_pending_next,
+                    when_true: ir::Mux.new(
+                      condition: CpuTracePackage.binop(
+                        :|,
+                        CpuTracePackage.binop(:!=, drain_count_next, zero4, 1),
+                        readcode_word_valid,
+                        1
+                      ),
+                      when_true: zero1,
+                      when_false: one1,
+                      width: 1
+                    ),
+                    when_false: zero1,
+                    width: 1
+                  ),
+                  width: 1
+                ),
+                width: 1
+              ),
+              width: 1
+            )
+            drop_fill_next = ir::Mux.new(
+              condition: request_reset_window,
+              when_true: zero1,
+              when_false: ir::Mux.new(
+                condition: request_start_hit,
+                when_true: zero1,
+                when_false: ir::Mux.new(
+                  condition: request_retarget,
+                  when_true: zero1,
+                  when_false: ir::Mux.new(
+                  condition: fill_start,
+                  when_true: speculative_fill,
+                  when_false: ir::Mux.new(
+                    condition: fill_complete,
+                    when_true: zero1,
+                    when_false: readcode_drop_fill,
+                    width: 1
+                  ),
+                    width: 1
+                  ),
+                  width: 1
+                ),
+                width: 1
+              ),
+              width: 1
+            )
+            burst_active_next = ir::Mux.new(
+              condition: request_reset_window,
+              when_true: zero1,
+              when_false: ir::Mux.new(
+                condition: request_start_hit,
+                when_true: zero1,
+                when_false: ir::Mux.new(
+                  condition: request_retarget,
+                  when_true: one1,
+                  when_false: ir::Mux.new(
+                  condition: fill_start,
+                  when_true: one1,
+                  when_false: ir::Mux.new(
+                  condition: fill_complete,
+                  when_true: zero1,
+                  when_false: readcode_burst_active,
+                    width: 1
+                  ),
+                    width: 1
+                  ),
+                  width: 1
+                ),
                 width: 1
               ),
               width: 1
             )
             beat_index_next = ir::Mux.new(
-              condition: reset_window,
-              when_true: ir::Literal.new(value: 0, width: 4),
+              condition: request_reset_window,
+              when_true: zero4,
               when_false: ir::Mux.new(
-                condition: readcode_word_valid,
-                when_true: ir::Mux.new(
-                  condition: readcode_burst_active,
-                  when_true: ir::Mux.new(
-                    condition: CpuTracePackage.binop(:==, readcode_beat_index, ir::Literal.new(value: 7, width: 4), 1),
-                    when_true: ir::Literal.new(value: 0, width: 4),
-                    when_false: CpuTracePackage.binop(:+, readcode_beat_index, ir::Literal.new(value: 1, width: 4), 4),
+                condition: request_start_hit,
+                when_true: zero4,
+                when_false: ir::Mux.new(
+                  condition: request_retarget,
+                  when_true: zero4,
+                  when_false: ir::Mux.new(
+                  condition: fill_start,
+                  when_true: zero4,
+                  when_false: ir::Mux.new(
+                    condition: CpuTracePackage.binop(:&, readcode_burst_active, accepted_readcode_word, 1),
+                    when_true: ir::Mux.new(
+                      condition: CpuTracePackage.binop(:==, readcode_beat_index, seven4, 1),
+                      when_true: zero4,
+                      when_false: CpuTracePackage.binop(:+, readcode_beat_index, ir::Literal.new(value: 1, width: 4), 4),
+                      width: 4
+                    ),
+                    when_false: readcode_beat_index,
                     width: 4
                   ),
-                  when_false: ir::Literal.new(value: 1, width: 4),
+                    width: 4
+                  ),
                   width: 4
                 ),
-                when_false: ir::Literal.new(value: 0, width: 4),
                 width: 4
               ),
               width: 4
             )
+            cache_valid_next = ir::Mux.new(
+              condition: flush_window,
+              when_true: zero1,
+              when_false: ir::Mux.new(
+                condition: request_start_hit,
+                when_true: runner_cache_valid,
+                when_false: ir::Mux.new(
+                  condition: CpuTracePackage.binop(
+                    :&,
+                    fill_complete,
+                    CpuTracePackage.binop(:^, readcode_drop_fill, one1, 1),
+                    1
+                  ),
+                  when_true: one1,
+                  when_false: runner_cache_valid,
+                  width: 1
+                ),
+                width: 1
+              ),
+              width: 1
+            )
+            cache_base_next = ir::Mux.new(
+              condition: flush_window,
+              when_true: zero32,
+              when_false: ir::Mux.new(
+                condition: request_start_hit,
+                when_true: runner_cache_base,
+                when_false: ir::Mux.new(
+                  condition: CpuTracePackage.binop(
+                    :&,
+                    fill_complete,
+                    CpuTracePackage.binop(:^, readcode_drop_fill, one1, 1),
+                    1
+                  ),
+                  when_true: readcode_request_addr,
+                  when_false: runner_cache_base,
+                  width: 32
+                ),
+                width: 32
+              ),
+              width: 32
+            )
+            outputs_remaining_next = ir::Mux.new(
+              condition: flush_window,
+              when_true: zero3,
+              when_false: ir::Mux.new(
+                condition: CpuTracePackage.binop(
+                  :|,
+                  CpuTracePackage.binop(:|, request_start_hit, request_start_miss, 1),
+                  request_retarget,
+                  1
+                ),
+                when_true: four3,
+                when_false: ir::Mux.new(
+                  condition: runner_output_active,
+                  when_true: CpuTracePackage.binop(:-, runner_outputs_remaining, one3, 3),
+                  when_false: runner_outputs_remaining,
+                  width: 3
+                ),
+                width: 3
+              ),
+              width: 3
+            )
+            output_active_next = ir::Mux.new(
+              condition: flush_window,
+              when_true: zero1,
+              when_false: ir::Mux.new(
+                condition: CpuTracePackage.binop(
+                  :|,
+                  request_start_hit,
+                  CpuTracePackage.binop(
+                    :&,
+                    fill_complete,
+                    CpuTracePackage.binop(:^, readcode_drop_fill, one1, 1),
+                    1
+                  ),
+                  1
+                ),
+                when_true: one1,
+                when_false: ir::Mux.new(
+                  condition: runner_output_active,
+                  when_true: ir::Mux.new(
+                    condition: CpuTracePackage.binop(:|, output_last_word, output_crosses_line, 1),
+                    when_true: zero1,
+                    when_false: one1,
+                    width: 1
+                  ),
+                  when_false: runner_output_active,
+                  width: 1
+                ),
+                width: 1
+              ),
+              width: 1
+            )
+            output_index_next = ir::Mux.new(
+              condition: flush_window,
+              when_true: zero4,
+              when_false: ir::Mux.new(
+                condition: CpuTracePackage.binop(
+                  :|,
+                  CpuTracePackage.binop(:|, request_start_hit, request_start_miss, 1),
+                  request_retarget,
+                  1
+                ),
+                when_true: request_start_index,
+                when_false: ir::Mux.new(
+                  condition: fill_complete,
+                  when_true: runner_output_index,
+                  when_false: ir::Mux.new(
+                    condition: runner_output_active,
+                    when_true: ir::Mux.new(
+                      condition: output_last_word,
+                      when_true: zero4,
+                      when_false: ir::Mux.new(
+                        condition: output_crosses_line,
+                        when_true: zero4,
+                        when_false: CpuTracePackage.binop(:+, runner_output_index, ir::Literal.new(value: 1, width: 4), 4),
+                        width: 4
+                      ),
+                      width: 4
+                    ),
+                    when_false: runner_output_index,
+                    width: 4
+                  ),
+                  width: 4
+                ),
+                width: 4
+              ),
+                width: 4
+            )
+            selected_cache_word = cache_words.each_with_index.to_a.reverse.reduce(nil) do |expr, (signal, index)|
+              expr ||= signal
+              ir::Mux.new(
+                condition: CpuTracePackage.binop(:==, runner_output_index, ir::Literal.new(value: index, width: 4), 1),
+                when_true: signal,
+                when_false: expr,
+                width: 32
+              )
+            end
+            cpu_visible_word = CpuTracePackage.binop(
+              :&,
+              runner_output_active,
+              CpuTracePackage.binop(:^, pr_reset_expr, one1, 1),
+              1
+            )
             mod.instances.reject! { |entry| entry.name.to_s == 'l1_icache_inst' }
-            mod.assigns << CpuTracePackage.assign(mem_req_name, cpu_req_expr)
-            mod.assigns << CpuTracePackage.assign(mem_addr_name, cpu_addr_expr)
+            mod.assigns << CpuTracePackage.assign(mem_req_name, readcode_request_pending)
+            mod.assigns << CpuTracePackage.assign(mem_addr_name, readcode_request_addr)
             mod.assigns << CpuTracePackage.assign(cpu_valid_name, cpu_visible_word)
-            mod.assigns << CpuTracePackage.assign(cpu_data_name, CpuTracePackage.signal('readcode_partial', 32))
+            mod.assigns << CpuTracePackage.assign(cpu_data_name, selected_cache_word)
             mod.assigns << CpuTracePackage.assign(
               cpu_done_name,
               CpuTracePackage.binop(
                 :|,
-                cpu_done_complete,
-                reset_combined_expr,
+                output_last_word,
+                CpuTracePackage.binop(:|, pr_reset_expr, reset_prefetch_expr, 1),
                 1
               )
             )
@@ -171,10 +612,53 @@ module RHDL
               clocked: true,
               clock: 'clk',
               statements: [
+                ir::SeqAssign.new(target: 'runner_readcode_drain_count', expr: drain_count_next),
+                ir::SeqAssign.new(target: 'runner_readcode_request_pending', expr: request_pending_next),
+                ir::SeqAssign.new(target: 'runner_readcode_request_armed', expr: request_armed_next),
+                ir::SeqAssign.new(target: 'runner_readcode_request_addr', expr: request_addr_next),
+                ir::SeqAssign.new(target: 'runner_readcode_drop_fill', expr: drop_fill_next),
                 ir::SeqAssign.new(target: 'runner_readcode_burst_active', expr: burst_active_next),
-                ir::SeqAssign.new(target: 'runner_readcode_beat_index', expr: beat_index_next)
+                ir::SeqAssign.new(target: 'runner_readcode_beat_index', expr: beat_index_next),
+                ir::SeqAssign.new(target: 'runner_cache_valid', expr: cache_valid_next),
+                ir::SeqAssign.new(target: 'runner_cache_base', expr: cache_base_next),
+                ir::SeqAssign.new(target: 'runner_output_active', expr: output_active_next),
+                ir::SeqAssign.new(target: 'runner_output_index', expr: output_index_next),
+                ir::SeqAssign.new(target: 'runner_outputs_remaining', expr: outputs_remaining_next)
               ]
             )
+            cache_words.each_with_index do |signal, index|
+              mod.processes << ir::Process.new(
+                name: "runner_icache_cache_word_#{index}",
+                clocked: true,
+                clock: 'clk',
+                statements: [
+                  ir::SeqAssign.new(
+                    target: signal.name.to_s,
+                    expr: ir::Mux.new(
+                      condition: flush_window,
+                      when_true: zero32,
+                      when_false: ir::Mux.new(
+                        condition: CpuTracePackage.binop(
+                          :&,
+                          cache_word_store_do,
+                          CpuTracePackage.binop(
+                            :==,
+                            readcode_beat_index,
+                            ir::Literal.new(value: index, width: 4),
+                            1
+                          ),
+                          1
+                        ),
+                        when_true: readcode_partial_expr,
+                        when_false: signal,
+                        width: 32
+                      ),
+                      width: 32
+                    )
+                  )
+                ]
+              )
+            end
           end
 
           def patch_prefetch_fifo_runner_model!(modules)
@@ -306,6 +790,9 @@ module RHDL
             )
             mod.assigns << CpuTracePackage.assign('prefetchfifo_accept_empty', accept_empty)
 
+            # Match the reference prefetch FIFO reset contract: reset_prefetch
+            # realigns the icache/prefetch window, but it must not discard
+            # already queued fetch bytes.
             reset_fifo = CpuTracePackage.binop(
               :|,
               CpuTracePackage.binop(:^, rst_n, one1, 1),
@@ -459,20 +946,7 @@ module RHDL
               width: 32
             )
             cs_base_prefetch_linear = CpuTracePackage.binop(:+, cs_base, prefetch_eip, 32)
-            delivered_accept_linear = CpuTracePackage.binop(:+, delivered_eip, accepted_length_ext, 32)
             linear_advance = CpuTracePackage.binop(:+, linear, current_length_ext, 32)
-            reset_prefetch_linear = ir::Mux.new(
-              condition: prefetched_accept_do_1,
-              when_true: delivered_accept_linear,
-              when_false: delivered_eip,
-              width: 32
-            )
-            delivered_hold_or_accept = ir::Mux.new(
-              condition: prefetched_accept_do_1,
-              when_true: delivered_accept_linear,
-              when_false: delivered_eip,
-              width: 32
-            )
             linear_next = ir::Mux.new(
               condition: CpuTracePackage.binop(:^, rst_n, one1, 1),
               when_true: startup_linear,
@@ -481,7 +955,12 @@ module RHDL
                 when_true: cs_base_prefetch_linear,
                 when_false: ir::Mux.new(
                   condition: reset_prefetch,
-                  when_true: reset_prefetch_linear,
+                  when_true: ir::Mux.new(
+                    condition: prefetched_accept_do_1,
+                    when_true: CpuTracePackage.binop(:+, delivered_eip, accepted_length_ext, 32),
+                    when_false: delivered_eip,
+                    width: 32
+                  ),
                   when_false: ir::Mux.new(
                     condition: prefetched_do,
                     when_true: linear_advance,
@@ -501,9 +980,9 @@ module RHDL
                 condition: pr_reset,
                 when_true: cs_base_prefetch_linear,
                 when_false: ir::Mux.new(
-                  condition: reset_prefetch,
-                  when_true: delivered_hold_or_accept,
-                  when_false: delivered_hold_or_accept,
+                  condition: prefetched_accept_do_1,
+                  when_true: CpuTracePackage.binop(:+, delivered_eip, accepted_length_ext, 32),
+                  when_false: delivered_eip,
                   width: 32
                 ),
                 width: 32
@@ -627,49 +1106,46 @@ module RHDL
             mod.assigns << CpuTracePackage.assign('prefetchfifo_signal_limit_do', signal_limit_do)
           end
 
-          def patch_execute_call_relative_target!(modules)
-            mod = CpuTracePackage.find_module!(modules, 'execute')
-            assign = mod.assigns.find { |entry| entry.target.to_s == 'exe_glob_param_2_value' }
-            raise KeyError, "Assign target 'exe_glob_param_2_value' not found in module '#{mod.name}'" unless assign
+          def patch_memory_runner_bridges!(modules)
+            mod = CpuTracePackage.find_module!(modules, 'memory')
 
-            ir = RHDL::Codegen::CIRCT::IR
-            cmd_call = CpuTracePackage.binop(
-              :==,
-              CpuTracePackage.signal('exe_cmd', 7),
-              ir::Literal.new(value: 3, width: 7),
-              1
-            )
-            cmdex_call_jv = CpuTracePackage.binop(
-              :==,
-              CpuTracePackage.signal('exe_cmdex', 4),
-              ir::Literal.new(value: 1, width: 4),
-              1
-            )
-            near_call_rel = CpuTracePackage.binop(:&, cmd_call, cmdex_call_jv, 1)
-            consumed_ext = ir::Concat.new(
-              parts: [
-                ir::Literal.new(value: 0, width: 28),
-                CpuTracePackage.signal('exe_consumed', 4)
+            {
+              'icache_inst' => %w[
+                reset_prefetch
+                readcode_do
+                readcode_address
+                prefetchfifo_write_do
+                prefetchfifo_write_data
+                prefetched_do
+                prefetched_length
               ],
-              width: 32
-            )
-            corrected_target = CpuTracePackage.binop(
-              :+,
-              CpuTracePackage.binop(:+, assign.expr, consumed_ext, 32),
-              ir::Literal.new(value: 1, width: 32),
-              32
-            )
-            original_expr = assign.expr
+              'prefetch_inst' => %w[
+                prefetch_address
+                prefetch_length
+                prefetch_su
+                prefetchfifo_signal_limit_do
+                delivered_eip
+              ],
+              'prefetch_fifo_inst' => %w[
+                prefetchfifo_used
+                prefetchfifo_accept_data
+                prefetchfifo_accept_empty
+              ]
+            }.each do |instance_name, ports|
+              inst = CpuTracePackage.find_instance!(mod, instance_name)
+              ports.each do |port_name|
+                mod.assigns.reject! { |assign| assign.target.to_s == port_name }
+                mod.assigns << CpuTracePackage.assign(port_name, CpuTracePackage.connection_signal!(inst, port_name))
+              end
+            end
+          end
 
-            assign.instance_variable_set(
-              :@expr,
-              ir::Mux.new(
-                condition: near_call_rel,
-                when_true: corrected_target,
-                when_false: original_expr,
-                width: 32
-              )
-            )
+          def patch_execute_call_relative_target!(modules)
+            nil
+          end
+
+          def patch_execute_call_return_push!(modules)
+            nil
           end
 
         end

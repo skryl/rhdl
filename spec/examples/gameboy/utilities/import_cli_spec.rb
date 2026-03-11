@@ -32,6 +32,7 @@ RSpec.describe RHDL::Examples::GameBoy::CLI do
       expect(status).to eq(0)
       expect(stderr.string).to eq('')
       expect(stdout.string).to include('--hdl-dir DIR')
+      expect(stdout.string).to include('--verilog-dir DIR')
       expect(stdout.string).to include('--top NAME')
       expect(stdout.string).to include('--use-staged-verilog')
     end
@@ -231,14 +232,15 @@ RSpec.describe RHDL::Examples::GameBoy::CLI do
       end
 
       status = described_class.run(
-        %w[--mode verilog --hdl-dir examples/gameboy/import --top gb --use-staged-verilog --pop --headless --cycles 7],
+        %w[--mode verilog --verilog-dir examples/gameboy/import --top Gameboy --use-staged-verilog --pop --headless --cycles 7],
         out: stdout,
         err: stderr,
         run_task_class: fake_run_task_class
       )
 
       expect(status).to eq(0)
-      expect(fake_run_task_class.last_options[:top]).to eq('gb')
+      expect(fake_run_task_class.last_options[:verilog_dir]).to eq(File.expand_path('examples/gameboy/import', Dir.pwd))
+      expect(fake_run_task_class.last_options[:top]).to eq('Gameboy')
       expect(fake_run_task_class.last_options[:use_staged_verilog]).to eq(true)
     end
   end

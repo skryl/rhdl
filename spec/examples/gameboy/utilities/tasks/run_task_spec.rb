@@ -180,6 +180,40 @@ RSpec.describe RHDL::Examples::GameBoy::Tasks::RunTask do
       custom.run
       expect(custom.runner.hdl_dir).to eq('/tmp/gameboy_import')
     end
+
+    it 'passes verilog_dir override to HeadlessRunner for direct Verilator runs' do
+      require_relative '../../../../../examples/gameboy/utilities/runners/headless_runner'
+
+      fake_headless_runner = instance_double(
+        'RHDL::Examples::GameBoy::HeadlessRunner',
+        load_rom: nil,
+        reset: nil,
+        run_steps: nil,
+        cpu_state: { pc: 0x1234, a: 0x56, cycles: 1 }
+      )
+      allow(RHDL::Examples::GameBoy::HeadlessRunner).to receive(:new).and_return(fake_headless_runner)
+
+      custom = described_class.new(
+        headless: true,
+        demo: true,
+        mode: :verilog,
+        cycles: 1,
+        verilog_dir: '/tmp/gameboy_import',
+        top: 'Gameboy',
+        use_staged_verilog: true
+      )
+
+      custom.run
+
+      expect(RHDL::Examples::GameBoy::HeadlessRunner).to have_received(:new).with(
+        mode: :verilog,
+        sim: :ruby,
+        hdl_dir: nil,
+        verilog_dir: '/tmp/gameboy_import',
+        top: 'Gameboy',
+        use_staged_verilog: true
+      )
+    end
   end
 
   describe 'PC progression' do

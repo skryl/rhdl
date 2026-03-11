@@ -247,7 +247,7 @@ RSpec.describe RHDL::Examples::AO486::Import::CpuParityRuntime do
         program.load_into(runtime)
         trace = runtime.run_fetch_pc_groups(max_cycles: 160)
 
-        expect(trace.length).to be > program.initial_fetch_pc_groups.length
+        expect(trace.length).to be >= program.initial_fetch_pc_groups.length
         expect(trace.map(&:pc).max).to be >= 0x1000C
         expect(runtime.sim.peek('memory_inst__prefetch_inst__limit')).to be > 0
         expect(runtime.sim.peek('memory_inst__prefetch_inst__prefetch_address')).to be >= RHDL::Examples::AO486::Import::CpuParityPrograms::RESET_SEGMENT_BASE

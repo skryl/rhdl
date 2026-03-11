@@ -33,7 +33,7 @@ module RHDL
           ].freeze
           TRACE_WORDS = 6
           FAULT_WORDS = 4
-	          DEBUG_WORDS = 144
+          DEBUG_WORDS = 287
 
           attr_reader :top_module
 
@@ -66,9 +66,13 @@ module RHDL
           def load_images(boot_image:, program_image:)
             @sim_clear_memory_fn.call(@sim_ctx)
             load_flash(boot_image, base_addr: Integration::FLASH_BOOT_BASE)
-            # The staged s1_top still fetches its reset vector from low DRAM.
-            # Mirror the boot shim there until the flash alias is wired end to end.
+            # The low-address fast-boot alias models the uncached boot-prom
+            # path, so it must serve the boot shim rather than the DRAM
+            # resident benchmark image. The shim is linked at 0x8000, so we
+            # mirror it there as well for any startup path that resolves the
+            # PROM window back into low DRAM instead of the flash aperture.
             load_memory(boot_image, base_addr: 0)
+            load_memory(boot_image, base_addr: Integration::BOOT_PROM_ALIAS_BASE)
             load_memory(program_image, base_addr: Integration::PROGRAM_BASE)
             reset!
             self
@@ -141,12 +145,12 @@ module RHDL
             end
           end
 
-	          def debug_snapshot
-	            buffer = Fiddle::Pointer.malloc(DEBUG_WORDS * 8)
-	            copied = @sim_copy_debug_snapshot_fn.call(@sim_ctx, buffer, DEBUG_WORDS).to_i
-	            words = unpack_u64_words(buffer, copied).fill(0, copied...DEBUG_WORDS)
+          def debug_snapshot
+            buffer = Fiddle::Pointer.malloc(DEBUG_WORDS * 8)
+            copied = @sim_copy_debug_snapshot_fn.call(@sim_ctx, buffer, DEBUG_WORDS).to_i
+            words = unpack_u64_words(buffer, copied).fill(0, copied...DEBUG_WORDS)
 
-	            {
+            {
               reset: {
                 cycle_counter: words[0],
                 sys_reset_final: !words[1].zero?,
@@ -155,21 +159,29 @@ module RHDL
                 cmp_arst_l: !words[4].zero?,
                 gdbginit_l: !words[5].zero?
               },
-	              bridge: {
-	                state: words[6],
-	                cpu: words[7],
-	                cpx_ready: !words[8].zero?,
-	                pcx_req_d: words[9],
-	                pcx_packet_type: words[10],
-	                cpx_two_packet: !words[11].zero?
-	              },
-	              bridge_capture: decode_bridge_capture_debug(words, 100),
-	              core0: decode_core_debug(words, 12, 40),
-	              core0_ifq: decode_ifq_debug(words, 112),
-	              core0_ifq_fill: decode_ifq_fill_debug(words, 124),
-	              core1: decode_core_debug(words, 26, 70)
-	            }
-	          end
+              bridge: {
+                state: words[6],
+                cpu: words[7],
+                cpx_ready: !words[8].zero?,
+                pcx_req_d: words[9],
+                pcx_packet_type: words[10],
+                cpx_two_packet: !words[11].zero?
+              },
+              bridge_capture: decode_bridge_capture_debug(words, 100),
+              core0: decode_core_debug(words, 12, 40),
+              core0_ifq: decode_ifq_debug(words, 112),
+              core0_ifq_fill: decode_ifq_fill_debug(words, 124),
+              core0_branch: decode_branch_debug(words, 150),
+              core0_ifq_mode: decode_ifq_mode_debug(words, 157),
+              core0_ifq_packet: decode_ifq_packet_debug(words, 164),
+              core0_store: decode_store_debug(words, 175),
+              core0_irf: decode_irf_debug(words, 185),
+              core0_fcl: decode_fcl_debug(words, 231),
+              core0_tlu: decode_tlu_debug(words, 243),
+              core0_lsu_ingress: decode_lsu_ingress_debug(words, 252),
+              core1: decode_core_debug(words, 26, 70)
+            }
+          end
 
           def self.finalizer(sim_destroy, sim_ctx)
             proc do
@@ -267,6 +279,8 @@ module RHDL
 
               namespace {
               constexpr std::uint64_t kFlashBootBase = 0x#{Integration::FLASH_BOOT_BASE.to_s(16).upcase}ULL;
+              constexpr std::uint64_t kMailboxStatus = 0x#{Integration::MAILBOX_STATUS.to_s(16).upcase}ULL;
+              constexpr std::uint64_t kMailboxValue = 0x#{Integration::MAILBOX_VALUE.to_s(16).upcase}ULL;
               constexpr std::uint64_t kPhysicalAddrMask = 0x#{Integration::PHYSICAL_ADDR_MASK.to_s(16).upcase}ULL;
               constexpr std::uint64_t kTraceOpRead = 0;
               constexpr std::uint64_t kTraceOpWrite = 1;
@@ -303,6 +317,7 @@ module RHDL
                 #{@verilator_prefix}* dut;
                 std::unordered_map<std::uint64_t, std::uint8_t> flash;
                 std::unordered_map<std::uint64_t, std::uint8_t> dram;
+                std::unordered_map<std::uint64_t, std::uint8_t> mailbox_mmio;
                 std::vector<WishboneTraceRecord> trace;
                 std::vector<FaultRecord> faults;
                 PendingResponse pending_response;
@@ -319,6 +334,12 @@ module RHDL
                 return canonical_bus_addr(addr) >= kFlashBootBase;
               }
 
+              bool is_mailbox_mmio_addr(std::uint64_t addr) {
+                const std::uint64_t physical = canonical_bus_addr(addr);
+                return (physical >= kMailboxStatus && physical < (kMailboxStatus + 8ULL)) ||
+                       (physical >= kMailboxValue && physical < (kMailboxValue + 8ULL));
+              }
+
               bool is_dram_addr(std::uint64_t addr) {
                 return canonical_bus_addr(addr) < kFlashBootBase;
               }
@@ -332,8 +353,17 @@ module RHDL
                 return it == ctx->dram.end() ? 0 : it->second;
               }
 
+              std::uint8_t read_mailbox_mmio_byte(SimContext* ctx, std::uint64_t addr) {
+                auto it = ctx->mailbox_mmio.find(addr);
+                return it == ctx->mailbox_mmio.end() ? 0 : it->second;
+              }
+
               bool read_mapped_byte(SimContext* ctx, std::uint64_t addr, std::uint8_t* out) {
                 const std::uint64_t physical = canonical_bus_addr(addr);
+                if (is_mailbox_mmio_addr(physical)) {
+                  *out = read_mailbox_mmio_byte(ctx, physical);
+                  return true;
+                }
                 if (is_flash_addr(physical)) {
                   auto it = ctx->flash.find(physical);
                   *out = it == ctx->flash.end() ? 0 : it->second;
@@ -348,20 +378,20 @@ module RHDL
 
               std::uint64_t read_wishbone_word(SimContext* ctx, std::uint64_t addr, std::uint64_t sel, bool* mapped) {
                 std::uint64_t value = 0;
-                bool any_mapped = false;
+                bool any_selected = false;
                 for (int lane = 0; lane < 8; ++lane) {
-                  if (!lane_selected(sel, lane)) {
-                    continue;
-                  }
                   std::uint8_t byte = 0;
                   if (!read_mapped_byte(ctx, addr + static_cast<std::uint64_t>(lane), &byte)) {
-                    if (mapped) *mapped = false;
-                    return 0;
+                    if (lane_selected(sel, lane)) {
+                      if (mapped) *mapped = false;
+                      return 0;
+                    }
+                    byte = 0;
                   }
                   value |= static_cast<std::uint64_t>(byte) << ((7 - lane) * 8);
-                  any_mapped = true;
+                  any_selected = any_selected || lane_selected(sel, lane);
                 }
-                if (mapped) *mapped = any_mapped;
+                if (mapped) *mapped = any_selected;
                 return value;
               }
 
@@ -372,6 +402,12 @@ module RHDL
                     continue;
                   }
                   std::uint64_t byte_addr = canonical_bus_addr(addr + static_cast<std::uint64_t>(lane));
+                  if (is_mailbox_mmio_addr(byte_addr)) {
+                    std::uint8_t byte = static_cast<std::uint8_t>((data >> ((7 - lane) * 8)) & 0xFFULL);
+                    ctx->mailbox_mmio[byte_addr] = byte;
+                    any_mapped = true;
+                    continue;
+                  }
                   if (is_flash_addr(byte_addr)) {
                     return false;
                   }
@@ -634,9 +670,159 @@ module RHDL
 	                if (count > 141) out_words[141] = root->s1_top__DOT__cpx_spc_data_cx2[4U];
 	                if (count > 142) out_words[142] = root->s1_top__DOT__os2wb_inst__DOT__cpx_packet_1[4U];
 	                if (count > 143) out_words[143] = root->s1_top__DOT__os2wb_inst__DOT__cpx_packet_2[4U];
+	                if (count > 144) out_words[144] = root->s1_top__DOT__sparc_0__DOT__ifu__DOT__ifqctl__DOT__next_wrreq_i2;
+	                if (count > 145) out_words[145] = root->s1_top__DOT__sparc_0__DOT__ifu__DOT__ifqctl__DOT__mil_vld_i2;
+                if (count > 146) out_words[146] = root->s1_top__DOT__sparc_0__DOT__ifu__DOT__ifqctl__DOT__uncached_fill_i2;
+                if (count > 147) out_words[147] = root->s1_top__DOT__sparc_0__DOT__ifu__DOT__ifqctl__DOT__ifd_ifc_4bpkt_i2;
+                if (count > 148) out_words[148] = root->s1_top__DOT__sparc_0__DOT__ifu__DOT__ifqctl__DOT__ifq_fcl_wrreq_bf;
+                if (count > 149) out_words[149] = root->s1_top__DOT__sparc_0__DOT__ifu__DOT__ifqctl__DOT__inq_wayvld_i1;
+                if (count > 150) out_words[150] = root->s1_top__DOT__sparc_0__DOT__ifu__DOT__fcl__DOT__brtaken_buf_e;
+                if (count > 151) out_words[151] = root->s1_top__DOT__sparc_0__DOT__ifu__DOT__fcl__DOT__load_bpc;
+                if (count > 152) out_words[152] = root->s1_top__DOT__sparc_0__DOT__ifu__DOT__fcl__DOT__load_pcp4;
+                if (count > 153) out_words[153] = root->s1_top__DOT__sparc_0__DOT__ifu__DOT__fcl__DOT__fcl_fdp_tpcbf_sel_brpc_bf_l;
+                if (count > 154) out_words[154] = root->s1_top__DOT__sparc_0__DOT__ifu__DOT__fcl__DOT__fcl_fdp_tpcbf_sel_pcp4_bf_l;
+                if (count > 155) out_words[155] = root->s1_top__DOT__sparc_0__DOT__ifu__DOT__exu_ifu_brpc_e;
+                if (count > 156) out_words[156] = root->s1_top__DOT__sparc_0__DOT__ifu__DOT__fdp__DOT__t0npc_bf;
+                if (count > 157) out_words[157] = root->s1_top__DOT__sparc_0__DOT__ifu__DOT__ifqctl__DOT__ifc_ifd_uncached_e;
+                if (count > 158) out_words[158] = root->s1_top__DOT__sparc_0__DOT__ifu__DOT__ifqctl__DOT__ifd_ifc_cpxnc_i2;
+                if (count > 159) out_words[159] = root->s1_top__DOT__sparc_0__DOT__ifu__DOT__ifqctl__DOT__mil_nc_i2;
+                if (count > 160) out_words[160] = root->s1_top__DOT__os2wb_inst__DOT__wb_addr;
+                if (count > 161) out_words[161] = (static_cast<QData>(root->s1_top__DOT__os2wb_inst__DOT__pcx_packet_d[3U] & 0xffU) << 32U) |
+                                                   static_cast<QData>(root->s1_top__DOT__os2wb_inst__DOT__pcx_packet_d[2U]);
+                if (count > 162) out_words[162] = root->s1_top__DOT__os2wb_inst__DOT__pcx_packet_d[2U] & 0xfU;
+                if (count > 163) out_words[163] = root->s1_top__DOT__os2wb_inst__DOT__pcx_packet_d[3U];
+                if (count > 164) out_words[164] = root->s1_top__DOT__sparc_0__DOT__ifu__DOT__fdp_icd_vaddr_bf;
+                if (count > 165) out_words[165] = root->s1_top__DOT__sparc_0__DOT__ifu__DOT__itlb_ifq_paddr_s;
+                if (count > 166) out_words[166] = root->s1_top__DOT__sparc_0__DOT__ifu__DOT__ifqdp__DOT__fdp_ifq_paddr_f;
+                if (count > 167) out_words[167] = root->s1_top__DOT__sparc_0__DOT__ifu__DOT__ifqdp__DOT__imiss_paddr_s;
+                if (count > 168) out_words[168] = root->s1_top__DOT__sparc_0__DOT__ifu__DOT__ifqdp__DOT__mil_entry0;
+                if (count > 169) out_words[169] = root->s1_top__DOT__sparc_0__DOT__ifu__DOT__ifqdp__DOT__mil_pcxreq_d;
+                if (count > 170) out_words[170] = root->s1_top__DOT__sparc_0__DOT__ifu__DOT__ifqdp__DOT__pcxreq_d;
+                if (count > 171) out_words[171] = root->s1_top__DOT__sparc_0__DOT__ifu__DOT__ifqdp__DOT__pcxreq_e;
+                if (count > 172) out_words[172] = root->s1_top__DOT__sparc_0__DOT__ifu__DOT__ifu_lsu_pcxpkt_e;
+                if (count > 173) out_words[173] = root->s1_top__DOT__sparc_0__DOT__ifu__DOT__ifqctl__DOT__ifc_ifd_pcxline_adj_d;
+                if (count > 174) out_words[174] = root->s1_top__DOT__sparc_0__DOT__ifu__DOT__ifqdp__DOT__ifd_ifc_pcxline_d;
+                if (count > 175) out_words[175] = root->s1_top__DOT__sparc_0__DOT__ifu__DOT__imd__DOT__dtu_inst_d;
+                if (count > 176) out_words[176] = root->s1_top__DOT__sparc_0__DOT__ifu__DOT__imd__DOT__ifu_exu_imm_data_d;
+                if (count > 177) out_words[177] = root->s1_top__DOT__sparc_0__DOT__ifu__DOT__ifu_exu_sethi_inst_d;
+                if (count > 178) out_words[178] = root->s1_top__DOT__sparc_0__DOT__lsu__DOT__ifu_lsu_st_inst_e;
+                if (count > 179) out_words[179] = root->s1_top__DOT__sparc_0__DOT__lsu__DOT__exu_lsu_ldst_va_e;
+                if (count > 180) out_words[180] = root->s1_top__DOT__sparc_0__DOT__lsu__DOT__lsu_ldst_va_m_buf;
+                if (count > 181) out_words[181] = root->s1_top__DOT__sparc_0__DOT__exu__DOT__byp_alu_rs1_data_e;
+                if (count > 182) out_words[182] = root->s1_top__DOT__sparc_0__DOT__exu__DOT__exu_lsu_rs2_data_e;
+                if (count > 183) out_words[183] = root->s1_top__DOT__sparc_0__DOT__exu__DOT__ecl_irf_wen_w;
+                if (count > 184) out_words[184] = root->s1_top__DOT__sparc_0__DOT__exu__DOT__ecl_irf_wen_w2;
+                if (count > 185) out_words[185] = root->s1_top__DOT__sparc_0__DOT__exu__DOT__irf__DOT__bw_r_irf_core__DOT__wr_en;
+                if (count > 186) out_words[186] = root->s1_top__DOT__sparc_0__DOT__exu__DOT__irf__DOT__bw_r_irf_core__DOT__wr_en2;
+                if (count > 187) out_words[187] = root->s1_top__DOT__sparc_0__DOT__exu__DOT__irf__DOT__bw_r_irf_core__DOT__thr_rd_w_neg;
+                if (count > 188) out_words[188] = root->s1_top__DOT__sparc_0__DOT__exu__DOT__irf__DOT__bw_r_irf_core__DOT__thr_rd_w2_neg;
+                if (count > 189) out_words[189] = root->s1_top__DOT__sparc_0__DOT__exu__DOT__irf__DOT__bw_r_irf_core__DOT__wren;
+                if (count > 190) out_words[190] = root->s1_top__DOT__sparc_0__DOT__exu__DOT__irf__DOT__bw_r_irf_core__DOT__wr_addr;
+                if (count > 191) out_words[191] = (static_cast<QData>(root->s1_top__DOT__sparc_0__DOT__exu__DOT__irf__DOT__bw_r_irf_core__DOT__wr_data0[1U]) << 32U) |
+                                                   static_cast<QData>(root->s1_top__DOT__sparc_0__DOT__exu__DOT__irf__DOT__bw_r_irf_core__DOT__wr_data0[0U]);
+                if (count > 192) out_words[192] = root->s1_top__DOT__sparc_0__DOT__exu__DOT__irf__DOT__bw_r_irf_core__DOT__wr_data0[2U] & 0xFFU;
+                if (count > 193) out_words[193] = (static_cast<QData>(root->s1_top__DOT__sparc_0__DOT__exu__DOT__irf__DOT__bw_r_irf_core__DOT__wr_data1[1U]) << 32U) |
+                                                   static_cast<QData>(root->s1_top__DOT__sparc_0__DOT__exu__DOT__irf__DOT__bw_r_irf_core__DOT__wr_data1[0U]);
+                if (count > 194) out_words[194] = root->s1_top__DOT__sparc_0__DOT__exu__DOT__irf__DOT__bw_r_irf_core__DOT__wr_data1[2U] & 0xFFU;
+                if (count > 195) out_words[195] = (static_cast<QData>(root->s1_top__DOT__sparc_0__DOT__exu__DOT__irf__DOT__bw_r_irf_core__DOT__rd_data02[1U]) << 32U) |
+                                                   static_cast<QData>(root->s1_top__DOT__sparc_0__DOT__exu__DOT__irf__DOT__bw_r_irf_core__DOT__rd_data02[0U]);
+                if (count > 196) out_words[196] = root->s1_top__DOT__sparc_0__DOT__exu__DOT__irf__DOT__bw_r_irf_core__DOT__rd_data02[2U] & 0xFFU;
+                if (count > 197) out_words[197] = (static_cast<QData>(root->s1_top__DOT__sparc_0__DOT__exu__DOT__irf__DOT__bw_r_irf_core__DOT__rd_data03[1U]) << 32U) |
+                                                   static_cast<QData>(root->s1_top__DOT__sparc_0__DOT__exu__DOT__irf__DOT__bw_r_irf_core__DOT__rd_data03[0U]);
+                if (count > 198) out_words[198] = root->s1_top__DOT__sparc_0__DOT__exu__DOT__irf__DOT__bw_r_irf_core__DOT__rd_data03[2U] & 0xFFU;
+                if (count > 199) out_words[199] = root->s1_top__DOT__sparc_0__DOT__exu__DOT__rml_irf_old_agp;
+                if (count > 200) out_words[200] = root->s1_top__DOT__sparc_0__DOT__exu__DOT__rml_irf_new_agp;
+                if (count > 201) out_words[201] = root->s1_top__DOT__sparc_0__DOT__exu__DOT__rml_irf_swap_global;
+                if (count > 202) out_words[202] = root->s1_top__DOT__sparc_0__DOT__exu__DOT__rml_irf_swap_local_e;
+                if (count > 203) out_words[203] = root->s1_top__DOT__sparc_0__DOT__exu__DOT__rml_irf_global_tid;
+                if (count > 204) out_words[204] = root->s1_top__DOT__sparc_0__DOT__exu__DOT__rml_irf_cwpswap_tid_e;
+                if (count > 205) out_words[205] = root->s1_top__DOT__sparc_0__DOT__exu__DOT__tlu_exu_agp;
+                if (count > 206) out_words[206] = root->s1_top__DOT__sparc_0__DOT__exu__DOT__tlu_exu_agp_swap;
+                if (count > 207) out_words[207] = root->s1_top__DOT__sparc_0__DOT__exu__DOT__tlu_exu_agp_tid;
+                if (count > 208) out_words[208] = root->s1_top__DOT__sparc_0__DOT__exu__DOT__rml_irf_swap_even_e;
+                if (count > 209) out_words[209] = root->s1_top__DOT__sparc_0__DOT__exu__DOT__rml_irf_swap_odd_e;
+                if (count > 210) out_words[210] = root->s1_top__DOT__sparc_0__DOT__exu__DOT__irf__DOT__ifu_exu_ren1_d;
+                if (count > 211) out_words[211] = root->s1_top__DOT__sparc_0__DOT__exu__DOT__irf__DOT__ifu_exu_ren2_d;
+                if (count > 212) out_words[212] = root->s1_top__DOT__sparc_0__DOT__exu__DOT__irf__DOT__thr_rs1;
+                if (count > 213) out_words[213] = root->s1_top__DOT__sparc_0__DOT__exu__DOT__irf__DOT__thr_rs2;
+                if (count > 214) out_words[214] = root->s1_top__DOT__sparc_0__DOT__exu__DOT__irf__DOT__thr_rs3;
+                if (count > 215) out_words[215] = root->s1_top__DOT__sparc_0__DOT__exu__DOT__irf__DOT__bw_r_irf_core__DOT__swap_global_d1_vld;
+                if (count > 216) out_words[216] = root->s1_top__DOT__sparc_0__DOT__exu__DOT__irf__DOT__bw_r_irf_core__DOT__swap_global_d2;
+                if (count > 217) out_words[217] = root->s1_top__DOT__sparc_0__DOT__exu__DOT__irf__DOT__ecl_irf_tid_w;
+                if (count > 218) out_words[218] = root->s1_top__DOT__sparc_0__DOT__exu__DOT__irf__DOT__ecl_irf_tid_w2;
+                if (count > 219) out_words[219] = root->s1_top__DOT__sparc_0__DOT__exu__DOT__irf__DOT__ecl_irf_rd_w;
+                if (count > 220) out_words[220] = root->s1_top__DOT__sparc_0__DOT__exu__DOT__irf__DOT__ecl_irf_rd_w2;
+                if (count > 221) out_words[221] = root->s1_top__DOT__sparc_0__DOT__exu__DOT__irf__DOT__thr_rd_w;
+                if (count > 222) out_words[222] = root->s1_top__DOT__sparc_0__DOT__exu__DOT__irf__DOT__thr_rd_w2;
+                if (count > 223) out_words[223] = root->s1_top__DOT__sparc_0__DOT__exu__DOT__irf__DOT__bw_r_irf_core__DOT__register02__DOT__wrens;
+                if (count > 224) out_words[224] = root->s1_top__DOT__sparc_0__DOT__exu__DOT__irf__DOT__bw_r_irf_core__DOT__register02__DOT__rd_thread;
+                if (count > 225) out_words[225] = root->s1_top__DOT__sparc_0__DOT__exu__DOT__irf__DOT__bw_r_irf_core__DOT__register02__DOT__save;
+                if (count > 226) out_words[226] = root->s1_top__DOT__sparc_0__DOT__exu__DOT__irf__DOT__bw_r_irf_core__DOT__register02__DOT__restore;
+                if (count > 227) out_words[227] = root->s1_top__DOT__sparc_0__DOT__exu__DOT__irf__DOT__bw_r_irf_core__DOT__register03__DOT__wrens;
+                if (count > 228) out_words[228] = root->s1_top__DOT__sparc_0__DOT__exu__DOT__irf__DOT__bw_r_irf_core__DOT__register03__DOT__rd_thread;
+                if (count > 229) out_words[229] = root->s1_top__DOT__sparc_0__DOT__exu__DOT__irf__DOT__bw_r_irf_core__DOT__register03__DOT__save;
+                if (count > 230) out_words[230] = root->s1_top__DOT__sparc_0__DOT__exu__DOT__irf__DOT__bw_r_irf_core__DOT__register03__DOT__restore;
+                if (count > 231) out_words[231] = root->s1_top__DOT__sparc_0__DOT__ifu__DOT__swl__DOT__dtu_fcl_nextthr_bf;
+                if (count > 232) out_words[232] = root->s1_top__DOT__sparc_0__DOT__ifu__DOT__swl__DOT__fcl_dtu_thr_f;
+                if (count > 233) out_words[233] = root->s1_top__DOT__sparc_0__DOT__ifu__DOT__fcl__DOT__dtu_fcl_nextthr_bf;
+                if (count > 234) out_words[234] = root->s1_top__DOT__sparc_0__DOT__ifu__DOT__fcl__DOT__fcl_dtu_thr_f;
+                if (count > 235) out_words[235] = root->s1_top__DOT__sparc_0__DOT__ifu__DOT__fcl__DOT__thr_f_flop;
+                if (count > 236) out_words[236] = root->s1_top__DOT__sparc_0__DOT__ifu__DOT__fcl__DOT__thr_f_crit;
+                if (count > 237) out_words[237] = root->s1_top__DOT__sparc_0__DOT__ifu__DOT__fcl__DOT__thr_f_crit;
+                if (count > 238) out_words[238] = root->s1_top__DOT__sparc_0__DOT__ifu__DOT__fcl__DOT__thr_f_flop;
+                if (count > 239) out_words[239] = root->s1_top__DOT__sparc_0__DOT__ifu__DOT__fcl__DOT__thr_s1_next;
+                if (count > 240) out_words[240] = root->s1_top__DOT__sparc_0__DOT__ifu__DOT__fcl__DOT__thr_d;
+                if (count > 241) out_words[241] = root->s1_top__DOT__sparc_0__DOT__ifu__DOT__ifu_exu_tid_s2;
+                if (count > 242) out_words[242] = root->s1_top__DOT__sparc_0__DOT__ifu__DOT__ifu_tlu_thrid_d;
+                if (count > 243) out_words[243] = root->s1_top__DOT__sparc_0__DOT__tlu__DOT__tcl__DOT__rstint_g;
+                if (count > 244) out_words[244] = root->s1_top__DOT__sparc_0__DOT__tlu__DOT__tcl__DOT__por_rstint_g;
+                if (count > 245) out_words[245] = root->s1_top__DOT__sparc_0__DOT__tlu__DOT__tcl__DOT__pending_trap_sel;
+                if (count > 246) out_words[246] = root->s1_top__DOT__sparc_0__DOT__tlu__DOT__tcl__DOT__thrid_g;
+                if (count > 247) out_words[247] = root->s1_top__DOT__sparc_0__DOT__tlu__DOT__tcl__DOT__trap_tid_g;
+                if (count > 248) out_words[248] = root->s1_top__DOT__sparc_0__DOT__tlu__DOT__tcl__DOT__agp_tid_g;
+                if (count > 249) out_words[249] = root->s1_top__DOT__sparc_0__DOT__tlu__DOT__tcl__DOT__agp_tid_w2;
+                if (count > 250) out_words[250] = root->s1_top__DOT__sparc_0__DOT__tlu__DOT__tcl__DOT__agp_tid_w3;
+                if (count > 251) out_words[251] = root->s1_top__DOT__sparc_0__DOT__tlu__DOT__tcl__DOT__true_trap_tid_g;
+                if (count > 252) out_words[252] = root->s1_top__DOT__sparc_0__DOT__cpx_spc_data_rdy_cx3;
+                if (count > 253) out_words[253] = root->s1_top__DOT__sparc_0__DOT__cpx_spc_data_cx3[4U];
+                if (count > 254) out_words[254] = root->s1_top__DOT__sparc_0__DOT__lsu__DOT__lsu_ifu_cpxpkt_vld_i1;
+                if (count > 255) out_words[255] = root->s1_top__DOT__sparc_0__DOT__lsu__DOT__lsu_ifu_cpxpkt_i1[4U];
+                if (count > 256) out_words[256] = root->s1_top__DOT__sparc_0__DOT__lsu__DOT__ifu_lsu_ibuf_busy;
+                if (count > 257) out_words[257] = root->s1_top__DOT__sparc_0__DOT__lsu__DOT__qctl2__DOT__dfq_wr_en;
+                if (count > 258) out_words[258] = root->s1_top__DOT__sparc_0__DOT__lsu__DOT__qctl2__DOT__dfq_rptr_vld_d1;
+                if (count > 259) out_words[259] = root->s1_top__DOT__sparc_0__DOT__lsu__DOT__qctl2__DOT__ifill_pkt_fwd_done_d1;
+                if (count > 260) out_words[260] = root->s1_top__DOT__sparc_0__DOT__lsu__DOT__qctl2__DOT__cpx_ifill_type;
+                // The fast-boot IRF debug slice is optional. Keep the word layout
+                // stable even when Verilator does not emit public-flat reg_th* fields.
+                if (count > 261) out_words[261] = 0;
+                if (count > 262) out_words[262] = 0;
+                if (count > 263) out_words[263] = 0;
+                if (count > 264) out_words[264] = 0;
+                if (count > 265) out_words[265] = 0;
+                if (count > 266) out_words[266] = 0;
+                if (count > 267) out_words[267] = 0;
+                if (count > 268) out_words[268] = 0;
+                if (count > 269) out_words[269] = 0;
+                if (count > 270) out_words[270] = 0;
+                if (count > 271) out_words[271] = 0;
+                if (count > 272) out_words[272] = 0;
+                if (count > 273) out_words[273] = 0;
+                if (count > 274) out_words[274] = 0;
+                if (count > 275) out_words[275] = 0;
+                if (count > 276) out_words[276] = 0;
+                if (count > 277) out_words[277] = root->s1_top__DOT__sparc_0__DOT__lsu__DOT__qctl2__DOT__dfq_ifill_type;
+                if (count > 278) out_words[278] = root->s1_top__DOT__sparc_0__DOT__lsu__DOT__qctl2__DOT__lsu_dfq_rdata_st_ack_type;
+                if (count > 279) out_words[279] = root->s1_top__DOT__sparc_0__DOT__lsu__DOT__qctl2__DOT__lsu_dfq_rdata_stack_dcfill_vld;
+                if (count > 280) out_words[280] = root->s1_top__DOT__sparc_0__DOT__lsu__DOT__qctl2__DOT__lsu_dfq_rdata_stack_iinv_vld;
+                if (count > 281) out_words[281] = root->s1_top__DOT__sparc_0__DOT__lsu__DOT__qctl2__DOT__dfq_rdata_local_pkt;
+                if (count > 282) out_words[282] = root->s1_top__DOT__sparc_0__DOT__lsu__DOT__qctl2__DOT__dfq_rd_advance;
+                if (count > 283) out_words[283] = root->s1_top__DOT__sparc_0__DOT__lsu__DOT__qctl2__DOT__dfq_byp_ff_en;
+                if (count > 284) out_words[284] = root->s1_top__DOT__sparc_0__DOT__lsu__DOT__qctl2__DOT__st_rd_advance;
+                if (count > 285) out_words[285] = root->s1_top__DOT__sparc_0__DOT__lsu__DOT__qctl2__DOT__dfq_int_type;
+                if (count > 286) out_words[286] = root->s1_top__DOT__sparc_0__DOT__lsu__DOT__qctl2__DOT__dfq_evict_type;
 
-	                return count;
-	              }
+                return count;
+              }
 
               void step_cycle(SimContext* ctx) {
                 bool reset_active = ctx->reset_cycles_remaining > 0;
@@ -691,6 +877,7 @@ module RHDL
                 SimContext* ctx = static_cast<SimContext*>(sim);
                 ctx->flash.clear();
                 ctx->dram.clear();
+                ctx->mailbox_mmio.clear();
                 ctx->protected_dram_limit = 0;
                 clear_runtime_state(ctx);
               }
@@ -903,70 +1090,241 @@ module RHDL
               lsu_stallreq_d1: words[extra_base + 26],
               ffu_stallreq_d1: words[extra_base + 27],
               itlb_starv_alert: words[extra_base + 28],
-	              ifq_fcl_stallreq: words[extra_base + 29]
-	            }
-	          end
+              ifq_fcl_stallreq: words[extra_base + 29]
+            }
+          end
 
-	          def decode_bridge_capture_debug(words, base)
-	            {
-	              pcx_req: words[base],
-	              pcx_req_1: words[base + 1],
-	              pcx_req_2: words[base + 2],
-	              pcx_atom: !words[base + 3].zero?,
-	              pcx_atom_1: !words[base + 4].zero?,
-	              pcx_atom_2: !words[base + 5].zero?,
-	              pcx_data_123: !words[base + 6].zero?,
-	              pcx_data_123_d: !words[base + 7].zero?,
-	              pcx_fifo_empty: !words[base + 8].zero?,
-	              fifo_rd: !words[base + 9].zero?,
-	              pcx1_fifo_empty: !words[base + 10].zero?,
-	              fifo_rd1: !words[base + 11].zero?
-	            }
-	          end
+          def decode_bridge_capture_debug(words, base)
+            {
+              pcx_req: words[base],
+              pcx_req_1: words[base + 1],
+              pcx_req_2: words[base + 2],
+              pcx_atom: !words[base + 3].zero?,
+              pcx_atom_1: !words[base + 4].zero?,
+              pcx_atom_2: !words[base + 5].zero?,
+              pcx_data_123: !words[base + 6].zero?,
+              pcx_data_123_d: !words[base + 7].zero?,
+              pcx_fifo_empty: !words[base + 8].zero?,
+              fifo_rd: !words[base + 9].zero?,
+              pcx1_fifo_empty: !words[base + 10].zero?,
+              fifo_rd1: !words[base + 11].zero?,
+              wb_addr: words[base + 60],
+              pcx_addr: words[base + 61],
+              pcx_addr_low_bits: words[base + 62],
+              pcx_addr_word3: words[base + 63]
+            }
+          end
 
-	          def decode_ifq_debug(words, base)
-	            {
-	              req_valid_d: !words[base].zero?,
-	              req_pending_d: !words[base + 1].zero?,
-	              lsu_ifu_pcxpkt_ack_d: !words[base + 2].zero?,
-	              ifu_lsu_pcxreq_d: !words[base + 3].zero?,
-	              newreq_valid: !words[base + 4].zero?,
-	              oldreq_valid: !words[base + 5].zero?,
-	              nextreq_valid_s: !words[base + 6].zero?,
-	              icmiss_qual_s: !words[base + 7].zero?,
-	              mil_thr_ready: words[base + 8],
-	              all_retry_rdy_m1: words[base + 9],
-	              pcxreq_qual_s: words[base + 10],
-	              lsu_qctl_ack_d: !words[base + 11].zero?
-	            }
-	          end
+          def decode_ifq_debug(words, base)
+            {
+              req_valid_d: !words[base].zero?,
+              req_pending_d: !words[base + 1].zero?,
+              lsu_ifu_pcxpkt_ack_d: !words[base + 2].zero?,
+              ifu_lsu_pcxreq_d: !words[base + 3].zero?,
+              newreq_valid: !words[base + 4].zero?,
+              oldreq_valid: !words[base + 5].zero?,
+              nextreq_valid_s: !words[base + 6].zero?,
+              icmiss_qual_s: !words[base + 7].zero?,
+              mil_thr_ready: words[base + 8],
+              all_retry_rdy_m1: words[base + 9],
+              pcxreq_qual_s: words[base + 10],
+              lsu_qctl_ack_d: !words[base + 11].zero?
+            }
+          end
 
-	          def decode_ifq_fill_debug(words, base)
-	            {
-	              wrt_tir: words[base],
-	              ifq_fcl_fill_thr: words[base + 1],
-	              ifc_inv_ifqadv_i2: !words[base + 2].zero?,
-	              filltid_i2: words[base + 3],
-	              imissrtn_next_i2: !words[base + 4].zero?,
-	              pred_rdy_i2: words[base + 5],
-	              finst_i2: words[base + 6],
-	              ifu_ifq_fcl_fill_thr: words[base + 7],
-	              mil0_state: words[base + 8],
-	              fill_retn_thr_i2: words[base + 9],
-	              imissrtn_i2: !words[base + 10].zero?,
-	              ifd_ifc_cpxvld_i2: !words[base + 11].zero?,
-	              cpxreq_i2: words[base + 12],
-	              ifqadv_i1: !words[base + 13].zero?,
-	              fcl_ifq_thr_s1: words[base + 14],
-	              fcl_ifq_icmiss_s1: !words[base + 15].zero?,
-	              os2wb_cpx_packet_word4: words[base + 16],
-	              top_cpx_packet_word4: words[base + 17],
-	              os2wb_cpx_packet1_word4: words[base + 18],
-	              os2wb_cpx_packet2_word4: words[base + 19]
-	            }
-	          end
+          def decode_ifq_fill_debug(words, base)
+            {
+              wrt_tir: words[base],
+              ifq_fcl_fill_thr: words[base + 1],
+              ifc_inv_ifqadv_i2: !words[base + 2].zero?,
+              filltid_i2: words[base + 3],
+              imissrtn_next_i2: !words[base + 4].zero?,
+              pred_rdy_i2: words[base + 5],
+              finst_i2: words[base + 6],
+              ifu_ifq_fcl_fill_thr: words[base + 7],
+              mil0_state: words[base + 8],
+              fill_retn_thr_i2: words[base + 9],
+              imissrtn_i2: !words[base + 10].zero?,
+              ifd_ifc_cpxvld_i2: !words[base + 11].zero?,
+              cpxreq_i2: words[base + 12],
+              ifqadv_i1: !words[base + 13].zero?,
+              fcl_ifq_thr_s1: words[base + 14],
+              fcl_ifq_icmiss_s1: !words[base + 15].zero?,
+              os2wb_cpx_packet_word4: words[base + 16],
+              top_cpx_packet_word4: words[base + 17],
+              os2wb_cpx_packet1_word4: words[base + 18],
+              os2wb_cpx_packet2_word4: words[base + 19],
+              next_wrreq_i2: !words[base + 20].zero?,
+              mil_vld_i2: !words[base + 21].zero?,
+              uncached_fill_i2: !words[base + 22].zero?,
+              four_byte_fill_i2: !words[base + 23].zero?,
+              ifq_fcl_wrreq_bf: !words[base + 24].zero?,
+              inq_wayvld_i1: !words[base + 25].zero?
+            }
+          end
 
-	          def decode_u64_be(bytes)
+          def decode_branch_debug(words, base)
+            {
+              brtaken_buf_e: !words[base].zero?,
+              load_bpc: words[base + 1],
+              load_pcp4: words[base + 2],
+              tpcbf_sel_brpc_bf_l: words[base + 3],
+              tpcbf_sel_pcp4_bf_l: words[base + 4],
+              exu_ifu_brpc_e: words[base + 5],
+              t0npc_bf: words[base + 6]
+            }
+          end
+
+          def decode_ifq_mode_debug(words, base)
+            {
+              ifc_ifd_uncached_e: !words[base].zero?,
+              ifd_ifc_cpxnc_i2: !words[base + 1].zero?,
+              mil_nc_i2: !words[base + 2].zero?
+            }
+          end
+
+          def decode_ifq_packet_debug(words, base)
+            {
+              fdp_icd_vaddr_bf: words[base],
+              itlb_ifq_paddr_s: words[base + 1],
+              fdp_ifq_paddr_f: words[base + 2],
+              imiss_paddr_s: words[base + 3],
+              mil_entry0: words[base + 4],
+              mil_pcxreq_d: words[base + 5],
+              pcxreq_d: words[base + 6],
+              pcxreq_e: words[base + 7],
+              ifu_lsu_pcxpkt_e: words[base + 8],
+              ifc_ifd_pcxline_adj_d: words[base + 9],
+              ifd_ifc_pcxline_d: words[base + 10]
+            }
+          end
+
+          def decode_store_debug(words, base)
+            {
+              dtu_inst_d: words[base],
+              ifu_exu_imm_data_d: words[base + 1],
+              ifu_exu_sethi_inst_d: !words[base + 2].zero?,
+              ifu_lsu_st_inst_e: !words[base + 3].zero?,
+              exu_lsu_ldst_va_e: words[base + 4],
+              lsu_ldst_va_m_buf: words[base + 5],
+              byp_alu_rs1_data_e: words[base + 6],
+              exu_lsu_rs2_data_e: words[base + 7],
+              ecl_irf_wen_w: !words[base + 8].zero?,
+              ecl_irf_wen_w2: !words[base + 9].zero?
+            }
+          end
+
+          def decode_irf_debug(words, base)
+            {
+              wr_en: !words[base].zero?,
+              wr_en2: !words[base + 1].zero?,
+              thr_rd_w_neg: words[base + 2],
+              thr_rd_w2_neg: words[base + 3],
+              wren: !words[base + 4].zero?,
+              wr_addr: words[base + 5],
+              wr_data0: words[base + 6] | (words[base + 7] << 64),
+              wr_data1: words[base + 8] | (words[base + 9] << 64),
+              rd_data02: words[base + 10] | (words[base + 11] << 64),
+              rd_data03: words[base + 12] | (words[base + 13] << 64),
+              old_agp: words[base + 14],
+              new_agp: words[base + 15],
+              swap_global: !words[base + 16].zero?,
+              swap_local_e: !words[base + 17].zero?,
+              global_tid: words[base + 18],
+              cwpswap_tid_e: words[base + 19],
+              tlu_exu_agp: words[base + 20],
+              tlu_exu_agp_swap: !words[base + 21].zero?,
+              tlu_exu_agp_tid: words[base + 22],
+              swap_even_e: !words[base + 23].zero?,
+              swap_odd_e: !words[base + 24].zero?,
+              ifu_exu_ren1_d: !words[base + 25].zero?,
+              ifu_exu_ren2_d: !words[base + 26].zero?,
+              thr_rs1: words[base + 27],
+              thr_rs2: words[base + 28],
+              thr_rs3: words[base + 29],
+              swap_global_d1_vld: !words[base + 30].zero?,
+              swap_global_d2: !words[base + 31].zero?,
+              ecl_irf_tid_w: words[base + 32],
+              ecl_irf_tid_w2: words[base + 33],
+              ecl_irf_rd_w: words[base + 34],
+              ecl_irf_rd_w2: words[base + 35],
+              thr_rd_w: words[base + 36],
+              thr_rd_w2: words[base + 37],
+              register02_wrens: words[base + 38],
+              register02_rd_thread: words[base + 39],
+              register02_save: !words[base + 40].zero?,
+              register02_restore: !words[base + 41].zero?,
+              register03_wrens: words[base + 42],
+              register03_rd_thread: words[base + 43],
+              register03_save: !words[base + 44].zero?,
+              register03_restore: !words[base + 45].zero?,
+              register02_reg_th0: words[base + 76] | (words[base + 77] << 64),
+              register02_reg_th1: words[base + 78] | (words[base + 79] << 64),
+              register02_reg_th2: words[base + 80] | (words[base + 81] << 64),
+              register02_reg_th3: words[base + 82] | (words[base + 83] << 64),
+              register03_reg_th0: words[base + 84] | (words[base + 85] << 64),
+              register03_reg_th1: words[base + 86] | (words[base + 87] << 64),
+              register03_reg_th2: words[base + 88] | (words[base + 89] << 64),
+              register03_reg_th3: words[base + 90] | (words[base + 91] << 64)
+            }
+          end
+
+          def decode_fcl_debug(words, base)
+            {
+              swl_dtu_fcl_nextthr_bf: words[base],
+              swl_fcl_dtu_thr_f: words[base + 1],
+              fcl_dtu_fcl_nextthr_bf: words[base + 2],
+              fcl_dtu_thr_f: words[base + 3],
+              thr_f_flop: words[base + 4],
+              thr_f_crit: words[base + 5],
+              thr_f_crit_raw: words[base + 6],
+              thr_f_raw: words[base + 7],
+              thr_s1_next: words[base + 8],
+              thr_d: words[base + 9],
+              ifu_exu_tid_s2: words[base + 10],
+              ifu_tlu_thrid_d: words[base + 11]
+            }
+          end
+
+          def decode_tlu_debug(words, base)
+            {
+              rstint_g: !words[base].zero?,
+              por_rstint_g: !words[base + 1].zero?,
+              pending_trap_sel: words[base + 2],
+              thrid_g: words[base + 3],
+              trap_tid_g: words[base + 4],
+              agp_tid_g: words[base + 5],
+              agp_tid_w2: words[base + 6],
+              agp_tid_w3: words[base + 7],
+              true_trap_tid_g: words[base + 8]
+            }
+          end
+
+          def decode_lsu_ingress_debug(words, base)
+            {
+              cpx_spc_data_rdy_cx3: !words[base].zero?,
+              cpx_spc_data_cx3_word4: words[base + 1],
+              lsu_ifu_cpxpkt_vld_i1: !words[base + 2].zero?,
+              lsu_ifu_cpxpkt_i1_word4: words[base + 3],
+              ifu_lsu_ibuf_busy: !words[base + 4].zero?,
+              dfq_wr_en: !words[base + 5].zero?,
+              dfq_rptr_vld_d1: !words[base + 6].zero?,
+              ifill_pkt_fwd_done_d1: !words[base + 7].zero?,
+              cpx_ifill_type: !words[base + 8].zero?,
+              dfq_ifill_type: !words[base + 25].zero?,
+              lsu_dfq_rdata_st_ack_type: !words[base + 26].zero?,
+              lsu_dfq_rdata_stack_dcfill_vld: !words[base + 27].zero?,
+              lsu_dfq_rdata_stack_iinv_vld: !words[base + 28].zero?,
+              dfq_rdata_local_pkt: !words[base + 29].zero?,
+              dfq_rd_advance: !words[base + 30].zero?,
+              dfq_byp_ff_en: !words[base + 31].zero?,
+              st_rd_advance: !words[base + 32].zero?,
+              dfq_int_type: !words[base + 33].zero?,
+              dfq_evict_type: !words[base + 34].zero?
+            }
+          end
+
+          def decode_u64_be(bytes)
             Array(bytes).first(8).reduce(0) { |acc, byte| (acc << 8) | (byte.to_i & 0xFF) }
           end
 
@@ -995,8 +1353,17 @@ module RHDL
 
         attr_reader :clock_count
 
-        def initialize(adapter: nil, adapter_factory: nil, fast_boot: true)
-          factory = adapter_factory || -> { DefaultAdapter.new(fast_boot: fast_boot) }
+        def initialize(adapter: nil, adapter_factory: nil, fast_boot: true,
+                       source_bundle: nil, source_bundle_class: Integration::StagedVerilogBundle,
+                       source_bundle_options: {})
+          factory = adapter_factory || lambda {
+            DefaultAdapter.new(
+              source_bundle: source_bundle,
+              source_bundle_class: source_bundle_class,
+              source_bundle_options: source_bundle_options,
+              fast_boot: fast_boot
+            )
+          }
           @adapter = adapter || factory.call
           @clock_count = 0
         end
@@ -1084,7 +1451,11 @@ module RHDL
             completed: completed?,
             timeout: timeout,
             cycles: clock_count,
-            boot_handoff_seen: trace.any? { |event| event.addr.to_i >= Integration::PROGRAM_BASE },
+            boot_handoff_seen: trace.any? do |event|
+              event.op == :read &&
+                event.addr.to_i >= Integration::PROGRAM_BASE &&
+                event.addr.to_i < Integration::FLASH_BOOT_BASE
+            end,
             secondary_core_parked: faults.empty?,
             mailbox_status: mailbox_status,
             mailbox_value: mailbox_value,

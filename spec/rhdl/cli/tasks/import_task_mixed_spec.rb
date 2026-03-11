@@ -247,7 +247,7 @@ RSpec.describe RHDL::CLI::Tasks::ImportTask do
       expect(RHDL::Codegen::CIRCT::Tooling).to have_received(:ghdl_synth_to_verilog).once
       expect(File.exist?(staged_path)).to be(true)
       staged = File.read(staged_path)
-      expect(staged).to include("`include \"#{File.expand_path(top)}\"")
+      expect(staged).to include("`include \"#{File.expand_path(File.join(out_dir, '.mixed_import', 'pure_verilog', 'top.sv'))}\"")
       expect(staged).to include('generated_vhdl/leaf.v')
       expect(staging.fetch(:provenance).fetch(:vhdl_analysis_commands).length).to eq(1)
     end

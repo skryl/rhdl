@@ -1,7 +1,7 @@
 diff --git a/T1-CPU/rtl/sparc.v b/T1-CPU/rtl/sparc.v
 --- a/T1-CPU/rtl/sparc.v
 +++ b/T1-CPU/rtl/sparc.v
-@@ -599,8 +599,17 @@
+@@ -599,8 +599,19 @@
     wire                 tlu_ifu_trapnpc_vld_w1; // From tlu of tlu.v
     wire [48:0]          tlu_ifu_trapnpc_w2;     // From tlu of tlu.v
     wire                 tlu_ifu_trappc_vld_w1;  // From tlu of tlu.v
@@ -9,11 +9,13 @@ diff --git a/T1-CPU/rtl/sparc.v b/T1-CPU/rtl/sparc.v
 -   wire                 tlu_itlb_data_rd_g;     // From tlu of tlu.v
 +   wire [48:0]          tlu_ifu_trappc_w2;      // From tlu of tlu.v
 +   wire                 fast_boot_reset_vector;
++   wire [1:0]           fast_boot_tlu_ifu_trap_tid_w1;
 +   wire [48:0]          fast_boot_tlu_ifu_trapnpc_w2;
 +   wire [48:0]          fast_boot_tlu_ifu_trappc_w2;
-+   localparam [48:0]    FAST_BOOT_TRAPPC_W2  = 49'h0_0000_0000_4000;
-+   localparam [48:0]    FAST_BOOT_TRAPNPC_W2 = 49'h0_0000_0000_4004;
++   localparam [48:0]    FAST_BOOT_TRAPPC_W2  = 49'h0_0000_0000_8000;
++   localparam [48:0]    FAST_BOOT_TRAPNPC_W2 = 49'h0_0000_0000_8004;
 +   assign fast_boot_reset_vector = (const_cpuid == 4'b0000) & (tlu_ifu_rstint_i2 | (|tlu_ifu_rstthr_i2[3:0]));
++   assign fast_boot_tlu_ifu_trap_tid_w1[1:0] = fast_boot_reset_vector ? 2'b00 : tlu_ifu_trap_tid_w1[1:0];
 +   assign fast_boot_tlu_ifu_trappc_w2[48:0] = fast_boot_reset_vector ? FAST_BOOT_TRAPPC_W2 : tlu_ifu_trappc_w2[48:0];
 +   assign fast_boot_tlu_ifu_trapnpc_w2[48:0] = fast_boot_reset_vector ? FAST_BOOT_TRAPNPC_W2 : tlu_ifu_trapnpc_w2[48:0];
 +
@@ -21,9 +23,9 @@ diff --git a/T1-CPU/rtl/sparc.v b/T1-CPU/rtl/sparc.v
     wire                 tlu_itlb_dmp_actxt_g;   // From tlu of tlu.v
     wire                 tlu_itlb_dmp_all_g;     // From tlu of tlu.v
     wire                 tlu_itlb_dmp_nctxt_g;   // From tlu of tlu.v
-@@ -1051,9 +1060,9 @@
+@@ -1051,9 +1062,9 @@
                   .tlu_ifu_sftint_vld    (tlu_ifu_sftint_vld[3:0]),
-                  .tlu_ifu_trap_tid_w1   (tlu_ifu_trap_tid_w1[1:0]),
+                 .tlu_ifu_trap_tid_w1   (fast_boot_tlu_ifu_trap_tid_w1[1:0]),
                   .tlu_ifu_trapnpc_vld_w1(tlu_ifu_trapnpc_vld_w1),
 -                 .tlu_ifu_trapnpc_w2    (tlu_ifu_trapnpc_w2[48:0]),
 +                 .tlu_ifu_trapnpc_w2    (fast_boot_tlu_ifu_trapnpc_w2[48:0]),

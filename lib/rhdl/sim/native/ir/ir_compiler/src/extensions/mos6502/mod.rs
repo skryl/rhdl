@@ -250,7 +250,7 @@ impl Mos6502Extension {
         code.push_str("/// Returns cycles run, and writes speaker toggle count to out parameter\n");
         code.push_str("#[no_mangle]\n");
         code.push_str("pub unsafe extern \"C\" fn run_mos6502_cycles(\n");
-        code.push_str("    signals: *mut u64,\n");
+        code.push_str("    signals: *mut u128,\n");
         code.push_str("    signals_len: usize,\n");
         code.push_str("    memory: *mut u8,\n");
         code.push_str("    rom_mask: *const bool,\n");
@@ -263,8 +263,8 @@ impl Mos6502Extension {
         code.push_str("    let s = signals.as_mut_ptr();\n");
         code.push_str("    let mem = memory.as_mut_ptr();\n");
         code.push_str("    let rom = rom_mask.as_ptr();\n");
-        code.push_str(&format!("    let mut old_clocks = [0u64; {}];\n", num_clocks));
-        code.push_str(&format!("    let mut next_regs = [0u64; {}];\n", num_regs.max(1)));
+        code.push_str(&format!("    let mut old_clocks = [0u128; {}];\n", num_clocks));
+        code.push_str(&format!("    let mut next_regs = [0u128; {}];\n", num_regs.max(1)));
         code.push_str("    let mut speaker_toggles: u32 = 0;\n");
         code.push_str("\n");
 
@@ -283,7 +283,7 @@ impl Mos6502Extension {
 
         code.push_str("        if rw == 1 {\n");
         code.push_str("            // Read: provide data from memory to CPU\n");
-        code.push_str(&format!("            *s.add({}) = *mem.add(addr) as u64;\n", data_in_idx));
+        code.push_str(&format!("            *s.add({}) = *mem.add(addr) as u128;\n", data_in_idx));
         code.push_str("        } else {\n");
         code.push_str("            // Write: store CPU data to memory (unless ROM protected)\n");
         code.push_str("            if !*rom.add(addr) {\n");
@@ -333,7 +333,7 @@ impl Mos6502Extension {
         code.push_str("/// Returns the number of instructions captured\n");
         code.push_str("#[no_mangle]\n");
         code.push_str("pub unsafe extern \"C\" fn run_mos6502_instructions_with_opcodes(\n");
-        code.push_str("    signals: *mut u64,\n");
+        code.push_str("    signals: *mut u128,\n");
         code.push_str("    signals_len: usize,\n");
         code.push_str("    memory: *mut u8,\n");
         code.push_str("    rom_mask: *const bool,\n");
@@ -349,14 +349,14 @@ impl Mos6502Extension {
         code.push_str("    let s = signals.as_mut_ptr();\n");
         code.push_str("    let mem = memory.as_mut_ptr();\n");
         code.push_str("    let rom = rom_mask.as_ptr();\n");
-        code.push_str(&format!("    let mut old_clocks = [0u64; {}];\n", num_clocks));
-        code.push_str(&format!("    let mut next_regs = [0u64; {}];\n", num_regs.max(1)));
+        code.push_str(&format!("    let mut old_clocks = [0u128; {}];\n", num_clocks));
+        code.push_str(&format!("    let mut next_regs = [0u128; {}];\n", num_regs.max(1)));
         code.push_str("    let mut speaker_toggles: u32 = 0;\n");
         code.push_str("    let mut instruction_count: usize = 0;\n");
         code.push_str("    let max_cycles = n * 10; // Safety limit\n");
         code.push_str("    let mut cycles: usize = 0;\n");
-        code.push_str(&format!("    let mut last_state = *s.add({});\n", state_idx));
-        code.push_str("    const STATE_DECODE: u64 = 0x02;\n");
+        code.push_str(&format!("    let mut last_state: u128 = *s.add({});\n", state_idx));
+        code.push_str("    const STATE_DECODE: u128 = 0x02;\n");
         code.push_str("\n");
 
         code.push_str("    while instruction_count < n && cycles < max_cycles {\n");
@@ -374,7 +374,7 @@ impl Mos6502Extension {
 
         code.push_str("        if rw == 1 {\n");
         code.push_str("            // Read: provide data from memory to CPU\n");
-        code.push_str(&format!("            *s.add({}) = *mem.add(addr) as u64;\n", data_in_idx));
+        code.push_str(&format!("            *s.add({}) = *mem.add(addr) as u128;\n", data_in_idx));
         code.push_str("        } else {\n");
         code.push_str("            // Write: store CPU data to memory (unless ROM protected)\n");
         code.push_str("            if !*rom.add(addr) {\n");
@@ -389,7 +389,7 @@ impl Mos6502Extension {
         code.push_str("        cycles += 1;\n\n");
 
         // Check for state transition to DECODE
-        code.push_str(&format!("        let current_state = *s.add({});\n", state_idx));
+        code.push_str(&format!("        let current_state: u128 = *s.add({});\n", state_idx));
         code.push_str("        if current_state == STATE_DECODE && last_state != STATE_DECODE {\n");
         code.push_str(&format!("            let opcode = (*s.add({}) & 0xFF) as u64;\n", opcode_idx));
         code.push_str(&format!("            let pc = ((*s.add({}) as u64).wrapping_sub(1)) & 0xFFFF;\n", pc_idx));

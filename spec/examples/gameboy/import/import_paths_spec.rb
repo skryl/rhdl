@@ -102,6 +102,7 @@ RSpec.describe 'GameBoy mixed import path coverage', slow: true do
     runtime_json = mixed.fetch('runtime_json_path')
     firtool_verilog = mixed.fetch('firtool_verilog_path')
     normalized_verilog = mixed.fetch('normalized_verilog_path')
+    wrapper_ruby = artifacts.fetch('wrapper_ruby_path')
     workspace_runtime_json = artifacts.fetch('workspace_runtime_json_path')
     workspace_firtool_verilog = artifacts.fetch('workspace_firtool_verilog_path')
     workspace_normalized_verilog = artifacts.fetch('workspace_normalized_verilog_path')
@@ -111,6 +112,7 @@ RSpec.describe 'GameBoy mixed import path coverage', slow: true do
     expect(File.file?(runtime_json)).to be(true)
     expect(File.file?(firtool_verilog)).to be(true)
     expect(File.file?(normalized_verilog)).to be(true)
+    expect(File.file?(wrapper_ruby)).to be(true)
     expect(File.file?(workspace_runtime_json)).to be(true)
     expect(File.file?(workspace_firtool_verilog)).to be(true)
     expect(File.file?(workspace_normalized_verilog)).to be(true)
@@ -120,6 +122,7 @@ RSpec.describe 'GameBoy mixed import path coverage', slow: true do
     expect(firtool_verilog).to start_with(File.join(out_dir, '.mixed_import'))
     expect(normalized_verilog).to start_with(File.join(out_dir, '.mixed_import'))
     expect(pure_root).to start_with(File.join(out_dir, '.mixed_import'))
+    expect(wrapper_ruby).to start_with(out_dir)
     expect(workspace_runtime_json).to start_with(File.join(workspace, 'import_artifacts'))
     expect(workspace_firtool_verilog).to start_with(File.join(workspace, 'import_artifacts'))
     expect(workspace_normalized_verilog).to start_with(File.join(workspace, 'import_artifacts'))
@@ -135,6 +138,12 @@ RSpec.describe 'GameBoy mixed import path coverage', slow: true do
     expect(artifacts.fetch('runtime_json_path')).to eq(mixed.fetch('runtime_json_path'))
     expect(artifacts.fetch('firtool_verilog_path')).to eq(mixed.fetch('firtool_verilog_path'))
     expect(artifacts.fetch('normalized_verilog_path')).to eq(mixed.fetch('normalized_verilog_path'))
+    expect(report.fetch('import_wrapper')).to include(
+      'class_name' => 'Gameboy',
+      'module_name' => 'gameboy',
+      'path' => artifacts.fetch('wrapper_ruby_path'),
+      'core_class_name' => 'Gb'
+    )
     expect(mixed.fetch('workspace_runtime_json_path')).to eq(artifacts.fetch('workspace_runtime_json_path'))
     expect(mixed.fetch('workspace_firtool_verilog_path')).to eq(artifacts.fetch('workspace_firtool_verilog_path'))
     expect(mixed.fetch('workspace_normalized_verilog_path')).to eq(artifacts.fetch('workspace_normalized_verilog_path'))

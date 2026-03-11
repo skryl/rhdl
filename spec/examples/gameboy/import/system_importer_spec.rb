@@ -88,6 +88,7 @@ RSpec.describe RHDL::Examples::GameBoy::Import::SystemImporter do
           expect(manifest.fetch('top').fetch('file')).to end_with('/mixed_sources/rtl/gb.v')
           expect(File.file?(manifest.fetch('top').fetch('file'))).to be(true)
           expect(manifest.fetch('files').length).to eq(26)
+          expect(manifest.dig('vhdl', 'synth_targets')).to include(include('entity' => 'speedcontrol'))
           shim_paths = manifest.fetch('files').map { |entry| entry.fetch('path') }
           expect(shim_paths).to include(
             a_string_ending_with('/mixed_sources/altera_mf/altera_mf_components.vhd'),
@@ -97,6 +98,21 @@ RSpec.describe RHDL::Examples::GameBoy::Import::SystemImporter do
           languages = manifest.fetch('files').map { |entry| entry.fetch('language') }.uniq.sort
           expect(languages).to eq(%w[verilog vhdl])
         end
+      end
+    end
+  end
+
+  describe '#normalize_verilog_for_import' do
+    it 'relaxes gb boot rom disable to trigger on any FF50 write' do
+      require_reference_tree!
+
+      Dir.mktmpdir('gameboy_import_normalize_verilog') do |out_dir|
+        importer = new_importer(output_dir: out_dir)
+        source_path = File.expand_path('examples/gameboy/reference/rtl/gb.v', Dir.pwd)
+        normalized = importer.send(:normalize_verilog_for_import, File.read(source_path), source_path: source_path)
+
+        expect(normalized).to include("if((cpu_addr == 16'hff50) && !cpu_wr_n_edge) begin")
+        expect(normalized).not_to include("if((cpu_addr == 16'hff50) && !cpu_wr_n_edge && cpu_do[0]) begin")
       end
     end
   end
@@ -478,6 +494,144 @@ RSpec.describe RHDL::Examples::GameBoy::Import::SystemImporter do
             artifacts.fetch('workspace_normalized_verilog_path')
           )
           expect(result.source_verilog_path).to eq(artifacts.fetch('workspace_normalized_verilog_path'))
+        end
+      end
+    end
+
+    it 'writes an import-local Gameboy wrapper and records it in the report' do
+      require_reference_tree!
+
+      fake_task_class = Class.new do
+        def initialize(options)
+          @options = options
+        end
+
+        def run
+          out_dir = @options.fetch(:out)
+          FileUtils.mkdir_p(out_dir)
+          FileUtils.mkdir_p(File.join(out_dir, '.mixed_import', 'pure_verilog', 'rtl'))
+          FileUtils.mkdir_p(File.join(out_dir, '.mixed_import', 'pure_verilog', 'generated_vhdl'))
+
+          staged_gb = File.join(out_dir, '.mixed_import', 'pure_verilog', 'rtl', 'gb.v')
+          staged_speedcontrol = File.join(out_dir, '.mixed_import', 'pure_verilog', 'generated_vhdl', 'speedcontrol.v')
+          File.write(staged_gb, "module gb;\nendmodule\n")
+          File.write(staged_speedcontrol, "module speedcontrol;\nendmodule\n")
+
+          File.write(File.join(out_dir, 'gb.rb'), <<~RUBY)
+            class Gb < RHDL::Sim::SequentialComponent
+              include RHDL::DSL::Behavior
+              include RHDL::DSL::Sequential
+
+              def self.verilog_module_name
+                'gb'
+              end
+            end
+          RUBY
+
+          File.write(File.join(out_dir, 'speedcontrol.rb'), <<~RUBY)
+            class Speedcontrol < RHDL::Sim::SequentialComponent
+              include RHDL::DSL::Behavior
+              include RHDL::DSL::Sequential
+
+              def self.verilog_module_name
+                'speedcontrol'
+              end
+            end
+          RUBY
+
+          File.write(@options.fetch(:report), JSON.pretty_generate(
+            success: true,
+            strict: true,
+            top: 'gb',
+            module_count: 1,
+            modules: [
+              {
+                name: 'gb',
+                staged_verilog_path: staged_gb,
+                staged_verilog_module_name: 'gb',
+                origin_kind: 'source_verilog',
+                original_source_path: staged_gb,
+                emitted_dsl_features: %w[behavior sequential]
+              },
+              {
+                name: 'speedcontrol',
+                staged_verilog_path: staged_speedcontrol,
+                staged_verilog_module_name: 'speedcontrol',
+                origin_kind: 'source_vhdl_generated',
+                original_source_path: staged_speedcontrol,
+                emitted_dsl_features: %w[behavior sequential]
+              }
+            ],
+            mixed_import: {
+              pure_verilog_files: [
+                {
+                  path: staged_gb,
+                  primary_module_name: 'gb',
+                  origin_kind: 'source_verilog',
+                  original_source_path: staged_gb
+                },
+                {
+                  path: staged_speedcontrol,
+                  primary_module_name: 'speedcontrol',
+                  origin_kind: 'source_vhdl_generated',
+                  original_source_path: staged_speedcontrol
+                }
+              ],
+              vhdl_synth_outputs: [
+                {
+                  entity: 'speedcontrol',
+                  module_name: 'speedcontrol',
+                  source_path: File.expand_path('examples/gameboy/reference/rtl/speedcontrol.vhd', Dir.pwd),
+                  output_path: staged_speedcontrol
+                }
+              ]
+            },
+            artifacts: {}
+          ))
+        end
+      end
+
+      Dir.mktmpdir('gameboy_import_wrapper_out') do |out_dir|
+        Dir.mktmpdir('gameboy_import_wrapper_ws') do |workspace|
+          importer = described_class.new(
+            output_dir: out_dir,
+            workspace_dir: workspace,
+            keep_workspace: true,
+            clean_output: true,
+            progress: ->(_msg) {},
+            import_task_class: fake_task_class
+          )
+
+          result = importer.run
+          expect(result.success?).to be(true)
+
+          wrapper_path = File.join(out_dir, 'gameboy.rb')
+          expect(result.files_written).to include(wrapper_path)
+          expect(File.read(wrapper_path)).to include('class Gameboy < RHDL::Sim::SequentialComponent')
+          expect(File.read(wrapper_path)).to include('instance :speed_ctrl, Speedcontrol')
+          expect(File.read(wrapper_path)).to include('instance :gb_core, Gb')
+          expect(File.read(wrapper_path)).to include('input :cart_oe')
+          expect(File.read(wrapper_path)).to include('input :cart_ram_size, width: 8')
+          expect(File.read(wrapper_path)).to include('port :const_zero => [:speed_ctrl, :pause]')
+          expect(File.read(wrapper_path)).to include('port :const_zero => [:speed_ctrl, :DMA_on]')
+          expect(File.read(wrapper_path)).to include('port :const_zero => [:speed_ctrl, :speedup]')
+          expect(File.read(wrapper_path)).to include('port :const_zero => [:gb_core, :fast_boot_en]')
+          expect(File.read(wrapper_path)).to include('port :const_zero => [:gb_core, :gg_reset]')
+          expect(File.read(wrapper_path)).to include('port :const_one => [:gb_core, :serial_data_in]')
+          expect(File.read(wrapper_path)).to include('port :const_zero => [:gb_core, :increaseSSHeaderCount]')
+          expect(File.read(wrapper_path)).to include('port :cart_ram_size => [:gb_core, :cart_ram_size]')
+          expect(File.read(wrapper_path)).not_to include('input :ce')
+
+          report = JSON.parse(File.read(result.report_path))
+          expect(report.dig('artifacts', 'wrapper_ruby_path')).to eq(wrapper_path)
+          expect(report.fetch('import_wrapper')).to include(
+            'class_name' => 'Gameboy',
+            'module_name' => 'gameboy',
+            'path' => wrapper_path,
+            'core_class_name' => 'Gb',
+            'speedcontrol_class_name' => 'Speedcontrol',
+            'uses_imported_speedcontrol' => true
+          )
         end
       end
     end

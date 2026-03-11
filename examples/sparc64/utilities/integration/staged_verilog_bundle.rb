@@ -79,6 +79,7 @@ module RHDL
               clean_output: false,
               strict: false,
               patches_dir: patches_dir,
+              force_stub_hierarchy_sources: false,
               emit_runtime_json: false,
               progress: ->(_message) {}
             )

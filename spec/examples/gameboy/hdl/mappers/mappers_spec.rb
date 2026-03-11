@@ -7,7 +7,7 @@ require 'spec_helper'
 
 RSpec.describe 'RHDL::Examples::GameBoy::Mappers' do
   before(:all) do
-    require_relative '../../../../../examples/gameboy/gameboy'
+    require_relative '../../../../../examples/gameboy/hdl/gameboy'
   end
 
   describe 'Module Loading' do

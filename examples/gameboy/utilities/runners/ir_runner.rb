@@ -14,6 +14,7 @@ require_relative '../hdl_loader'
 require_relative '../output/speaker'
 require_relative '../renderers/lcd_renderer'
 require_relative '../clock_enable_waveform'
+require 'json'
 
 module RHDL
   module Examples
@@ -344,7 +345,10 @@ module RHDL
       end
 
       def handle_memory_access
-        if @boot_rom_loaded && @boot_rom && signal_available?('sel_boot_rom') && safe_peek('sel_boot_rom') == 1
+        if @boot_rom_loaded && @boot_rom && signal_available?('boot_rom_addr') && signal_available?('boot_rom_do')
+          boot_addr = safe_peek('boot_rom_addr') & 0xFF
+          poke_if_available('boot_rom_do', @boot_rom[boot_addr] || 0)
+        elsif @boot_rom_loaded && @boot_rom && signal_available?('sel_boot_rom') && safe_peek('sel_boot_rom') == 1
           boot_addr = safe_peek('boot_rom_addr') & 0xFF
           poke_if_available('boot_rom_do', @boot_rom[boot_addr] || 0)
         end
@@ -555,26 +559,23 @@ module RHDL
         resolved_hdl_dir = HdlLoader.resolve_hdl_dir(hdl_dir: hdl_dir)
         if resolved_hdl_dir == HdlLoader::DEFAULT_HDL_DIR
           HdlLoader.configure!(hdl_dir: resolved_hdl_dir)
-          require_relative '../../gameboy'
+          require_relative '../../hdl/gameboy'
           return ::RHDL::Examples::GameBoy::Gameboy
         end
 
         HdlLoader.load_component_tree!(hdl_dir: resolved_hdl_dir)
+        top_name = top || default_import_top_name(resolved_hdl_dir: resolved_hdl_dir)
+        if top_name.nil? || top_name.to_s.empty?
+          raise ArgumentError,
+                "Imported Game Boy HDL at #{resolved_hdl_dir} does not define a wrapper top. "\
+                "Re-run the importer or pass --top explicitly."
+        end
+
         candidates = []
-        if top
-          top_name = top
-          class_name = camelize_name(top_name.to_s)
-          candidates << Object.const_get(class_name, false) if Object.const_defined?(class_name, false)
-          if defined?(::RHDL::Examples::GameBoy) && ::RHDL::Examples::GameBoy.const_defined?(class_name, false)
-            candidates << ::RHDL::Examples::GameBoy.const_get(class_name, false)
-          end
-        else
-          %w[GB Gb].each do |class_name|
-            candidates << Object.const_get(class_name, false) if Object.const_defined?(class_name, false)
-            if defined?(::RHDL::Examples::GameBoy) && ::RHDL::Examples::GameBoy.const_defined?(class_name, false)
-              candidates << ::RHDL::Examples::GameBoy.const_get(class_name, false)
-            end
-          end
+        class_name = camelize_name(top_name.to_s)
+        candidates << Object.const_get(class_name, false) if Object.const_defined?(class_name, false)
+        if defined?(::RHDL::Examples::GameBoy) && ::RHDL::Examples::GameBoy.const_defined?(class_name, false)
+          candidates << ::RHDL::Examples::GameBoy.const_get(class_name, false)
         end
 
         component_class = candidates.find do |candidate|
@@ -583,16 +584,27 @@ module RHDL
 
         return component_class if component_class
 
-        unless top
-          require_relative '../../gameboy'
-          return ::RHDL::Examples::GameBoy::Gameboy
-        end
-
-        top_name = top
-        class_name = camelize_name(top_name.to_s)
         raise NameError,
               "Unable to resolve imported Game Boy top component '#{top_name}' "\
               "(expected class '#{class_name}') in #{resolved_hdl_dir}"
+      end
+
+      def default_import_top_name(resolved_hdl_dir:)
+        report_path = File.expand_path(File.join(resolved_hdl_dir, 'import_report.json'))
+        if File.file?(report_path)
+          begin
+            report = JSON.parse(File.read(report_path))
+            wrapper_name = report.dig('import_wrapper', 'class_name')
+            return wrapper_name unless wrapper_name.to_s.empty?
+          rescue JSON::ParserError
+            # Fall through to static path probes.
+          end
+        end
+
+        wrapper_path = File.join(resolved_hdl_dir, 'gameboy.rb')
+        return 'Gameboy' if File.file?(wrapper_path)
+
+        nil
       end
 
       def camelize_name(value)

@@ -201,7 +201,10 @@ RSpec.describe 'Headless Runners', :slow do
 
     describe 'Netlist mode' do
       before(:each) do
-        skip 'Netlist requires native extension' unless ir_interpreter_available?
+        available = RHDL::Sim::Native::Netlist::INTERPRETER_AVAILABLE
+        skip 'Netlist requires native extension' unless available
+      rescue LoadError, NameError
+        skip 'Netlist requires native extension'
       end
 
       it 'creates netlist mode runner' do

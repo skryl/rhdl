@@ -1261,7 +1261,10 @@ RSpec.describe 'GameBoy mixed import Verilog roundtrip AST comparison', slow: tr
 
         report = JSON.parse(File.read(import_result.report_path))
         source_staged_verilog_path = report.fetch('mixed_import').fetch('pure_verilog_entry_path')
+        wrapper_path = report.dig('import_wrapper', 'path')
         expect(File.file?(source_staged_verilog_path)).to be(true)
+        expect(File.file?(wrapper_path)).to be(true)
+        expect(report.fetch('artifacts').fetch('wrapper_ruby_path')).to eq(wrapper_path)
 
         source_mlir = File.read(import_result.mlir_path)
         source_sigs = timed_roundtrip_step('source signatures') do

@@ -12,7 +12,9 @@ module RHDL
     module SPARC64
       module Integration
         class ProgramImageBuilder
-          BOOT_SHIM_REVISION = 'absolute_jump_v2'.freeze
+          BOOT_PROGRAM_ENTRY = PROGRAM_BASE
+          BOOT_SHIM_REVISION = 'uncached_boot_prom_slot_branch_table_va_8000'.freeze
+          PROGRAM_ENTRY_PAD_REVISION = 'entry_pad_8_nops'.freeze
 
           BuildResult = Struct.new(
             :program,
@@ -107,6 +109,7 @@ module RHDL
               MAILBOX_STATUS,
               MAILBOX_VALUE,
               BOOT_SHIM_REVISION,
+              PROGRAM_ENTRY_PAD_REVISION,
               program.name,
               program.program_source
             ].join("\n"))
@@ -152,23 +155,46 @@ module RHDL
           end
 
           def boot_source(_program)
-            <<~ASM
-              .equ PROGRAM_BASE, #{format('0x%X', PROGRAM_BASE)}
+            branch_words = 4.times.map do |index|
+              format('0x%08X', boot_branch_word(index * 4))
+            end
 
+            <<~ASM
               .section .text
               .global _start
             _start:
-              sethi %hi(PROGRAM_BASE), %g1
-              or %g1, %lo(PROGRAM_BASE), %g1
-              jmpl %g1, %g0
+              .word #{branch_words[0]}
+              .word #{branch_words[1]}
+              .word #{branch_words[2]}
+              .word #{branch_words[3]}
+              nop
+              nop
+              nop
+              nop
+              nop
+              nop
+              nop
+              nop
+              nop
+              nop
+              nop
               nop
             ASM
           end
 
+          def boot_branch_word(slot_offset)
+            pc = 0x8000 + slot_offset
+            disp = (BOOT_PROGRAM_ENTRY - pc) >> 2
+            raise "boot branch target out of range for slot #{slot_offset}" unless disp.between?(0, 0x3F_FFFF)
+
+            0x3080_0000 | disp
+          end
+
           def boot_linker_script
             <<~LD
+              program_entry = #{format('0x%X', BOOT_PROGRAM_ENTRY)};
               SECTIONS {
-                . = #{format('0x%X', FLASH_BOOT_BASE)};
+                . = 0x8000;
                 .text : { *(.text*) }
               }
             LD
@@ -192,6 +218,16 @@ module RHDL
               .equ STACK_TOP, #{format('0x%X', STACK_TOP)}
               .equ MAILBOX_STATUS, #{format('0x%X', MAILBOX_STATUS)}
               .equ MAILBOX_VALUE, #{format('0x%X', MAILBOX_VALUE)}
+
+              .section .text
+              nop
+              nop
+              nop
+              nop
+              nop
+              nop
+              nop
+              nop
 
               #{program.program_source}
             ASM

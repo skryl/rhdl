@@ -30,23 +30,24 @@ RSpec.describe 'AO486 runner interface' do
   end
 
   it 'selects the requested concrete runner for each AO486 mode' do
-    expect(RHDL::Examples::AO486::HeadlessRunner.new(mode: :ir, sim: :jit).runner)
+    expect(RHDL::Examples::AO486::HeadlessRunner.new(mode: :ir, sim: :compiler).runner)
       .to be_a(RHDL::Examples::AO486::IrRunner)
-    expect(RHDL::Examples::AO486::HeadlessRunner.new(mode: :verilator).runner)
+    expect(RHDL::Examples::AO486::HeadlessRunner.new(mode: :verilog).runner)
       .to be_a(RHDL::Examples::AO486::VerilatorRunner)
-    expect(RHDL::Examples::AO486::HeadlessRunner.new(mode: :arcilator).runner)
+    expect(RHDL::Examples::AO486::HeadlessRunner.new(mode: :circt).runner)
       .to be_a(RHDL::Examples::AO486::ArcilatorRunner)
   end
 
-  it 'delegates software loading and returns runner state from run' do
-    runner = RHDL::Examples::AO486::HeadlessRunner.new(mode: :verilator, debug: true, speed: 1_000, cycles: 42)
+  it 'delegates software loading and returns canonical runner state from headless run' do
+    runner = RHDL::Examples::AO486::HeadlessRunner.new(mode: :verilog, headless: true, debug: true, speed: 1_000, cycles: 42)
 
     runner.load_bios
     runner.load_dos
     result = runner.run
 
     expect(result).to include(
-      mode: :verilator,
+      mode: :verilog,
+      effective_mode: :verilog,
       backend: :verilator,
       simulator_type: :ao486_verilator,
       native: true,
@@ -65,7 +66,7 @@ RSpec.describe 'AO486 runner interface' do
     runner.update_display_buffer(buffer)
     frame = runner.render_display(debug_lines: ['backend=arcilator'])
 
-    expect(frame).to include('|AO486>')
+    expect(frame).to include('_O486>')
     expect(frame).to include('|backend=arcilator')
   end
 

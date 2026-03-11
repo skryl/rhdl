@@ -1339,10 +1339,11 @@ module RHDL
       # Increment PC at end of T3 (pre-edge timing), or jump to target address
       # For relative jumps (JR), sign-extend the 8-bit displacement and add to PC
       disp_sign_ext = mux(wz[7], lit(0xFF, width: 8), lit(0, width: 8))  # Sign extension
-      pc_rel = pc + cat(disp_sign_ext, wz[7..0])  # PC + signed displacement
+      pc_rel = (pc + cat(disp_sign_ext, wz[7..0]))[15..0]  # PC + signed displacement, wrapped to 16 bits
+      pc_inc = (pc + lit(1, width: 16))[15..0]
 
       pc <= mux(clken & (t_state == lit(3, width: 3)) & inc_pc,
-                pc + lit(1, width: 16),
+                pc_inc,
                 mux(clken & int_cycle & (m_cycle == lit(5, width: 3)) & (t_state == lit(3, width: 3)),
                     cat(lit(0, width: 8), wz[7..0]),  # Interrupt: vector at 0x00XX (low byte from M4)
                 mux(clken & jump & (m_cycle == m_cycles) & (t_state == lit(3, width: 3)),

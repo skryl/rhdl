@@ -12,13 +12,17 @@ require_relative '../../../../examples/gameboy/utilities/import/system_importer'
 require_relative '../../../../examples/gameboy/utilities/import/ir_runner'
 require_relative '../../../../examples/gameboy/utilities/tasks/run_task'
 require_relative '../../../../lib/rhdl/cli/tasks/import_task'
+require_relative './verilator_wrapper_support'
 
 RSpec.describe 'GameBoy mixed import runtime parity (Verilator/Arcilator/IR)', slow: true do
+  include GameboyImportVerilatorWrapperSupport
+
   MAX_CYCLES = 500_000
   IR_TRACE_CYCLES = 100_000
   VIDEO_PARITY_CYCLES = IR_TRACE_CYCLES
   SCREEN_WIDTH = 160
   SCREEN_HEIGHT = 144
+  DMG_BOOT_ROM_PATH = File.expand_path('../../../../examples/gameboy/software/roms/dmg_boot.bin', __dir__)
   VERILATOR_WARN_FLAGS = %w[
     -Wno-fatal
     -Wno-ASCRANGE
@@ -58,6 +62,11 @@ RSpec.describe 'GameBoy mixed import runtime parity (Verilator/Arcilator/IR)', s
     path = File.expand_path('../../../../examples/gameboy/software/roms/pop.gb', __dir__)
     skip "POP ROM not available: #{path}" unless File.file?(path)
     path
+  end
+
+  def require_boot_rom!
+    skip "DMG boot ROM not available: #{DMG_BOOT_ROM_PATH}" unless File.file?(DMG_BOOT_ROM_PATH)
+    DMG_BOOT_ROM_PATH
   end
 
   def require_ir_compiler!
@@ -228,8 +237,8 @@ RSpec.describe 'GameBoy mixed import runtime parity (Verilator/Arcilator/IR)', s
 
   def write_verilator_trace_harness(path)
     source = <<~CPP
-      #include "Vgb.h"
-      #include "Vgb___024root.h"
+      #include "Vgameboy.h"
+      #include "Vgameboy___024root.h"
       #include "verilated.h"
       #include <cstdint>
       #include <cstdio>
@@ -271,10 +280,12 @@ RSpec.describe 'GameBoy mixed import runtime parity (Verilator/Arcilator/IR)', s
       int main(int argc, char** argv) {
         Verilated::commandArgs(argc, argv);
         const char* rom_path = (argc > 1) ? argv[1] : "";
-        int max_cycles = (argc > 2) ? std::atoi(argv[2]) : 200000;
+        const char* boot_rom_path = (argc > 2) ? argv[2] : "";
+        int max_cycles = (argc > 3) ? std::atoi(argv[3]) : 200000;
 
-        Vgb dut;
+        Vgameboy dut;
         auto rom = load_rom(rom_path);
+        auto boot_rom = load_rom(boot_rom_path);
         std::vector<uint8_t> framebuffer(#{SCREEN_WIDTH} * #{SCREEN_HEIGHT}, 0);
         int lcd_x = 0;
         int lcd_y = 0;
@@ -324,6 +335,8 @@ RSpec.describe 'GameBoy mixed import runtime parity (Verilator/Arcilator/IR)', s
           dut.ce = (ce_phase == 0) ? 1 : 0;
           dut.ce_n = (ce_phase == 4) ? 1 : 0;
           dut.ce_2x = ((ce_phase & 0x3) == 0) ? 1 : 0;
+          uint8_t boot_addr = dut.boot_rom_addr & 0xFF;
+          dut.boot_rom_do = boot_rom[boot_addr];
           dut.clk_sys = 0;
           dut.eval();
 
@@ -346,7 +359,9 @@ RSpec.describe 'GameBoy mixed import runtime parity (Verilator/Arcilator/IR)', s
         };
 
         dut.joystick = 0xFF;
-        dut.cart_oe = 1;
+        dut.is_gbc = 0;
+        dut.is_sgb = 0;
+        dut.boot_rom_do = 0;
         dut.reset = 1;
         for (int i = 0; i < 10; ++i) tick_clock();
         dut.reset = 0;
@@ -359,9 +374,9 @@ RSpec.describe 'GameBoy mixed import runtime parity (Verilator/Arcilator/IR)', s
             emit_video_snapshot(i + 1);
             video_emitted = true;
           }
-          const bool fetch = (dut.rootp->gb__DOT___cpu_M1_n == 0);
+          const bool fetch = (dut.rootp->gameboy__DOT__gb_core__DOT___cpu_M1_n == 0);
           if (fetch) {
-            uint16_t pc = static_cast<uint16_t>(dut.rootp->gb__DOT___cpu_A);
+            uint16_t pc = static_cast<uint16_t>(dut.rootp->gameboy__DOT__gb_core__DOT___cpu_A);
             if (pc == last_pc) continue;
             uint8_t opcode = rom_read(rom, pc);
             std::printf("%u,%u\\n", static_cast<unsigned>(pc), static_cast<unsigned>(opcode));
@@ -425,23 +440,27 @@ RSpec.describe 'GameBoy mixed import runtime parity (Verilator/Arcilator/IR)', s
   def collect_verilator_trace(staging_entry:, rom_path:, scratch_dir:)
     FileUtils.mkdir_p(scratch_dir)
     build_dir = File.join(scratch_dir, 'verilator_obj')
+    wrapper = File.join(scratch_dir, 'gameboy.v')
     harness = File.join(scratch_dir, 'trace_main.cpp')
+    profile = gb_wrapper_profile(staging_entry)
+    write_gameboy_wrapper(wrapper, profile: profile)
     write_verilator_trace_harness(harness)
 
     run_cmd!([
       'verilator',
       '--cc',
+      wrapper,
       staging_entry,
-      '--top-module', 'gb',
+      '--top-module', gameboy_wrapper_top_module,
       '--Mdir', build_dir,
       '--public-flat-rw',
       *VERILATOR_WARN_FLAGS,
       '--exe',
       harness
     ])
-    run_cmd!(['make', '-C', build_dir, '-f', 'Vgb.mk', 'Vgb'])
+    run_cmd!(['make', '-C', build_dir, '-f', 'Vgameboy.mk', 'Vgameboy'])
 
-    output = run_capture_cmd!([File.join(build_dir, 'Vgb'), rom_path, MAX_CYCLES.to_s])
+    output = run_capture_cmd!([File.join(build_dir, 'Vgameboy'), rom_path, require_boot_rom!, MAX_CYCLES.to_s])
     {
       trace: normalize_trace(parse_trace(output)),
       video: parse_video_snapshot(output)
@@ -923,6 +942,7 @@ RSpec.describe 'GameBoy mixed import runtime parity (Verilator/Arcilator/IR)', s
     require_tool!('arcilator') unless skip_arcilator?
     require_ir_compiler!
     pop_rom_path = require_pop_rom!
+    require_boot_rom!
 
     Dir.mktmpdir('gameboy_runtime_parity_out') do |out_dir|
       Dir.mktmpdir('gameboy_runtime_parity_ws') do |workspace|

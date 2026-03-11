@@ -57,11 +57,20 @@ By default it preserves the original source directory structure in the raised RH
 To run the imported Game Boy design through the same staged Verilator path used by the parity tests:
 
 ```bash
-bundle exec ruby examples/gameboy/bin/gb import --out examples/gameboy/import
+bundle exec ruby examples/gameboy/bin/gb import \
+  --out examples/gameboy/import \
+  --workspace examples/gameboy/tmp/import_workspace \
+  --keep-workspace
 bundle exec ruby examples/gameboy/bin/gb \
   --mode verilog \
-  --hdl-dir examples/gameboy/import \
-  --top gb \
+  --verilog-dir examples/gameboy/import \
+  --top Gameboy \
+  --pop
+
+bundle exec ruby examples/gameboy/bin/gb \
+  --mode verilog \
+  --verilog-dir examples/gameboy/import \
+  --top Gameboy \
   --use-staged-verilog \
   --pop
 ```
@@ -514,6 +523,7 @@ examples/gameboy/
 |   +-- dma/
 |   |   +-- hdma.rb             # DMA engines
 |   +-- gb.rb                   # Top-level GB core
+|   +-- gameboy.rb              # Handwritten top-level wrapper
 |   +-- timer.rb                # Timer/counter
 |   +-- link.rb                 # Serial link
 |   +-- speedcontrol.rb         # GBC speed control
@@ -525,7 +535,6 @@ examples/gameboy/
 |   +-- speaker.rb              # Audio output
 +-- software/
 |   +-- roms/                   # Test ROMs
-+-- gameboy.rb                  # Main loader
 +-- demo_display.rb             # Demo program
 ```
 

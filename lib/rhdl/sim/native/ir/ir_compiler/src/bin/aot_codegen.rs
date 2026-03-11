@@ -17,7 +17,7 @@ fn append_missing_stubs(code: &mut String, has_apple2: bool, has_gameboy: bool, 
             r#"
 #[no_mangle]
 pub unsafe extern "C" fn run_cpu_cycles(
-    _signals: *mut u64,
+    _signals: *mut u128,
     _signals_len: usize,
     _ram: *mut u8,
     _ram_len: usize,
@@ -26,7 +26,7 @@ pub unsafe extern "C" fn run_cpu_cycles(
     _n: usize,
     _key_data: u8,
     _key_ready: bool,
-    _prev_speaker_ptr: *mut u64,
+    _prev_speaker_ptr: *mut u128,
     text_dirty_out: *mut bool,
     key_cleared_out: *mut bool,
     speaker_toggles_out: *mut u32,
@@ -91,7 +91,7 @@ pub unsafe extern "C" fn run_gb_cycles(
             r#"
 #[no_mangle]
 pub unsafe extern "C" fn run_mos6502_cycles(
-    _signals: *mut u64,
+    _signals: *mut u128,
     _signals_len: usize,
     _memory: *mut u8,
     _rom_mask: *const bool,
@@ -104,7 +104,7 @@ pub unsafe extern "C" fn run_mos6502_cycles(
 
 #[no_mangle]
 pub unsafe extern "C" fn run_mos6502_instructions_with_opcodes(
-    _signals: *mut u64,
+    _signals: *mut u128,
     _signals_len: usize,
     _memory: *mut u8,
     _rom_mask: *const bool,

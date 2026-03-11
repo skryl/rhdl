@@ -417,13 +417,27 @@ rhdl examples gameboy import --no-strict
 
 ## Examples AO486 Command
 
-Run AO486-specific CIRCT import and bounded parity workflows.
+Run the AO486 CPU-top environment or AO486-specific CIRCT import/parity workflows.
 
 ### Usage
 
 ```bash
+rhdl examples ao486 [run options]
 rhdl examples ao486 <subcommand> [options]
 ```
+
+### Default run options
+
+| Option | Description |
+|--------|-------------|
+| `-m`, `--mode TYPE` | Simulation mode: `ir` (default), `verilog`, `circt` |
+| `--sim TYPE` | IR simulator backend: `compile` (default), `interpret`, `jit` |
+| `--bios` | Load BIOS ROMs from `examples/ao486/software/rom` |
+| `--dos` | Load DOS floppy image from `examples/ao486/software/bin` |
+| `--headless` | Run once without the interactive terminal loop |
+| `--cycles N` | Headless cycle-count override |
+| `-s`, `--speed CYCLES` | Cycles per frame/chunk |
+| `-d`, `--debug` | Show boxed debug info below the AO486 display |
 
 ### Subcommands
 
@@ -436,6 +450,12 @@ rhdl examples ao486 <subcommand> [options]
 ### Examples
 
 ```bash
+# Run the AO486 CPU-top on the Verilator-backed path
+rhdl examples ao486 -m verilog --bios --dos --headless --cycles 100000
+
+# Run the AO486 CPU-top on the Arcilator-backed path with debug output
+rhdl examples ao486 -m circt --bios --dos -d -s 5000
+
 # Regenerate examples/ao486/import from rtl/ao486/ao486.v
 rhdl examples ao486 import --out examples/ao486/import
 

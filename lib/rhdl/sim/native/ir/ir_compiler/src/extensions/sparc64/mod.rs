@@ -331,21 +331,21 @@ impl Sparc64Extension {
 
     fn read_wishbone_word(&self, addr: u64, sel: u8) -> (u64, bool) {
         let mut value = 0u64;
-        let mut mapped = false;
+        let mut selected = false;
 
         for lane in 0..8 {
-            if !lane_selected(sel, lane) {
-                continue;
-            }
             let byte_addr = addr.wrapping_add(lane as u64);
             let Some(byte) = self.read_mapped_byte(byte_addr) else {
-                return (0, false);
+                if lane_selected(sel, lane) {
+                    return (0, false);
+                }
+                continue;
             };
             value |= (byte as u64) << ((7 - lane) * 8);
-            mapped = true;
+            selected |= lane_selected(sel, lane);
         }
 
-        (value, mapped)
+        (value, selected)
     }
 
     fn write_wishbone_word(&mut self, addr: u64, data: u64, sel: u8) -> bool {

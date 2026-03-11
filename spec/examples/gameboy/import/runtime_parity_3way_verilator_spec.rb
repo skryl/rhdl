@@ -10,12 +10,20 @@ require 'tempfile'
 require_relative '../../../../examples/gameboy/utilities/import/system_importer'
 require_relative '../../../../examples/gameboy/utilities/tasks/run_task'
 require_relative '../../../../lib/rhdl/cli/tasks/import_task'
+require_relative './verilator_wrapper_support'
 
 RSpec.describe 'GameBoy mixed import runtime parity (Verilator/Verilator/Verilator)', slow: true do
-  MAX_CYCLES = 500_000
-  VIDEO_PARITY_CYCLES = 100_000
+  include GameboyImportVerilatorWrapperSupport
+
+  MAX_CYCLES = Integer(ENV.fetch('RHDL_GAMEBOY_VERILATOR_PARITY_MAX_CYCLES', '50000000'))
+  VIDEO_SNAPSHOT_INTERVAL_CYCLES = Integer(
+    ENV.fetch('RHDL_GAMEBOY_VERILATOR_PARITY_SNAPSHOT_CYCLES', [MAX_CYCLES / 20, 25_000].max.to_s)
+  )
+  PARITY_LEGS = %i[staged normalized raised].freeze
+  NINTENDO_LOGO_HEADER_RANGE = (0x0104..0x0133)
   SCREEN_WIDTH = 160
   SCREEN_HEIGHT = 144
+  DMG_BOOT_ROM_PATH = File.expand_path('../../../../examples/gameboy/software/roms/dmg_boot.bin', __dir__)
   VERILATOR_WARN_FLAGS = %w[
     -Wno-fatal
     -Wno-ASCRANGE
@@ -44,6 +52,11 @@ RSpec.describe 'GameBoy mixed import runtime parity (Verilator/Verilator/Verilat
     path
   end
 
+  def require_boot_rom!
+    skip "DMG boot ROM not available: #{DMG_BOOT_ROM_PATH}" unless File.file?(DMG_BOOT_ROM_PATH)
+    DMG_BOOT_ROM_PATH
+  end
+
   def export_tool
     tool = RHDL::Codegen::CIRCT::Tooling::DEFAULT_VERILOG_EXPORT_TOOL
     return tool if HdlToolchain.which(tool)
@@ -68,19 +81,33 @@ RSpec.describe 'GameBoy mixed import runtime parity (Verilator/Verilator/Verilat
     Array(framebuffer).sum { |row| Array(row).count { |pixel| pixel.to_i != 0 } }
   end
 
-  def parse_video_snapshot(text)
-    text.to_s.lines.reverse_each do |line|
+  def parse_video_snapshots(text)
+    text.to_s.lines.filter_map do |line|
       match = line.strip.match(/\AVIDEO_SNAPSHOT,(\d+),(\d+),(\d+),([0-9a-fA-F]+)\z/)
       next unless match
 
-      return {
+      {
         cycles: match[1].to_i,
         frame_count: match[2].to_i,
         nonzero_pixels: match[3].to_i,
         hash: match[4].downcase
       }
     end
-    nil
+  end
+
+  def latest_video_snapshot(snapshots)
+    Array(snapshots).last
+  end
+
+  def first_nonblank_video_snapshot(snapshots)
+    Array(snapshots).find { |snapshot| snapshot[:nonzero_pixels].to_i.positive? }
+  end
+
+  def trace_reaches_nintendo_logo_header?(trace)
+    Array(trace).any? do |event|
+      pc, = unpack_trace_event(event)
+      NINTENDO_LOGO_HEADER_RANGE.cover?(pc)
+    end
   end
 
   def first_video_mismatch(lhs, rhs)
@@ -168,29 +195,207 @@ RSpec.describe 'GameBoy mixed import runtime parity (Verilator/Verilator/Verilat
     GC.compact if GC.respond_to?(:compact)
   end
 
-  def write_verilator_trace_harness(path)
+  def enabled_verilator_legs
+    @enabled_verilator_legs ||=
+      begin
+        raw = ENV.fetch('RHDL_GAMEBOY_VERILATOR_PARITY_LEGS', '').strip
+        if raw.empty?
+          PARITY_LEGS
+        else
+          legs = raw.split(',').map { |value| value.strip.downcase.to_sym }.reject(&:empty?)
+          unknown = legs - PARITY_LEGS
+          raise ArgumentError, "Unknown parity legs: #{unknown.join(', ')}" if unknown.any?
+
+          legs
+        end
+      end
+  end
+
+  def parity_leg_enabled?(name)
+    enabled_verilator_legs.include?(name.to_sym)
+  end
+
+  def speedcontrol_verilog_path(pure_verilog_root:)
+    path = File.join(pure_verilog_root, 'generated_vhdl', 'speedcontrol.v')
+    raise "Missing synthesized speedcontrol Verilog: #{path}" unless File.file?(path)
+
+    path
+  end
+
+  def write_verilator_trace_harness(path, wrapper_uses_speedcontrol:)
+    ce_state = wrapper_uses_speedcontrol ? '' : "        unsigned int ce_phase = 0;\n"
+    ce_drive = if wrapper_uses_speedcontrol
+                 ''
+               else
+                 <<~CPP.chomp
+                   dut.ce = (ce_phase == 0u) ? 1u : 0u;
+                   dut.ce_n = (ce_phase == 4u) ? 1u : 0u;
+                   dut.ce_2x = ((ce_phase & 0x3u) == 0u) ? 1u : 0u;
+                 CPP
+               end
+    ce_advance = wrapper_uses_speedcontrol ? '' : "          ce_phase = (ce_phase + 1u) & 0x7u;\n"
+    ce_init = if wrapper_uses_speedcontrol
+                ''
+              else
+                <<~CPP.chomp
+                  dut.ce = 0;
+                  dut.ce_n = 0;
+                  dut.ce_2x = 0;
+                CPP
+              end
+
     source = <<~CPP
-      #include "Vgb.h"
-      #include "Vgb___024root.h"
+      #include "Vgameboy.h"
+      #include "Vgameboy___024root.h"
       #include "verilated.h"
       #include <cstdint>
       #include <cstdio>
       #include <cstdlib>
       #include <fstream>
       #include <iterator>
+      #include <cstring>
       #include <vector>
 
-      static std::vector<uint8_t> load_rom(const char* path) {
+      static std::vector<uint8_t> load_bytes(const char* path, size_t min_size) {
         std::ifstream in(path, std::ios::binary);
-        if (!in) return std::vector<uint8_t>(1 << 16, 0);
+        if (!in) return std::vector<uint8_t>(min_size, 0);
         std::vector<uint8_t> bytes((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
-        if (bytes.empty()) bytes.resize(1 << 16, 0);
-        if (bytes.size() < (1 << 16)) bytes.resize(1 << 16, 0);
+        if (bytes.empty()) bytes.resize(min_size, 0);
+        if (bytes.size() < min_size) bytes.resize(min_size, 0);
         return bytes;
       }
 
       static uint8_t rom_read(const std::vector<uint8_t>& rom, uint16_t addr) {
         return rom[addr % rom.size()];
+      }
+
+      struct CartState {
+        uint8_t cart_type;
+        uint8_t rom_size_code;
+        uint8_t ram_size_code;
+        uint16_t rom_bank_count;
+        uint8_t mbc1_rom_bank_low5;
+        uint8_t mbc1_bank_upper2;
+        uint8_t mbc1_mode;
+        uint8_t mbc1_ram_enabled;
+        uint8_t cart_do_latched;
+        uint8_t cart_oe_latched;
+        unsigned int cart_read_pipeline[6];
+        uint8_t cart_read_valid[6];
+        unsigned int cart_last_full_addr;
+        uint8_t cart_last_rd;
+        unsigned int last_fetch_addr;
+      };
+
+      static uint16_t rom_bank_count(uint8_t rom_size_code) {
+        switch (rom_size_code) {
+          case 0x00: return 2;
+          case 0x01: return 4;
+          case 0x02: return 8;
+          case 0x03: return 16;
+          case 0x04: return 32;
+          case 0x05: return 64;
+          case 0x06: return 128;
+          case 0x07: return 256;
+          case 0x08: return 512;
+          case 0x52: return 72;
+          case 0x53: return 80;
+          case 0x54: return 96;
+          default: return 2;
+        }
+      }
+
+      static bool mbc1_cart(uint8_t cart_type) {
+        return cart_type == 0x01 || cart_type == 0x02 || cart_type == 0x03;
+      }
+
+      static void reset_cart_state(CartState& cart) {
+        cart.mbc1_rom_bank_low5 = 1;
+        cart.mbc1_bank_upper2 = 0;
+        cart.mbc1_mode = 0;
+        cart.mbc1_ram_enabled = 0;
+        cart.cart_do_latched = 0xFF;
+        cart.cart_oe_latched = 0;
+        memset(cart.cart_read_pipeline, 0, sizeof(cart.cart_read_pipeline));
+        memset(cart.cart_read_valid, 0, sizeof(cart.cart_read_valid));
+        cart.cart_last_full_addr = 0u;
+        cart.cart_last_rd = 0u;
+        cart.last_fetch_addr = 0xFFFFu;
+      }
+
+      static uint8_t cart_read(const std::vector<uint8_t>& rom, const CartState& cart, uint16_t addr) {
+        if (!mbc1_cart(cart.cart_type)) return rom_read(rom, addr);
+        if (addr > 0x7FFF) return 0xFF;
+
+        uint32_t bank = 0;
+        if (addr <= 0x3FFF) {
+          bank = cart.mbc1_mode ? ((cart.mbc1_bank_upper2 & 0x3u) << 5) : 0u;
+        } else {
+          uint32_t low = cart.mbc1_rom_bank_low5 & 0x1Fu;
+          if (low == 0u) low = 1u;
+          bank = ((cart.mbc1_bank_upper2 & 0x3u) << 5) | low;
+        }
+        uint32_t bank_count = cart.rom_bank_count ? cart.rom_bank_count : 1u;
+        bank %= bank_count;
+        uint32_t index = bank * 0x4000u + (addr & 0x3FFFu);
+        return rom[index % rom.size()];
+      }
+
+      static uint8_t cart_output_enable(const CartState& cart, uint16_t addr) {
+        if (addr <= 0x7FFF) return 1;
+        if (mbc1_cart(cart.cart_type) && addr >= 0xA000 && addr <= 0xBFFF) return cart.mbc1_ram_enabled;
+        return 0;
+      }
+
+      static void cart_write(CartState& cart, uint16_t addr, uint8_t value) {
+        if (!mbc1_cart(cart.cart_type) || addr > 0x7FFF) return;
+
+        if (addr <= 0x1FFF) {
+          cart.mbc1_ram_enabled = (value & 0x0F) == 0x0A ? 1u : 0u;
+        } else if (addr <= 0x3FFF) {
+          uint8_t bank = value & 0x1F;
+          cart.mbc1_rom_bank_low5 = bank == 0 ? 1 : bank;
+        } else if (addr <= 0x5FFF) {
+          cart.mbc1_bank_upper2 = value & 0x03;
+        } else {
+          cart.mbc1_mode = value & 0x01;
+        }
+      }
+
+      static void cart_advance_read_pipeline(CartState& cart, const std::vector<uint8_t>& rom) {
+        for (int i = 5; i > 0; --i) {
+          cart.cart_read_pipeline[i] = cart.cart_read_pipeline[i - 1];
+          cart.cart_read_valid[i] = cart.cart_read_valid[i - 1];
+        }
+        cart.cart_read_pipeline[0] = cart.cart_last_full_addr;
+        cart.cart_read_valid[0] = cart.cart_last_rd;
+        if (cart.cart_read_valid[5]) {
+          cart.cart_do_latched = cart_read(rom, cart, cart.cart_read_pipeline[5]);
+          cart.cart_oe_latched = cart_output_enable(cart, cart.cart_read_pipeline[5]);
+        } else {
+          cart.cart_oe_latched = 0;
+        }
+      }
+
+      static void drive_inputs(Vgameboy& dut, CartState& cart, const std::vector<uint8_t>& rom, const std::vector<uint8_t>& boot_rom) {
+        uint16_t cart_addr =
+          (static_cast<uint16_t>(dut.ext_bus_a15 & 0x1) << 15) |
+          static_cast<uint16_t>(dut.ext_bus_addr & 0x7FFF);
+        cart.cart_last_full_addr = cart_addr;
+
+        dut.cart_ram_size = cart.ram_size_code;
+        uint8_t boot_addr = dut.boot_rom_addr & 0xFF;
+        dut.boot_rom_do = boot_rom[boot_addr];
+
+        if (dut.cart_wr) {
+          cart_write(cart, cart_addr, dut.cart_di & 0xFF);
+        }
+
+        cart.cart_last_rd = dut.cart_rd ? 1u : 0u;
+        cart.last_fetch_addr = cart_addr;
+
+        dut.cart_oe = cart.cart_oe_latched;
+        dut.cart_do = cart.cart_do_latched;
       }
 
       static uint64_t framebuffer_hash(const std::vector<uint8_t>& framebuffer) {
@@ -213,18 +418,25 @@ RSpec.describe 'GameBoy mixed import runtime parity (Verilator/Verilator/Verilat
       int main(int argc, char** argv) {
         Verilated::commandArgs(argc, argv);
         const char* rom_path = (argc > 1) ? argv[1] : "";
-        int max_cycles = (argc > 2) ? std::atoi(argv[2]) : #{MAX_CYCLES};
+        const char* boot_rom_path = (argc > 2) ? argv[2] : "";
+        int max_cycles = (argc > 3) ? std::atoi(argv[3]) : #{MAX_CYCLES};
 
-        Vgb dut;
-        auto rom = load_rom(rom_path);
+        Vgameboy dut;
+        auto rom = load_bytes(rom_path, 1 << 16);
+        auto boot_rom = load_bytes(boot_rom_path, 256);
+        CartState cart{};
+        cart.cart_type = rom[0x147];
+        cart.rom_size_code = rom[0x148];
+        cart.ram_size_code = rom[0x149];
+        cart.rom_bank_count = rom_bank_count(rom[0x148]);
+        reset_cart_state(cart);
         std::vector<uint8_t> framebuffer(#{SCREEN_WIDTH} * #{SCREEN_HEIGHT}, 0);
         int lcd_x = 0;
         int lcd_y = 0;
         uint8_t prev_lcd_clkena = 0;
         uint8_t prev_lcd_vsync = 0;
         uint64_t frame_count = 0;
-        bool video_emitted = false;
-
+#{ce_state.chomp}
         auto capture_video = [&]() {
           uint8_t lcd_clkena = dut.lcd_clkena & 0x1;
           uint8_t lcd_vsync = dut.lcd_vsync & 0x1;
@@ -262,33 +474,26 @@ RSpec.describe 'GameBoy mixed import runtime parity (Verilator/Verilator/Verilat
         };
 
         auto tick_clock = [&]() {
-          static uint32_t ce_phase = 0;
-          dut.ce = (ce_phase == 0) ? 1 : 0;
-          dut.ce_n = (ce_phase == 4) ? 1 : 0;
-          dut.ce_2x = ((ce_phase & 0x3) == 0) ? 1 : 0;
+#{ce_drive.empty? ? '' : "          #{ce_drive.gsub("\n", "\n          ")}\n"}
           dut.clk_sys = 0;
           dut.eval();
-
-          if (dut.cart_rd) {
-            uint16_t addr =
-              (static_cast<uint16_t>(dut.ext_bus_a15 & 0x1) << 15) |
-              static_cast<uint16_t>(dut.ext_bus_addr & 0x7FFF);
-            dut.cart_do = rom_read(rom, addr);
-          }
-
+          drive_inputs(dut, cart, rom, boot_rom);
           dut.eval();
+#{ce_drive.empty? ? '' : "          #{ce_drive.gsub("\n", "\n          ")}\n"}
           dut.clk_sys = 1;
           dut.eval();
+          drive_inputs(dut, cart, rom, boot_rom);
+          dut.eval();
           capture_video();
-          ce_phase = (ce_phase + 1) & 0x7;
-        };
-
-        auto run_machine_cycle = [&]() {
-          for (int i = 0; i < 4; ++i) tick_clock();
+          cart_advance_read_pipeline(cart, rom);
+#{ce_advance.chomp}
         };
 
         dut.joystick = 0xFF;
-        dut.cart_oe = 1;
+        dut.is_gbc = 0;
+        dut.is_sgb = 0;
+#{ce_init.empty? ? '' : "        #{ce_init.gsub("\n", "\n        ")}\n"}
+        dut.boot_rom_do = 0;
         dut.reset = 1;
         for (int i = 0; i < 10; ++i) tick_clock();
         dut.reset = 0;
@@ -296,24 +501,24 @@ RSpec.describe 'GameBoy mixed import runtime parity (Verilator/Verilator/Verilat
 
         uint16_t last_addr = 0xFFFF;
         for (int i = 0; i < max_cycles; ++i) {
-          run_machine_cycle();
-          if (!video_emitted && (i + 1) == #{VIDEO_PARITY_CYCLES}) {
+          tick_clock();
+          if (((i + 1) % #{VIDEO_SNAPSHOT_INTERVAL_CYCLES}) == 0) {
             emit_video_snapshot(i + 1);
-            video_emitted = true;
           }
           if (!dut.cart_rd) continue;
 
           uint16_t addr =
-            (static_cast<uint16_t>(dut.ext_bus_a15 & 0x1) << 15) |
-            static_cast<uint16_t>(dut.ext_bus_addr & 0x7FFF);
+            (static_cast<uint16_t>(dut.ext_bus_a15 & 0x1u) << 15) |
+            (static_cast<uint16_t>(dut.ext_bus_addr & 0x7FFFu));
           if (addr == last_addr) continue;
 
+          cart.last_fetch_addr = addr;
           uint8_t opcode = rom_read(rom, addr);
           std::printf("%u,%u\\n", static_cast<unsigned>(addr), static_cast<unsigned>(opcode));
           last_addr = addr;
         }
 
-        if (!video_emitted) emit_video_snapshot(max_cycles);
+        if ((max_cycles % #{VIDEO_SNAPSHOT_INTERVAL_CYCLES}) != 0) emit_video_snapshot(max_cycles);
 
         return 0;
       }
@@ -405,29 +610,42 @@ RSpec.describe 'GameBoy mixed import runtime parity (Verilator/Verilator/Verilat
     Array(trace).drop(start).first(limit).map { |event| unpack_trace_event(event) }
   end
 
-  def collect_verilator_trace(verilog_entry:, rom_path:, scratch_dir:)
+  def collect_verilator_trace(verilog_entry:, rom_path:, scratch_dir:, support_verilog_paths:, use_speedcontrol:)
     FileUtils.mkdir_p(scratch_dir)
     build_dir = File.join(scratch_dir, 'verilator_obj')
+    wrapper = File.join(scratch_dir, 'gameboy.v')
     harness = File.join(scratch_dir, 'trace_main.cpp')
-    write_verilator_trace_harness(harness)
+    profile = gb_wrapper_profile(verilog_entry)
+    File.write(
+      wrapper,
+      gameboy_wrapper_source(
+        profile: profile,
+        use_speedcontrol: use_speedcontrol
+      )
+    )
+    write_verilator_trace_harness(harness, wrapper_uses_speedcontrol: use_speedcontrol)
 
     run_cmd!([
       'verilator',
       '--cc',
+      wrapper,
+      *Array(support_verilog_paths).uniq,
       verilog_entry,
-      '--top-module', 'gb',
+      '--top-module', gameboy_wrapper_top_module,
       '--Mdir', build_dir,
       '--public-flat-rw',
       *VERILATOR_WARN_FLAGS,
       '--exe',
       harness
     ])
-    run_cmd!(['make', '-C', build_dir, '-f', 'Vgb.mk', 'Vgb'])
+    run_cmd!(['make', '-C', build_dir, '-f', 'Vgameboy.mk', 'Vgameboy'])
 
-    output = run_capture_cmd!([File.join(build_dir, 'Vgb'), rom_path, MAX_CYCLES.to_s])
+    output = run_capture_cmd!([File.join(build_dir, 'Vgameboy'), rom_path, require_boot_rom!, MAX_CYCLES.to_s])
+    videos = parse_video_snapshots(output)
     {
       trace: normalize_trace(parse_trace(output)),
-      video: parse_video_snapshot(output)
+      video: latest_video_snapshot(videos),
+      videos: videos
     }
   end
 
@@ -471,7 +689,7 @@ RSpec.describe 'GameBoy mixed import runtime parity (Verilator/Verilator/Verilat
   it 'matches PC/opcode progression and video snapshot across staged source, normalized import, and raised-RHDL Verilog', timeout: 3600 do
     require_reference_tree!
     %w[ghdl circt-verilog verilator c++].each { |tool| require_tool!(tool) }
-    require_export_tool!
+    require_export_tool! if parity_leg_enabled?(:raised)
     pop_rom_path = require_pop_rom!
 
     Dir.mktmpdir('gameboy_runtime_parity_verilator_out') do |out_dir|
@@ -483,6 +701,7 @@ RSpec.describe 'GameBoy mixed import runtime parity (Verilator/Verilator/Verilat
             keep_workspace: true,
             clean_output: true,
             emit_runtime_json: false,
+            auto_stub_modules: :simulation_safe,
             strict: true,
             progress: ->(_msg) {}
           )
@@ -496,151 +715,229 @@ RSpec.describe 'GameBoy mixed import runtime parity (Verilator/Verilator/Verilat
           pure_verilog_entry = mixed.fetch('pure_verilog_entry_path')
           normalized_verilog = mixed.fetch('normalized_verilog_path')
           pure_verilog_root = mixed.fetch('pure_verilog_root')
-          source_mlir = File.read(import_result.mlir_path)
-          raised_rhdl_verilog = export_raised_rhdl_verilog(
-            source_mlir,
-            scratch_dir: File.join(scratch, 'raised_rhdl'),
-            pure_verilog_root: pure_verilog_root
-          )
+          raised_rhdl_verilog = nil
+          if parity_leg_enabled?(:raised)
+            source_mlir = File.read(import_result.mlir_path)
+            raised_rhdl_verilog = export_raised_rhdl_verilog(
+              source_mlir,
+              scratch_dir: File.join(scratch, 'raised_rhdl'),
+              pure_verilog_root: pure_verilog_root
+            )
+          end
 
           expect(File.file?(pure_verilog_entry)).to be(true)
           expect(File.file?(normalized_verilog)).to be(true)
-          expect(File.file?(raised_rhdl_verilog)).to be(true)
+          expect(File.file?(raised_rhdl_verilog)).to be(true) if raised_rhdl_verilog
+          speedcontrol_verilog = speedcontrol_verilog_path(pure_verilog_root: pure_verilog_root)
 
           summary_lines = []
           failures = []
           summary_lines << 'Backend order: Verilator(staged source) -> Verilator(normalized import) -> Verilator(raised RHDL)'
+          summary_lines << "Enabled legs: #{enabled_verilator_legs.join(', ')}"
+          summary_lines << "Importer stubs: #{import_result.stub_modules.join(', ')}"
           summary_lines << "Staged source Verilog: #{pure_verilog_entry}"
           summary_lines << "Normalized imported Verilog: #{normalized_verilog}"
-          summary_lines << "Raised-RHDL Verilog: #{raised_rhdl_verilog}"
+          summary_lines << "Raised-RHDL Verilog: #{raised_rhdl_verilog || '(skipped)'}"
+          summary_lines << "Imported speedcontrol Verilog: #{speedcontrol_verilog}"
 
           importer = nil
           import_result = nil
           report = nil
           mixed = nil
-          source_mlir = nil
           trim_ruby_heap!
 
           announce_parity_phase!('collecting staged-source Verilator trace')
-          staged = collect_verilator_trace(
-            verilog_entry: pure_verilog_entry,
-            rom_path: pop_rom_path,
-            scratch_dir: File.join(scratch, 'staged_source')
-          )
-          staged_trace = staged.fetch(:trace)
-          staged_video = staged.fetch(:video)
-          staged = nil
-          if staged_trace.empty?
-            failures << 'Staged-source Verilator trace is empty'
-            summary_lines << 'Staged-source Verilator: empty trace'
+          staged_trace = []
+          staged_videos = []
+          staged_video = nil
+          staged_first_nonblank_video = nil
+          if parity_leg_enabled?(:staged)
+            staged = collect_verilator_trace(
+              verilog_entry: pure_verilog_entry,
+              rom_path: pop_rom_path,
+              scratch_dir: File.join(scratch, 'staged_source'),
+              support_verilog_paths: [],
+              use_speedcontrol: true
+            )
+            staged_trace = staged.fetch(:trace)
+            staged_videos = staged.fetch(:videos)
+            staged_video = staged.fetch(:video)
+            staged_first_nonblank_video = first_nonblank_video_snapshot(staged_videos)
+            staged = nil
+            if staged_trace.empty?
+              failures << 'Staged-source Verilator trace is empty'
+              summary_lines << 'Staged-source Verilator: empty trace'
+            else
+              summary_lines << "Staged-source Verilator: #{staged_trace.length} events"
+            end
+            unless trace_reaches_nintendo_logo_header?(staged_trace)
+              failures << 'Staged-source Verilator trace never reaches Nintendo logo header range'
+              summary_lines << 'Staged-source trace: missing Nintendo logo header access'
+            end
+            if staged_video
+              summary_lines << "Staged-source video@#{staged_video[:cycles]}: frames=#{staged_video[:frame_count]} nonzero=#{staged_video[:nonzero_pixels]} hash=#{staged_video[:hash]}"
+            else
+              failures << 'Staged-source Verilator video snapshot is missing'
+              summary_lines << 'Staged-source video: missing snapshot'
+            end
+            if staged_first_nonblank_video
+              summary_lines << "Staged-source first nonblank video@#{staged_first_nonblank_video[:cycles]}: frames=#{staged_first_nonblank_video[:frame_count]} nonzero=#{staged_first_nonblank_video[:nonzero_pixels]} hash=#{staged_first_nonblank_video[:hash]}"
+            else
+              failures << 'Staged-source Verilator framebuffer never becomes nonblank'
+              summary_lines << 'Staged-source video: framebuffer remained blank'
+            end
           else
-            summary_lines << "Staged-source Verilator: #{staged_trace.length} events"
-          end
-          if staged_video
-            summary_lines << "Staged-source video@#{staged_video[:cycles]}: frames=#{staged_video[:frame_count]} nonzero=#{staged_video[:nonzero_pixels]} hash=#{staged_video[:hash]}"
-          else
-            failures << 'Staged-source Verilator video snapshot is missing'
-            summary_lines << 'Staged-source video: missing snapshot'
+            summary_lines << 'Staged-source Verilator: skipped by RHDL_GAMEBOY_VERILATOR_PARITY_LEGS'
           end
 
           trim_ruby_heap!
 
           announce_parity_phase!('collecting normalized-import Verilator trace')
-          normalized = collect_verilator_trace(
-            verilog_entry: normalized_verilog,
-            rom_path: pop_rom_path,
-            scratch_dir: File.join(scratch, 'normalized_import')
-          )
-          normalized_trace = normalized.fetch(:trace)
-          normalized_video = normalized.fetch(:video)
-          normalized = nil
-          if normalized_trace.empty?
-            failures << 'Normalized-import Verilator trace is empty'
-            summary_lines << 'Normalized-import Verilator: empty trace'
+          normalized_trace = []
+          normalized_videos = []
+          normalized_video = nil
+          normalized_first_nonblank_video = nil
+          if parity_leg_enabled?(:normalized)
+            normalized = collect_verilator_trace(
+              verilog_entry: normalized_verilog,
+              rom_path: pop_rom_path,
+              scratch_dir: File.join(scratch, 'normalized_import'),
+              support_verilog_paths: [speedcontrol_verilog],
+              use_speedcontrol: true
+            )
+            normalized_trace = normalized.fetch(:trace)
+            normalized_videos = normalized.fetch(:videos)
+            normalized_video = normalized.fetch(:video)
+            normalized_first_nonblank_video = first_nonblank_video_snapshot(normalized_videos)
+            normalized = nil
+            if normalized_trace.empty?
+              failures << 'Normalized-import Verilator trace is empty'
+              summary_lines << 'Normalized-import Verilator: empty trace'
+            else
+              summary_lines << "Normalized-import Verilator: #{normalized_trace.length} events"
+            end
+            unless trace_reaches_nintendo_logo_header?(normalized_trace)
+              failures << 'Normalized-import Verilator trace never reaches Nintendo logo header range'
+              summary_lines << 'Normalized-import trace: missing Nintendo logo header access'
+            end
+            if normalized_video
+              summary_lines << "Normalized-import video@#{normalized_video[:cycles]}: frames=#{normalized_video[:frame_count]} nonzero=#{normalized_video[:nonzero_pixels]} hash=#{normalized_video[:hash]}"
+            else
+              failures << 'Normalized-import Verilator video snapshot is missing'
+              summary_lines << 'Normalized-import video: missing snapshot'
+            end
+            if normalized_first_nonblank_video
+              summary_lines << "Normalized-import first nonblank video@#{normalized_first_nonblank_video[:cycles]}: frames=#{normalized_first_nonblank_video[:frame_count]} nonzero=#{normalized_first_nonblank_video[:nonzero_pixels]} hash=#{normalized_first_nonblank_video[:hash]}"
+            else
+              failures << 'Normalized-import Verilator framebuffer never becomes nonblank'
+              summary_lines << 'Normalized-import video: framebuffer remained blank'
+            end
           else
-            summary_lines << "Normalized-import Verilator: #{normalized_trace.length} events"
-          end
-          if normalized_video
-            summary_lines << "Normalized-import video@#{normalized_video[:cycles]}: frames=#{normalized_video[:frame_count]} nonzero=#{normalized_video[:nonzero_pixels]} hash=#{normalized_video[:hash]}"
-          else
-            failures << 'Normalized-import Verilator video snapshot is missing'
-            summary_lines << 'Normalized-import video: missing snapshot'
+            summary_lines << 'Normalized-import Verilator: skipped by RHDL_GAMEBOY_VERILATOR_PARITY_LEGS'
           end
 
           trim_ruby_heap!
 
           announce_parity_phase!('collecting raised-RHDL Verilator trace')
-          raised = collect_verilator_trace(
-            verilog_entry: raised_rhdl_verilog,
-            rom_path: pop_rom_path,
-            scratch_dir: File.join(scratch, 'raised_rhdl_verilator')
-          )
-          raised_trace = raised.fetch(:trace)
-          raised_video = raised.fetch(:video)
-          raised = nil
-          if raised_trace.empty?
-            failures << 'Raised-RHDL Verilator trace is empty'
-            summary_lines << 'Raised-RHDL Verilator: empty trace'
+          raised_trace = []
+          raised_videos = []
+          raised_video = nil
+          raised_first_nonblank_video = nil
+          if parity_leg_enabled?(:raised)
+            raised = collect_verilator_trace(
+              verilog_entry: raised_rhdl_verilog,
+              rom_path: pop_rom_path,
+              scratch_dir: File.join(scratch, 'raised_rhdl_verilator'),
+              support_verilog_paths: [speedcontrol_verilog],
+              use_speedcontrol: true
+            )
+            raised_trace = raised.fetch(:trace)
+            raised_videos = raised.fetch(:videos)
+            raised_video = raised.fetch(:video)
+            raised_first_nonblank_video = first_nonblank_video_snapshot(raised_videos)
+            raised = nil
+            if raised_trace.empty?
+              failures << 'Raised-RHDL Verilator trace is empty'
+              summary_lines << 'Raised-RHDL Verilator: empty trace'
+            else
+              summary_lines << "Raised-RHDL Verilator: #{raised_trace.length} events"
+            end
+            unless trace_reaches_nintendo_logo_header?(raised_trace)
+              failures << 'Raised-RHDL Verilator trace never reaches Nintendo logo header range'
+              summary_lines << 'Raised-RHDL trace: missing Nintendo logo header access'
+            end
+            if raised_video
+              summary_lines << "Raised-RHDL video@#{raised_video[:cycles]}: frames=#{raised_video[:frame_count]} nonzero=#{raised_video[:nonzero_pixels]} hash=#{raised_video[:hash]}"
+            else
+              failures << 'Raised-RHDL Verilator video snapshot is missing'
+              summary_lines << 'Raised-RHDL video: missing snapshot'
+            end
+            if raised_first_nonblank_video
+              summary_lines << "Raised-RHDL first nonblank video@#{raised_first_nonblank_video[:cycles]}: frames=#{raised_first_nonblank_video[:frame_count]} nonzero=#{raised_first_nonblank_video[:nonzero_pixels]} hash=#{raised_first_nonblank_video[:hash]}"
+            else
+              failures << 'Raised-RHDL Verilator framebuffer never becomes nonblank'
+              summary_lines << 'Raised-RHDL video: framebuffer remained blank'
+            end
           else
-            summary_lines << "Raised-RHDL Verilator: #{raised_trace.length} events"
-          end
-          if raised_video
-            summary_lines << "Raised-RHDL video@#{raised_video[:cycles]}: frames=#{raised_video[:frame_count]} nonzero=#{raised_video[:nonzero_pixels]} hash=#{raised_video[:hash]}"
-          else
-            failures << 'Raised-RHDL Verilator video snapshot is missing'
-            summary_lines << 'Raised-RHDL video: missing snapshot'
+            summary_lines << 'Raised-RHDL Verilator: skipped by RHDL_GAMEBOY_VERILATOR_PARITY_LEGS'
           end
 
-          record_trace_comparison!(
-            summary_lines: summary_lines,
-            failures: failures,
-            lhs_name: 'Staged source',
-            lhs_trace: staged_trace,
-            rhs_name: 'Normalized import',
-            rhs_trace: normalized_trace
-          )
-          record_video_comparison!(
-            summary_lines: summary_lines,
-            failures: failures,
-            lhs_name: 'Staged source',
-            lhs_video: staged_video,
-            rhs_name: 'Normalized import',
-            rhs_video: normalized_video
-          )
+          if parity_leg_enabled?(:staged) && parity_leg_enabled?(:normalized)
+            record_trace_comparison!(
+              summary_lines: summary_lines,
+              failures: failures,
+              lhs_name: 'Staged source',
+              lhs_trace: staged_trace,
+              rhs_name: 'Normalized import',
+              rhs_trace: normalized_trace
+            )
+            record_video_comparison!(
+              summary_lines: summary_lines,
+              failures: failures,
+              lhs_name: 'Staged source',
+              lhs_video: staged_first_nonblank_video || staged_video,
+              rhs_name: 'Normalized import',
+              rhs_video: normalized_first_nonblank_video || normalized_video
+            )
+          end
 
-          record_trace_comparison!(
-            summary_lines: summary_lines,
-            failures: failures,
-            lhs_name: 'Staged source',
-            lhs_trace: staged_trace,
-            rhs_name: 'Raised RHDL',
-            rhs_trace: raised_trace
-          )
-          record_video_comparison!(
-            summary_lines: summary_lines,
-            failures: failures,
-            lhs_name: 'Staged source',
-            lhs_video: staged_video,
-            rhs_name: 'Raised RHDL',
-            rhs_video: raised_video
-          )
+          if parity_leg_enabled?(:staged) && parity_leg_enabled?(:raised)
+            record_trace_comparison!(
+              summary_lines: summary_lines,
+              failures: failures,
+              lhs_name: 'Staged source',
+              lhs_trace: staged_trace,
+              rhs_name: 'Raised RHDL',
+              rhs_trace: raised_trace
+            )
+            record_video_comparison!(
+              summary_lines: summary_lines,
+              failures: failures,
+              lhs_name: 'Staged source',
+              lhs_video: staged_first_nonblank_video || staged_video,
+              rhs_name: 'Raised RHDL',
+              rhs_video: raised_first_nonblank_video || raised_video
+            )
+          end
 
-          record_trace_comparison!(
-            summary_lines: summary_lines,
-            failures: failures,
-            lhs_name: 'Normalized import',
-            lhs_trace: normalized_trace,
-            rhs_name: 'Raised RHDL',
-            rhs_trace: raised_trace
-          )
-          record_video_comparison!(
-            summary_lines: summary_lines,
-            failures: failures,
-            lhs_name: 'Normalized import',
-            lhs_video: normalized_video,
-            rhs_name: 'Raised RHDL',
-            rhs_video: raised_video
-          )
+          if parity_leg_enabled?(:normalized) && parity_leg_enabled?(:raised)
+            record_trace_comparison!(
+              summary_lines: summary_lines,
+              failures: failures,
+              lhs_name: 'Normalized import',
+              lhs_trace: normalized_trace,
+              rhs_name: 'Raised RHDL',
+              rhs_trace: raised_trace
+            )
+            record_video_comparison!(
+              summary_lines: summary_lines,
+              failures: failures,
+              lhs_name: 'Normalized import',
+              lhs_video: normalized_first_nonblank_video || normalized_video,
+              rhs_name: 'Raised RHDL',
+              rhs_video: raised_first_nonblank_video || raised_video
+            )
+          end
 
           if failures.any?
             raise RSpec::Expectations::ExpectationNotMetError,

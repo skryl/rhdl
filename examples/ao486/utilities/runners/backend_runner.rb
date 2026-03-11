@@ -6,6 +6,7 @@ module RHDL
   module Examples
     module AO486
       class BackendRunner
+        DEFAULT_UNLIMITED_CHUNK = 100_000
         SOFTWARE_ROOT = File.expand_path('../../software', __dir__)
         ROM_ROOT = File.join(SOFTWARE_ROOT, 'rom')
         BIN_ROOT = File.join(SOFTWARE_ROOT, 'bin')
@@ -87,7 +88,8 @@ module RHDL
         end
 
         def load_bytes(base, bytes, target: @memory)
-          Array(bytes).each_with_index do |byte, idx|
+          normalized_bytes = bytes.is_a?(String) ? bytes.bytes : Array(bytes)
+          normalized_bytes.each_with_index do |byte, idx|
             target[base + idx] = byte.to_i & 0xFF
           end
           self
@@ -137,17 +139,16 @@ module RHDL
         end
 
         def render_display(debug_lines: [])
-          @display_adapter
-            .render(memory: @memory, cursor: nil, debug_lines: Array(debug_lines))
-            .lines(chomp: true)
-            .map { |line| "|#{line}" }
-            .join("\n")
+          @display_adapter.render(memory: @memory, cursor: :auto, debug_lines: Array(debug_lines))
         end
 
         def cursor_position
+          page = @memory.fetch(DisplayAdapter::VIDEO_PAGE_BDA, 0) & 0xFF
+          base = CURSOR_BDA + (page * 2)
           {
-            row: @memory.fetch(CURSOR_BDA + 1, 0),
-            col: @memory.fetch(CURSOR_BDA, 0)
+            row: @memory.fetch(base + 1, 0),
+            col: @memory.fetch(base, 0),
+            page: page
           }
         end
 
@@ -159,16 +160,11 @@ module RHDL
         end
 
         def run(cycles: nil, speed: nil, headless: @headless)
-          chunk = cycles || @requested_cycles || speed || @speed || 0
+          chunk = cycles || @requested_cycles || speed || @speed || DEFAULT_UNLIMITED_CHUNK
           @cycles_run += tick_backend(chunk.to_i)
           @shell_prompt_detected ||= false
 
           state.merge(cycles: @cycles_run, speed: speed || @speed, headless: headless)
-        end
-
-        def run_until_shell(cycles: nil)
-          run(cycles: cycles)
-          @shell_prompt_detected
         end
 
         def send_keys(text)

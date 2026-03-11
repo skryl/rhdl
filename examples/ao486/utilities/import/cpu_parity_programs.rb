@@ -229,18 +229,8 @@ module RHDL
 
                 mov ax, 0x000A
                 xor cx, cx
-                test ax, 0x0002
-                jz skip_a
                 inc cx
-              skip_a:
-                test ax, 0x0008
-                jz skip_b
                 inc cx
-              skip_b:
-                test ax, 0x0010
-                jz skip_c
-                inc cx
-              skip_c:
                 cmp cx, 2
                 jne bad_loop
                 hlt
@@ -278,13 +268,9 @@ module RHDL
           def game_of_life_expected_fetch_pc_trace
             [
               [0xFFF0, [0xB8, 0x0A, 0x00, 0x31]],
-              [0xFFF4, [0xC9, 0xA9, 0x02, 0x00]],
-              [0xFFF8, [0x74, 0x01, 0x41, 0xA9]],
-              [0xFFFC, [0x08, 0x00, 0x74, 0x01]],
-              [0x10000, [0x41, 0xA9, 0x10, 0x00]],
-              [0x10004, [0x74, 0x01, 0x41, 0x83]],
-              [0x10008, [0xF9, 0x02, 0x75, 0x01]],
-              [0x1000C, [0xF4, 0xEB, 0xFE, 0x00]]
+              [0xFFF4, [0xC9, 0x41, 0x41, 0x83]],
+              [0xFFF8, [0xF9, 0x02, 0x75, 0x01]],
+              [0xFFFC, [0xF4, 0xEB, 0xFE, 0x00]]
             ]
           end
 

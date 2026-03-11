@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 require 'spec_helper'
-require_relative '../../../../examples/gameboy/gameboy'
+require_relative '../../../../examples/gameboy/hdl/gameboy'
 require_relative '../../../../examples/gameboy/utilities/runners/ruby_runner'
 require_relative '../../../../examples/gameboy/utilities/renderers/lcd_renderer'
 

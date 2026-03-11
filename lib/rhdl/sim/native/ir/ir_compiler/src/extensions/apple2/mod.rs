@@ -30,7 +30,7 @@ pub struct Apple2Extension {
     pub speaker_idx: usize,
     pub cpu_addr_idx: usize,
     /// Previous speaker state for edge detection
-    pub prev_speaker: u64,
+    pub prev_speaker: u128,
     /// Number of sub-cycles per CPU cycle (default: 14)
     pub sub_cycles: usize,
 }
@@ -126,9 +126,9 @@ impl Apple2Extension {
         {
             let lib = core.compiled_lib.as_ref().unwrap();
             unsafe {
-                type RunCpuCyclesFn = unsafe extern "C" fn(
+            type RunCpuCyclesFn = unsafe extern "C" fn(
                     *mut u128, usize, *mut u8, usize, *const u8, usize,
-                    usize, u8, bool, *mut u64, *mut bool, *mut bool, *mut u32
+                    usize, u8, bool, *mut u128, *mut bool, *mut bool, *mut u32
                 ) -> usize;
 
                 let func: libloading::Symbol<RunCpuCyclesFn> = lib.get(b"run_cpu_cycles")
@@ -187,7 +187,7 @@ impl Apple2Extension {
 
         code.push_str("#[no_mangle]\n");
         code.push_str("pub unsafe extern \"C\" fn run_cpu_cycles(\n");
-        code.push_str("    signals: *mut u64,\n");
+        code.push_str("    signals: *mut u128,\n");
         code.push_str("    signals_len: usize,\n");
         code.push_str("    ram: *mut u8,\n");
         code.push_str("    ram_len: usize,\n");
@@ -196,7 +196,7 @@ impl Apple2Extension {
         code.push_str("    n: usize,\n");
         code.push_str("    key_data: u8,\n");
         code.push_str("    key_ready: bool,\n");
-        code.push_str("    prev_speaker_ptr: *mut u64,\n");
+        code.push_str("    prev_speaker_ptr: *mut u128,\n");
         code.push_str("    text_dirty_out: *mut bool,\n");
         code.push_str("    key_cleared_out: *mut bool,\n");
         code.push_str("    speaker_toggles_out: *mut u32,\n");
@@ -205,13 +205,13 @@ impl Apple2Extension {
         code.push_str("    let ram = std::slice::from_raw_parts_mut(ram, ram_len);\n");
         code.push_str("    let rom = std::slice::from_raw_parts(rom, rom_len);\n");
         code.push_str("    let s = signals.as_mut_ptr();\n");
-        code.push_str(&format!("    let mut old_clocks = [0u64; {}];\n", num_clocks));
-        code.push_str(&format!("    let mut next_regs = [0u64; {}];\n", num_regs.max(1)));
+        code.push_str(&format!("    let mut old_clocks = [0u128; {}];\n", num_clocks));
+        code.push_str(&format!("    let mut next_regs = [0u128; {}];\n", num_regs.max(1)));
         code.push_str("    let mut text_dirty = false;\n");
         code.push_str("    let mut key_cleared = false;\n");
         code.push_str("    let mut speaker_toggles: u32 = 0;\n");
         code.push_str("    let mut prev_speaker = *prev_speaker_ptr;\n\n");
-        code.push_str("    let key_signal = if key_ready { (key_data as u64) | 0x80 } else { key_data as u64 };\n");
+        code.push_str("    let key_signal = if key_ready { (key_data as u128) | 0x80 } else { key_data as u128 };\n");
         code.push_str(&format!("    *s.add({}) = key_signal;\n\n", k_idx));
 
         code.push_str("    for _ in 0..n {\n");
@@ -223,11 +223,11 @@ impl Apple2Extension {
         code.push_str(&format!("        let cpu_addr = (*s.add({}) as usize) & 0xFFFF;\n", cpu_addr_idx));
         code.push_str("        let ram_data = if cpu_addr >= 0xD000 {\n");
         code.push_str("            let rom_idx = cpu_addr - 0xD000;\n");
-        code.push_str("            if rom_idx < rom_len { rom[rom_idx] as u64 } else { 0 }\n");
+        code.push_str("            if rom_idx < rom_len { rom[rom_idx] as u128 } else { 0 }\n");
         code.push_str("        } else if cpu_addr >= 0xC000 {\n");
         code.push_str("            0\n");
         code.push_str("        } else if cpu_addr < ram_len {\n");
-        code.push_str("            ram[cpu_addr] as u64\n");
+        code.push_str("            ram[cpu_addr] as u128\n");
         code.push_str("        } else {\n");
         code.push_str("            0\n");
         code.push_str("        };\n");

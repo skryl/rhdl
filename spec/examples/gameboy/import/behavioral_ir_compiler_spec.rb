@@ -10,10 +10,14 @@ require 'tempfile'
 require_relative '../../../../examples/gameboy/utilities/tasks/run_task'
 require_relative '../../../../examples/gameboy/utilities/import/system_importer'
 require_relative '../../../../lib/rhdl/cli/tasks/import_task'
+require_relative './verilator_wrapper_support'
 
 RSpec.describe 'GameBoy imported design behavioral parity on Verilator', slow: true do
-  MAX_CYCLES = 50_000
+  include GameboyImportVerilatorWrapperSupport
+
+  MAX_CYCLES = 100_000
   TRACE_COMPARE_LIMIT = 128
+  DMG_BOOT_ROM_PATH = File.expand_path('../../../../examples/gameboy/software/roms/dmg_boot.bin', __dir__)
   VERILATOR_WARN_FLAGS = %w[
     -Wno-fatal
     -Wno-ASCRANGE
@@ -43,6 +47,11 @@ RSpec.describe 'GameBoy imported design behavioral parity on Verilator', slow: t
 
   def require_export_tool!
     skip "#{RHDL::Codegen::CIRCT::Tooling::DEFAULT_VERILOG_EXPORT_TOOL} not available for MLIR export" unless export_tool
+  end
+
+  def require_boot_rom!
+    skip "DMG boot ROM not available: #{DMG_BOOT_ROM_PATH}" unless File.file?(DMG_BOOT_ROM_PATH)
+    DMG_BOOT_ROM_PATH
   end
 
   def run_cmd!(cmd, chdir: nil)
@@ -88,8 +97,7 @@ RSpec.describe 'GameBoy imported design behavioral parity on Verilator', slow: t
 
   def write_verilator_trace_harness(path)
     source = <<~CPP
-      #include "Vgb.h"
-      #include "Vgb___024root.h"
+      #include "Vgameboy.h"
       #include "verilated.h"
       #include <cstdint>
       #include <cstdio>
@@ -114,16 +122,20 @@ RSpec.describe 'GameBoy imported design behavioral parity on Verilator', slow: t
       int main(int argc, char** argv) {
         Verilated::commandArgs(argc, argv);
         const char* rom_path = (argc > 1) ? argv[1] : "";
-        int max_cycles = (argc > 2) ? std::atoi(argv[2]) : #{MAX_CYCLES};
+        const char* boot_rom_path = (argc > 2) ? argv[2] : "";
+        int max_cycles = (argc > 3) ? std::atoi(argv[3]) : #{MAX_CYCLES};
 
-        Vgb dut;
+        Vgameboy dut;
         auto rom = load_rom(rom_path);
+        auto boot_rom = load_rom(boot_rom_path);
 
         auto tick_clock = [&]() {
           static uint32_t ce_phase = 0;
           dut.ce = (ce_phase == 0) ? 1 : 0;
           dut.ce_n = (ce_phase == 4) ? 1 : 0;
           dut.ce_2x = ((ce_phase & 0x3) == 0) ? 1 : 0;
+          uint8_t boot_addr = dut.boot_rom_addr & 0xFF;
+          dut.boot_rom_do = boot_rom[boot_addr];
           dut.clk_sys = 0;
           dut.eval();
 
@@ -145,7 +157,9 @@ RSpec.describe 'GameBoy imported design behavioral parity on Verilator', slow: t
         };
 
         dut.joystick = 0xFF;
-        dut.cart_oe = 1;
+        dut.is_gbc = 0;
+        dut.is_sgb = 0;
+        dut.boot_rom_do = 0;
         dut.reset = 1;
         for (int i = 0; i < 10; ++i) tick_clock();
         dut.reset = 0;
@@ -193,23 +207,27 @@ RSpec.describe 'GameBoy imported design behavioral parity on Verilator', slow: t
   def collect_verilator_trace(verilog_entry:, rom_path:, scratch_dir:)
     FileUtils.mkdir_p(scratch_dir)
     build_dir = File.join(scratch_dir, 'verilator_obj')
+    wrapper = File.join(scratch_dir, 'gameboy.v')
     harness = File.join(scratch_dir, 'trace_main.cpp')
+    profile = gb_wrapper_profile(verilog_entry)
+    write_gameboy_wrapper(wrapper, profile: profile)
     write_verilator_trace_harness(harness)
 
     run_cmd!([
       'verilator',
       '--cc',
+      wrapper,
       verilog_entry,
-      '--top-module', 'gb',
+      '--top-module', gameboy_wrapper_top_module,
       '--Mdir', build_dir,
       '--public-flat-rw',
       *VERILATOR_WARN_FLAGS,
       '--exe',
       harness
     ])
-    run_cmd!(['make', '-C', build_dir, '-f', 'Vgb.mk', 'Vgb'])
+    run_cmd!(['make', '-C', build_dir, '-f', 'Vgameboy.mk', 'Vgameboy'])
 
-    parse_trace(run_capture_cmd!([File.join(build_dir, 'Vgb'), rom_path, MAX_CYCLES.to_s]))
+    parse_trace(run_capture_cmd!([File.join(build_dir, 'Vgameboy'), rom_path, require_boot_rom!, MAX_CYCLES.to_s]))
   end
 
   def convert_mlir_to_verilog(mlir_source, base_dir:, stem:)
@@ -310,6 +328,7 @@ RSpec.describe 'GameBoy imported design behavioral parity on Verilator', slow: t
     require_tool!('verilator')
     require_tool!('c++')
     require_export_tool!
+    require_boot_rom!
 
     Dir.mktmpdir('gameboy_import_parity_out') do |out_dir|
       Dir.mktmpdir('gameboy_import_parity_ws') do |workspace|

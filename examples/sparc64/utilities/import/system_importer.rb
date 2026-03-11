@@ -48,6 +48,14 @@ module RHDL
             endgenerate function endfunction task endtask initial package import
             typedef enum struct
           ].freeze
+          FAST_BOOT_PROM_IFILL_DECLARATIONS_PATTERN = /
+            wire\s+fast_boot_prom_ifill;\s*
+            wire\s+fast_boot_prom_ifill_live;\s*
+            assign\s+fast_boot_prom_ifill\s*=\s*\(pcx_packet_d\[122:118\]==5'b10000\)\s*&&\s*!pcx_req_d\[4\]\s*&&\s*
+              \(pcx_packet_d\[103:64\+5\]\s*<\s*35'h000000001\);\s*
+            assign\s+fast_boot_prom_ifill_live\s*=\s*\(pcx_packet\[122:118\]==5'b10000\)\s*&&\s*
+              \(pcx_packet\[103:64\+5\]\s*<\s*35'h000000001\);\s*
+          /mx.freeze
 
           Result = Struct.new(
             :success,
@@ -80,7 +88,8 @@ module RHDL
 
           attr_reader :reference_root, :top, :top_file, :output_dir, :workspace_dir, :keep_workspace,
                       :clean_output, :maintain_directory_structure, :strict, :progress_callback,
-                      :import_task_class, :import_strategy, :emit_runtime_json, :patches_dir
+                      :import_task_class, :import_strategy, :emit_runtime_json, :patches_dir,
+                      :force_stub_hierarchy_sources
 
           def initialize(reference_root: DEFAULT_REFERENCE_ROOT,
                          top: DEFAULT_TOP,
@@ -95,6 +104,7 @@ module RHDL
                          import_task_class: nil,
                          import_strategy: DEFAULT_IMPORT_STRATEGY,
                          patches_dir: nil,
+                         force_stub_hierarchy_sources: true,
                          emit_runtime_json: true)
             @reference_root = File.expand_path(reference_root)
             @top = top.to_s
@@ -109,6 +119,7 @@ module RHDL
             @import_task_class = import_task_class
             @import_strategy = normalize_strategy(import_strategy)
             @patches_dir = normalize_patches_dir(patches_dir)
+            @force_stub_hierarchy_sources = !!force_stub_hierarchy_sources
             @emit_runtime_json = !!emit_runtime_json
             @resolved_include_cache = {}
             @prepared_reference_root = nil
@@ -256,8 +267,10 @@ module RHDL
             module_files = ordered_module_paths(top, graph, module_paths)
             closure_modules = module_closure(top, graph).select { |name| module_paths.key?(name) }
             top_path = File.expand_path(active_top_file)
-            module_files.reject! do |path|
-              File.expand_path(path) != top_path && force_stubbed_hierarchy_source?(path)
+            if force_stub_hierarchy_sources
+              module_files.reject! do |path|
+                File.expand_path(path) != top_path && force_stubbed_hierarchy_source?(path)
+              end
             end
             module_files << top_path if File.file?(top_path)
             module_files.uniq!
@@ -573,8 +586,9 @@ module RHDL
                 assign pcx_packet=pcx_data_fifo[123:0];
 
               DECL
-              text.sub!(/reg fifo_rd;\s*wire \[123:0\] pcx_packet;\s*assign pcx_packet=pcx_data_fifo\[123:0\];\s*/m, '')
+              text = strip_hoisted_os2wb_declarations(text, :os2wb)
               text.sub!(/pcx_fifo pcx_fifo_inst\(/, "#{declarations}pcx_fifo pcx_fifo_inst(")
+              text = ensure_fast_boot_prom_ifill_defined(text, source_path, :os2wb)
             when 'os2wb_dual.v'
               text.gsub!(/\.ready\(ready\),(\s*\/\/[^\n]*\n\s*)\);/, '.ready(ready)\1);')
               declarations = <<~DECL
@@ -586,9 +600,9 @@ module RHDL
                 assign pcx_packet=cpu ? pcx1_data_fifo[123:0]:pcx_data_fifo[123:0];
 
               DECL
-              text.sub!(/reg fifo_rd;\s*reg fifo_rd1;\s*reg cpu;\s*reg cpu2;\s*wire \[123:0\] pcx_packet;\s*assign pcx_packet=cpu \? pcx1_data_fifo\[123:0\]:pcx_data_fifo\[123:0\];\s*/m, '')
-              text.sub!(/reg fifo_rd;\s*reg fifo_rd1;\s*wire \[123:0\] pcx_packet;\s*assign pcx_packet=cpu \? pcx1_data_fifo\[123:0\]:pcx_data_fifo\[123:0\];\s*reg cpu;\s*reg cpu2;\s*/m, '')
+              text = strip_hoisted_os2wb_declarations(text, :os2wb_dual)
               text.sub!(/pcx_fifo pcx_fifo_inst\(/, "#{declarations}pcx_fifo pcx_fifo_inst(")
+              text = ensure_fast_boot_prom_ifill_defined(text, source_path, :os2wb_dual)
             when 'lsu_qctl1.v'
               text.sub!(
                 /assign\s+pcx_pkt_src_sel_tmp\[2\]\s*=\s*~\|\{pcx_pkt_src_sel\[3\],\s*pcx_pkt_src_sel\[1:0\]\};/,
@@ -598,6 +612,11 @@ module RHDL
                 /assign\s+fwd_int_fp_pcx_mx_sel_tmp\[0\]\s*=\s*~fwd_int_fp_pcx_mx_sel\[1\]\s*&\s*~fwd_int_fp_pcx_mx_sel\[2\];/,
                 'assign fwd_int_fp_pcx_mx_sel_tmp[0] = ~rst_tri_en & ~fwd_int_fp_pcx_mx_sel_tmp[1] & ~fwd_int_fp_pcx_mx_sel_tmp[2];'
               )
+              text = ensure_lsu_imiss_ack_staging(text)
+            when 'lsu.v'
+              text = ensure_lsu_imiss_ack_wiring(text)
+            when 'bw_r_irf_register.v'
+              text = ensure_verilator_public_flat_irf_registers(text)
             when 'sparc_ifu_milfsm.v'
               text.gsub!(/`CMP_CLK_PERIOD/, '1333')
             when 'sparc_exu_alu.v'
@@ -643,6 +662,134 @@ module RHDL
                 DEFS
               )
             end
+
+            text
+          end
+
+          def strip_hoisted_os2wb_declarations(text, source_variant)
+            case source_variant
+            when :os2wb
+              text.sub!(
+                Regexp.new(
+                  "reg\\s+fifo_rd;\\s*" \
+                  "wire\\s+\\[123:0\\]\\s+pcx_packet;\\s*" \
+                  "assign\\s+pcx_packet=pcx_data_fifo\\[123:0\\];\\s*" \
+                  "(?:#{FAST_BOOT_PROM_IFILL_DECLARATIONS_PATTERN.source})?",
+                  Regexp::MULTILINE | Regexp::EXTENDED
+                ),
+                ''
+              )
+            when :os2wb_dual
+              [
+                Regexp.new(
+                  "reg\\s+fifo_rd;\\s*" \
+                  "reg\\s+fifo_rd1;\\s*" \
+                  "reg\\s+cpu;\\s*" \
+                  "reg\\s+cpu2;\\s*" \
+                  "wire\\s+\\[123:0\\]\\s+pcx_packet;\\s*" \
+                  "assign\\s+pcx_packet=cpu\\s+\\?\\s+pcx1_data_fifo\\[123:0\\]:pcx_data_fifo\\[123:0\\];\\s*" \
+                  "(?:#{FAST_BOOT_PROM_IFILL_DECLARATIONS_PATTERN.source})?",
+                  Regexp::MULTILINE | Regexp::EXTENDED
+                ),
+                Regexp.new(
+                  "reg\\s+fifo_rd;\\s*" \
+                  "reg\\s+fifo_rd1;\\s*" \
+                  "wire\\s+\\[123:0\\]\\s+pcx_packet;\\s*" \
+                  "assign\\s+pcx_packet=cpu\\s+\\?\\s+pcx1_data_fifo\\[123:0\\]:pcx_data_fifo\\[123:0\\];\\s*" \
+                  "(?:#{FAST_BOOT_PROM_IFILL_DECLARATIONS_PATTERN.source})?" \
+                  "reg\\s+cpu;\\s*" \
+                  "reg\\s+cpu2;\\s*",
+                  Regexp::MULTILINE | Regexp::EXTENDED
+                )
+              ].each do |pattern|
+                text.sub!(pattern, '')
+              end
+            end
+
+            text
+          end
+
+          def ensure_fast_boot_prom_ifill_defined(text, source_path, source_variant)
+            return text unless text.include?('fast_boot_prom_ifill')
+            return text if text.include?('wire        fast_boot_prom_ifill;') || text.include?('wire fast_boot_prom_ifill;')
+
+            fast_boot_block = fast_boot_prom_ifill_snippet(source_path, source_variant)
+            return text unless fast_boot_block
+            selector = fast_boot_prom_ifill_selector[source_variant]
+            return text unless selector
+            return text unless text.sub!(selector, "\\0\n#{fast_boot_block}")
+
+            text
+          end
+
+          def fast_boot_prom_ifill_snippet(_source_path, source_variant)
+            return nil unless %i[os2wb os2wb_dual].include?(source_variant)
+
+            <<~DECL
+              wire        fast_boot_prom_ifill;
+              wire        fast_boot_prom_ifill_live;
+              assign fast_boot_prom_ifill = (pcx_packet_d[122:118]==5'b10000) && !pcx_req_d[4] &&
+                                            (pcx_packet_d[103:64+5] < 35'h000000001);
+              assign fast_boot_prom_ifill_live = (pcx_packet[122:118]==5'b10000) &&
+                                               (pcx_packet[103:64+5] < 35'h000000001);
+
+            DECL
+          end
+
+          def fast_boot_prom_ifill_selector
+            {
+              os2wb: /wire \[123:0\] pcx_packet;\s*assign pcx_packet=pcx_data_fifo\[123:0\];/,
+              os2wb_dual: /wire \[123:0\] pcx_packet;\s*assign pcx_packet=cpu \? pcx1_data_fifo\[123:0\]:pcx_data_fifo\[123:0\];/
+            }
+          end
+
+          def ensure_lsu_imiss_ack_staging(text)
+            unless text.include?('ifu_lsu_pcxpkt_e_b49')
+              text.sub!(
+                'lsu_ld_inst_vld_g, asi_internal_m, ifu_lsu_pcxpkt_e_b50, ',
+                'lsu_ld_inst_vld_g, asi_internal_m, ifu_lsu_pcxpkt_e_b49, ifu_lsu_pcxpkt_e_b50, '
+              )
+              text.sub!(
+                "input\t\t\tasi_internal_m ;\n\ninput\t\t\tifu_lsu_pcxpkt_e_b50 ;\n",
+                "input\t\t\tasi_internal_m ;\n\ninput\t\t\tifu_lsu_pcxpkt_e_b49 ;\ninput\t\t\tifu_lsu_pcxpkt_e_b50 ;\n"
+              )
+            end
+
+            text.sub!(
+              'assign	lsu_ifu_pcxpkt_ack_d = imiss_pcx_rq_sel_d2 & ~pcx_req_squash_d1 ;',
+              'assign	lsu_ifu_pcxpkt_ack_d = imiss_pcx_rq_sel_d2 & ~pcx_req_squash_d1 ;  // Keep real LSU acceptance timing for fast boot'
+            )
+
+            text
+          end
+
+          def ensure_lsu_imiss_ack_wiring(text)
+            return text if text.include?('.ifu_lsu_pcxpkt_e_b49   (ifu_lsu_pcxpkt_e[49]),') &&
+                           text.include?('.ifu_lsu_pcxpkt_e_b49 (ifu_lsu_pcxpkt_e[49]),  // Templated')
+
+            text.sub!(
+              ".lsu_ldst_va_m          (lsu_ldst_va_m_buf[7:6]),\n                .ifu_lsu_pcxpkt_e_b50   (ifu_lsu_pcxpkt_e[50]),",
+              ".lsu_ldst_va_m          (lsu_ldst_va_m_buf[7:6]),\n                .ifu_lsu_pcxpkt_e_b49   (ifu_lsu_pcxpkt_e[49]),\n                .ifu_lsu_pcxpkt_e_b50   (ifu_lsu_pcxpkt_e[50]),"
+            )
+            text.gsub!(
+              ".asi_internal_m       (asi_internal_m),\n                  .ifu_lsu_pcxpkt_e_b50 (ifu_lsu_pcxpkt_e[50]),  // Templated",
+              ".asi_internal_m       (asi_internal_m),\n                  .ifu_lsu_pcxpkt_e_b49 (ifu_lsu_pcxpkt_e[49]),  // Templated\n                  .ifu_lsu_pcxpkt_e_b50 (ifu_lsu_pcxpkt_e[50]),  // Templated"
+            )
+
+            text
+          end
+
+          def ensure_verilator_public_flat_irf_registers(text)
+            text.sub!(
+              /reg\s*\[71:0\]\s*reg_th0,\s*reg_th1,\s*reg_th2,\s*reg_th3;\s*/,
+              <<~REGS
+                reg\t[71:0]\treg_th0 /* verilator public_flat_rw */;
+                reg\t[71:0]\treg_th1 /* verilator public_flat_rw */;
+                reg\t[71:0]\treg_th2 /* verilator public_flat_rw */;
+                reg\t[71:0]\treg_th3 /* verilator public_flat_rw */;
+
+              REGS
+            )
 
             text
           end

@@ -7,9 +7,9 @@ RSpec.describe 'SPARC64 integration runner contract' do
 
   it 'defines the benchmark and memory ABI constants for the integration suite' do
     expect(sparc64_benchmark_names).to eq(%i[prime_sieve mandelbrot game_of_life])
-    expect(Sparc64IntegrationSupport::MAILBOX_STATUS_ADDR).to eq(0x0000_1000)
-    expect(Sparc64IntegrationSupport::MAILBOX_VALUE_ADDR).to eq(0x0000_1008)
-    expect(Sparc64IntegrationSupport::PROGRAM_BASE).to eq(0x0000_4000)
+    expect(Sparc64IntegrationSupport::MAILBOX_STATUS_ADDR).to eq(0x0000_0000_0000_1000)
+    expect(Sparc64IntegrationSupport::MAILBOX_VALUE_ADDR).to eq(0x0000_0000_0000_1008)
+    expect(Sparc64IntegrationSupport::PROGRAM_BASE).to eq(0x0001_0000)
     expect(Sparc64IntegrationSupport::STACK_TOP).to eq(0x0002_0000)
   end
 

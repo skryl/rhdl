@@ -357,7 +357,7 @@ Nintendo Game Boy emulation based on MiSTer reference, supporting DMG, GBC, and 
 rhdl examples gameboy cpu_instrs.gb            # Run test ROM
 rhdl examples gameboy --demo                   # Run demo display
 rhdl examples gameboy --pop                    # Load Prince of Persia ROM
-rhdl examples gameboy --mode verilog --hdl-dir examples/gameboy/import --top gb --use-staged-verilog --pop
+rhdl examples gameboy --mode verilog --verilog-dir examples/gameboy/import --top Gameboy --pop
 rhdl examples gameboy game.gb --audio          # Enable audio
 rhdl examples gameboy import                   # Regenerate examples/gameboy/import from the reference HDL
 ```
@@ -683,6 +683,8 @@ bundle exec rake native:build          # Build native extensions
 bundle exec rake native:check          # Check extension availability
 
 # AO486 import/parity workflow (CLI)
+bundle exec rhdl examples ao486 -m verilog --bios --dos --headless --cycles 100000 # Run AO486 on the Verilator-backed path using the shared mode naming
+bundle exec rhdl examples ao486 -m circt --bios --dos -d -s 5000 # Run AO486 on the Arcilator-backed path with boxed debug output
 bundle exec rhdl examples ao486 import --out examples/ao486/import # Import rtl/ao486/ao486.v via CIRCT and regenerate examples/ao486/import
 bundle exec rhdl examples ao486 import --out examples/ao486/import --strategy stubbed # Force a stubbed CPU-top baseline import
 bundle exec rhdl examples ao486 import --out examples/ao486/import --report tmp/ao486_import_report.json # Emit AO486 import report JSON for the default CPU-top tree import

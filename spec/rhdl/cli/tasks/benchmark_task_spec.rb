@@ -4,6 +4,12 @@ require 'spec_helper'
 require 'rhdl/cli'
 
 RSpec.describe RHDL::CLI::Tasks::BenchmarkTask do
+  def netlist_interpreter_available?
+    RHDL::Sim::Native::Netlist::INTERPRETER_AVAILABLE
+  rescue LoadError, NameError
+    false
+  end
+
   describe 'initialization' do
     it 'can be instantiated with no options' do
       expect { described_class.new }.not_to raise_error
@@ -44,6 +50,10 @@ RSpec.describe RHDL::CLI::Tasks::BenchmarkTask do
 
   describe '#run' do
     context 'with type: :gates' do
+      before(:each) do
+        skip 'Netlist interpreter backend unavailable' unless netlist_interpreter_available?
+      end
+
       it 'starts gate benchmark without error' do
         task = described_class.new(type: :gates, lanes: 2, cycles: 10)
         expect { task.run }.to output(/Gate-level Simulation Benchmark/).to_stdout
@@ -81,6 +91,10 @@ RSpec.describe RHDL::CLI::Tasks::BenchmarkTask do
   end
 
   describe '#benchmark_gates' do
+    before(:each) do
+      skip 'Netlist interpreter backend unavailable' unless netlist_interpreter_available?
+    end
+
     it 'runs gate benchmark and reports results' do
       task = described_class.new(type: :gates, lanes: 2, cycles: 10)
       expect { task.benchmark_gates }.to output(/Result:/).to_stdout
@@ -88,6 +102,10 @@ RSpec.describe RHDL::CLI::Tasks::BenchmarkTask do
   end
 
   describe 'environment variables' do
+    before(:each) do
+      skip 'Netlist interpreter backend unavailable' unless netlist_interpreter_available?
+    end
+
     it 'respects RHDL_BENCH_LANES environment variable' do
       original_lanes = ENV['RHDL_BENCH_LANES']
       ENV['RHDL_BENCH_LANES'] = '16'

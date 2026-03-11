@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 require 'spec_helper'
-require_relative '../../../../examples/gameboy/gameboy'
+require_relative '../../../../examples/gameboy/hdl/gameboy'
 
 # Game Boy Top-Level (GB) Unit Tests
 # Tests the main Game Boy system integration module

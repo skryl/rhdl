@@ -103,6 +103,7 @@ module RHDL
                       "SPARC64 import tree already loaded from #{loaded_from}; cannot switch to #{resolved} in the same process"
               end
 
+              clear_existing_component_classes!(resolved)
               require_directory_tree_with_retries(resolved)
               @loaded_from = resolved
               resolved
@@ -139,6 +140,35 @@ module RHDL
 
             def import_tree_ready?(root)
               Dir.exist?(root) && Dir.glob(File.join(root, '**', '*.rb')).any?
+            end
+
+            def clear_existing_component_classes!(root)
+              Dir.glob(File.join(root, '**', '*.rb')).each do |path|
+                source = File.read(path)
+                class_name = source[/^\s*class\s+([A-Za-z_][A-Za-z0-9_:]*)\s*</, 1]
+                next unless class_name
+
+                remove_component_constant(class_name)
+              end
+            end
+
+            def remove_component_constant(constant_path)
+              names = constant_path.to_s.split('::')
+              return if names.empty?
+
+              scope = Object
+              *parents, leaf = names
+
+              parents.each do |name|
+                break unless scope.const_defined?(name, false)
+                value = scope.const_get(name, false)
+                return unless value.is_a?(Module)
+                scope = value
+              end
+
+              scope.send(:remove_const, leaf.to_sym) if scope.const_defined?(leaf, false)
+            rescue NameError
+              nil
             end
 
             def require_directory_tree_with_retries(root)

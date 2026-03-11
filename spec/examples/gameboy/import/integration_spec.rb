@@ -70,6 +70,7 @@ RSpec.describe 'GameBoy mixed import integration', slow: true do
         mixed = report.fetch('mixed_import')
         artifacts = report.fetch('artifacts')
         components = report.fetch('components')
+        import_wrapper = report.fetch('import_wrapper')
         expect(mixed.fetch('top_name')).to eq('gb')
         expect(mixed.fetch('top_file')).to start_with(File.join(out_dir, '.mixed_import', 'pure_verilog'))
         expect(mixed.fetch('top_file')).to end_with('/rtl/gb.v')
@@ -83,6 +84,7 @@ RSpec.describe 'GameBoy mixed import integration', slow: true do
         expect(File.file?(artifacts.fetch('workspace_normalized_verilog_path'))).to be(true)
         expect(File.file?(artifacts.fetch('workspace_firtool_verilog_path'))).to be(true)
         expect(File.file?(artifacts.fetch('workspace_core_mlir_path'))).to be(true)
+        expect(File.file?(artifacts.fetch('wrapper_ruby_path'))).to be(true)
         expect(artifacts.fetch('workspace_runtime_json_path')).to start_with(File.join(workspace, 'import_artifacts'))
         expect(artifacts.fetch('workspace_normalized_verilog_path')).to start_with(File.join(workspace, 'import_artifacts'))
         expect(artifacts.fetch('workspace_firtool_verilog_path')).to start_with(File.join(workspace, 'import_artifacts'))
@@ -90,6 +92,12 @@ RSpec.describe 'GameBoy mixed import integration', slow: true do
         expect(artifacts.fetch('runtime_json_path')).to eq(mixed.fetch('runtime_json_path'))
         expect(artifacts.fetch('normalized_verilog_path')).to eq(mixed.fetch('normalized_verilog_path'))
         expect(artifacts.fetch('firtool_verilog_path')).to eq(mixed.fetch('firtool_verilog_path'))
+        expect(import_wrapper).to include(
+          'class_name' => 'Gameboy',
+          'module_name' => 'gameboy',
+          'path' => artifacts.fetch('wrapper_ruby_path'),
+          'core_class_name' => 'Gb'
+        )
         expect(components).not_to be_empty
         gb_component = components.find { |entry| entry.fetch('verilog_module_name') == 'gb' }
         expect(gb_component).not_to be_nil

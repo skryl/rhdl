@@ -19,7 +19,7 @@ require 'spec_helper'
 RSpec.describe 'GameBoy HDMA' do
   before(:all) do
     begin
-      require_relative '../../../../../examples/gameboy/gameboy'
+      require_relative '../../../../../examples/gameboy/hdl/gameboy'
       require_relative '../../../../../examples/gameboy/hdl/dma/hdma'
       @component_available = defined?(RHDL::Examples::GameBoy::HDMA)
     rescue LoadError => e
