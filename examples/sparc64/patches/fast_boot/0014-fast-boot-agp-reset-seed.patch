@@ -1,0 +1,21 @@
+diff --git a/T1-CPU/exu/sparc_exu_rml.v b/T1-CPU/exu/sparc_exu_rml.v
+--- a/T1-CPU/exu/sparc_exu_rml.v
++++ b/T1-CPU/exu/sparc_exu_rml.v
+@@ -686,7 +686,7 @@
+    // decode tids
+    assign        agp_thr[0] = ~agp_tid[1] & ~agp_tid[0];
+       // Decode agp input
+-   assign new_agp[1:0] = rml_irf_new_agp[1:0] | {2{reset}};
++   assign new_agp[1:0] = reset ? 2'b00 : rml_irf_new_agp[1:0];
+ 
+    // send current global level to ecl for error logging
+    assign rml_ecl_gl_e[1:0] = agp_thr0[1:0];
+@@ -758,7 +758,7 @@
+    assign        agp_thr[3] = agp_tid[1] & agp_tid[0];
+    
+    // Decode agp input
+-   assign new_agp[1:0] = rml_irf_new_agp[1:0] | {2{reset}};
++   assign new_agp[1:0] = reset ? 2'b00 : rml_irf_new_agp[1:0];
+ 
+    // send current global level to ecl for error logging
+    assign rml_ecl_gl_e[1:0] = ((tid_e[1:0] == 2'b00)? agp_thr0[1:0]:

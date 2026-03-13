@@ -49,7 +49,9 @@ RSpec.describe RHDL::Examples::MOS6502::ProgramCounter do
     it 'generates valid Verilog' do
       verilog = described_class.to_verilog
       expect(verilog).to include('module mos6502_program_counter')
-      expect(verilog).to include('output reg [15:0] pc')
+      expect(verilog).to include('output [15:0] pc')
+      expect(verilog).to include('always_ff @(posedge clk)')
+      expect(verilog).to include('assign pc =')
     end
 
     context 'when iverilog is available', if: HdlToolchain.iverilog_available? do
@@ -81,7 +83,7 @@ RSpec.describe RHDL::Examples::MOS6502::ProgramCounter do
 
   describe 'gate-level netlist' do
     let(:component) { described_class.new('mos6502_program_counter') }
-    let(:ir) { RHDL::Export::Structure::Lower.from_components([component], name: 'mos6502_program_counter') }
+    let(:ir) { RHDL::Codegen::Netlist::Lower.from_components([component], name: 'mos6502_program_counter') }
 
     it 'generates correct IR structure' do
       expect(ir.inputs.keys).to include('mos6502_program_counter.clk', 'mos6502_program_counter.rst')

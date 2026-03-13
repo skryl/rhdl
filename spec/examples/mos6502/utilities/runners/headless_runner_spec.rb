@@ -109,6 +109,11 @@ RSpec.describe RHDL::Examples::MOS6502::HeadlessRunner, :slow do
           .to raise_error(RuntimeError, /native extension is unavailable/i)
       end
     end
+
+    it 'returns nil from sim when the active backend has no native sim object' do
+      runner = described_class.new(mode: :isa, sim: :ruby)
+      expect(runner.sim).to be_nil
+    end
   end
 
   describe 'Ruby HDL mode' do
@@ -214,6 +219,21 @@ RSpec.describe RHDL::Examples::MOS6502::HeadlessRunner, :slow do
       program_area = runner.memory_sample[:program_area]
       expect(program_area.any? { |b| b != 0 }).to be true
     end
+
+    it 'exposes the native sim object uniformly' do
+      require_relative '../../../../../examples/mos6502/utilities/runners/verilator_runner'
+      fake_sim = instance_double('Sim')
+      fake_runner = instance_double(
+        'RHDL::Examples::MOS6502::VerilogRunner',
+        native?: true,
+        simulator_type: :hdl_verilator,
+        sim: fake_sim
+      )
+      allow(RHDL::Examples::MOS6502::VerilogRunner).to receive(:new).and_return(fake_runner)
+
+      runner = described_class.new(mode: :verilog)
+      expect(runner.sim).to eq(fake_sim)
+    end
   end
 
   describe 'runner interface' do
@@ -260,7 +280,7 @@ RSpec.describe RHDL::Examples::MOS6502::HeadlessRunner, :slow do
   # Check if IR interpreter is available
   def ir_interpreter_available?
     require 'rhdl/codegen'
-    RHDL::Codegen::IR::IR_INTERPRETER_AVAILABLE
+    RHDL::Sim::Native::IR::INTERPRETER_AVAILABLE
   rescue LoadError, NameError
     false
   end
@@ -268,7 +288,7 @@ RSpec.describe RHDL::Examples::MOS6502::HeadlessRunner, :slow do
   # Check if IR JIT is available
   def ir_jit_available?
     require 'rhdl/codegen'
-    RHDL::Codegen::IR::IR_JIT_AVAILABLE
+    RHDL::Sim::Native::IR::JIT_AVAILABLE
   rescue LoadError, NameError
     false
   end
@@ -276,7 +296,7 @@ RSpec.describe RHDL::Examples::MOS6502::HeadlessRunner, :slow do
   # Check if IR Compiler is available
   def ir_compiler_available?
     require 'rhdl/codegen'
-    RHDL::Codegen::IR::IR_COMPILER_AVAILABLE
+    RHDL::Sim::Native::IR::COMPILER_AVAILABLE
   rescue LoadError, NameError
     false
   end

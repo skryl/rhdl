@@ -86,8 +86,8 @@ RSpec.describe RHDL::HDL::SRLatch do
     end
 
     it 'generates valid IR' do
-      ir = RHDL::HDL::SRLatch.to_ir
-      expect(ir).to be_a(RHDL::Export::IR::ModuleDef)
+      ir = RHDL::HDL::SRLatch.to_flat_circt_nodes
+      expect(ir).to be_a(RHDL::Codegen::CIRCT::IR::ModuleOp)
       expect(ir.ports.length).to eq(5)  # s, r, en, q, qn
     end
 
@@ -99,13 +99,13 @@ RSpec.describe RHDL::HDL::SRLatch do
       expect(verilog).to match(/output.*q/)
     end
 
-    it 'generates valid FIRRTL' do
-      firrtl = RHDL::HDL::SRLatch.to_circt
-      expect(firrtl).to include('FIRRTL version')
-      expect(firrtl).to include('circuit sr_latch')
-      expect(firrtl).to include('input s')
-      expect(firrtl).to include('input r')
-      expect(firrtl).to include('output q')
+    it 'generates valid CIRCT MLIR' do
+      mlir = RHDL::HDL::SRLatch.to_circt
+      expect(mlir).to include('hw.output')
+      expect(mlir).to include('hw.module @sr_latch')
+      expect(mlir).to include('%s:')
+      expect(mlir).to include('%r:')
+      expect(mlir).to include('q:')
     end
 
     context 'CIRCT firtool validation', if: HdlToolchain.firtool_available? do
@@ -128,7 +128,7 @@ RSpec.describe RHDL::HDL::SRLatch do
 
   describe 'gate-level netlist' do
     let(:component) { RHDL::HDL::SRLatch.new('sr_latch') }
-    let(:ir) { RHDL::Export::Structure::Lower.from_components([component], name: 'sr_latch') }
+    let(:ir) { RHDL::Codegen::Netlist::Lower.from_components([component], name: 'sr_latch') }
 
     it 'generates correct IR structure' do
       expect(ir.inputs.keys).to include('sr_latch.s', 'sr_latch.r', 'sr_latch.en')

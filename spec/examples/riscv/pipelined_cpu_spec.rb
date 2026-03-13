@@ -6,11 +6,11 @@ require_relative '../../../examples/riscv/hdl/pipeline/ir_harness'
 require_relative '../../../examples/riscv/utilities/assembler'
 
 RSpec.describe RHDL::Examples::RISCV::Pipeline::IRHarness, timeout: 30 do
-  let(:cpu) { described_class.new('test_cpu', backend: :jit, allow_fallback: false) }
+  let(:cpu) { described_class.new('test_cpu', backend: :jit) }
   let(:asm) { RHDL::Examples::RISCV::Assembler }
 
   before(:each) do
-    skip 'IR JIT not available' unless RHDL::Codegen::IR::IR_JIT_AVAILABLE
+    skip 'IR JIT not available' unless RHDL::Sim::Native::IR::JIT_AVAILABLE
     cpu.reset!
   end
 

@@ -70,12 +70,12 @@ RSpec.describe RHDL::HDL::OrGate do
       end
     end
 
-    it 'generates valid FIRRTL' do
-      firrtl = RHDL::HDL::OrGate.to_circt
-      expect(firrtl).to include('FIRRTL version')
-      expect(firrtl).to include('circuit or_gate')
-      expect(firrtl).to include('input a0')
-      expect(firrtl).to include('output y')
+    it 'generates valid CIRCT MLIR' do
+      mlir = RHDL::HDL::OrGate.to_circt
+      expect(mlir).to include('hw.output')
+      expect(mlir).to include('hw.module @or_gate')
+      expect(mlir).to include('%a0:')
+      expect(mlir).to include('y:')
     end
 
     context 'CIRCT firtool validation', if: HdlToolchain.firtool_available? && HdlToolchain.iverilog_available? do
@@ -100,7 +100,7 @@ RSpec.describe RHDL::HDL::OrGate do
 
   describe 'gate-level netlist' do
     let(:component) { RHDL::HDL::OrGate.new('or_gate') }
-    let(:ir) { RHDL::Export::Structure::Lower.from_components([component], name: 'or_gate') }
+    let(:ir) { RHDL::Codegen::Netlist::Lower.from_components([component], name: 'or_gate') }
 
     it 'generates correct IR structure' do
       expect(ir.inputs.keys).to include('or_gate.a0', 'or_gate.a1')

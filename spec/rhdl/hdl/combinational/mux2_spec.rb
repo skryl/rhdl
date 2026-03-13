@@ -31,8 +31,8 @@ RSpec.describe RHDL::HDL::Mux2 do
     end
 
     it 'generates valid IR' do
-      ir = RHDL::HDL::Mux2.to_ir
-      expect(ir).to be_a(RHDL::Export::IR::ModuleDef)
+      ir = RHDL::HDL::Mux2.to_flat_circt_nodes
+      expect(ir).to be_a(RHDL::Codegen::CIRCT::IR::ModuleOp)
       expect(ir.ports.length).to eq(4)  # a, b, sel, y
     end
 
@@ -42,13 +42,13 @@ RSpec.describe RHDL::HDL::Mux2 do
       expect(verilog).to include('assign y')
     end
 
-    it 'generates valid FIRRTL' do
-      firrtl = RHDL::HDL::Mux2.to_circt
-      expect(firrtl).to include('FIRRTL version')
-      expect(firrtl).to include('circuit mux2')
-      expect(firrtl).to include('input a')
-      expect(firrtl).to include('input b')
-      expect(firrtl).to include('output y')
+    it 'generates valid CIRCT MLIR' do
+      mlir = RHDL::HDL::Mux2.to_circt
+      expect(mlir).to include('hw.output')
+      expect(mlir).to include('hw.module @mux2')
+      expect(mlir).to include('%a:')
+      expect(mlir).to include('%b:')
+      expect(mlir).to include('y:')
     end
 
     context 'CIRCT firtool validation', if: HdlToolchain.firtool_available? && HdlToolchain.iverilog_available? do
@@ -134,7 +134,7 @@ RSpec.describe RHDL::HDL::Mux2 do
 
   describe 'gate-level netlist (1-bit)' do
     let(:component) { RHDL::HDL::Mux2.new('mux2', width: 1) }
-    let(:ir) { RHDL::Export::Structure::Lower.from_components([component], name: 'mux2') }
+    let(:ir) { RHDL::Codegen::Netlist::Lower.from_components([component], name: 'mux2') }
 
     it 'generates correct IR structure' do
       expect(ir.inputs.keys).to include('mux2.a', 'mux2.b', 'mux2.sel')
@@ -190,7 +190,7 @@ RSpec.describe RHDL::HDL::Mux2 do
 
   describe 'gate-level netlist (4-bit)' do
     let(:component) { RHDL::HDL::Mux2.new('mux2_4bit', width: 4) }
-    let(:ir) { RHDL::Export::Structure::Lower.from_components([component], name: 'mux2_4bit') }
+    let(:ir) { RHDL::Codegen::Netlist::Lower.from_components([component], name: 'mux2_4bit') }
 
     it 'generates correct IR structure' do
       expect(ir.inputs.keys).to include('mux2_4bit.a', 'mux2_4bit.b', 'mux2_4bit.sel')

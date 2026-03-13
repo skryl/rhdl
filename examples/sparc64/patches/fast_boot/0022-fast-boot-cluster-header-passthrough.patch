@@ -1,0 +1,22 @@
+diff --git a/T1-common/common/cluster_header.v b/T1-common/common/cluster_header.v
+--- a/T1-common/common/cluster_header.v
++++ b/T1-common/common/cluster_header.v
+@@ -50,16 +50,11 @@
+ //  assign #10 cluster_grst_l = grst_l; 
+ //  assign so = 1'b0;
+ 
+-reg      dbginit_l; 
+-reg      cluster_grst_l;
++assign rclk = gclk;
++assign dbginit_l = gdbginit_l;
++assign cluster_grst_l = grst_l;
++assign so = 1'b0;
+ 
+-assign #10 rclk = gclk;
+-
+-always @(negedge rclk) begin
+-  dbginit_l <= gdbginit_l;
+-  cluster_grst_l <= grst_l;
+-end
+-
+ `else

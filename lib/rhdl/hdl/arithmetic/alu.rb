@@ -56,6 +56,12 @@ module RHDL
       output :overflow
 
       behavior do
+        select_case = lambda do |selector, selector_width, cases, default|
+          cases.reverse.reduce(default) do |acc, (match_value, expr)|
+            mux(selector == lit(match_value, width: selector_width), expr, acc)
+          end
+        end
+
         # Addition: a + b + cin (9 bits to capture carry)
         add_full = a + b + cin
         add_result = add_full[7..0]
@@ -89,10 +95,12 @@ module RHDL
         shl6 = a[1..0].concat(lit(0, width: 6))
         shl7 = a[0].concat(lit(0, width: 7))
 
-        shl_result = case_select(shift_amt, {
-          0 => shl0, 1 => shl1, 2 => shl2, 3 => shl3,
-          4 => shl4, 5 => shl5, 6 => shl6, 7 => shl7
-        }, default: shl0)
+        shl_result = select_case.call(
+          shift_amt,
+          3,
+          [[0, shl0], [1, shl1], [2, shl2], [3, shl3], [4, shl4], [5, shl5], [6, shl6], [7, shl7]],
+          shl0
+        )
 
         # Shift right logical by 0-7
         shr0 = a
@@ -104,10 +112,12 @@ module RHDL
         shr6 = lit(0, width: 6).concat(a[7..6])
         shr7 = lit(0, width: 7).concat(a[7])
 
-        shr_result = case_select(shift_amt, {
-          0 => shr0, 1 => shr1, 2 => shr2, 3 => shr3,
-          4 => shr4, 5 => shr5, 6 => shr6, 7 => shr7
-        }, default: shr0)
+        shr_result = select_case.call(
+          shift_amt,
+          3,
+          [[0, shr0], [1, shr1], [2, shr2], [3, shr3], [4, shr4], [5, shr5], [6, shr6], [7, shr7]],
+          shr0
+        )
 
         # Shift right arithmetic by 0-7 (sign extend)
         sign = a[7]
@@ -120,10 +130,12 @@ module RHDL
         sar6 = sign.replicate(6).concat(a[7..6])
         sar7 = sign.replicate(7).concat(a[7])
 
-        sar_result = case_select(shift_amt, {
-          0 => sar0, 1 => sar1, 2 => sar2, 3 => sar3,
-          4 => sar4, 5 => sar5, 6 => sar6, 7 => sar7
-        }, default: sar0)
+        sar_result = select_case.call(
+          shift_amt,
+          3,
+          [[0, sar0], [1, sar1], [2, sar2], [3, sar3], [4, sar4], [5, sar5], [6, sar6], [7, sar7]],
+          sar0
+        )
 
         # Rotate left by 0-7
         rol0 = a
@@ -135,10 +147,12 @@ module RHDL
         rol6 = a[1..0].concat(a[7..2])
         rol7 = a[0].concat(a[7..1])
 
-        rol_result = case_select(shift_amt, {
-          0 => rol0, 1 => rol1, 2 => rol2, 3 => rol3,
-          4 => rol4, 5 => rol5, 6 => rol6, 7 => rol7
-        }, default: rol0)
+        rol_result = select_case.call(
+          shift_amt,
+          3,
+          [[0, rol0], [1, rol1], [2, rol2], [3, rol3], [4, rol4], [5, rol5], [6, rol6], [7, rol7]],
+          rol0
+        )
 
         # Rotate right by 0-7
         ror0 = a
@@ -150,10 +164,12 @@ module RHDL
         ror6 = a[5..0].concat(a[7..6])
         ror7 = a[6..0].concat(a[7])
 
-        ror_result = case_select(shift_amt, {
-          0 => ror0, 1 => ror1, 2 => ror2, 3 => ror3,
-          4 => ror4, 5 => ror5, 6 => ror6, 7 => ror7
-        }, default: ror0)
+        ror_result = select_case.call(
+          shift_amt,
+          3,
+          [[0, ror0], [1, ror1], [2, ror2], [3, ror3], [4, ror4], [5, ror5], [6, ror6], [7, ror7]],
+          ror0
+        )
 
         # Multiply: a * b (full 16 bits, we take low 8)
         mul_full = a * b
@@ -177,88 +193,108 @@ module RHDL
         dec_overflow = mux(a == lit(128, width: 8), lit(1, width: 1), lit(0, width: 1))
 
         # Select result based on opcode
-        result <= case_select(op, {
-          OP_ADD => add_result,
-          OP_SUB => sub_result,
-          OP_AND => and_result,
-          OP_OR  => or_result,
-          OP_XOR => xor_result,
-          OP_NOT => not_result,
-          OP_SHL => shl_result,
-          OP_SHR => shr_result,
-          OP_SAR => sar_result,
-          OP_ROL => rol_result,
-          OP_ROR => ror_result,
-          OP_MUL => mul_result,
-          OP_DIV => div_result,
-          OP_MOD => mod_result,
-          OP_INC => inc_result,
-          OP_DEC => dec_result
-        }, default: add_result)
+        selected_result = select_case.call(
+          op,
+          4,
+          [
+            [OP_ADD, add_result],
+            [OP_SUB, sub_result],
+            [OP_AND, and_result],
+            [OP_OR, or_result],
+            [OP_XOR, xor_result],
+            [OP_NOT, not_result],
+            [OP_SHL, shl_result],
+            [OP_SHR, shr_result],
+            [OP_SAR, sar_result],
+            [OP_ROL, rol_result],
+            [OP_ROR, ror_result],
+            [OP_MUL, mul_result],
+            [OP_DIV, div_result],
+            [OP_MOD, mod_result],
+            [OP_INC, inc_result],
+            [OP_DEC, dec_result]
+          ],
+          add_result
+        )
+
+        selected_negative = select_case.call(
+          op,
+          4,
+          [
+            [OP_ADD, add_result[7]],
+            [OP_SUB, sub_result[7]],
+            [OP_AND, and_result[7]],
+            [OP_OR, or_result[7]],
+            [OP_XOR, xor_result[7]],
+            [OP_NOT, not_result[7]],
+            [OP_SHL, shl_result[7]],
+            [OP_SHR, shr_result[7]],
+            [OP_SAR, sar_result[7]],
+            [OP_ROL, rol_result[7]],
+            [OP_ROR, ror_result[7]],
+            [OP_MUL, mul_result[7]],
+            [OP_DIV, div_result[7]],
+            [OP_MOD, mod_result[7]],
+            [OP_INC, inc_result[7]],
+            [OP_DEC, dec_result[7]]
+          ],
+          add_result[7]
+        )
+        result <= selected_result
 
         # Select cout based on opcode
-        cout <= case_select(op, {
-          OP_ADD => add_cout,
-          OP_SUB => sub_cout,
-          OP_AND => lit(0, width: 1),
-          OP_OR  => lit(0, width: 1),
-          OP_XOR => lit(0, width: 1),
-          OP_NOT => lit(0, width: 1),
-          OP_SHL => a[7],  # MSB shifted out
-          OP_SHR => a[0],  # LSB shifted out
-          OP_SAR => a[0],
-          OP_ROL => a[7],
-          OP_ROR => a[0],
-          OP_MUL => mul_cout,
-          OP_DIV => div_cout,
-          OP_MOD => div_cout,
-          OP_INC => inc_cout,
-          OP_DEC => dec_cout
-        }, default: add_cout)
+        cout <= select_case.call(
+          op,
+          4,
+          [
+            [OP_ADD, add_cout],
+            [OP_SUB, sub_cout],
+            [OP_AND, lit(0, width: 1)],
+            [OP_OR, lit(0, width: 1)],
+            [OP_XOR, lit(0, width: 1)],
+            [OP_NOT, lit(0, width: 1)],
+            [OP_SHL, a[7]],
+            [OP_SHR, a[0]],
+            [OP_SAR, a[0]],
+            [OP_ROL, a[7]],
+            [OP_ROR, a[0]],
+            [OP_MUL, mul_cout],
+            [OP_DIV, div_cout],
+            [OP_MOD, div_cout],
+            [OP_INC, inc_cout],
+            [OP_DEC, dec_cout]
+          ],
+          add_cout
+        )
 
         # Select overflow based on opcode
-        overflow <= case_select(op, {
-          OP_ADD => add_overflow,
-          OP_SUB => sub_overflow,
-          OP_AND => lit(0, width: 1),
-          OP_OR  => lit(0, width: 1),
-          OP_XOR => lit(0, width: 1),
-          OP_NOT => lit(0, width: 1),
-          OP_SHL => lit(0, width: 1),
-          OP_SHR => lit(0, width: 1),
-          OP_SAR => lit(0, width: 1),
-          OP_ROL => lit(0, width: 1),
-          OP_ROR => lit(0, width: 1),
-          OP_MUL => lit(0, width: 1),
-          OP_DIV => lit(0, width: 1),
-          OP_MOD => lit(0, width: 1),
-          OP_INC => inc_overflow,
-          OP_DEC => dec_overflow
-        }, default: add_overflow)
+        overflow <= select_case.call(
+          op,
+          4,
+          [
+            [OP_ADD, add_overflow],
+            [OP_SUB, sub_overflow],
+            [OP_AND, lit(0, width: 1)],
+            [OP_OR, lit(0, width: 1)],
+            [OP_XOR, lit(0, width: 1)],
+            [OP_NOT, lit(0, width: 1)],
+            [OP_SHL, lit(0, width: 1)],
+            [OP_SHR, lit(0, width: 1)],
+            [OP_SAR, lit(0, width: 1)],
+            [OP_ROL, lit(0, width: 1)],
+            [OP_ROR, lit(0, width: 1)],
+            [OP_MUL, lit(0, width: 1)],
+            [OP_DIV, lit(0, width: 1)],
+            [OP_MOD, lit(0, width: 1)],
+            [OP_INC, inc_overflow],
+            [OP_DEC, dec_overflow]
+          ],
+          add_overflow
+        )
 
         # Zero and negative flags depend on result
-        # We need to compute which result is active
-        active_result = case_select(op, {
-          OP_ADD => add_result,
-          OP_SUB => sub_result,
-          OP_AND => and_result,
-          OP_OR  => or_result,
-          OP_XOR => xor_result,
-          OP_NOT => not_result,
-          OP_SHL => shl_result,
-          OP_SHR => shr_result,
-          OP_SAR => sar_result,
-          OP_ROL => rol_result,
-          OP_ROR => ror_result,
-          OP_MUL => mul_result,
-          OP_DIV => div_result,
-          OP_MOD => mod_result,
-          OP_INC => inc_result,
-          OP_DEC => dec_result
-        }, default: add_result)
-
-        zero <= mux(active_result == lit(0, width: 8), lit(1, width: 1), lit(0, width: 1))
-        negative <= active_result[7]
+        zero <= mux(selected_result == lit(0, width: 8), lit(1, width: 1), lit(0, width: 1))
+        negative <= selected_negative
       end
     end
   end

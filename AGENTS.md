@@ -124,22 +124,29 @@ Use `bundle exec rake -T` to inspect full task list.
 
 Common tasks:
 - `bundle exec rake spec`
-- `bundle exec rake spec:lib`
-- `bundle exec rake spec:hdl`
-- `bundle exec rake spec:mos6502`
-- `bundle exec rake spec:apple2`
-- `bundle exec rake spec:riscv`
+- `bundle exec rake spec[lib]`
+- `bundle exec rake spec[hdl]`
+- `bundle exec rake spec[ao486]`
+- `bundle exec rake spec[gameboy]`
+- `bundle exec rake spec[mos6502]`
+- `bundle exec rake spec[apple2]`
+- `bundle exec rake spec[riscv]`
+- `bundle exec rake spec[sparc64]`
 
 Parallel:
 - `bundle exec rake pspec`
-- `bundle exec rake pspec:lib`
-- `bundle exec rake pspec:hdl`
-- `bundle exec rake pspec:mos6502`
-- `bundle exec rake pspec:apple2`
-- `bundle exec rake pspec:riscv`
+- `bundle exec rake pspec[lib]`
+- `bundle exec rake pspec[hdl]`
+- `bundle exec rake pspec[ao486]`
+- `bundle exec rake pspec[gameboy]`
+- `bundle exec rake pspec[mos6502]`
+- `bundle exec rake pspec[apple2]`
+- `bundle exec rake pspec[riscv]`
+- `bundle exec rake pspec[sparc64]`
 
 Spec benchmarks:
 - `bundle exec rake spec:bench[all,20]`
+- `bundle exec rake spec:bench[gameboy,20]`
 - `bundle exec rake spec:bench[riscv,20]`
 
 Simulation benchmarks:
@@ -221,7 +228,7 @@ Examples:
 - CLI task changes:
   - `bundle exec rspec spec/rhdl/cli/tasks/<task>_spec.rb`
 - broader confidence:
-  - `bundle exec rake spec:riscv`
+  - `bundle exec rake spec[riscv]`
   - `bundle exec rake spec`
 
 If a native backend is unavailable (for example IR compiler extension), tests should fail clearly or be conditionally skipped with explicit reason.

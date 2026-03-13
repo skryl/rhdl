@@ -31,8 +31,8 @@ RSpec.describe RHDL::HDL::LZCount do
     end
 
     it 'generates valid IR' do
-      ir = RHDL::HDL::LZCount.to_ir
-      expect(ir).to be_a(RHDL::Export::IR::ModuleDef)
+      ir = RHDL::HDL::LZCount.to_flat_circt_nodes
+      expect(ir).to be_a(RHDL::Codegen::CIRCT::IR::ModuleOp)
       expect(ir.ports.length).to eq(3)  # a, count, zero
     end
 
@@ -43,12 +43,12 @@ RSpec.describe RHDL::HDL::LZCount do
       expect(verilog).to include('output [3:0] count')
     end
 
-    it 'generates valid FIRRTL' do
-      firrtl = RHDL::HDL::LZCount.to_circt
-      expect(firrtl).to include('FIRRTL version')
-      expect(firrtl).to include('circuit lz_count')
-      expect(firrtl).to include('input a')
-      expect(firrtl).to include('output count')
+    it 'generates valid CIRCT MLIR' do
+      mlir = RHDL::HDL::LZCount.to_circt
+      expect(mlir).to include('hw.output')
+      expect(mlir).to include('hw.module @lz_count')
+      expect(mlir).to include('%a:')
+      expect(mlir).to include('count:')
     end
 
     context 'CIRCT firtool validation', if: HdlToolchain.firtool_available? do
@@ -65,7 +65,7 @@ RSpec.describe RHDL::HDL::LZCount do
 
   describe 'gate-level netlist' do
     let(:component) { RHDL::HDL::LZCount.new('lzcount', width: 8) }
-    let(:ir) { RHDL::Export::Structure::Lower.from_components([component], name: 'lzcount') }
+    let(:ir) { RHDL::Codegen::Netlist::Lower.from_components([component], name: 'lzcount') }
 
     it 'generates correct IR structure' do
       expect(ir.inputs.keys).to include('lzcount.a')

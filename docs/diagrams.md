@@ -165,7 +165,7 @@ Gate-level diagrams show the actual primitive gates (AND, OR, XOR, NOT, MUX) and
 **API:**
 ```ruby
 # First, get gate-level IR
-ir = RHDL::Codegen::Structure::Lower.from_components([component])
+ir = RHDL::Codegen::Netlist::Lower.from_components([component])
 
 # Then generate diagram
 diagram = RHDL::Diagram.gate_level(ir)
@@ -443,7 +443,7 @@ Graphviz is not installed. Install it using your package manager (see Installing
 
 2. **Lower the component first:**
    ```ruby
-   ir = RHDL::Codegen::Structure::Lower.from_components([component])
+   ir = RHDL::Codegen::Netlist::Lower.from_components([component])
    puts ir.gates.length  # Should be > 0
    ```
 
@@ -497,7 +497,7 @@ behavior_diagram = RHDL::Diagram.component(component)
 behavior_diagram.save_svg("adder_behavioral.svg")
 
 # Gate-level diagram
-ir = RHDL::Codegen::Structure::Lower.from_components([component])
+ir = RHDL::Codegen::Netlist::Lower.from_components([component])
 gate_diagram = RHDL::Diagram.gate_level(ir)
 gate_diagram.save_svg("adder_gates.svg")
 

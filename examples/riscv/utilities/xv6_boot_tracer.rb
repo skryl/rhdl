@@ -5,7 +5,7 @@ require 'time'
 
 require_relative '../../../lib/rhdl'
 require_relative '../../../lib/rhdl/codegen'
-require_relative '../../../lib/rhdl/codegen/ir/sim/ir_simulator'
+require_relative '../../../lib/rhdl/sim/native/ir/simulator'
 require_relative '../hdl/ir_harness'
 require_relative '../hdl/pipeline/ir_harness'
 
@@ -109,14 +109,12 @@ module RHDL
           case @options[:core]
           when :single
             RHDL::Examples::RISCV::IRHarness.new(
-              backend: @options[:backend],
-              allow_fallback: false
+              backend: @options[:backend]
             )
           when :pipeline
             RHDL::Examples::RISCV::Pipeline::IRHarness.new(
               'xv6_pipeline_trace',
-              backend: @options[:backend],
-              allow_fallback: false
+              backend: @options[:backend]
             )
           else
             raise ArgumentError, "Unsupported core #{@options[:core]}"

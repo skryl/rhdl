@@ -244,20 +244,20 @@ module RHDL
           case e
           when Symbol
             width = widths.fetch(e, 1)
-            RHDL::Codegen::IR::Signal.new(name: e, width: width)
+            RHDL::Codegen::CIRCT::IR::Signal.new(name: e, width: width)
           when Integer
-            RHDL::Codegen::IR::Literal.new(value: e, width: 1)
+            RHDL::Codegen::CIRCT::IR::Literal.new(value: e, width: 1)
           when Array
             if e.length == 3
               left = expr_to_ir(e[0], widths)
               op = e[1]
               right = expr_to_ir(e[2], widths)
-              RHDL::Codegen::IR::BinaryOp.new(op: op, left: left, right: right, width: 1)
+              RHDL::Codegen::CIRCT::IR::BinaryOp.new(op: op, left: left, right: right, width: 1)
             else
-              RHDL::Codegen::IR::Literal.new(value: 0, width: 1)
+              RHDL::Codegen::CIRCT::IR::Literal.new(value: 0, width: 1)
             end
           else
-            RHDL::Codegen::IR::Literal.new(value: 1, width: 1)
+            RHDL::Codegen::CIRCT::IR::Literal.new(value: 1, width: 1)
           end
         end
       end
@@ -396,25 +396,25 @@ module RHDL
           @outputs.map do |output_name, output_width|
             cases = @entries.transform_keys { |k| [k] }
                            .transform_values { |vals|
-                             RHDL::Export::IR::Literal.new(
+                             RHDL::Codegen::CIRCT::IR::Literal.new(
                                value: vals[output_name] || @default_values[output_name] || 0,
                                width: output_width
                              )
                            }
 
-            default_ir = RHDL::Export::IR::Literal.new(
+            default_ir = RHDL::Codegen::CIRCT::IR::Literal.new(
               value: @default_values[output_name] || 0,
               width: output_width
             )
 
-            case_ir = RHDL::Export::IR::Case.new(
-              selector: RHDL::Export::IR::Signal.new(name: @input_signal, width: @input_width),
+            case_ir = RHDL::Codegen::CIRCT::IR::Case.new(
+              selector: RHDL::Codegen::CIRCT::IR::Signal.new(name: @input_signal, width: @input_width),
               cases: cases,
               default: default_ir,
               width: output_width
             )
 
-            RHDL::Export::IR::Assign.new(
+            RHDL::Codegen::CIRCT::IR::Assign.new(
               target: output_name,
               expr: case_ir
             )

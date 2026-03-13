@@ -1,10 +1,10 @@
 # RV32I IR Harness - IR simulator + Ruby MMIO/memory harness
 #
-# Runs the single-cycle CPU core through RHDL IR simulation (jit/interpreter/compiler/ruby fallback)
+# Runs the single-cycle CPU core through RHDL IR simulation (jit/interpreter/compiler)
 # while keeping instruction/data memory and MMIO peripherals in Ruby for test ergonomics.
 
 require 'rhdl/codegen'
-require 'rhdl/codegen/ir/sim/ir_simulator'
+require 'rhdl/sim/native/ir/simulator'
 require_relative 'constants'
 require_relative 'cpu'
 require_relative 'memory'
@@ -19,10 +19,9 @@ module RHDL
       class IRHarness
         attr_reader :clock_count, :sim
 
-        def initialize(mem_size: Memory::DEFAULT_SIZE, backend: :jit, allow_fallback: true)
+        def initialize(mem_size: Memory::DEFAULT_SIZE, backend: :jit)
           @mem_size = mem_size
           @backend = backend
-          @allow_fallback = allow_fallback
 
           @clock_count = 0
           @irq_software = 0
@@ -41,12 +40,11 @@ module RHDL
           @clk = 0
           @rst = 0
 
-          ir = CPU.to_flat_ir
-          ir_json = RHDL::Codegen::IR::IRToJson.convert(ir)
-          @sim = RHDL::Codegen::IR::IrSimulator.new(
+          ir = CPU.to_flat_circt_nodes
+          ir_json = RHDL::Sim::Native::IR.sim_json(ir, backend: backend)
+          @sim = RHDL::Sim::Native::IR::Simulator.new(
             ir_json,
-            backend: backend,
-            allow_fallback: allow_fallback
+            backend: backend
           )
           @native_riscv = @sim.native? && @sim.runner_kind == :riscv
 

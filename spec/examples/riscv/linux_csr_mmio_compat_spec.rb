@@ -176,14 +176,14 @@ end
 
 RSpec.describe 'RISC-V Linux CSR/MMIO compatibility', timeout: 30 do
   backends = {
-    jit: RHDL::Codegen::IR::IR_JIT_AVAILABLE,
-    interpreter: RHDL::Codegen::IR::IR_INTERPRETER_AVAILABLE
+    jit: RHDL::Sim::Native::IR::JIT_AVAILABLE,
+    interpreter: RHDL::Sim::Native::IR::INTERPRETER_AVAILABLE
   }
-  backends[:compiler] = RHDL::Codegen::IR::IR_COMPILER_AVAILABLE if ENV['RHDL_LINUX_INCLUDE_COMPILER'] == '1'
+  backends[:compiler] = RHDL::Sim::Native::IR::COMPILER_AVAILABLE if ENV['RHDL_LINUX_INCLUDE_COMPILER'] == '1'
 
   backends.each do |backend, available|
     context "single-cycle on #{backend}" do
-      let(:cpu) { RHDL::Examples::RISCV::IRHarness.new(mem_size: 4096, backend: backend, allow_fallback: false) }
+      let(:cpu) { RHDL::Examples::RISCV::IRHarness.new(mem_size: 4096, backend: backend) }
 
       before(:each) do
         skip "#{backend} backend not available" unless available
@@ -196,8 +196,7 @@ RSpec.describe 'RISC-V Linux CSR/MMIO compatibility', timeout: 30 do
       let(:cpu) do
         RHDL::Examples::RISCV::Pipeline::IRHarness.new(
           "linux_csr_mmio_pipeline_#{backend}",
-          backend: backend,
-          allow_fallback: false
+          backend: backend
         )
       end
 

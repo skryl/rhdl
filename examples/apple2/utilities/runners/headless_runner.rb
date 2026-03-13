@@ -7,11 +7,13 @@
 # but without any terminal/display dependencies.
 
 require_relative 'ruby_runner'
+require 'rhdl/sim/native/headless_trace'
 
 module RHDL
   module Examples
     module Apple2
       class HeadlessRunner
+      include RHDL::Sim::Native::HeadlessTrace
       attr_reader :runner, :mode, :sim_backend
 
       # Create a headless runner with the specified options
@@ -113,6 +115,12 @@ module RHDL
       # Check if using native implementation
       def native?
         @runner.native?
+      end
+
+      def sim
+        return nil unless @runner.respond_to?(:sim)
+
+        @runner.sim
       end
 
       # Get simulator type

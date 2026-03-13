@@ -1,0 +1,193 @@
+diff --git a/ao486/memory/prefetch_fifo.v b/ao486/memory/prefetch_fifo.v
+--- a/ao486/memory/prefetch_fifo.v
++++ b/ao486/memory/prefetch_fifo.v
+@@ -1,101 +1,92 @@
+-/*
+- * Copyright (c) 2014, Aleksander Osman
+- * All rights reserved.
+- * 
+- * Redistribution and use in source and binary forms, with or without
+- * modification, are permitted provided that the following conditions are met:
+- * 
+- * * Redistributions of source code must retain the above copyright notice, this
+- *   list of conditions and the following disclaimer.
+- * 
+- * * Redistributions in binary form must reproduce the above copyright notice,
+- *   this list of conditions and the following disclaimer in the documentation
+- *   and/or other materials provided with the distribution.
+- * 
+- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+- * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+- * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+- * DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+- * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+- * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+- * SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+- * CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+- * OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+- * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+- */
+-
+-`include "defines.v"
+-
+ module prefetch_fifo(
+-    input           clk,
+-    input           rst_n,
+-    
+-    input           pr_reset,
+-    
+-    //RESP:
+-    input           prefetchfifo_signal_limit_do,
+-    //END
+-    
+-    //RESP:
+-    input           prefetchfifo_signal_pf_do,
+-    //END
+-    
+-    //RESP:
+-    input           prefetchfifo_write_do,
+-    input   [35:0]  prefetchfifo_write_data,
+-    //END
+-    
+-    output  [4:0]   prefetchfifo_used,
+-    
+-    //RESP:
+-    input           prefetchfifo_accept_do,
+-    output [67:0]   prefetchfifo_accept_data,
+-    output          prefetchfifo_accept_empty
+-    //END
++  input         clk,
++                rst_n,
++                pr_reset,
++                prefetchfifo_signal_limit_do,
++                prefetchfifo_signal_pf_do,
++                prefetchfifo_write_do,
++  input  [35:0] prefetchfifo_write_data,
++  input         prefetchfifo_accept_do,
++  output [4:0]  prefetchfifo_used,
++  output [67:0] prefetchfifo_accept_data,
++  output        prefetchfifo_accept_empty
+ );
+ 
+-//------------------------------------------------------------------------------
+-
+-wire [35:0] q;
+-wire        empty;
+-wire        bypass;
+-
+-assign bypass = prefetchfifo_write_do && empty;
+-
+-assign prefetchfifo_accept_data = (bypass) ? { prefetchfifo_write_data[35:32], 32'd0, prefetchfifo_write_data[31:0] } : { q[35:32], 32'd0, q[31:0] };
+-
+-assign prefetchfifo_accept_empty = empty && ~bypass;
+-
+-//------------------------------------------------------------------------------
+-
+-simple_fifo_mlab #(
+-    .width      (36),
+-    .widthu     (4)
+-)
+-prefetch_fifo_inst(
+-    .clk        (clk),      //input
+-    .rst_n      (rst_n),    //input
+-    .sclr       (pr_reset), //input
+-    
+-    .rdreq      (prefetchfifo_accept_do),                                                               //input
+-    .wrreq      ((prefetchfifo_write_do && (~empty || ~prefetchfifo_accept_do)) || prefetchfifo_signal_limit_do || prefetchfifo_signal_pf_do),   //input
+-    .data       ((prefetchfifo_signal_limit_do)? { `PREFETCH_GP_FAULT, 32'd0 } :
+-                 (prefetchfifo_signal_pf_do)?    { `PREFETCH_PF_FAULT, 32'd0 } :
+-                                                     prefetchfifo_write_data),                          //input [35:0]
+-    
+-    
+-    .empty      (empty),                    //output
+-    .full       (prefetchfifo_used[4]),     //output
+-    .q          (q),                        //output [35:0]
+-    .usedw      (prefetchfifo_used[3:0])    //output [3:0]
+-);
+-
+-//------------------------------------------------------------------------------
+-
+-//------------------------------------------------------------------------------
+-
+-//------------------------------------------------------------------------------
+-
+-//------------------------------------------------------------------------------
+-
++  reg  [35:0] rt_tmp_5_36;
++  reg         rt_tmp_2_1;
++  reg  [4:0]  rt_tmp_1_5;
++  wire        _GEN = rt_tmp_1_5 == 5'h0;	// /var/folders/fx/2jqq5cks33g297zlybsqw6c40000gn/T/ao486_patch_profile_ws20260311-55795-e9mvr1/runner.mlir:2195:18, :2196:18, :2224:17
++  wire        _GEN_0 =
++    prefetchfifo_write_do & (|prefetchfifo_write_data[35:32]);	// Zero-tag writes are invalid on the runner path, but identical adjacent fetch words must still be preserved.
++  reg         rt_tmp_3_1;
++  reg         rt_tmp_4_1;
++  reg  [35:0] rt_tmp_6_36;
++  reg  [35:0] rt_tmp_7_36;
++  reg  [35:0] rt_tmp_8_36;
++  reg  [35:0] rt_tmp_9_36;
++  reg  [35:0] rt_tmp_10_36;
++  reg  [35:0] rt_tmp_11_36;
++  reg  [35:0] rt_tmp_12_36;
++  reg  [35:0] rt_tmp_13_36;
++  always_ff @(posedge clk) begin
++    automatic logic        _GEN_1 = ~rst_n | pr_reset;	// /var/folders/fx/2jqq5cks33g297zlybsqw6c40000gn/T/ao486_patch_profile_ws20260311-55795-e9mvr1/runner.mlir:2193:18, :2194:18
++    automatic logic        _GEN_2 = prefetchfifo_accept_do & ~_GEN;	// /var/folders/fx/2jqq5cks33g297zlybsqw6c40000gn/T/ao486_patch_profile_ws20260311-55795-e9mvr1/runner.mlir:2196:18, :2197:18, :2198:18
++    automatic logic        _GEN_3 =
++      (_GEN_0 & (~_GEN | ~prefetchfifo_accept_do) | prefetchfifo_signal_limit_do
++       & ~rt_tmp_3_1 | prefetchfifo_signal_pf_do & ~rt_tmp_4_1)
++      & (rt_tmp_1_5[4:3] == 2'h0 | _GEN_2);	// /var/folders/fx/2jqq5cks33g297zlybsqw6c40000gn/T/ao486_patch_profile_ws20260311-55795-e9mvr1/runner.mlir:2196:18, :2197:18, :2198:18, :2202:18, :2203:18, :2204:18, :2205:18, :2206:18, :2207:18, :2208:18, :2209:18, :2210:18, :2211:18, :2213:18, :2215:18, :2216:18, :2224:17, :2226:17, :2227:17
++    automatic logic [4:0]  _GEN_4 = rt_tmp_1_5 - 5'h1;	// /var/folders/fx/2jqq5cks33g297zlybsqw6c40000gn/T/ao486_patch_profile_ws20260311-55795-e9mvr1/runner.mlir:2218:18, :2224:17
++    automatic logic [4:0]  _GEN_5 = _GEN_2 ? _GEN_4 : rt_tmp_1_5;	// /var/folders/fx/2jqq5cks33g297zlybsqw6c40000gn/T/ao486_patch_profile_ws20260311-55795-e9mvr1/runner.mlir:2198:18, :2218:18, :2224:17, :2230:18
++    automatic logic [35:0] _GEN_6 =
++      prefetchfifo_signal_limit_do
++        ? 36'hF00000000
++        : prefetchfifo_signal_pf_do ? 36'hE00000000 : prefetchfifo_write_data;	// /var/folders/fx/2jqq5cks33g297zlybsqw6c40000gn/T/ao486_patch_profile_ws20260311-55795-e9mvr1/runner.mlir:2236:19, :2238:19, :2239:19, :2240:19
++    rt_tmp_1_5 <=
++      _GEN_1
++        ? 5'h0
++        : _GEN_2
++            ? (_GEN_3 ? rt_tmp_1_5 : _GEN_4)
++            : _GEN_3 ? rt_tmp_1_5 + 5'h1 : rt_tmp_1_5;	// /var/folders/fx/2jqq5cks33g297zlybsqw6c40000gn/T/ao486_patch_profile_ws20260311-55795-e9mvr1/runner.mlir:2194:18, :2195:18, :2198:18, :2216:18, :2217:18, :2218:18, :2219:18, :2220:18, :2221:18, :2222:18, :2223:18, :2224:17
++    rt_tmp_2_1 <= prefetchfifo_write_do;
++    rt_tmp_3_1 <= prefetchfifo_signal_limit_do;
++    rt_tmp_4_1 <= prefetchfifo_signal_pf_do;
++    rt_tmp_5_36 <= prefetchfifo_write_data;
++    rt_tmp_6_36 <=
++      _GEN_1
++        ? 36'h0
++        : _GEN_3 & _GEN_5 == 5'h0 ? _GEN_6 : _GEN_2 ? rt_tmp_7_36 : rt_tmp_6_36;	// /var/folders/fx/2jqq5cks33g297zlybsqw6c40000gn/T/ao486_patch_profile_ws20260311-55795-e9mvr1/runner.mlir:2194:18, :2195:18, :2198:18, :2216:18, :2229:19, :2230:18, :2232:18, :2233:18, :2240:19, :2241:19, :2242:19, :2243:19, :2244:18, :2251:18
++    rt_tmp_7_36 <=
++      _GEN_1
++        ? 36'h0
++        : _GEN_3 & _GEN_5 == 5'h1 ? _GEN_6 : _GEN_2 ? rt_tmp_8_36 : rt_tmp_7_36;	// /var/folders/fx/2jqq5cks33g297zlybsqw6c40000gn/T/ao486_patch_profile_ws20260311-55795-e9mvr1/runner.mlir:2194:18, :2198:18, :2216:18, :2217:18, :2229:19, :2230:18, :2240:19, :2246:18, :2247:18, :2248:19, :2249:19, :2250:19, :2251:18, :2258:18
++    rt_tmp_8_36 <=
++      _GEN_1
++        ? 36'h0
++        : _GEN_3 & _GEN_5 == 5'h2 ? _GEN_6 : _GEN_2 ? rt_tmp_9_36 : rt_tmp_8_36;	// /var/folders/fx/2jqq5cks33g297zlybsqw6c40000gn/T/ao486_patch_profile_ws20260311-55795-e9mvr1/runner.mlir:2194:18, :2198:18, :2216:18, :2229:19, :2230:18, :2240:19, :2252:18, :2253:18, :2254:18, :2255:19, :2256:19, :2257:19, :2258:18, :2265:18
++    rt_tmp_9_36 <=
++      _GEN_1
++        ? 36'h0
++        : _GEN_3 & _GEN_5 == 5'h3 ? _GEN_6 : _GEN_2 ? rt_tmp_10_36 : rt_tmp_9_36;	// /var/folders/fx/2jqq5cks33g297zlybsqw6c40000gn/T/ao486_patch_profile_ws20260311-55795-e9mvr1/runner.mlir:2194:18, :2198:18, :2216:18, :2229:19, :2230:18, :2240:19, :2259:18, :2260:18, :2261:18, :2262:19, :2263:19, :2264:19, :2265:18, :2272:19
++    rt_tmp_10_36 <=
++      _GEN_1
++        ? 36'h0
++        : _GEN_3 & _GEN_5 == 5'h4 ? _GEN_6 : _GEN_2 ? rt_tmp_11_36 : rt_tmp_10_36;	// /var/folders/fx/2jqq5cks33g297zlybsqw6c40000gn/T/ao486_patch_profile_ws20260311-55795-e9mvr1/runner.mlir:2194:18, :2198:18, :2216:18, :2229:19, :2230:18, :2240:19, :2266:18, :2267:18, :2268:18, :2269:19, :2270:19, :2271:19, :2272:19, :2279:19
++    rt_tmp_11_36 <=
++      _GEN_1
++        ? 36'h0
++        : _GEN_3 & _GEN_5 == 5'h5 ? _GEN_6 : _GEN_2 ? rt_tmp_12_36 : rt_tmp_11_36;	// /var/folders/fx/2jqq5cks33g297zlybsqw6c40000gn/T/ao486_patch_profile_ws20260311-55795-e9mvr1/runner.mlir:2194:18, :2198:18, :2216:18, :2229:19, :2230:18, :2240:19, :2273:18, :2274:18, :2275:18, :2276:19, :2277:19, :2278:19, :2279:19, :2286:19
++    rt_tmp_12_36 <=
++      _GEN_1
++        ? 36'h0
++        : _GEN_3 & _GEN_5 == 5'h6 ? _GEN_6 : _GEN_2 ? rt_tmp_13_36 : rt_tmp_12_36;	// /var/folders/fx/2jqq5cks33g297zlybsqw6c40000gn/T/ao486_patch_profile_ws20260311-55795-e9mvr1/runner.mlir:2194:18, :2198:18, :2216:18, :2229:19, :2230:18, :2240:19, :2280:18, :2281:18, :2282:18, :2283:19, :2284:19, :2285:19, :2286:19, :2293:19
++    rt_tmp_13_36 <=
++      _GEN_1 ? 36'h0 : _GEN_3 & _GEN_5 == 5'h7 ? _GEN_6 : _GEN_2 ? 36'h0 : rt_tmp_13_36;	// /var/folders/fx/2jqq5cks33g297zlybsqw6c40000gn/T/ao486_patch_profile_ws20260311-55795-e9mvr1/runner.mlir:2194:18, :2198:18, :2216:18, :2229:19, :2230:18, :2240:19, :2287:18, :2288:18, :2289:19, :2290:20, :2291:20, :2292:20, :2293:19
++  end // always_ff @(posedge)
++  wire        _GEN_7 = _GEN_0 & _GEN;	// /var/folders/fx/2jqq5cks33g297zlybsqw6c40000gn/T/ao486_patch_profile_ws20260311-55795-e9mvr1/runner.mlir:2196:18, :2202:18, :2294:19
++  assign prefetchfifo_used = rt_tmp_1_5;	// /var/folders/fx/2jqq5cks33g297zlybsqw6c40000gn/T/ao486_patch_profile_ws20260311-55795-e9mvr1/runner.mlir:2224:17, :2304:3
++  assign prefetchfifo_accept_data =
++    _GEN_7
++      ? {prefetchfifo_write_data[35:32], 32'h0, prefetchfifo_write_data[31:0]}
++      : {rt_tmp_6_36[35:32], 32'h0, rt_tmp_6_36[31:0]};	// /var/folders/fx/2jqq5cks33g297zlybsqw6c40000gn/T/ao486_patch_profile_ws20260311-55795-e9mvr1/runner.mlir:2235:19, :2244:18, :2294:19, :2295:19, :2296:20, :2297:20, :2298:19, :2299:20, :2300:20, :2301:20, :2304:3
++  assign prefetchfifo_accept_empty = _GEN & ~_GEN_7;	// /var/folders/fx/2jqq5cks33g297zlybsqw6c40000gn/T/ao486_patch_profile_ws20260311-55795-e9mvr1/runner.mlir:2196:18, :2294:19, :2302:19, :2303:19, :2304:3
+ endmodule

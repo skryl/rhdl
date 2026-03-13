@@ -53,8 +53,8 @@ RSpec.describe RHDL::HDL::RegisterLoad do
     end
 
     it 'generates valid IR' do
-      ir = RHDL::HDL::RegisterLoad.to_ir
-      expect(ir).to be_a(RHDL::Export::IR::ModuleDef)
+      ir = RHDL::HDL::RegisterLoad.to_flat_circt_nodes
+      expect(ir).to be_a(RHDL::Codegen::CIRCT::IR::ModuleOp)
       expect(ir.ports.length).to eq(5)  # d, clk, rst, load, q
     end
 
@@ -65,13 +65,13 @@ RSpec.describe RHDL::HDL::RegisterLoad do
       expect(verilog).to match(/output.*\[7:0\].*q/)
     end
 
-    it 'generates valid FIRRTL' do
-      firrtl = RHDL::HDL::RegisterLoad.to_circt
-      expect(firrtl).to include('FIRRTL version')
-      expect(firrtl).to include('circuit register_load')
-      expect(firrtl).to include('input d')
-      expect(firrtl).to include('input clk')
-      expect(firrtl).to include('output q')
+    it 'generates valid CIRCT MLIR' do
+      mlir = RHDL::HDL::RegisterLoad.to_circt
+      expect(mlir).to include('hw.output')
+      expect(mlir).to include('hw.module @register_load')
+      expect(mlir).to include('%d:')
+      expect(mlir).to include('%clk:')
+      expect(mlir).to include('q:')
     end
 
     context 'CIRCT firtool validation', if: HdlToolchain.firtool_available? do
@@ -88,7 +88,7 @@ RSpec.describe RHDL::HDL::RegisterLoad do
 
   describe 'gate-level netlist' do
     let(:component) { RHDL::HDL::RegisterLoad.new('reg_load') }
-    let(:ir) { RHDL::Export::Structure::Lower.from_components([component], name: 'reg_load') }
+    let(:ir) { RHDL::Codegen::Netlist::Lower.from_components([component], name: 'reg_load') }
 
     it 'generates correct IR structure' do
       expect(ir.inputs.keys).to include('reg_load.d', 'reg_load.clk', 'reg_load.rst', 'reg_load.load')

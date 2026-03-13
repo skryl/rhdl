@@ -1,0 +1,197 @@
+diff --git a/os2wb/os2wb.v b/os2wb/os2wb.v
+--- a/os2wb/os2wb.v	2026-03-10 20:32:40
++++ b/os2wb/os2wb.v	2026-03-10 20:32:40
+@@ -188,7 +188,14 @@
+ reg fifo_rd;
+ wire [123:0] pcx_packet;
+ assign pcx_packet=pcx_data_fifo[123:0];
++wire        fast_boot_prom_ifill;
++wire        fast_boot_prom_ifill_live;
++assign fast_boot_prom_ifill = (pcx_packet_d[122:118]==5'b10000) && !pcx_req_d[4] &&
++                              (pcx_packet_d[103:64+5] < 35'h000000001);
++assign fast_boot_prom_ifill_live = (pcx_packet[122:118]==5'b10000) &&
++                                   (pcx_packet[103:64+5] < 35'h000000001);
+ 
++
+ always @(posedge clk or negedge rstn)
+    if(rstn==0)
+       begin
+@@ -392,7 +399,7 @@
+                         if((pcx_packet_d[122:118]==5'b00000 && !pcx_req_d[4]) || pcx_packet_d[122:118]==5'b00010 || pcx_packet_d[122:118]==5'b00100 || pcx_packet_d[122:118]==5'b00110)
+                            wb_addr<={pcx_req_d,19'b0,pcx_packet_d[103:64+4],4'b0000}; //DRAM load/streamload, CAS and SWAP always use DRAM and load first 
+                         else
+-                           if(pcx_packet_d[122:118]==5'b10000 && !pcx_req_d[4])
++                           if((pcx_packet_d[122:118]==5'b10000) && !pcx_req_d[4] && !fast_boot_prom_ifill)
+                               wb_addr<={pcx_req_d,19'b0,pcx_packet_d[103:64+5],5'b00000}; //DRAM ifill
+                            else
+                               if(pcx_packet_d[64+39:64+28]==12'hFFF && pcx_packet_d[64+27:64+24]!=4'b0) // flash remap FFF1->FFF8
+@@ -616,7 +623,7 @@
+                                  default:multi_hit1<=1;
+                               endcase
+                            end
+-                        if(pcx_req_d[4]) // I/O access
++                        if(pcx_req_d[4] || fast_boot_prom_ifill) // I/O access
+                            wb_sel<=(pcx_packet_d[64+2]==0) ? 8'b11110000:8'b00001111;
+                         else
+                            wb_sel<=8'b11111111;
+@@ -635,7 +642,7 @@
+                      cpx_packet_1[144]<=1;     // Valid
+                      cpx_packet_1[139]<=(pcx_packet_d[122:118]==5'b00000) || (pcx_packet_d[122:118]==5'b10000) ? 1:0;     // L2 always miss on load and ifill
+                      cpx_packet_1[138:137]<=0; // Error
+-                     cpx_packet_1[136]<=pcx_packet_d[117] || (pcx_packet_d[122:118]==5'b00001) ? 1:0; // Non-cacheble is set on store too
++                     cpx_packet_1[136]<=fast_boot_prom_ifill ? 1'b1 : (pcx_packet_d[117] || (pcx_packet_d[122:118]==5'b00001) ? 1:0); // Non-cacheble is set on store too
+                      cpx_packet_1[135:134]<=pcx_packet_d[113:112]; // Thread ID
+                      if((pcx_packet_d[122:118]==5'b00000 && !pcx_packet_d[117] && !pcx_packet_d[110]) || (pcx_packet_d[122:118]==5'b10000)) // Cacheble Load or IFill
+                         cpx_packet_1[133:131]<={inval_vect0[3],inval_vect0[1:0]};
+@@ -647,7 +654,7 @@
+                         if(pcx_packet_d[122:118]==5'b00101) // Stream store
+                            cpx_packet_1[130]<=pcx_packet_d[108]; // A
+                         else
+-                           cpx_packet_1[130]<=((pcx_packet_d[122:118]==5'b10000) && pcx_req_d[4]) ? 1:0; // Four byte fill
++                           cpx_packet_1[130]<=((pcx_packet_d[122:118]==5'b10000) && (pcx_req_d[4] || fast_boot_prom_ifill)) ? 1:0; // Four byte fill
+                      if(pcx_packet_d[122:118]==5'b00100) // Strload
+                         cpx_packet_1[129]<=pcx_packet_d[105]; // B
+                      else      
+@@ -656,14 +663,14 @@
+                      cpx_packet_2[144]<=1;     // Valid
+                      cpx_packet_2[139]<=0;     // L2 miss
+                      cpx_packet_2[138:137]<=0; // Error
+-                     cpx_packet_2[136]<=pcx_packet_d[117] || (pcx_packet_d[122:118]==5'b00001) ? 1:0; // Non-cacheble is set on store too
++                     cpx_packet_2[136]<=fast_boot_prom_ifill ? 1'b1 : (pcx_packet_d[117] || (pcx_packet_d[122:118]==5'b00001) ? 1:0); // Non-cacheble is set on store too
+                      cpx_packet_2[135:134]<=pcx_packet_d[113:112]; // Thread ID
+-                     if(pcx_packet_d[122:118]==5'b10000) // IFill
++                     if((pcx_packet_d[122:118]==5'b10000) && !fast_boot_prom_ifill) // IFill
+                         cpx_packet_2[133:131]<={inval_vect1[3],inval_vect1[1:0]};
+                      else
+                         cpx_packet_2[133:131]<=3'b000; // Way valid
+                      cpx_packet_2[130]<=0; // Four byte fill
+-                     cpx_packet_2[129]<=pcx_atom_d || (pcx_packet_d[122:118]==5'b00110) || ((pcx_packet_d[122:118]==5'b10000) && !pcx_req_d[4]);
++                     cpx_packet_2[129]<=pcx_atom_d || (pcx_packet_d[122:118]==5'b00110) || ((pcx_packet_d[122:118]==5'b10000) && !pcx_req_d[4] && !fast_boot_prom_ifill);
+                      cpx_packet_2[128]<=0; // Prefetch
+                      wb_strobe<=0;
+                      wb_sel<=8'b0;
+@@ -787,7 +794,7 @@
+                            begin
+                               cpx_packet_1[143:140]<=4'b0001; // Type
+                               cpx_packet_2[143:140]<=4'b0001; // Type
+-                              if(pcx_req_d[4]) // I/O access
++                              if(pcx_req_d[4] || fast_boot_prom_ifill) // I/O access
+                                  begin
+                                     if(pcx_packet_d[64+2]==0)
+                                        cpx_packet_1[127:0]<={wb_data_i[63:32],wb_data_i[63:32],wb_data_i[63:32],wb_data_i[63:32]};
+@@ -909,7 +916,7 @@
+                   wb_addr<=64'b0;
+                   wb_we<=0;
+                   wb_data_o<=64'b0;
+-                  if(pcx_packet_d[122:118]==5'b10000) // IFill
++                  if((pcx_packet_d[122:118]==5'b10000) && !fast_boot_prom_ifill) // IFill
+                      begin
+                         cpx_packet_2[127:64]<=wb_data_i;
+                         state<=`PCX_REQ_STEP4;
+@@ -1095,7 +1102,7 @@
+ assign cacheload=(pcx_packet[122:118]==5'b00000) && !pcx_packet[110] && !pcx_packet[117] && !pcx_packet[111];
+ 
+ // ICache allocation flag
+-assign cacheifill=(pcx_packet[122:118]==5'b10000) && !pcx_packet[117] && !pcx_packet[111];
++assign cacheifill=(pcx_packet[122:118]==5'b10000) && !pcx_packet[117] && !pcx_packet[111] && !fast_boot_prom_ifill_live;
+ 
+ assign dcache0_alloc=(state==`GOT_PCX_REQ) && (pcx_packet[108:107]==2'b00) && cacheload;
+ assign dcache0_dealloc0=(state==`PCX_REQ_STEP1_1) && (inval_vect0==4'b1_1_00) && ifillcas;
+diff --git a/os2wb/os2wb_dual.v b/os2wb/os2wb_dual.v
+--- a/os2wb/os2wb_dual.v	2026-03-10 20:32:40
++++ b/os2wb/os2wb_dual.v	2026-03-10 20:32:40
+@@ -216,6 +216,13 @@
+ reg fifo_rd1;
+ wire [123:0] pcx_packet;
+ assign pcx_packet=cpu ? pcx1_data_fifo[123:0]:pcx_data_fifo[123:0];
++wire        fast_boot_prom_ifill;
++wire        fast_boot_prom_ifill_live;
++assign fast_boot_prom_ifill = (pcx_packet_d[122:118]==5'b10000) && !pcx_req_d[4] &&
++                              (pcx_packet_d[103:64+5] < 35'h000000001);
++assign fast_boot_prom_ifill_live = (pcx_packet[122:118]==5'b10000) &&
++                                   (pcx_packet[103:64+5] < 35'h000000001);
++
+ reg cpu;
+ reg cpu2;
+ 
+@@ -437,7 +444,7 @@
+                         if((pcx_packet_d[122:118]==5'b00000 && !pcx_req_d[4]) || pcx_packet_d[122:118]==5'b00010 || pcx_packet_d[122:118]==5'b00100 || pcx_packet_d[122:118]==5'b00110)
+                            wb_addr<={pcx_req_d,19'b0,pcx_packet_d[103:64+4],4'b0000}; //DRAM load/streamload, CAS and SWAP always use DRAM and load first 
+                         else
+-                           if(pcx_packet_d[122:118]==5'b10000 && !pcx_req_d[4])
++                           if((pcx_packet_d[122:118]==5'b10000) && !pcx_req_d[4] && !fast_boot_prom_ifill)
+                               wb_addr<={pcx_req_d,19'b0,pcx_packet_d[103:64+5],5'b00000}; //DRAM ifill
+                            else
+                               if(pcx_packet_d[64+39:64+28]==12'hFFF && pcx_packet_d[64+27:64+24]!=4'b0) // flash remap FFF1->FFF8
+@@ -593,7 +600,7 @@
+                   5'b10000://IFILL
+                      begin
+                         wb_we<=0;
+-                        if(pcx_req_d[4]) // I/O access
++                        if(pcx_req_d[4] || fast_boot_prom_ifill) // I/O access
+                            wb_sel<=(pcx_packet_d[64+2]==0) ? 8'b11110000:8'b00001111;
+                         else
+                            wb_sel<=8'b11111111;
+@@ -614,7 +621,7 @@
+                      cpx_packet_1[144]<=1;     // Valid
+                      cpx_packet_1[139]<=(pcx_packet_d[122:118]==5'b00000) || (pcx_packet_d[122:118]==5'b10000) ? 1:0;     // L2 always miss on load and ifill
+                      cpx_packet_1[138:137]<=0; // Error
+-                     cpx_packet_1[136]<=pcx_packet_d[117] || (pcx_packet_d[122:118]==5'b00001) ? 1:0; // Non-cacheble is set on store too
++                     cpx_packet_1[136]<=fast_boot_prom_ifill ? 1'b1 : (pcx_packet_d[117] || (pcx_packet_d[122:118]==5'b00001) ? 1:0); // Non-cacheble is set on store too
+                      cpx_packet_1[135:134]<=pcx_packet_d[113:112]; // Thread ID
+                      if((pcx_packet_d[122:118]==5'b00000 && !pcx_packet_d[117] && !pcx_packet_d[110]) || (pcx_packet_d[122:118]==5'b10000)) // Cacheble Load or IFill
+                         cpx_packet_1[133:131]<={othercachehit[0],wayval0};
+@@ -626,7 +633,7 @@
+                         if(pcx_packet_d[122:118]==5'b00101) // Stream store
+                            cpx_packet_1[130]<=pcx_packet_d[108]; // A
+                         else
+-                           cpx_packet_1[130]<=((pcx_packet_d[122:118]==5'b10000) && pcx_req_d[4]) ? 1:0; // Four byte fill
++                           cpx_packet_1[130]<=((pcx_packet_d[122:118]==5'b10000) && (pcx_req_d[4] || fast_boot_prom_ifill)) ? 1:0; // Four byte fill
+                      if(pcx_packet_d[122:118]==5'b00100) // Strload
+                         cpx_packet_1[129]<=pcx_packet_d[105]; // B
+                      else      
+@@ -635,14 +642,14 @@
+                      cpx_packet_2[144]<=1;     // Valid
+                      cpx_packet_2[139]<=0;     // L2 miss
+                      cpx_packet_2[138:137]<=0; // Error
+-                     cpx_packet_2[136]<=pcx_packet_d[117] || (pcx_packet_d[122:118]==5'b00001) ? 1:0; // Non-cacheble is set on store too
++                     cpx_packet_2[136]<=fast_boot_prom_ifill ? 1'b1 : (pcx_packet_d[117] || (pcx_packet_d[122:118]==5'b00001) ? 1:0); // Non-cacheble is set on store too
+                      cpx_packet_2[135:134]<=pcx_packet_d[113:112]; // Thread ID
+-                     if(pcx_packet_d[122:118]==5'b10000) // IFill
++                     if((pcx_packet_d[122:118]==5'b10000) && !fast_boot_prom_ifill) // IFill
+                         cpx_packet_2[133:131]<={othercachehit[1],wayval1};
+                      else
+                         cpx_packet_2[133:131]<=3'b000; // Way valid
+                      cpx_packet_2[130]<=0; // Four byte fill
+-                     cpx_packet_2[129]<=pcx_atom_d || (pcx_packet_d[122:118]==5'b00110) || ((pcx_packet_d[122:118]==5'b10000) && !pcx_req_d[4]);
++                     cpx_packet_2[129]<=pcx_atom_d || (pcx_packet_d[122:118]==5'b00110) || ((pcx_packet_d[122:118]==5'b10000) && !pcx_req_d[4] && !fast_boot_prom_ifill);
+                      cpx_packet_2[128]<=0; // Prefetch
+                      wb_strobe<=0;
+                      wb_sel<=8'b0;
+@@ -766,7 +773,7 @@
+                            begin
+                               cpx_packet_1[143:140]<=4'b0001; // Type
+                               cpx_packet_2[143:140]<=4'b0001; // Type
+-                              if(pcx_req_d[4]) // I/O access
++                              if(pcx_req_d[4] || fast_boot_prom_ifill) // I/O access
+                                  begin
+                                     if(pcx_packet_d[64+2]==0)
+                                        cpx_packet_1[127:0]<={wb_data_i[63:32],wb_data_i[63:32],wb_data_i[63:32],wb_data_i[63:32]};
+@@ -888,7 +895,7 @@
+                   wb_addr<=64'b0;
+                   wb_we<=0;
+                   wb_data_o<=64'b0;
+-                  if(pcx_packet_d[122:118]==5'b10000) // IFill
++                  if((pcx_packet_d[122:118]==5'b10000) && !fast_boot_prom_ifill) // IFill
+                      begin
+                         cpx_packet_2[127:64]<=wb_data_i;
+                         state<=`PCX_REQ_STEP4;
+@@ -1101,7 +1108,7 @@
+    .swap(pcx_packet[122:118]==5'b00110),
+    .strload(pcx_packet[122:118]==5'b00100),
+    .strstore(pcx_packet[122:118]==5'b00101),
+-   .cacheable((!pcx_packet[117]) && (!pcx_req_d[4])),
++   .cacheable((!pcx_packet[117]) && (!pcx_req_d[4]) && !fast_boot_prom_ifill_live),
+    .prefetch(pcx_packet[110]),
+    .invalidate(pcx_packet[111]),
+    .blockstore(pcx_packet[109] | pcx_packet[110]),

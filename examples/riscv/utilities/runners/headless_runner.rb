@@ -3,6 +3,7 @@
 require_relative 'ruby_runner'
 require_relative 'ir_runner'
 require_relative '../assembler'
+require 'rhdl/sim/native/headless_trace'
 
 module RHDL
   module Examples
@@ -10,6 +11,7 @@ module RHDL
       # Headless runner factory for RISC-V simulation.
       # Provides the same core lifecycle APIs as interactive tasks but without terminal UI.
       class HeadlessRunner
+        include RHDL::Sim::Native::HeadlessTrace
         XV6_RESET_PC = 0x8000_0000
         LINUX_KERNEL_LOAD_ADDR = 0x8040_0000
         LINUX_INITRAMFS_LOAD_ADDR = 0x8400_0000
@@ -39,8 +41,8 @@ module RHDL
                  when :ruby
                    RubyRunner.new(core: @core, mem_size: resolved_mem_size)
                  when :ir
-                   backend, allow_fallback = map_backend(@effective_mode, @sim_backend)
-                   IrRunner.new(core: @core, mem_size: resolved_mem_size, backend: backend, allow_fallback: allow_fallback)
+                   backend = map_backend(@sim_backend)
+                   IrRunner.new(core: @core, mem_size: resolved_mem_size, backend: backend)
                  when :verilog
                    if @core != :single
                      warn "Verilog mode only supports single-cycle core; overriding core=#{@core} to single."
@@ -62,6 +64,12 @@ module RHDL
 
         def native?
           @cpu.native?
+        end
+
+        def sim
+          return nil unless @cpu.respond_to?(:sim)
+
+          @cpu.sim
         end
 
         def simulator_type
@@ -284,16 +292,16 @@ module RHDL
           @cpu.sim.respond_to?(:runner_set_reset_vector)
         end
 
-        def map_backend(mode, sim_backend)
+        def map_backend(sim_backend)
           case sim_backend
           when :ruby
-            [:interpreter, mode == :ruby]
+            :interpreter
           when :interpret
-            [:interpreter, mode == :ruby]
+            :interpreter
           when :jit
-            [:jit, mode == :ruby]
+            :jit
           when :compile
-            [:compiler, mode == :ruby]
+            :compiler
           else
             raise ArgumentError, "Unsupported sim backend #{sim_backend.inspect}. Use ruby, interpret, jit, or compile."
           end

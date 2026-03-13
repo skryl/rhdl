@@ -2,7 +2,7 @@
 # Runs the core in IR simulation and keeps memories/MMIO in Ruby.
 
 require 'rhdl/codegen'
-require 'rhdl/codegen/ir/sim/ir_simulator'
+require 'rhdl/sim/native/ir/simulator'
 require_relative 'cpu'
 require_relative '../memory'
 require_relative '../clint'
@@ -17,7 +17,7 @@ module RHDL
         class IRHarness
           attr_reader :clock_count, :sim
 
-          def initialize(name = nil, mem_size: Memory::DEFAULT_SIZE, backend: :jit, allow_fallback: true)
+          def initialize(name = nil, mem_size: Memory::DEFAULT_SIZE, backend: :jit)
             @mem_size = mem_size
             @clock_count = 0
             @irq_software = 0
@@ -36,12 +36,11 @@ module RHDL
             @clk = 0
             @rst = 0
 
-            ir = CPU.to_flat_ir(top_name: name || 'riscv_pipeline_ir')
-            ir_json = RHDL::Codegen::IR::IRToJson.convert(ir)
-            @sim = RHDL::Codegen::IR::IrSimulator.new(
+            ir = CPU.to_flat_circt_nodes(top_name: name || 'riscv_pipeline_ir')
+            ir_json = RHDL::Sim::Native::IR.sim_json(ir, backend: backend)
+            @sim = RHDL::Sim::Native::IR::Simulator.new(
               ir_json,
-              backend: backend,
-              allow_fallback: allow_fallback
+              backend: backend
             )
             @native_riscv = @sim.native? && @sim.runner_kind == :riscv
 

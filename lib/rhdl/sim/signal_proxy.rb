@@ -114,13 +114,13 @@ module RHDL
 
       # Concatenation
       def concat(*others)
-        result = value
+        result = value & MaskCache.mask(@width)
         offset = @width
         total_width = @width
         others.each do |other|
           other_val = resolve(other)
           other_width = other.respond_to?(:width) ? other.width : (other_val == 0 ? 1 : other_val.bit_length)
-          result = (other_val << offset) | result
+          result = ((other_val & MaskCache.mask(other_width)) << offset) | result
           offset += other_width
           total_width += other_width
         end

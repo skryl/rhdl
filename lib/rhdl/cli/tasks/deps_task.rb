@@ -102,7 +102,7 @@ module RHDL
                 diagnostic = command_output_first_line(arcilator_health_checks.fetch(tool))
                 puts "  #{tool}: #{diagnostic}" if diagnostic && !diagnostic.empty?
               end
-              puts "  Install CIRCT tools (firtool, arcilator, llc) from https://github.com/llvm/circt"
+              puts "  Install CIRCT tools (firtool, arcilator, circt-verilog, llc) from https://github.com/llvm/circt"
             end
           end
 
@@ -124,6 +124,26 @@ module RHDL
             else
               puts "  Install LLVM tools (mlir-opt/llc) and spirv-cross for ArcToGPU pipelines."
             end
+          end
+
+          # Check for ghdl (mixed-language import path)
+          puts
+          ghdl_available = command_available?('ghdl')
+
+          if ghdl_available
+            version = `ghdl --version 2>&1`.lines.first&.strip
+            puts "[OK] ghdl is installed: #{version}"
+
+            synth_capable, synth_detail = ghdl_synth_probe
+            if synth_capable
+              puts "[OK] ghdl synth frontend is available (--synth)"
+            else
+              puts "[WARN] ghdl is installed but synth frontend probe failed (--synth)"
+              puts "  #{synth_detail}" if synth_detail && !synth_detail.empty?
+            end
+          else
+            puts "[OPTIONAL] ghdl is not installed (required for mixed Verilog+VHDL import mode)"
+            puts "  Install GHDL from https://ghdl.github.io/ghdl/"
           end
 
           # Check for graphviz (dot)
@@ -191,8 +211,11 @@ module RHDL
             'verilator' => { cmd: 'verilator --version', optional: true, desc: 'Verilator (for high-performance Verilog simulation)' },
             'firtool' => { cmd: 'firtool --version', optional: true, desc: 'CIRCT firtool (for Arcilator HDL simulation)' },
             'arcilator' => { cmd: 'arcilator --version', optional: true, desc: 'CIRCT Arcilator (cycle-based HDL simulator)' },
+            'circt-verilog' => { cmd: 'circt-verilog --version', optional: false, desc: 'CIRCT Verilog frontend (core-dialect import)' },
             'mlir-opt' => { cmd: 'mlir-opt --version', optional: true, desc: 'MLIR optimizer (GPU/SPIR-V lowering passes)' },
             'spirv-cross' => { cmd: 'spirv-cross --version', optional: true, desc: 'SPIR-V to Metal shader cross-compiler' },
+            'circt-translate' => { cmd: 'circt-translate --version', optional: true, desc: 'CIRCT translate utility (MLIR export fallback / legacy translation paths)' },
+            'ghdl' => { cmd: 'ghdl --version', optional: true, desc: 'GHDL (VHDL synth frontend for mixed-language import)' },
             'dot' => { cmd: 'dot -V', optional: true, desc: 'Graphviz (for diagram rendering)' },
             'bun' => { cmd: 'bun --version', optional: true, desc: 'Bun (for web and desktop tooling)' },
             'ruby' => { cmd: 'ruby --version', optional: false, desc: 'Ruby interpreter' },
@@ -207,6 +230,11 @@ module RHDL
             puts "#{status.ljust(12)} #{name.ljust(12)} - #{info[:desc]}"
             puts "             #{version}" if available
           end
+
+          ghdl_synth_capable, ghdl_synth_detail = ghdl_synth_probe
+          synth_status = ghdl_synth_capable ? '[OK]' : '[OPTIONAL]'
+          puts "#{synth_status.ljust(12)} #{'ghdl-synth'.ljust(12)} - GHDL synth frontend capability (--synth)"
+          puts "             #{ghdl_synth_detail}" if ghdl_synth_detail && !ghdl_synth_detail.empty?
 
           if detect_platform == :macos
             metal_tools = {
@@ -275,6 +303,7 @@ module RHDL
           {
             'firtool' => 'firtool --version',
             'arcilator' => 'arcilator --version',
+            'circt-verilog' => 'circt-verilog --version',
             'llc' => 'llc --version'
           }
         end
@@ -311,12 +340,27 @@ module RHDL
           status&.success? || false
         end
 
+        def ghdl_synth_probe
+          return [false, 'ghdl not installed'] unless command_available?('ghdl')
+
+          output, status = run_command_with_timeout('ghdl --synth --help')
+          return [true, output.lines.first&.strip] if status&.success?
+
+          help_output, help_status = run_command_with_timeout('ghdl --help')
+          if help_status&.success? && help_output.include?('--synth')
+            synth_line = help_output.lines.find { |line| line.include?('--synth') }&.strip
+            return [true, synth_line]
+          end
+
+          [false, output.lines.first&.strip]
+        end
+
         def command_output_first_line(command)
           output, _status = run_command_with_timeout(command)
           output.lines.first&.strip
         end
 
-        def run_command_with_timeout(command, timeout_seconds: 2)
+        def run_command_with_timeout(command, timeout_seconds: 10)
           output = +""
           status = nil
 
@@ -453,7 +497,7 @@ module RHDL
           when :windows
             puts "On Windows, please install CIRCT tools manually:"
             puts "  1. Download prebuilt CIRCT release from: https://github.com/llvm/circt/releases"
-            puts "  2. Add firtool/arcilator/llc to PATH"
+            puts "  2. Add firtool/arcilator/circt-verilog/llc to PATH"
           else
             puts "Unknown platform. Attempting GitHub prebuilt CIRCT install..."
             install_arcilator_from_release(platform: platform, missing_tools: missing_tools)

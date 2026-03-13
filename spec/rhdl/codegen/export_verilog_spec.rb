@@ -24,7 +24,7 @@ RSpec.describe "Verilog HDL export" do
     module_path = File.join(base_dir, "#{top_name}.v")
     tb_path = File.join(base_dir, "tb.v")
 
-    File.write(module_path, RHDL::Export.verilog(component, top_name: top_name))
+    File.write(module_path, RHDL::Codegen.verilog(component, top_name: top_name))
     HdlExportHelper.write_verilog_testbench(
       tb_path,
       top_name: top_name,
@@ -34,7 +34,7 @@ RSpec.describe "Verilog HDL export" do
       clocked: clocked
     )
 
-    compile = HdlExportHelper.run_cmd(["iverilog", "-g2001", "-o", "sim.out", "tb.v", "#{top_name}.v"], cwd: base_dir)
+    compile = HdlExportHelper.run_cmd(["iverilog", "-g2012", "-o", "sim.out", "tb.v", "#{top_name}.v"], cwd: base_dir)
     expect(compile[:status].success?).to be(true), compile[:stderr]
 
     run = HdlExportHelper.run_cmd(["vvp", "sim.out"], cwd: base_dir)
@@ -49,12 +49,12 @@ RSpec.describe "Verilog HDL export" do
   it "exports and simulates a mux" do
     rng = Random.new(1234)
     run_case(
-      component: RHDL::ExportFixtures::Mux2,
-      reference: RHDL::ExportFixtures::Mux2Ref,
+      component: RHDL::HDL::Mux2,
+      reference: RHDL::HDL::Mux2,
       cycles: 8,
       clocked: false,
       input_builder: lambda { |_cycle|
-        { a: rng.rand(16), b: rng.rand(16), sel: rng.rand(2) }
+        { a: rng.rand(2), b: rng.rand(2), sel: rng.rand(2) }
       }
     )
   end
@@ -62,12 +62,12 @@ RSpec.describe "Verilog HDL export" do
   it "exports and simulates an adder" do
     rng = Random.new(5678)
     run_case(
-      component: RHDL::ExportFixtures::Adder8,
-      reference: RHDL::ExportFixtures::Adder8Ref,
+      component: RHDL::HDL::RippleCarryAdder,
+      reference: RHDL::HDL::RippleCarryAdder,
       cycles: 8,
       clocked: false,
       input_builder: lambda { |_cycle|
-        { a: rng.rand(256), b: rng.rand(256) }
+        { a: rng.rand(256), b: rng.rand(256), cin: rng.rand(2) }
       }
     )
   end
@@ -75,12 +75,12 @@ RSpec.describe "Verilog HDL export" do
   it "exports and simulates a register" do
     rng = Random.new(9012)
     run_case(
-      component: RHDL::ExportFixtures::Reg8,
-      reference: RHDL::ExportFixtures::Reg8Ref,
+      component: RHDL::HDL::Register,
+      reference: RHDL::HDL::Register,
       cycles: 8,
       clocked: true,
       input_builder: lambda { |cycle|
-        { reset: cycle.zero? ? 1 : 0, d: rng.rand(256) }
+        { rst: cycle.zero? ? 1 : 0, en: 1, d: rng.rand(256) }
       }
     )
   end

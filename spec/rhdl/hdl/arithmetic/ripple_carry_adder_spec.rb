@@ -28,8 +28,8 @@ RSpec.describe RHDL::HDL::RippleCarryAdder do
     end
 
     it 'generates valid IR' do
-      ir = RHDL::HDL::RippleCarryAdder.to_ir
-      expect(ir).to be_a(RHDL::Export::IR::ModuleDef)
+      ir = RHDL::HDL::RippleCarryAdder.to_flat_circt_nodes
+      expect(ir).to be_a(RHDL::Codegen::CIRCT::IR::ModuleOp)
       expect(ir.ports.length).to eq(6)  # a, b, cin, sum, cout, overflow
     end
 
@@ -42,13 +42,13 @@ RSpec.describe RHDL::HDL::RippleCarryAdder do
       expect(verilog).to include('assign sum')
     end
 
-    it 'generates valid FIRRTL' do
-      firrtl = RHDL::HDL::RippleCarryAdder.to_circt
-      expect(firrtl).to include('FIRRTL version')
-      expect(firrtl).to include('circuit ripple_carry_adder')
-      expect(firrtl).to include('input a')
-      expect(firrtl).to include('input b')
-      expect(firrtl).to include('output sum')
+    it 'generates valid CIRCT MLIR' do
+      mlir = RHDL::HDL::RippleCarryAdder.to_circt
+      expect(mlir).to include('hw.output')
+      expect(mlir).to include('hw.module @ripple_carry_adder')
+      expect(mlir).to include('%a:')
+      expect(mlir).to include('%b:')
+      expect(mlir).to include('sum:')
     end
 
     context 'CIRCT firtool validation', if: HdlToolchain.firtool_available? do
@@ -65,7 +65,7 @@ RSpec.describe RHDL::HDL::RippleCarryAdder do
 
   describe 'gate-level netlist' do
     let(:component) { RHDL::HDL::RippleCarryAdder.new('rca', width: 4) }
-    let(:ir) { RHDL::Export::Structure::Lower.from_components([component], name: 'rca') }
+    let(:ir) { RHDL::Codegen::Netlist::Lower.from_components([component], name: 'rca') }
 
     it 'generates correct IR structure' do
       expect(ir.inputs.keys).to include('rca.a', 'rca.b', 'rca.cin')

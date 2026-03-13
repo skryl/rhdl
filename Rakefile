@@ -75,6 +75,7 @@ rescue LoadError
   # Bundler not available, skip gem tasks
 end
 require 'rbconfig'
+require 'timeout'
 
 # =============================================================================
 # CLI Task Loading
@@ -83,6 +84,127 @@ require 'rbconfig'
 # Load CLI tasks for shared functionality
 def load_cli_tasks
   require_relative 'lib/rhdl/cli'
+end
+
+WRAPPED_SPEC_RESULTS = []
+WRAPPED_SPEC_TIMEOUT_SECONDS = Integer(ENV.fetch('RHDL_WRAPPED_SPEC_TIMEOUT_SECONDS', '600'))
+
+def rspec_cmd
+  binstub = File.expand_path('bin/rspec', __dir__)
+  return [binstub] if File.executable?(binstub)
+
+  ['ruby', '-Ilib', '-S', 'rspec']
+end
+
+def spec_files_for_pattern(pattern)
+  return [pattern] if File.file?(pattern)
+
+  Dir.glob(File.join(pattern, '**', '*_spec.rb')).sort
+end
+
+def run_wrapped_rspec(scope, pattern)
+  files = spec_files_for_pattern(pattern)
+  result = {
+    scope: scope,
+    pattern: pattern,
+    files: files,
+    failed_files: [],
+    crashed_files: []
+  }
+
+  if files.empty?
+    result[:crashed_files] << {
+      file: pattern,
+      status: nil,
+      reason: 'no files matched'
+    }
+    puts "No spec files matched '#{pattern}'."
+    return result
+  end
+
+  files.each do |file|
+    puts "==> #{file}"
+    pid = spawn(*rspec_cmd, file, '--format', 'progress')
+    status = nil
+    timed_out = false
+
+    begin
+      Timeout.timeout(WRAPPED_SPEC_TIMEOUT_SECONDS) do
+        _, status = Process.wait2(pid)
+      end
+    rescue Timeout::Error
+      timed_out = true
+      begin
+        Process.kill('TERM', pid)
+      rescue Errno::ESRCH
+        nil
+      end
+      begin
+        Timeout.timeout(5) do
+          _, status = Process.wait2(pid)
+        end
+      rescue Timeout::Error
+        begin
+          Process.kill('KILL', pid)
+        rescue Errno::ESRCH
+          nil
+        end
+        _, status = Process.wait2(pid) rescue [nil, nil]
+      rescue Errno::ECHILD
+        nil
+      end
+    end
+
+    next if !timed_out && status&.success?
+
+    entry = { file: file, status: status }
+    if timed_out
+      entry[:reason] = "timeout after #{WRAPPED_SPEC_TIMEOUT_SECONDS}s"
+      result[:crashed_files] << entry
+    elsif status&.signaled? || (status&.exitstatus && status.exitstatus != 1)
+      result[:crashed_files] << entry
+    else
+      result[:failed_files] << entry
+    end
+  end
+
+  return result if result[:failed_files].empty? && result[:crashed_files].empty?
+
+  puts "\nWrapped spec summary for #{scope}:"
+  puts "  failed files: #{result[:failed_files].size}"
+  result[:failed_files].each do |entry|
+    puts "    FAIL  #{entry[:file]}"
+  end
+  puts "  crashed files: #{result[:crashed_files].size}"
+  result[:crashed_files].each do |entry|
+    status = entry[:status]
+    detail =
+      if status&.signaled?
+        "signal #{status.termsig}"
+      elsif status&.exitstatus
+        "exit #{status.exitstatus}"
+      else
+        entry[:reason] || 'unknown'
+      end
+    puts "    CRASH #{entry[:file]} (#{detail})"
+  end
+
+  result
+end
+
+at_exit do
+  next if $!
+
+  failed_results = WRAPPED_SPEC_RESULTS.select do |result|
+    result[:failed_files].any? || result[:crashed_files].any?
+  end
+  next if failed_results.empty?
+
+  puts "\nAggregate wrapped spec failure summary:"
+  failed_results.each do |result|
+    puts "  #{result[:scope]}: #{result[:failed_files].size} failed files, #{result[:crashed_files].size} crashed files"
+  end
+  exit 1
 end
 
 # =============================================================================
@@ -133,6 +255,14 @@ namespace :native do
   end
 end
 
+namespace :hygiene do
+  desc "Run repository hygiene checks"
+  task :check do
+    load_cli_tasks
+    RHDL::CLI::Tasks::HygieneTask.new.run
+  end
+end
+
 # =============================================================================
 # Test Tasks (spec namespace)
 # =============================================================================
@@ -142,16 +272,19 @@ SPEC_PATHS = {
   all: 'spec/',
   lib: 'spec/rhdl/',
   hdl: 'spec/rhdl/hdl/',
+  ao486: 'spec/examples/ao486/',
+  gameboy: 'spec/examples/gameboy/',
   mos6502: 'spec/examples/mos6502/',
   apple2: 'spec/examples/apple2/',
-  riscv: 'spec/examples/riscv/'
+  riscv: 'spec/examples/riscv/',
+  sparc64: 'spec/examples/sparc64/'
 }.freeze
 
 # RSpec tasks
 begin
   require "rspec/core/rake_task"
 
-  desc "Run specs by scope (all, lib, hdl, mos6502, apple2, riscv)"
+  desc "Run specs by scope (all, lib, hdl, ao486, gameboy, mos6502, apple2, riscv, sparc64)"
   task :spec, [:scope] => 'build:setup:binstubs' do |_, args|
     scope = (args[:scope] || 'all').to_sym
 
@@ -159,24 +292,27 @@ begin
       all: SPEC_PATHS[:all],
       lib: SPEC_PATHS[:lib],
       hdl: SPEC_PATHS[:hdl],
+      ao486: SPEC_PATHS[:ao486],
+      gameboy: SPEC_PATHS[:gameboy],
       mos6502: SPEC_PATHS[:mos6502],
       apple2: SPEC_PATHS[:apple2],
-      riscv: SPEC_PATHS[:riscv]
+      riscv: SPEC_PATHS[:riscv],
+      sparc64: SPEC_PATHS[:sparc64]
     }
     pattern = patterns[scope]
 
     if pattern.nil?
       puts "Unknown spec scope '#{scope}'."
-      puts "Available scopes: all, lib, hdl, mos6502, apple2, riscv"
+      puts "Available scopes: all, lib, hdl, ao486, gameboy, mos6502, apple2, riscv, sparc64"
       exit 1
     end
 
-    sh "bin/rspec #{pattern} --format progress"
+    WRAPPED_SPEC_RESULTS << run_wrapped_rspec(scope, pattern)
   end
   
   namespace :spec do
     # Benchmark tasks
-    desc "Benchmark specs by scope (all, lib, hdl, mos6502, apple2, riscv)"
+    desc "Benchmark specs by scope (all, lib, hdl, ao486, gameboy, mos6502, apple2, riscv, sparc64)"
     task :bench, [:scope, :count] => 'build:setup:binstubs' do |_, args|
       load_cli_tasks
 
@@ -187,15 +323,18 @@ begin
         all: SPEC_PATHS[:all],
         lib: SPEC_PATHS[:lib],
         hdl: SPEC_PATHS[:hdl],
+        ao486: SPEC_PATHS[:ao486],
+        gameboy: SPEC_PATHS[:gameboy],
         mos6502: SPEC_PATHS[:mos6502],
         apple2: SPEC_PATHS[:apple2],
-        riscv: SPEC_PATHS[:riscv]
+        riscv: SPEC_PATHS[:riscv],
+        sparc64: SPEC_PATHS[:sparc64]
       }
       pattern = patterns[scope]
 
       if pattern.nil?
         puts "Unknown spec benchmark scope '#{scope}'."
-        puts "Available scopes: all, lib, hdl, mos6502, apple2, riscv"
+        puts "Available scopes: all, lib, hdl, ao486, gameboy, mos6502, apple2, riscv, sparc64"
         exit 1
       end
 
@@ -222,31 +361,34 @@ begin
   end
 
 rescue LoadError
-  desc "Run specs by scope (all, lib, hdl, mos6502, apple2, riscv)"
+  desc "Run specs by scope (all, lib, hdl, ao486, gameboy, mos6502, apple2, riscv, sparc64)"
   task :spec, [:scope] => 'build:setup:binstubs' do |_, args|
     scope = (args[:scope] || 'all').to_sym
     patterns = {
       all: SPEC_PATHS[:all],
       lib: SPEC_PATHS[:lib],
       hdl: SPEC_PATHS[:hdl],
+      ao486: SPEC_PATHS[:ao486],
+      gameboy: SPEC_PATHS[:gameboy],
       mos6502: SPEC_PATHS[:mos6502],
       apple2: SPEC_PATHS[:apple2],
-      riscv: SPEC_PATHS[:riscv]
+      riscv: SPEC_PATHS[:riscv],
+      sparc64: SPEC_PATHS[:sparc64]
     }
     pattern = patterns[scope]
 
     if pattern.nil?
       puts "Unknown spec scope '#{scope}'."
-      puts "Available scopes: all, lib, hdl, mos6502, apple2, riscv"
+      puts "Available scopes: all, lib, hdl, ao486, gameboy, mos6502, apple2, riscv, sparc64"
       exit 1
     end
 
-    sh "ruby -Ilib -S rspec #{pattern} --format progress"
+    WRAPPED_SPEC_RESULTS << run_wrapped_rspec(scope, pattern)
   end
 
   namespace :spec do
     # Benchmark tasks
-    desc "Benchmark specs by scope (all, lib, hdl, mos6502, apple2, riscv)"
+    desc "Benchmark specs by scope (all, lib, hdl, ao486, gameboy, mos6502, apple2, riscv, sparc64)"
     task :bench, [:scope, :count] do |_, args|
       load_cli_tasks
 
@@ -257,15 +399,18 @@ rescue LoadError
         all: SPEC_PATHS[:all],
         lib: SPEC_PATHS[:lib],
         hdl: SPEC_PATHS[:hdl],
+        ao486: SPEC_PATHS[:ao486],
+        gameboy: SPEC_PATHS[:gameboy],
         mos6502: SPEC_PATHS[:mos6502],
         apple2: SPEC_PATHS[:apple2],
-        riscv: SPEC_PATHS[:riscv]
+        riscv: SPEC_PATHS[:riscv],
+        sparc64: SPEC_PATHS[:sparc64]
       }
       pattern = patterns[scope]
 
       if pattern.nil?
         puts "Unknown spec benchmark scope '#{scope}'."
-        puts "Available scopes: all, lib, hdl, mos6502, apple2, riscv"
+        puts "Available scopes: all, lib, hdl, ao486, gameboy, mos6502, apple2, riscv, sparc64"
         exit 1
       end
 
@@ -314,22 +459,25 @@ begin
     sh "RUBYOPT=-W0 #{parallel_rspec_cmd} --quiet --test-options '--format progress' #{args}"
   end
 
-  desc "Run specs in parallel by scope (all, lib, hdl, mos6502, apple2, riscv)"
+  desc "Run specs in parallel by scope (all, lib, hdl, ao486, gameboy, mos6502, apple2, riscv, sparc64)"
   task :pspec, [:scope] => 'build:setup:binstubs' do |_, args|
     scope = (args[:scope] || 'all').to_sym
     patterns = {
       all: SPEC_PATHS[:all],
       lib: SPEC_PATHS[:lib],
       hdl: SPEC_PATHS[:hdl],
+      ao486: SPEC_PATHS[:ao486],
+      gameboy: SPEC_PATHS[:gameboy],
       mos6502: SPEC_PATHS[:mos6502],
       apple2: SPEC_PATHS[:apple2],
-      riscv: SPEC_PATHS[:riscv]
+      riscv: SPEC_PATHS[:riscv],
+      sparc64: SPEC_PATHS[:sparc64]
     }
     pattern = patterns[scope]
 
     if pattern.nil?
       puts "Unknown pspec scope '#{scope}'."
-      puts "Available scopes: all, lib, hdl, mos6502, apple2, riscv"
+      puts "Available scopes: all, lib, hdl, ao486, gameboy, mos6502, apple2, riscv, sparc64"
       exit 1
     end
 
@@ -370,14 +518,17 @@ rescue LoadError
       all: SPEC_PATHS[:all],
       lib: SPEC_PATHS[:lib],
       hdl: SPEC_PATHS[:hdl],
+      ao486: SPEC_PATHS[:ao486],
+      gameboy: SPEC_PATHS[:gameboy],
       mos6502: SPEC_PATHS[:mos6502],
       apple2: SPEC_PATHS[:apple2],
-      riscv: SPEC_PATHS[:riscv]
+      riscv: SPEC_PATHS[:riscv],
+      sparc64: SPEC_PATHS[:sparc64]
     }
 
     if patterns[scope].nil?
       puts "Unknown pspec scope '#{scope}'."
-      puts "Available scopes: all, lib, hdl, mos6502, apple2, riscv"
+      puts "Available scopes: all, lib, hdl, ao486, gameboy, mos6502, apple2, riscv, sparc64"
     end
 
     abort "parallel_tests gem not installed. Run: bundle install"
@@ -394,7 +545,7 @@ end
 
 # Dependency Management
 namespace :deps do
-  desc "Check and install test dependencies (iverilog, verilator, CIRCT tools)"
+  desc "Check and install test dependencies (iverilog, verilator, firtool, arcilator, circt-verilog, llc)"
   task :install do
     load_cli_tasks
     RHDL::CLI::Tasks::DepsTask.new.run

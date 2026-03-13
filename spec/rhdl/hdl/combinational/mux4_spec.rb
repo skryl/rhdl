@@ -38,8 +38,8 @@ RSpec.describe RHDL::HDL::Mux4 do
     end
 
     it 'generates valid IR' do
-      ir = RHDL::HDL::Mux4.to_ir
-      expect(ir).to be_a(RHDL::Export::IR::ModuleDef)
+      ir = RHDL::HDL::Mux4.to_flat_circt_nodes
+      expect(ir).to be_a(RHDL::Codegen::CIRCT::IR::ModuleOp)
       expect(ir.ports.length).to eq(6)  # a, b, c, d, sel, y
     end
 
@@ -49,12 +49,12 @@ RSpec.describe RHDL::HDL::Mux4 do
       expect(verilog).to include('input [1:0] sel')
     end
 
-    it 'generates valid FIRRTL' do
-      firrtl = RHDL::HDL::Mux4.to_circt
-      expect(firrtl).to include('FIRRTL version')
-      expect(firrtl).to include('circuit mux4')
-      expect(firrtl).to include('input a')
-      expect(firrtl).to include('output y')
+    it 'generates valid CIRCT MLIR' do
+      mlir = RHDL::HDL::Mux4.to_circt
+      expect(mlir).to include('hw.output')
+      expect(mlir).to include('hw.module @mux4')
+      expect(mlir).to include('%a:')
+      expect(mlir).to include('y:')
     end
 
     context 'CIRCT firtool validation', if: HdlToolchain.firtool_available? && HdlToolchain.iverilog_available? do
@@ -152,7 +152,7 @@ RSpec.describe RHDL::HDL::Mux4 do
 
   describe 'gate-level netlist' do
     let(:component) { RHDL::HDL::Mux4.new('mux4', width: 1) }
-    let(:ir) { RHDL::Export::Structure::Lower.from_components([component], name: 'mux4') }
+    let(:ir) { RHDL::Codegen::Netlist::Lower.from_components([component], name: 'mux4') }
 
     it 'generates correct IR structure' do
       expect(ir.inputs.keys).to include('mux4.a', 'mux4.b', 'mux4.c', 'mux4.d', 'mux4.sel')

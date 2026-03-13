@@ -43,3 +43,35 @@ require_relative 'sim/vec'
 require_relative 'sim/component'
 require_relative 'sim/simulator'
 require_relative 'sim/sequential_component'
+
+module RHDL
+  module Sim
+    class << self
+      # Canonical gate-level simulation entrypoint.
+      # Lower components to netlist IR, then instantiate a native backend.
+      def gate_level(components, backend: :interpreter, lanes: 64, name: 'design')
+        require_relative 'codegen/netlist/lower'
+        require_relative 'sim/native/netlist/simulator'
+
+        ir = RHDL::Codegen::Netlist::Lower.from_components(components, name: name)
+        RHDL::Sim::Native::Netlist::Simulator.new(
+          ir,
+          backend: normalize_gate_backend(backend),
+          lanes: lanes
+        )
+      end
+
+      private
+
+      def normalize_gate_backend(backend)
+        case backend.to_sym
+        when :interpreter, :interpret then :interpreter
+        when :jit then :jit
+        when :compiler, :compile then :compiler
+        else
+          raise ArgumentError, "Unknown backend: #{backend}. Valid: :interpreter, :jit, :compiler"
+        end
+      end
+    end
+  end
+end

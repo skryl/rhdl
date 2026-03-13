@@ -104,14 +104,13 @@ module RHDL
             ensure_runner_cpu8bit_mode!
           else
             # Generate IR from CPU component
-            ir = RHDL::HDL::CPU::CPU.to_flat_ir
-            ir_json = RHDL::Codegen::IR::IRToJson.convert(ir)
+            ir = RHDL::HDL::CPU::CPU.to_flat_circt_nodes
+            ir_json = RHDL::Sim::Native::IR.sim_json(ir, backend: @sim_backend)
 
-            require 'rhdl/codegen/ir/sim/ir_simulator'
-            @sim = RHDL::Codegen::IR::IrSimulator.new(
+            require 'rhdl/sim/native/ir/simulator'
+            @sim = RHDL::Sim::Native::IR::Simulator.new(
               ir_json,
-              backend: simulator_backend,
-              allow_fallback: true
+              backend: @sim_backend
             )
             @memory = Memory64K.new
           end

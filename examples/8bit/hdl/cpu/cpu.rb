@@ -116,7 +116,7 @@ module RHDL
         instance :alu, ALU, width: 8
         instance :pc_reg, ProgramCounter, width: 16
         instance :acc, Register, width: 8
-        instance :sp, StackPointer, width: 8, initial: 0xFF
+        instance :sp, StackPointer, width: 8, initial_rhdl: 0xFF
         instance :zero_flag_reg, DFlipFlop
         instance :acc_mux, Mux2, width: 8
 
@@ -300,13 +300,14 @@ module RHDL
           # ALU B input: use latched memory data from S_READ_MEM
           alu_b_input <= mem_data_latched
 
-          # Combine operand bytes into 16-bit value
-          # Assembler uses big-endian: operand_lo (at PC+1) is high byte, operand_hi (at PC+2) is low byte
-          operand_16 <= operand_lo.concat(operand_hi)
+          # Combine operand bytes into 16-bit value.
+          # concat places the receiver in the low bits, so use low.concat(high)
+          # to produce the intended big-endian address.
+          operand_16 <= operand_hi.concat(operand_lo)
 
-          # Indirect address from latched pointer bytes
-          # indirect_hi is the high byte, indirect_lo is the low byte
-          indirect_addr <= indirect_hi.concat(indirect_lo)
+          # Indirect address from latched pointer bytes.
+          # concat places the receiver in the low bits, so use low.concat(high).
+          indirect_addr <= indirect_lo.concat(indirect_hi)
 
           # ACC data input - for LDI use latched operand, for LDA use latched memory data
           acc_data_in <= mux(dec_alu_src,

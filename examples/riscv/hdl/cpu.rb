@@ -1747,10 +1747,16 @@ module RHDL
       # - trap: mtvec/stvec
       # - else: pc_plus4
       jal_target = local(:jal_target, pc + imm, width: 32)
-      trap_target = local(:trap_target, csr_read_selected & lit(0xFFFFFFFC, width: 32), width: 32)
+      trap_vector = local(:trap_vector,
+                          mux(trap_to_supervisor, csr_read_data10, csr_read_data9),
+                          width: 32)
+      ret_vector = local(:ret_vector,
+                         mux(is_mret, csr_read_data11, csr_read_data12),
+                         width: 32)
+      trap_target = local(:trap_target, trap_vector & lit(0xFFFFFFFC, width: 32), width: 32)
 
       pc_next <= mux(trap_taken, trap_target,
-                     mux(is_mret | is_sret, csr_read_selected,
+                     mux(is_mret | is_sret, ret_vector,
                          mux(jump,
                              mux(jalr, jalr_target, jal_target),
                              mux(branch & branch_taken, branch_target, pc_plus4))))
@@ -1866,28 +1872,7 @@ module RHDL
 
     # Generate complete Verilog hierarchy
     def self.to_verilog_hierarchy(top_name: nil)
-      parts = []
-
-      # Generate sub-modules first
-      parts << ALU.to_verilog
-      parts << RegisterFile.to_verilog
-      parts << FPRegisterFile.to_verilog
-      parts << VectorRegisterFile.to_verilog
-      parts << VectorCSRFile.to_verilog
-      parts << CSRFile.to_verilog
-      parts << ImmGen.to_verilog
-      parts << CompressedDecoder.to_verilog
-      parts << Decoder.to_verilog
-      parts << BranchCond.to_verilog
-      parts << ProgramCounter.to_verilog
-      parts << AtomicReservation.to_verilog
-      parts << PrivModeReg.to_verilog
-      parts << Sv32Tlb.to_verilog
-
-      # Generate top-level last
-      parts << to_verilog(top_name: top_name)
-
-      parts.join("\n\n")
+      to_verilog(top_name: top_name)
     end
       end
     end

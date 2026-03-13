@@ -18,13 +18,12 @@ module RHDL
         def initialize(core: :single, mem_size: Memory::DEFAULT_SIZE)
           @core = core
           backend = :interpreter
-          allow_fallback = true
 
           @harness = case core
                      when :single
-                       IRHarness.new(mem_size: mem_size, backend: backend, allow_fallback: allow_fallback)
+                       IRHarness.new(mem_size: mem_size, backend: backend)
                      when :pipeline
-                       Pipeline::IRHarness.new('riscv_pipeline_ir', mem_size: mem_size, backend: backend, allow_fallback: allow_fallback)
+                       Pipeline::IRHarness.new('riscv_pipeline_ir', mem_size: mem_size, backend: backend)
                      else
                        raise ArgumentError, "Unsupported core: #{core.inspect}"
                      end

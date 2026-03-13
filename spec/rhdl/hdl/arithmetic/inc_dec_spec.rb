@@ -47,8 +47,8 @@ RSpec.describe RHDL::HDL::IncDec do
     end
 
     it 'generates valid IR' do
-      ir = RHDL::HDL::IncDec.to_ir
-      expect(ir).to be_a(RHDL::Export::IR::ModuleDef)
+      ir = RHDL::HDL::IncDec.to_flat_circt_nodes
+      expect(ir).to be_a(RHDL::Codegen::CIRCT::IR::ModuleOp)
       expect(ir.ports.length).to eq(4)  # a, inc, result, cout
     end
 
@@ -59,12 +59,12 @@ RSpec.describe RHDL::HDL::IncDec do
       expect(verilog).to include('output [7:0] result')
     end
 
-    it 'generates valid FIRRTL' do
-      firrtl = RHDL::HDL::IncDec.to_circt
-      expect(firrtl).to include('FIRRTL version')
-      expect(firrtl).to include('circuit inc_dec')
-      expect(firrtl).to include('input a')
-      expect(firrtl).to include('output result')
+    it 'generates valid CIRCT MLIR' do
+      mlir = RHDL::HDL::IncDec.to_circt
+      expect(mlir).to include('hw.output')
+      expect(mlir).to include('hw.module @inc_dec')
+      expect(mlir).to include('%a:')
+      expect(mlir).to include('result:')
     end
 
     context 'CIRCT firtool validation', if: HdlToolchain.firtool_available? do
@@ -81,7 +81,7 @@ RSpec.describe RHDL::HDL::IncDec do
 
   describe 'gate-level netlist' do
     let(:component) { RHDL::HDL::IncDec.new('incdec', width: 4) }
-    let(:ir) { RHDL::Export::Structure::Lower.from_components([component], name: 'incdec') }
+    let(:ir) { RHDL::Codegen::Netlist::Lower.from_components([component], name: 'incdec') }
 
     it 'generates correct IR structure' do
       expect(ir.inputs.keys).to include('incdec.a', 'incdec.inc')

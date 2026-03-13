@@ -2587,7 +2587,7 @@ module RHDL
 
       def self.to_verilog(top_name: nil)
         name = top_name || verilog_module_name
-        RHDL::Export::Verilog.generate(to_ir(top_name: name))
+        to_verilog_via_circt(top_name: name)
       end
         end
       end

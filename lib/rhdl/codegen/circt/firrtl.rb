@@ -1,12 +1,15 @@
 # FIRRTL code generator for CIRCT toolchain
 # Generates FIRRTL 5.1.0 format that can be compiled by firtool to Verilog
 
-require_relative "../ir/ir"
+require_relative "ir"
 
 module RHDL
   module Codegen
     module CIRCT
       module FIRRTL
+        # FIRRTL lowering consumes CIRCT IR nodes.
+        IR = RHDL::Codegen::CIRCT::IR
+
         FIRRTL_KEYWORDS = %w[
           circuit module input output wire reg node when else skip stop printf
           mux validif add sub mul div rem lt leq gt geq eq neq pad asUInt asSInt
@@ -26,7 +29,7 @@ module RHDL
         end
 
         # Generate a complete FIRRTL circuit with multiple modules (hierarchical)
-        # @param module_defs [Array<IR::ModuleDef>] Array of module definitions, top module last
+        # @param module_defs [Array<IR::ModuleOp>] Array of module definitions, top module last
         # @param top_name [String] Name of the circuit (usually the top module name)
         def generate_hierarchy(module_defs, top_name:)
           lines = []
@@ -49,9 +52,9 @@ module RHDL
         end
 
         # Generate just the module body (without circuit header)
-        # @param module_def [IR::ModuleDef] The module definition
+        # @param module_def [IR::ModuleOp] The module definition
         # @param is_public [Boolean] Whether this is the public top-level module
-        # @param module_map [Hash{String => IR::ModuleDef}] Map of module names to definitions (for hierarchical)
+        # @param module_map [Hash{String => IR::ModuleOp}] Map of module names to definitions (for hierarchical)
         # @return [String] The module body FIRRTL code
         def generate_module_body(module_def, is_public: false, module_map: {})
           lines = []
@@ -636,13 +639,16 @@ module RHDL
 
         def statement(stmt, indent:, output_regs: Set.new, memory_reads: [], mem_read_index: Hash.new(0), rom_read_wires: {})
           pad = " " * indent
+
+          if memory_write_statement?(stmt)
+            return ["#{pad}connect #{sanitize(stmt.memory)}[#{expr(stmt.addr)}], #{expr(stmt.data)}"]
+          end
+
           case stmt
           when IR::SeqAssign
             # Rewrite target to use internal register if it's an output
             target = output_regs.include?(stmt.target) ? "#{stmt.target}_reg" : stmt.target
             ["#{pad}connect #{sanitize(target)}, #{expr_with_mem_reads(stmt.expr, memory_reads, mem_read_index, output_regs: output_regs, rom_read_wires: rom_read_wires)}"]
-          when IR::MemoryWrite
-            ["#{pad}connect #{sanitize(stmt.memory)}[#{expr(stmt.addr)}], #{expr(stmt.data)}"]
           when IR::If
             lines = []
             lines << "#{pad}when #{expr_with_mem_reads(stmt.condition, memory_reads, mem_read_index, output_regs: output_regs, rom_read_wires: rom_read_wires)}:"
@@ -655,6 +661,12 @@ module RHDL
           else
             []
           end
+        end
+
+        def memory_write_statement?(stmt)
+          return false unless IR.const_defined?(:MemoryWrite, false)
+
+          stmt.is_a?(IR.const_get(:MemoryWrite))
         end
 
         def expr(expr_node, output_regs: Set.new)

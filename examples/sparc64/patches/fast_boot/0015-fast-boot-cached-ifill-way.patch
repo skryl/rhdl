@@ -1,0 +1,46 @@
+diff --git a/os2wb/os2wb.v b/os2wb/os2wb.v
+--- a/os2wb/os2wb.v
++++ b/os2wb/os2wb.v
+@@ -644,7 +644,9 @@
+                      cpx_packet_1[138:137]<=0; // Error
+                      cpx_packet_1[136]<=fast_boot_prom_ifill ? 1'b1 : (pcx_packet_d[117] || (pcx_packet_d[122:118]==5'b00001) ? 1:0); // Non-cacheble is set on store too
+                      cpx_packet_1[135:134]<=pcx_packet_d[113:112]; // Thread ID
+-                     if((pcx_packet_d[122:118]==5'b00000 && !pcx_packet_d[117] && !pcx_packet_d[110]) || (pcx_packet_d[122:118]==5'b10000)) // Cacheble Load or IFill
++                     if((pcx_packet_d[122:118]==5'b10000) && !fast_boot_prom_ifill) // IFill
++                        cpx_packet_1[133:131]<={1'b1,pcx_packet_d[108:107]};
++                     else if((pcx_packet_d[122:118]==5'b00000 && !pcx_packet_d[117] && !pcx_packet_d[110])) // Cacheble Load
+                         cpx_packet_1[133:131]<={inval_vect0[3],inval_vect0[1:0]};
+                      else
+                         cpx_packet_1[133:131]<=3'b000; // Way valid
+@@ -666,7 +668,7 @@
+                      cpx_packet_2[136]<=fast_boot_prom_ifill ? 1'b1 : (pcx_packet_d[117] || (pcx_packet_d[122:118]==5'b00001) ? 1:0); // Non-cacheble is set on store too
+                      cpx_packet_2[135:134]<=pcx_packet_d[113:112]; // Thread ID
+                      if((pcx_packet_d[122:118]==5'b10000) && !fast_boot_prom_ifill) // IFill
+-                        cpx_packet_2[133:131]<={inval_vect1[3],inval_vect1[1:0]};
++                        cpx_packet_2[133:131]<={1'b1,pcx_packet_d[108:107]};
+                      else
+                         cpx_packet_2[133:131]<=3'b000; // Way valid
+                      cpx_packet_2[130]<=0; // Four byte fill
+diff --git a/os2wb/os2wb_dual.v b/os2wb/os2wb_dual.v
+--- a/os2wb/os2wb_dual.v
++++ b/os2wb/os2wb_dual.v
+@@ -623,7 +623,9 @@
+                      cpx_packet_1[138:137]<=0; // Error
+                      cpx_packet_1[136]<=fast_boot_prom_ifill ? 1'b1 : (pcx_packet_d[117] || (pcx_packet_d[122:118]==5'b00001) ? 1:0); // Non-cacheble is set on store too
+                      cpx_packet_1[135:134]<=pcx_packet_d[113:112]; // Thread ID
+-                     if((pcx_packet_d[122:118]==5'b00000 && !pcx_packet_d[117] && !pcx_packet_d[110]) || (pcx_packet_d[122:118]==5'b10000)) // Cacheble Load or IFill
++                     if((pcx_packet_d[122:118]==5'b10000) && !fast_boot_prom_ifill) // IFill
++                        cpx_packet_1[133:131]<={1'b1,pcx_packet_d[108:107]};
++                     else if((pcx_packet_d[122:118]==5'b00000 && !pcx_packet_d[117] && !pcx_packet_d[110])) // Cacheble Load
+                         cpx_packet_1[133:131]<={othercachehit[0],wayval0};
+                      else
+                         cpx_packet_1[133:131]<=3'b000; // Way valid
+@@ -645,7 +647,7 @@
+                      cpx_packet_2[136]<=fast_boot_prom_ifill ? 1'b1 : (pcx_packet_d[117] || (pcx_packet_d[122:118]==5'b00001) ? 1:0); // Non-cacheble is set on store too
+                      cpx_packet_2[135:134]<=pcx_packet_d[113:112]; // Thread ID
+                      if((pcx_packet_d[122:118]==5'b10000) && !fast_boot_prom_ifill) // IFill
+-                        cpx_packet_2[133:131]<={othercachehit[1],wayval1};
++                        cpx_packet_2[133:131]<={1'b1,pcx_packet_d[108:107]};
+                      else
+                         cpx_packet_2[133:131]<=3'b000; // Way valid
+                      cpx_packet_2[130]<=0; // Four byte fill

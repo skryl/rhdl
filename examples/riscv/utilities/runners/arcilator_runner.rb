@@ -7,42 +7,30 @@
 require 'fileutils'
 require 'fiddle'
 require 'rhdl/codegen'
+require 'rhdl/codegen/circt/tooling'
 require 'json'
+require 'open3'
 require 'rbconfig'
+require 'rhdl/sim/native/mlir/arcilator/runtime'
+require 'etc'
 require_relative '../../hdl/constants'
 require_relative '../../hdl/memory'
 require_relative '../../hdl/cpu'
+require_relative 'verilator_runner'
 
 module RHDL
   module Examples
     module RISCV
       class ArcilatorRunner
-        # Minimal stub for code that probes @cpu.sim for native runner capabilities.
-        # HDL runners do not use the Rust native runner.
-        class HdlSimStub
-          def initialize(simulator_type)
-            @simulator_type = simulator_type
-          end
-
-          def native?
-            false
-          end
-
-          def runner_kind
-            :hdl
-          end
-
-          def simulator_type
-            @simulator_type
-          end
-        end
+        SIGNAL_WIDTHS = VerilogRunner::SIGNAL_WIDTHS
 
         attr_reader :clock_count
 
-        def initialize(backend_sym:, simulator_type_sym:, mem_size:)
+        def initialize(backend_sym:, simulator_type_sym:, mem_size:, jit: false)
           @backend = backend_sym
           @simulator_type_sym = simulator_type_sym
           @mem_size = mem_size
+          @jit = !!jit
 
           check_tools_available!
 
@@ -50,7 +38,7 @@ module RHDL
           start_time = Time.now
 
           build_simulation
-          load_shared_library
+          jit? ? start_jit_process : load_shared_library
 
           elapsed = Time.now - start_time
           puts "  #{@backend.to_s.capitalize} simulation built in #{elapsed.round(2)}s"
@@ -66,9 +54,12 @@ module RHDL
           reset!
         end
 
-        # Stub sim object for compatibility with HeadlessRunner checks.
         def sim
-          @sim_stub ||= HdlSimStub.new(@simulator_type_sym)
+          @sim
+        end
+
+        def jit?
+          @jit
         end
 
         def native?
@@ -87,18 +78,36 @@ module RHDL
           @clock_count = 0
           @debug_reg_addr = 0
           @synced = false
-          @sim_reset_fn.call(@sim_ctx)
+          if jit?
+            send_jit_command('RESET')
+          else
+            @sim.reset
+          end
+          self
         end
 
         def run_cycles(n)
           ensure_synced!
-          @sim_run_cycles_fn.call(@sim_ctx, n)
-          @clock_count += n
+          if jit?
+            response = send_jit_command("RUN #{n.to_i}")
+            _tag, cycles_run, _uart_tx_len = response.split(' ', 3)
+            ran = cycles_run.to_i
+            @clock_count += ran
+            ran
+          else
+            result = @sim.runner_run_cycles(n)
+            @clock_count += (result && result[:cycles_run]) || n
+          end
         end
 
         def read_reg(index)
           idx = index & 0x1F
           return 0 if idx == 0
+
+          if jit?
+            _tag, value = send_jit_command("GET_REG #{idx}").split(' ', 2)
+            return value.to_i & 0xFFFF_FFFF
+          end
 
           old_addr = @debug_reg_addr
           @debug_reg_addr = idx
@@ -115,14 +124,30 @@ module RHDL
         end
 
         def read_pc
+          if jit?
+            _tag, value = send_jit_command('GET_PC').split(' ', 2)
+            return value.to_i & 0xFFFF_FFFF
+          end
+
           peek_cpu(:debug_pc) & 0xFFFF_FFFF
         end
 
         def write_pc(value)
           v = value.to_i & 0xFFFF_FFFF
           v -= 0x1_0000_0000 if v > 0x7FFF_FFFF
-          @sim_write_pc_fn.call(@sim_ctx, v)
-          eval_cpu
+          if jit?
+            send_jit_command("SET_PC #{v & 0xFFFF_FFFF}")
+            return
+          end
+
+          if @sim_write_pc_fn
+            @sim_write_pc_fn.call(@sim.raw_context, v)
+            eval_cpu
+          elsif @sim.runner_set_reset_vector(v)
+            reset!
+          else
+            raise NotImplementedError, "#{self.class.name} cannot write the PC on this runtime"
+          end
         end
 
         def load_program(program, start_addr = 0)
@@ -139,23 +164,31 @@ module RHDL
         end
 
         def read_inst_word(addr)
-          if @sim_read_mem_word_fn
-            a = addr.to_i & 0xFFFF_FFFF
-            a -= 0x1_0000_0000 if a > 0x7FFF_FFFF
-            @sim_read_mem_word_fn.call(@sim_ctx, 0, a) & 0xFFFF_FFFF
-          else
-            @inst_mem.read_word(addr)
+          ensure_synced!
+          if jit?
+            _tag, value = send_jit_command("READ_INST_WORD #{addr.to_i & 0xFFFF_FFFF}").split(' ', 2)
+            return value.to_i & 0xFFFF_FFFF
           end
+
+          a = addr.to_i & 0xFFFF_FFFF
+          bytes = @sim.runner_read_rom(a, 4)
+          return @inst_mem.read_word(addr) if bytes.empty?
+
+          little_endian_word(bytes)
         end
 
         def read_data_word(addr)
-          if @sim_read_mem_word_fn
-            a = addr.to_i & 0xFFFF_FFFF
-            a -= 0x1_0000_0000 if a > 0x7FFF_FFFF
-            @sim_read_mem_word_fn.call(@sim_ctx, 1, a) & 0xFFFF_FFFF
-          else
-            @data_mem.read_word(addr)
+          ensure_synced!
+          if jit?
+            _tag, value = send_jit_command("READ_DATA_WORD #{addr.to_i & 0xFFFF_FFFF}").split(' ', 2)
+            return value.to_i & 0xFFFF_FFFF
           end
+
+          a = addr.to_i & 0xFFFF_FFFF
+          bytes = @sim.runner_read_memory(a, 4, mapped: false)
+          return @data_mem.read_word(addr) if bytes.empty?
+
+          little_endian_word(bytes)
         end
 
         def write_data_word(addr, value)
@@ -176,17 +209,11 @@ module RHDL
         end
 
         def uart_receive_bytes(bytes)
-          payload = if bytes.is_a?(String)
-            bytes.b
-          elsif bytes.respond_to?(:pack)
-            bytes.pack('C*')
+          if jit?
+            send_jit_payload_command('UART_RX', bytes)
           else
-            Array(bytes).pack('C*')
+            @sim.runner_riscv_uart_receive_bytes(bytes)
           end
-          return if payload.empty?
-
-          ptr = Fiddle::Pointer.to_ptr(payload)
-          @sim_uart_rx_push_fn.call(@sim_ctx, ptr, payload.bytesize)
         end
 
         def uart_receive_text(text)
@@ -194,40 +221,42 @@ module RHDL
         end
 
         def uart_tx_bytes
-          len = @sim_uart_tx_len_fn.call(@sim_ctx).to_i
-          return [] if len <= 0
-
-          buf = "\0".b * len
-          ptr = Fiddle::Pointer.to_ptr(buf)
-          copied = @sim_uart_tx_copy_fn.call(@sim_ctx, ptr, len).to_i
-          return [] if copied <= 0
-
-          buf.bytes.take(copied)
+          if jit?
+            _tag, hex = send_jit_command('GET_UART_TX').split(' ', 2)
+            parse_jit_hex_bytes(hex)
+          else
+            @sim.runner_riscv_uart_tx_bytes
+          end
         end
 
         def clear_uart_tx_bytes
-          @sim_uart_tx_clear_fn.call(@sim_ctx)
+          jit? ? send_jit_command('CLEAR_UART_TX') : @sim.runner_riscv_clear_uart_tx_bytes
         end
 
         def load_virtio_disk(bytes, offset: 0)
-          payload = if bytes.is_a?(String)
-            bytes.b
-          elsif bytes.respond_to?(:pack)
-            bytes.pack('C*')
+          payload = bytes.is_a?(String) ? bytes.b.bytes : Array(bytes)
+          if jit?
+            send_jit_payload_command_with_addr('LOAD_DISK', offset.to_i, payload)
           else
-            Array(bytes).pack('C*')
+            @sim.runner_load_disk(payload.pack('C*'), offset.to_i)
           end
-          return if payload.empty?
-
-          ptr = Fiddle::Pointer.to_ptr(payload)
-          @sim_disk_load_fn.call(@sim_ctx, ptr, payload.bytesize, offset.to_i)
         end
 
         def read_virtio_disk_byte(offset)
-          @sim_disk_read_byte_fn.call(@sim_ctx, offset.to_i) & 0xFF
+          if jit?
+            _tag, value = send_jit_command("READ_DISK_BYTE #{offset.to_i}").split(' ', 2)
+            value.to_i & 0xFF
+          else
+            @sim.runner_read_disk(offset.to_i, 1).first.to_i & 0xFF
+          end
         end
 
         def current_inst
+          if jit?
+            _tag, value = send_jit_command('GET_INST').split(' ', 2)
+            return value.to_i & 0xFFFF_FFFF
+          end
+
           peek_cpu(:debug_inst) & 0xFFFF_FFFF
         end
 
@@ -267,90 +296,125 @@ module RHDL
         # ---- FFI ----
 
         def load_shared_library
-          @lib = Fiddle.dlopen(@lib_path)
+          @sim = RHDL::Sim::Native::MLIR::Arcilator::Runtime.open(
+            lib_path: @lib_path,
+            config: runtime_config,
+            signal_widths_by_name: SIGNAL_WIDTHS,
+            signal_widths_by_idx: SIGNAL_WIDTHS.values,
+            backend_label: 'RISC-V Arcilator'
+          )
+          ensure_runner_abi!(@sim, expected_kind: :riscv, backend_label: 'RISC-V Arcilator')
+          @sim_write_pc_fn = @sim.bind_optional_function(
+            'sim_write_pc',
+            [Fiddle::TYPE_VOIDP, Fiddle::TYPE_INT],
+            Fiddle::TYPE_VOID
+          )
+        end
 
-          @sim_create_fn = Fiddle::Function.new(
-            @lib['sim_create'], [Fiddle::TYPE_INT], Fiddle::TYPE_VOIDP
-          )
-          @sim_destroy_fn = Fiddle::Function.new(@lib['sim_destroy'], [Fiddle::TYPE_VOIDP], Fiddle::TYPE_VOID)
-          @sim_reset_fn = Fiddle::Function.new(@lib['sim_reset'], [Fiddle::TYPE_VOIDP], Fiddle::TYPE_VOID)
-          @sim_eval_fn = Fiddle::Function.new(@lib['sim_eval'], [Fiddle::TYPE_VOIDP], Fiddle::TYPE_VOID)
-          @sim_poke_fn = Fiddle::Function.new(
-            @lib['sim_poke'],
-            [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP, Fiddle::TYPE_INT],
-            Fiddle::TYPE_VOID
-          )
-          @sim_peek_fn = Fiddle::Function.new(
-            @lib['sim_peek'],
-            [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP],
-            Fiddle::TYPE_INT
-          )
-          @sim_write_pc_fn = Fiddle::Function.new(
-            @lib['sim_write_pc'],
-            [Fiddle::TYPE_VOIDP, Fiddle::TYPE_INT],
-            Fiddle::TYPE_VOID
-          )
-          @sim_load_mem_fn = Fiddle::Function.new(
-            @lib['sim_load_mem'],
-            [Fiddle::TYPE_VOIDP, Fiddle::TYPE_INT, Fiddle::TYPE_VOIDP, Fiddle::TYPE_INT, Fiddle::TYPE_INT],
-            Fiddle::TYPE_VOID
-          )
-          @sim_read_mem_word_fn = Fiddle::Function.new(
-            @lib['sim_read_mem_word'],
-            [Fiddle::TYPE_VOIDP, Fiddle::TYPE_INT, Fiddle::TYPE_INT],
-            Fiddle::TYPE_INT
-          )
-          @sim_run_cycles_fn = Fiddle::Function.new(
-            @lib['sim_run_cycles'],
-            [Fiddle::TYPE_VOIDP, Fiddle::TYPE_INT],
-            Fiddle::TYPE_VOID
-          )
-          @sim_uart_rx_push_fn = Fiddle::Function.new(
-            @lib['sim_uart_rx_push'],
-            [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP, Fiddle::TYPE_INT],
-            Fiddle::TYPE_VOID
-          )
-          @sim_uart_tx_len_fn = Fiddle::Function.new(
-            @lib['sim_uart_tx_len'],
-            [Fiddle::TYPE_VOIDP],
-            Fiddle::TYPE_INT
-          )
-          @sim_uart_tx_copy_fn = Fiddle::Function.new(
-            @lib['sim_uart_tx_copy'],
-            [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP, Fiddle::TYPE_INT],
-            Fiddle::TYPE_INT
-          )
-          @sim_uart_tx_clear_fn = Fiddle::Function.new(
-            @lib['sim_uart_tx_clear'],
-            [Fiddle::TYPE_VOIDP],
-            Fiddle::TYPE_VOID
-          )
-          @sim_disk_load_fn = Fiddle::Function.new(
-            @lib['sim_disk_load'],
-            [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP, Fiddle::TYPE_INT, Fiddle::TYPE_INT],
-            Fiddle::TYPE_INT
-          )
-          @sim_disk_read_byte_fn = Fiddle::Function.new(
-            @lib['sim_disk_read_byte'],
-            [Fiddle::TYPE_VOIDP, Fiddle::TYPE_INT],
-            Fiddle::TYPE_INT
-          )
+        def start_jit_process
+          raise "Linked JIT bitcode not found: #{@jit_bitcode_path}" unless @jit_bitcode_path && File.file?(@jit_bitcode_path)
 
-          @sim_ctx = @sim_create_fn.call(@mem_size)
+          cmd = ['lli', '--jit-kind=orc-lazy', "--compile-threads=#{jit_compile_threads}", '-O0', @jit_bitcode_path]
+          @jit_stdin, @jit_stdout, @jit_stderr, @jit_wait_thr = Open3.popen3(*cmd)
+          @jit_stdin.sync = true
+          @jit_stdout.sync = true
+          @jit_stderr.sync = true
+          @jit_log_thread = Thread.new do
+            begin
+              File.open(log_path, 'a') do |file|
+                @jit_stderr.each_line do |line|
+                  file.write(line)
+                  file.flush
+                end
+              end
+            rescue IOError
+              nil
+            end
+          end
+
+          ready = @jit_stdout.gets
+          return if ready&.strip == 'READY'
+
+          close_jit_process
+          raise "RISC-V Arcilator JIT runtime failed to start#{ready ? ": #{ready.strip}" : ''}"
+        end
+
+        def ensure_runner_abi!(sim, expected_kind:, backend_label:)
+          unless sim.runner_supported?
+            sim.close
+            raise RuntimeError, "#{backend_label} shared library does not expose runner ABI"
+          end
+
+          actual_kind = sim.runner_kind
+          return if actual_kind == expected_kind
+
+          sim.close
+          raise RuntimeError, "#{backend_label} shared library exposes runner kind #{actual_kind.inspect}, expected #{expected_kind.inspect}"
+        end
+
+        def send_jit_command(command)
+          raise 'RISC-V Arcilator JIT runner is not active' unless @jit_stdin && @jit_stdout
+
+          @jit_stdin.puts(command)
+          response = @jit_stdout.gets
+          raise 'RISC-V Arcilator JIT runner exited unexpectedly' unless response
+
+          response = response.strip
+          raise "RISC-V Arcilator JIT command failed: #{response}" if response.start_with?('ERR')
+
+          response
+        end
+
+        def send_jit_payload_command(prefix, bytes)
+          payload = Array(bytes).pack('C*').unpack1('H*')
+          send_jit_command("#{prefix} #{payload}")
+        end
+
+        def send_jit_payload_command_with_addr(prefix, addr, bytes)
+          payload = Array(bytes).pack('C*').unpack1('H*')
+          send_jit_command("#{prefix} #{addr.to_i & 0xFFFF_FFFF} #{payload}")
+        end
+
+        def parse_jit_hex_bytes(hex)
+          return [] if hex.nil? || hex.empty?
+
+          [hex].pack('H*').bytes
+        end
+
+        def close_jit_process
+          return false unless @jit_wait_thr
+
+          begin
+            send_jit_command('QUIT') if @jit_stdin && !@jit_stdin.closed?
+          rescue StandardError
+            nil
+          end
+
+          @jit_stdin&.close unless @jit_stdin&.closed?
+          @jit_stdout&.close unless @jit_stdout&.closed?
+          @jit_stderr&.close unless @jit_stderr&.closed?
+          @jit_wait_thr.value
+          @jit_log_thread&.join(1)
+          @jit_stdin = nil
+          @jit_stdout = nil
+          @jit_stderr = nil
+          @jit_wait_thr = nil
+          @jit_log_thread = nil
+          true
         end
 
         def poke_cpu(name, value)
           v = value.to_i & 0xFFFF_FFFF
           v -= 0x1_0000_0000 if v > 0x7FFF_FFFF
-          @sim_poke_fn.call(@sim_ctx, name.to_s, v)
+          @sim.poke(name.to_s, v)
         end
 
         def peek_cpu(name)
-          @sim_peek_fn.call(@sim_ctx, name.to_s) & 0xFFFF_FFFF
+          @sim.peek(name.to_s) & 0xFFFF_FFFF
         end
 
         def eval_cpu
-          @sim_eval_fn.call(@sim_ctx)
+          @sim.evaluate
         end
 
         # ---- Memory sync ----
@@ -373,13 +437,39 @@ module RHDL
             length = max_addr - min_addr + 1
             buf = "\0".b * length
             backing.each { |addr, byte| buf.setbyte(addr - min_addr, byte) }
-            ptr = Fiddle::Pointer.to_ptr(buf)
-            @sim_load_mem_fn.call(@sim_ctx, mem_type, ptr, length, min_addr)
+            sync_runtime_memory(mem_type, buf, min_addr)
           else
             buf = backing.pack('C*')
-            ptr = Fiddle::Pointer.to_ptr(buf)
-            @sim_load_mem_fn.call(@sim_ctx, mem_type, ptr, buf.size, 0)
+            sync_runtime_memory(mem_type, buf, 0)
           end
+        end
+
+        def sync_runtime_memory(mem_type, payload, base_addr)
+          if jit?
+            if mem_type == 0
+              send_jit_payload_command_with_addr('LOAD_ROM', base_addr, payload.bytes)
+            else
+              send_jit_payload_command_with_addr('LOAD_MAIN', base_addr, payload.bytes)
+            end
+          elsif mem_type == 0
+            @sim.runner_load_rom(payload, base_addr)
+          else
+            @sim.runner_load_memory(payload, base_addr, false)
+          end
+        end
+
+        def little_endian_word(bytes)
+          Array(bytes).first(4).each_with_index.reduce(0) do |acc, (byte, idx)|
+            acc | ((byte.to_i & 0xFF) << (idx * 8))
+          end
+        end
+
+        def runtime_config
+          { 'mem_size' => @mem_size }
+        end
+
+        def jit_compile_threads
+          [Etc.nprocessors, 8].compact.min
         end
 
         # ---- Utilities ----
@@ -1620,8 +1710,8 @@ module RHDL
         BUILD_BASE = File.expand_path('../../.hdl_build', __dir__)
         alias_method :initialize_backend_runner, :initialize
 
-        def initialize(mem_size: Memory::DEFAULT_SIZE)
-          initialize_backend_runner(backend_sym: :arcilator, simulator_type_sym: :hdl_arcilator, mem_size: mem_size)
+        def initialize(mem_size: Memory::DEFAULT_SIZE, jit: false)
+          initialize_backend_runner(backend_sym: :arcilator, simulator_type_sym: :hdl_arcilator, mem_size: mem_size, jit: jit)
         end
 
         private :initialize_backend_runner
@@ -1629,91 +1719,119 @@ module RHDL
         private
 
         def check_tools_available!
-          %w[firtool circt-opt arcilator].each do |tool|
+          %w[arcilator circt-opt].each do |tool|
             raise LoadError, "#{tool} not found in PATH" unless command_available?(tool)
           end
 
-          return if darwin_host? && command_available?('clang')
-          raise LoadError, 'llc not found in PATH' unless command_available?('llc')
+          %w[clang++ llvm-link].each do |tool|
+            raise LoadError, "#{tool} not found in PATH" unless command_available?(tool)
+          end
+          raise LoadError, 'Neither clang nor llc found in PATH' unless command_available?('clang') || command_available?('llc')
+          raise LoadError, 'lli not found in PATH' if jit? && !command_available?('lli')
         end
 
         def build_dir
-          @build_dir ||= File.join(BUILD_BASE, 'arcilator')
+          @build_dir ||= File.join(BUILD_BASE, jit? ? 'arcilator_jit' : 'arcilator')
         end
 
         def build_simulation
           FileUtils.mkdir_p(build_dir)
 
-          fir_file = File.join(build_dir, 'riscv_cpu.fir')
           mlir_file = File.join(build_dir, 'riscv_cpu_hw.mlir')
           ll_file = File.join(build_dir, 'riscv_cpu_arc.ll')
           state_file = File.join(build_dir, 'riscv_cpu_state.json')
           obj_file = File.join(build_dir, 'riscv_cpu_arc.o')
           wrapper_file = File.join(build_dir, 'arc_wrapper.cpp')
+          wrapper_ll_file = File.join(build_dir, 'arc_wrapper.ll')
+          runtime_bc_file = File.join(build_dir, 'riscv_cpu_arc_runtime.bc')
+          jit_wrapper_ll_file = File.join(build_dir, 'arc_jit_main.ll')
+          jit_bc_file = File.join(build_dir, 'riscv_cpu_arc_jit.bc')
           lib_file = shared_lib_path
+          arc_dir = File.join(build_dir, 'arc')
 
           cpu_source = File.expand_path('../../hdl/cpu.rb', __dir__)
-          firrtl_gen = File.expand_path('../../../../lib/rhdl/codegen/circt/firrtl.rb', __dir__)
-          export_deps = [__FILE__, cpu_source, firrtl_gen].select { |p| File.exist?(p) }
+          mlir_gen = File.expand_path('../../../../lib/rhdl/codegen/circt/mlir.rb', __dir__)
+          tooling_file = File.expand_path('../../../../lib/rhdl/codegen/circt/tooling.rb', __dir__)
+          export_deps = [__FILE__, cpu_source, mlir_gen, tooling_file].select { |p| File.exist?(p) }
 
-          needs_rebuild = !File.exist?(lib_file) ||
-                          export_deps.any? { |p| File.mtime(p) > File.mtime(lib_file) }
+          primary_output = jit? ? jit_bc_file : lib_file
+          needs_rebuild = !File.exist?(primary_output) ||
+                          export_deps.any? { |p| File.mtime(p) > File.mtime(primary_output) }
 
           if needs_rebuild
-            puts '  Exporting RISC-V CPU to FIRRTL...'
-            export_firrtl(fir_file)
+            puts '  Exporting RISC-V CPU to CIRCT MLIR...'
+            export_mlir(mlir_file)
 
-            puts '  Compiling with firtool + arcilator...'
-            compile_arcilator(fir_file, mlir_file, ll_file, state_file, obj_file)
+            puts '  Preparing ARC MLIR...'
+            prepared = RHDL::Codegen::CIRCT::Tooling.prepare_arc_mlir_from_circt_mlir(
+              mlir_path: mlir_file,
+              work_dir: arc_dir,
+              base_name: 'riscv_cpu',
+              top: 'riscv_cpu'
+            )
+            raise LoadError, "ARC preparation failed for RISC-V CPU: #{prepared.dig(:arc, :stderr)}" unless prepared[:success]
+            RHDL::Codegen::CIRCT::Tooling.finalize_arc_mlir_for_arcilator!(
+              arc_mlir_path: prepared.fetch(:arc_mlir_path),
+              check_paths: [
+                prepared[:normalized_llhd_mlir_path],
+                prepared[:hwseq_mlir_path],
+                prepared[:flattened_hwseq_mlir_path],
+                prepared[:arc_mlir_path]
+              ]
+            )
+
+            puts '  Compiling with arcilator...'
+            compile_arcilator(prepared.fetch(:arc_mlir_path), ll_file, state_file)
 
             puts '  Building shared library...'
             write_arcilator_wrapper(wrapper_file, state_file)
-            link_arcilator(wrapper_file, obj_file, lib_file)
+            FileUtils.rm_f(wrapper_ll_file)
+            FileUtils.rm_f(runtime_bc_file)
+            compile_wrapper_llvm_ir(wrapper_path: wrapper_file, wrapper_ll_path: wrapper_ll_file, jit_main: false)
+            link_jit_bitcode(ll_path: ll_file, wrapper_ll_path: wrapper_ll_file, jit_bc_path: runtime_bc_file)
+            if jit?
+              FileUtils.rm_f(jit_wrapper_ll_file)
+              FileUtils.rm_f(jit_bc_file)
+              compile_wrapper_llvm_ir(wrapper_path: wrapper_file, wrapper_ll_path: jit_wrapper_ll_file, jit_main: true)
+              link_jit_bitcode(ll_path: ll_file, wrapper_ll_path: jit_wrapper_ll_file, jit_bc_path: jit_bc_file)
+            else
+              compile_llvm_ir_object(ll_path: runtime_bc_file, obj_path: obj_file)
+              link_arcilator(obj_file, lib_file)
+            end
           end
 
           @lib_path = lib_file
+          @jit_bitcode_path = jit_bc_file
         end
 
         def shared_lib_path
           File.join(build_dir, 'libriscv_arc_sim.so')
         end
 
-        def export_firrtl(fir_file)
-          flat_ir = CPU.to_flat_ir(top_name: 'riscv_cpu')
-          firrtl = RHDL::Codegen::CIRCT::FIRRTL.generate(flat_ir)
-          File.write(fir_file, firrtl)
+        def export_mlir(mlir_file)
+          flat_nodes = CPU.to_flat_circt_nodes(top_name: 'riscv_cpu')
+          mlir = RHDL::Codegen::CIRCT::MLIR.generate(flat_nodes)
+          File.write(mlir_file, mlir)
         end
 
-        def compile_arcilator(fir_file, mlir_file, ll_file, state_file, obj_file)
-          parsed_mlir = File.join(build_dir, 'riscv_cpu_parsed.mlir')
-          lowered_mlir = File.join(build_dir, 'riscv_cpu_lowered.mlir')
-          log = File.join(build_dir, 'firtool.log')
-
-          run_or_raise("firtool #{fir_file} --parse-only -o #{parsed_mlir} 2>#{log}",
-                       'firtool parse', log)
-
-          run_or_raise(
-            "circt-opt #{parsed_mlir} --pass-pipeline='#{firrtl_pipeline_without_comb_check}' " \
-            "-o #{lowered_mlir} 2>>#{log}",
-            'circt-opt FIRRTL pipeline', log
+        def compile_arcilator(mlir_file, ll_file, state_file)
+          log = log_path
+          FileUtils.rm_f(state_file)
+          FileUtils.rm_f(ll_file)
+          cmd = RHDL::Codegen::CIRCT::Tooling.arcilator_command(
+            mlir_path: mlir_file,
+            state_file: state_file,
+            out_path: ll_file
           )
-
-          run_or_raise("firtool --format=mlir #{lowered_mlir} --ir-hw -o #{mlir_file} 2>>#{log}",
-                       'firtool HW lowering', log)
-
-          run_or_raise("arcilator #{mlir_file} --observe-registers --state-file=#{state_file} -o #{ll_file} 2>>#{log}",
-                       'arcilator', log)
-
-          if darwin_host? && command_available?('clang')
-            compile_object_with_clang(ll_file: ll_file, obj_file: obj_file, log_file: log) or raise LoadError, 'clang failed'
-            return
-          end
-
-          compile_object_with_llc(ll_file: ll_file, obj_file: obj_file, log_file: log) or raise LoadError, 'llc failed'
+          run_or_raise(cmd, 'arcilator', log)
         end
 
         def run_or_raise(cmd, step_name, log_path)
-          return if system(cmd)
+          if cmd.is_a?(Array)
+            return if system(*cmd, out: [log_path, 'a'], err: [log_path, 'a'])
+          else
+            return if system(cmd)
+          end
 
           error_msg = File.exist?(log_path) ? File.read(log_path).lines.last(3).join.strip : 'unknown error'
           raise LoadError, "#{step_name} failed for RISC-V CPU: #{error_msg}"
@@ -1751,7 +1869,7 @@ module RHDL
           'firrtl-add-seqmem-ports))'
         end
 
-        def link_arcilator(wrapper_file, obj_file, lib_file)
+        def link_arcilator(obj_file, lib_file)
           cxx = if darwin_host? && command_available?('clang++')
                   'clang++'
                 elsif command_available?('g++')
@@ -1764,7 +1882,7 @@ module RHDL
           if (arch = build_target_arch)
             link_cmd << " -arch #{arch}"
           end
-          link_cmd << " -o #{lib_file} #{wrapper_file} #{obj_file}"
+          link_cmd << " -o #{lib_file} #{obj_file}"
 
           system(link_cmd) or raise LoadError, "#{cxx} link failed"
         end
@@ -1783,50 +1901,53 @@ module RHDL
           nil
         end
 
-        def llc_target_triple(host_os: RbConfig::CONFIG['host_os'], host_cpu: RbConfig::CONFIG['host_cpu'])
-          arch = build_target_arch(host_os: host_os, host_cpu: host_cpu)
-          return nil unless arch
-
-          "#{arch}-apple-macosx"
+        def log_path
+          File.join(build_dir, 'arcilator.log')
         end
 
-        def compile_object_with_llc(ll_file:, obj_file:, log_file:)
-          return false unless command_available?('llc')
-
-          llc_cmd = String.new('llc -filetype=obj -O2 -relocation-model=pic')
-          if (target_triple = llc_target_triple)
-            llc_cmd << " -mtriple=#{target_triple}"
-          end
-          llc_cmd << " #{ll_file} -o #{obj_file} 2>>#{log_file}"
-          system(llc_cmd)
+        def compile_wrapper_llvm_ir(wrapper_path:, wrapper_ll_path:, jit_main: false)
+          cmd = ['clang++', '-std=c++17', '-O0', '-S', '-emit-llvm']
+          cmd << '-DARCI_JIT_MAIN' if jit_main
+          cmd += [wrapper_path, '-o', wrapper_ll_path]
+          stdout, stderr, status = Open3.capture3(*cmd)
+          File.write(log_path, "#{stdout}#{stderr}", mode: 'a')
+          raise "RISC-V Arcilator wrapper LLVM IR compilation failed:\n#{stdout}\n#{stderr}" unless status.success?
         end
 
-        def compile_object_with_clang(ll_file:, obj_file:, log_file:)
-          return false unless command_available?('clang')
+        def link_jit_bitcode(ll_path:, wrapper_ll_path:, jit_bc_path:)
+          cmd = ['llvm-link', ll_path, wrapper_ll_path, '-o', jit_bc_path]
+          stdout, stderr, status = Open3.capture3(*cmd)
+          File.write(log_path, "#{stdout}#{stderr}", mode: 'a')
+          raise "RISC-V Arcilator bitcode link failed:\n#{stdout}\n#{stderr}" unless status.success?
+        end
 
-          clang_cmd = String.new('clang -c -O2 -fPIC')
-          if (target_triple = llc_target_triple)
-            clang_cmd << " -target #{target_triple}"
-          end
-          clang_cmd << " #{ll_file} -o #{obj_file} 2>>#{log_file}"
-          system(clang_cmd)
+        def compile_llvm_ir_object(ll_path:, obj_path:)
+          cmd = if command_available?('llc')
+                  ['llc', '-filetype=obj', '-O0', '-relocation-model=pic', ll_path, '-o', obj_path]
+                else
+                  ['clang', '-c', '-O0', '-fPIC', ll_path, '-o', obj_path]
+                end
+          stdout, stderr, status = Open3.capture3(*cmd)
+          File.write(log_path, "#{stdout}#{stderr}", mode: 'a')
+          raise "RISC-V Arcilator object compilation failed:\n#{stdout}\n#{stderr}" unless status.success?
         end
 
         def write_arcilator_wrapper(wrapper_path, state_file_path)
           state = JSON.parse(File.read(state_file_path))
-          mod = state[0]
+          mod = state.find { |entry| entry['name'].to_s == 'riscv_cpu' } || state[0]
 
           offsets = {}
           mod['states'].each { |s| offsets[s['name']] = s['offset'] }
 
           signal_defines = []
           signal_defines << "#define STATE_SIZE #{mod['numStateBytes']}"
-          offsets.each { |name, offset| signal_defines << "#define OFF_#{name.upcase} #{offset}" }
+          offsets.each { |name, offset| signal_defines << "#define OFF_#{name.to_s.upcase.gsub(/[^A-Z0-9]+/, '_')} #{offset}" }
 
           wrapper = <<~CPP
             #include <cstdint>
             #include <cstring>
             #include <cstdlib>
+            #include <stdio.h>
 
             extern "C" void riscv_cpu_eval(void* state);
 
@@ -1879,12 +2000,242 @@ module RHDL
 
             #{riscv_sim_run_cycles_impl}
 
+            static unsigned int parse_mem_size_config(const char* json, size_t json_len, unsigned int default_mem_size) {
+                if (!json || json_len == 0) return default_mem_size;
+                const char* key = "\\\"mem_size\\\"";
+                const char* match = std::strstr(json, key);
+                if (!match) return default_mem_size;
+                match += std::strlen(key);
+                while (*match == ' ' || *match == '\\t' || *match == '\\n' || *match == '\\r' || *match == ':') match++;
+                char* end_ptr = nullptr;
+                unsigned long value = std::strtoul(match, &end_ptr, 10);
+                if (end_ptr == match || value == 0ul) return default_mem_size;
+                return static_cast<unsigned int>(value & 0xFFFF'FFFFu);
+            }
+
+            enum {
+                SIM_CAP_SIGNAL_INDEX = 1u << 0,
+                SIM_CAP_FORCED_CLOCK = 1u << 1,
+                SIM_CAP_TRACE = 1u << 2,
+                SIM_CAP_TRACE_STREAMING = 1u << 3,
+                SIM_CAP_COMPILE = 1u << 4,
+                SIM_CAP_GENERATED_CODE = 1u << 5,
+                SIM_CAP_RUNNER = 1u << 6
+            };
+
+            enum {
+                SIM_SIGNAL_HAS = 0u,
+                SIM_SIGNAL_GET_INDEX = 1u,
+                SIM_SIGNAL_PEEK = 2u,
+                SIM_SIGNAL_POKE = 3u,
+                SIM_SIGNAL_PEEK_INDEX = 4u,
+                SIM_SIGNAL_POKE_INDEX = 5u
+            };
+
+            enum {
+                SIM_EXEC_EVALUATE = 0u,
+                SIM_EXEC_TICK = 1u,
+                SIM_EXEC_TICK_FORCED = 2u,
+                SIM_EXEC_SET_PREV_CLOCK = 3u,
+                SIM_EXEC_GET_CLOCK_LIST_IDX = 4u,
+                SIM_EXEC_RESET = 5u,
+                SIM_EXEC_RUN_TICKS = 6u,
+                SIM_EXEC_SIGNAL_COUNT = 7u,
+                SIM_EXEC_REG_COUNT = 8u,
+                SIM_EXEC_COMPILE = 9u,
+                SIM_EXEC_IS_COMPILED = 10u
+            };
+
+            enum {
+                SIM_TRACE_START = 0u,
+                SIM_TRACE_START_STREAMING = 1u,
+                SIM_TRACE_STOP = 2u,
+                SIM_TRACE_ENABLED = 3u,
+                SIM_TRACE_CAPTURE = 4u,
+                SIM_TRACE_ADD_SIGNAL = 5u,
+                SIM_TRACE_ADD_SIGNALS_MATCHING = 6u,
+                SIM_TRACE_ALL_SIGNALS = 7u,
+                SIM_TRACE_CLEAR_SIGNALS = 8u,
+                SIM_TRACE_CLEAR = 9u,
+                SIM_TRACE_CHANGE_COUNT = 10u,
+                SIM_TRACE_SIGNAL_COUNT = 11u,
+                SIM_TRACE_SET_TIMESCALE = 12u,
+                SIM_TRACE_SET_MODULE_NAME = 13u,
+                SIM_TRACE_SAVE_VCD = 14u
+            };
+
+            enum {
+                SIM_BLOB_INPUT_NAMES = 0u,
+                SIM_BLOB_OUTPUT_NAMES = 1u,
+                SIM_BLOB_TRACE_TO_VCD = 2u,
+                SIM_BLOB_TRACE_TAKE_LIVE_VCD = 3u,
+                SIM_BLOB_GENERATED_CODE = 4u,
+                SIM_BLOB_SPARC64_WISHBONE_TRACE = 5u,
+                SIM_BLOB_SPARC64_UNMAPPED_ACCESSES = 6u
+            };
+
+            enum {
+                RUNNER_KIND_NONE = 0,
+                RUNNER_KIND_APPLE2 = 1,
+                RUNNER_KIND_MOS6502 = 2,
+                RUNNER_KIND_GAMEBOY = 3,
+                RUNNER_KIND_CPU8BIT = 4,
+                RUNNER_KIND_RISCV = 5
+            };
+
+            enum {
+                RUNNER_MEM_OP_LOAD = 0u,
+                RUNNER_MEM_OP_READ = 1u,
+                RUNNER_MEM_OP_WRITE = 2u
+            };
+
+            enum {
+                RUNNER_MEM_SPACE_MAIN = 0u,
+                RUNNER_MEM_SPACE_ROM = 1u,
+                RUNNER_MEM_SPACE_DISK = 7u,
+                RUNNER_MEM_SPACE_UART_TX = 8u,
+                RUNNER_MEM_SPACE_UART_RX = 9u
+            };
+
+            enum {
+                RUNNER_MEM_FLAG_MAPPED = 1u
+            };
+
+            enum {
+                RUNNER_RUN_MODE_BASIC = 0u
+            };
+
+            enum {
+                RUNNER_CONTROL_SET_RESET_VECTOR = 0u,
+                RUNNER_CONTROL_RESET_SPEAKER_TOGGLES = 1u,
+                RUNNER_CONTROL_RESET_LCD = 2u,
+                RUNNER_CONTROL_RISCV_SET_IRQS = 3u,
+                RUNNER_CONTROL_RISCV_SET_PLIC_SOURCES = 4u,
+                RUNNER_CONTROL_RISCV_UART_PUSH_RX = 5u,
+                RUNNER_CONTROL_RISCV_CLEAR_UART_TX = 6u
+            };
+
+            enum {
+                RUNNER_PROBE_KIND = 0u,
+                RUNNER_PROBE_IS_MODE = 1u,
+                RUNNER_PROBE_SIGNAL = 9u,
+                RUNNER_PROBE_RISCV_UART_TX_LEN = 17u
+            };
+
+            struct RunnerCaps {
+                int kind;
+                unsigned int mem_spaces;
+                unsigned int control_ops;
+                unsigned int probe_ops;
+            };
+
+            struct RunnerRunResult {
+                int text_dirty;
+                int key_cleared;
+                unsigned int cycles_run;
+                unsigned int speaker_toggles;
+                unsigned int frames_completed;
+            };
+
+            static const char* k_input_signal_names[] = {
+                "clk", "rst", "irq_software", "irq_timer", "irq_external",
+                "inst_data", "data_rdata", "debug_reg_addr",
+                "inst_ptw_pte0", "inst_ptw_pte1", "data_ptw_pte0", "data_ptw_pte1"
+            };
+
+            static const char* k_output_signal_names[] = {
+                "inst_addr", "inst_ptw_addr0", "inst_ptw_addr1",
+                "data_addr", "data_wdata", "data_we", "data_re", "data_funct3",
+                "data_ptw_addr0", "data_ptw_addr1",
+                "debug_pc", "debug_inst", "debug_x1", "debug_x2", "debug_x10", "debug_x11", "debug_reg_data"
+            };
+
+            static const char k_input_names_csv[] =
+                "clk,rst,irq_software,irq_timer,irq_external,inst_data,data_rdata,debug_reg_addr,"
+                "inst_ptw_pte0,inst_ptw_pte1,data_ptw_pte0,data_ptw_pte1";
+
+            static const char k_output_names_csv[] =
+                "inst_addr,inst_ptw_addr0,inst_ptw_addr1,data_addr,data_wdata,data_we,data_re,data_funct3,"
+                "data_ptw_addr0,data_ptw_addr1,debug_pc,debug_inst,debug_x1,debug_x2,debug_x10,debug_x11,debug_reg_data";
+
+            static const unsigned int k_input_signal_count = static_cast<unsigned int>(sizeof(k_input_signal_names) / sizeof(k_input_signal_names[0]));
+            static const unsigned int k_output_signal_count = static_cast<unsigned int>(sizeof(k_output_signal_names) / sizeof(k_output_signal_names[0]));
+
+            static inline void write_out_u32(unsigned int* out, unsigned int value) {
+                if (out) *out = value;
+            }
+
+            static inline void write_out_ulong(unsigned long* out, unsigned long value) {
+                if (out) *out = value;
+            }
+
+            static inline size_t total_signal_count() {
+                return static_cast<size_t>(k_input_signal_count + k_output_signal_count);
+            }
+
+            static inline const char* signal_name_from_index(unsigned int idx) {
+                if (idx < k_input_signal_count) return k_input_signal_names[idx];
+                idx -= k_input_signal_count;
+                return idx < k_output_signal_count ? k_output_signal_names[idx] : nullptr;
+            }
+
+            static inline int signal_index_from_name(const char* name) {
+                if (!name) return -1;
+                for (unsigned int i = 0; i < k_input_signal_count; i++) {
+                    if (!std::strcmp(name, k_input_signal_names[i])) return static_cast<int>(i);
+                }
+                for (unsigned int i = 0; i < k_output_signal_count; i++) {
+                    if (!std::strcmp(name, k_output_signal_names[i])) {
+                        return static_cast<int>(k_input_signal_count + i);
+                    }
+                }
+                return -1;
+            }
+
+            static inline size_t copy_blob(unsigned char* out_ptr, size_t out_len, const char* text) {
+                const size_t required = text ? std::strlen(text) : 0u;
+                if (out_ptr && out_len && required) {
+                    const size_t copy_len = required < out_len ? required : out_len;
+                    std::memcpy(out_ptr, text, copy_len);
+                }
+                return required;
+            }
+
+            static inline unsigned int runner_main_resolve_offset(unsigned int offset, unsigned int flags) {
+                if ((flags & RUNNER_MEM_FLAG_MAPPED) == 0u) {
+                    return offset;
+                }
+                if (offset >= 0xC0000000u) {
+                    return offset - 0x40000000u;
+                }
+                return offset;
+            }
+
+            static inline size_t read_mem_bytes(SimContext* ctx, int mem_type, unsigned int offset, unsigned char* out, size_t len) {
+                const uint8_t* mem = mem_type == MEM_TYPE_INST ? ctx->mem.inst_mem : ctx->mem.data_mem;
+                if (!mem || !out) return 0u;
+                for (size_t i = 0; i < len; i++) {
+                    out[i] = mem[(offset + static_cast<unsigned int>(i)) & ctx->mem.mem_mask];
+                }
+                return len;
+            }
+
+            static inline size_t read_uart_tx_bytes(SimContext* ctx, unsigned int offset, unsigned char* out, size_t len) {
+                if (!out || offset >= ctx->mem.uart_tx_len) return 0u;
+                const size_t available = ctx->mem.uart_tx_len - offset;
+                const size_t copy_len = available < len ? available : len;
+                std::memcpy(out, ctx->mem.uart_tx_bytes + offset, copy_len);
+                return copy_len;
+            }
+
             extern "C" {
 
-            void* sim_create(unsigned int mem_size) {
+            void* sim_create(const char* json, size_t json_len, unsigned int sub_cycles, char** err_out) {
+                (void)sub_cycles;
+                if (err_out) *err_out = nullptr;
                 SimContext* ctx = new SimContext();
                 memset(ctx->state, 0, sizeof(ctx->state));
-                mem_init(&ctx->mem, mem_size);
+                mem_init(&ctx->mem, parse_mem_size_config(json, json_len, #{@mem_size}));
                 set_bit(ctx->state, OFF_CLK, 0);
                 set_bit(ctx->state, OFF_RST, 1);
                 set_bit(ctx->state, OFF_IRQ_SOFTWARE, 0);
@@ -1905,6 +2256,27 @@ module RHDL
                 SimContext* ctx = static_cast<SimContext*>(sim);
                 mem_free(&ctx->mem);
                 delete ctx;
+            }
+
+            void sim_free_error(char* error) {
+                if (error) {
+                    std::free(error);
+                }
+            }
+
+            void sim_free_string(char* str) {
+                if (str) {
+                    std::free(str);
+                }
+            }
+
+            void* sim_wasm_alloc(size_t size) {
+                return std::malloc(size > 0 ? size : 1);
+            }
+
+            void sim_wasm_dealloc(void* ptr, size_t size) {
+                (void)size;
+                std::free(ptr);
             }
 
             void sim_reset(void* sim) {
@@ -2015,10 +2387,523 @@ module RHDL
                 return (unsigned int)disk_read_byte(&ctx->mem, offset);
             }
 
+            int sim_get_caps(void* sim, unsigned int* caps_out) {
+                (void)sim;
+                write_out_u32(caps_out, SIM_CAP_SIGNAL_INDEX | SIM_CAP_RUNNER);
+                return 1;
+            }
+
+            int sim_signal(void* sim, unsigned int op, const char* name, unsigned int idx, unsigned long value, unsigned long* out_value) {
+                int resolved_idx = -1;
+                const char* resolved_name = nullptr;
+                if (name && name[0]) {
+                    resolved_idx = signal_index_from_name(name);
+                    resolved_name = name;
+                } else {
+                    resolved_name = signal_name_from_index(idx);
+                    resolved_idx = resolved_name ? static_cast<int>(idx) : -1;
+                }
+
+                switch (op) {
+                case SIM_SIGNAL_HAS:
+                    write_out_ulong(out_value, resolved_idx >= 0 ? 1ul : 0ul);
+                    return resolved_idx >= 0 ? 1 : 0;
+                case SIM_SIGNAL_GET_INDEX:
+                    if (resolved_idx < 0) {
+                        write_out_ulong(out_value, 0ul);
+                        return 0;
+                    }
+                    write_out_ulong(out_value, static_cast<unsigned long>(resolved_idx));
+                    return 1;
+                case SIM_SIGNAL_PEEK:
+                case SIM_SIGNAL_PEEK_INDEX:
+                    if (resolved_idx < 0 || !resolved_name) {
+                        write_out_ulong(out_value, 0ul);
+                        return 0;
+                    }
+                    write_out_ulong(out_value, static_cast<unsigned long>(sim_peek(sim, resolved_name)));
+                    return 1;
+                case SIM_SIGNAL_POKE:
+                case SIM_SIGNAL_POKE_INDEX:
+                    if (resolved_idx < 0 || !resolved_name) {
+                        write_out_ulong(out_value, 0ul);
+                        return 0;
+                    }
+                    sim_poke(sim, resolved_name, static_cast<unsigned int>(value));
+                    write_out_ulong(out_value, 1ul);
+                    return 1;
+                default:
+                    write_out_ulong(out_value, 0ul);
+                    return 0;
+                }
+            }
+
+            int sim_exec(void* sim, unsigned int op, unsigned long arg0, unsigned long arg1, unsigned long* out_value, char** err_out) {
+                (void)arg1;
+                if (err_out) *err_out = nullptr;
+                switch (op) {
+                case SIM_EXEC_EVALUATE:
+                    sim_eval(sim);
+                    write_out_ulong(out_value, 0ul);
+                    return 1;
+                case SIM_EXEC_TICK:
+                    sim_run_cycles(sim, 1u);
+                    write_out_ulong(out_value, 0ul);
+                    return 1;
+                case SIM_EXEC_RESET:
+                    sim_reset(sim);
+                    write_out_ulong(out_value, 0ul);
+                    return 1;
+                case SIM_EXEC_RUN_TICKS:
+                    sim_run_cycles(sim, static_cast<unsigned int>(arg0));
+                    write_out_ulong(out_value, 0ul);
+                    return 1;
+                case SIM_EXEC_SIGNAL_COUNT:
+                    write_out_ulong(out_value, static_cast<unsigned long>(total_signal_count()));
+                    return 1;
+                case SIM_EXEC_REG_COUNT:
+                    write_out_ulong(out_value, 0ul);
+                    return 1;
+                default:
+                    write_out_ulong(out_value, 0ul);
+                    return 0;
+                }
+            }
+
+            int sim_trace(void* sim, unsigned int op, const char* str_arg, unsigned long* out_value) {
+                (void)sim;
+                (void)str_arg;
+                write_out_ulong(out_value, 0ul);
+                return (op == SIM_TRACE_ENABLED) ? 1 : 0;
+            }
+
+            size_t sim_blob(void* sim, unsigned int op, unsigned char* out_ptr, size_t out_len) {
+                (void)sim;
+                switch (op) {
+                case SIM_BLOB_INPUT_NAMES:
+                    return copy_blob(out_ptr, out_len, k_input_names_csv);
+                case SIM_BLOB_OUTPUT_NAMES:
+                    return copy_blob(out_ptr, out_len, k_output_names_csv);
+                default:
+                    return 0u;
+                }
+            }
+
+            int runner_get_caps(void* sim, RunnerCaps* caps_out) {
+                (void)sim;
+                if (!caps_out) return 0;
+                caps_out->kind = RUNNER_KIND_RISCV;
+                caps_out->mem_spaces =
+                    (1u << RUNNER_MEM_SPACE_MAIN) |
+                    (1u << RUNNER_MEM_SPACE_ROM) |
+                    (1u << RUNNER_MEM_SPACE_DISK) |
+                    (1u << RUNNER_MEM_SPACE_UART_TX) |
+                    (1u << RUNNER_MEM_SPACE_UART_RX);
+                caps_out->control_ops =
+                    (1u << RUNNER_CONTROL_SET_RESET_VECTOR) |
+                    (1u << RUNNER_CONTROL_RISCV_CLEAR_UART_TX);
+                caps_out->probe_ops =
+                    (1u << RUNNER_PROBE_KIND) |
+                    (1u << RUNNER_PROBE_IS_MODE) |
+                    (1u << RUNNER_PROBE_SIGNAL) |
+                    (1u << RUNNER_PROBE_RISCV_UART_TX_LEN);
+                return 1;
+            }
+
+            size_t runner_mem(void* sim, unsigned int op, unsigned int space, size_t offset, unsigned char* ptr, size_t len, unsigned int flags) {
+                if (!sim || !ptr || len == 0u) return 0u;
+                if (op == RUNNER_MEM_OP_LOAD) {
+                    if (space == RUNNER_MEM_SPACE_MAIN) {
+                        sim_load_mem(sim, MEM_TYPE_DATA, ptr, static_cast<unsigned int>(len), static_cast<unsigned int>(offset));
+                        return len;
+                    }
+                    if (space == RUNNER_MEM_SPACE_ROM) {
+                        sim_load_mem(sim, MEM_TYPE_INST, ptr, static_cast<unsigned int>(len), static_cast<unsigned int>(offset));
+                        return len;
+                    }
+                    if (space == RUNNER_MEM_SPACE_DISK) {
+                        return static_cast<size_t>(sim_disk_load(sim, ptr, static_cast<unsigned int>(len), static_cast<unsigned int>(offset)));
+                    }
+                    return 0u;
+                }
+                if (op == RUNNER_MEM_OP_READ) {
+                    SimContext* ctx = static_cast<SimContext*>(sim);
+                    if (space == RUNNER_MEM_SPACE_MAIN) {
+                        return read_mem_bytes(ctx, MEM_TYPE_DATA, runner_main_resolve_offset(static_cast<unsigned int>(offset), flags), ptr, len);
+                    }
+                    if (space == RUNNER_MEM_SPACE_ROM) {
+                        return read_mem_bytes(ctx, MEM_TYPE_INST, static_cast<unsigned int>(offset), ptr, len);
+                    }
+                    if (space == RUNNER_MEM_SPACE_UART_TX) {
+                        return read_uart_tx_bytes(ctx, static_cast<unsigned int>(offset), ptr, len);
+                    }
+                    if (space == RUNNER_MEM_SPACE_DISK) {
+                        size_t copied = 0u;
+                        for (; copied < len; copied++) {
+                            ptr[copied] = static_cast<unsigned char>(sim_disk_read_byte(sim, static_cast<unsigned int>(offset + copied)) & 0xFFu);
+                        }
+                        return copied;
+                    }
+                    return 0u;
+                }
+                if (op == RUNNER_MEM_OP_WRITE) {
+                    if (space == RUNNER_MEM_SPACE_UART_RX) {
+                        sim_uart_rx_push(sim, ptr, static_cast<unsigned int>(len));
+                        return len;
+                    }
+                    if (space == RUNNER_MEM_SPACE_MAIN) {
+                        sim_load_mem(sim, MEM_TYPE_DATA, ptr, static_cast<unsigned int>(len), runner_main_resolve_offset(static_cast<unsigned int>(offset), flags));
+                        return len;
+                    }
+                    return 0u;
+                }
+                return 0u;
+            }
+
+            int runner_run(void* sim, unsigned int cycles, unsigned char key_data, int key_ready, unsigned int mode, RunnerRunResult* result_out) {
+                (void)mode;
+                if (!sim) return 0;
+                if (key_ready) {
+                    unsigned char key = static_cast<unsigned char>(key_data & 0xFFu);
+                    sim_uart_rx_push(sim, &key, 1u);
+                }
+                sim_run_cycles(sim, cycles);
+                if (result_out) {
+                    result_out->text_dirty = 0;
+                    result_out->key_cleared = key_ready ? 1 : 0;
+                    result_out->cycles_run = cycles;
+                    result_out->speaker_toggles = 0u;
+                    result_out->frames_completed = 0u;
+                }
+                return 1;
+            }
+
+            int runner_control(void* sim, unsigned int op, unsigned int arg0, unsigned int arg1) {
+                (void)arg1;
+                if (!sim) return 0;
+                if (op == RUNNER_CONTROL_SET_RESET_VECTOR) {
+                    sim_write_pc(sim, arg0);
+                    return 1;
+                }
+                if (op == RUNNER_CONTROL_RISCV_CLEAR_UART_TX) {
+                    sim_uart_tx_clear(sim);
+                    return 1;
+                }
+                return 0;
+            }
+
+            unsigned long long runner_probe(void* sim, unsigned int op, unsigned int arg0) {
+                if (!sim) return 0ull;
+                if (op == RUNNER_PROBE_KIND) return static_cast<unsigned long long>(RUNNER_KIND_RISCV);
+                if (op == RUNNER_PROBE_IS_MODE) return 1ull;
+                if (op == RUNNER_PROBE_RISCV_UART_TX_LEN) return static_cast<unsigned long long>(sim_uart_tx_len(sim));
+                if (op == RUNNER_PROBE_SIGNAL) {
+                    const char* signal_name = signal_name_from_index(arg0);
+                    return signal_name ? static_cast<unsigned long long>(sim_peek(sim, signal_name)) : 0ull;
+                }
+                return 0ull;
+            }
+
             } // extern "C"
+
+            #{riscv_jit_main}
           CPP
 
           File.write(wrapper_path, wrapper)
+        end
+
+        def riscv_jit_main
+          <<~'CPP'
+            #ifdef ARCI_JIT_MAIN
+            static int hex_nibble(char ch) {
+                if (ch >= '0' && ch <= '9') return ch - '0';
+                if (ch >= 'a' && ch <= 'f') return 10 + (ch - 'a');
+                if (ch >= 'A' && ch <= 'F') return 10 + (ch - 'A');
+                return -1;
+            }
+
+            static bool decode_hex_payload(const char* hex, unsigned char* out, size_t out_cap, size_t* out_len) {
+                const size_t hex_len = std::strlen(hex);
+                if ((hex_len & 1u) != 0u) return false;
+                const size_t byte_len = hex_len / 2u;
+                if (byte_len > out_cap) return false;
+                std::memset(out, 0, out_cap);
+                for (size_t i = 0; i < byte_len; ++i) {
+                    const int hi = hex_nibble(hex[i * 2u]);
+                    const int lo = hex_nibble(hex[(i * 2u) + 1u]);
+                    if (hi < 0 || lo < 0) return false;
+                    out[i] = static_cast<unsigned char>((hi << 4) | lo);
+                }
+                if (out_len) *out_len = byte_len;
+                return true;
+            }
+
+            static void write_hex_bytes(FILE* out, const unsigned char* bytes, size_t len) {
+                static const char* digits = "0123456789abcdef";
+                for (size_t i = 0; i < len; ++i) {
+                    const unsigned int value = bytes[i];
+                    fputc(digits[(value >> 4) & 0xFu], out);
+                    fputc(digits[value & 0xFu], out);
+                }
+            }
+
+            static char* skip_spaces(char* text) {
+                while (text && (*text == ' ' || *text == '\t')) ++text;
+                return text;
+            }
+
+            static bool parse_u32_token(const char* token, unsigned int* out_value) {
+                if (!token || !out_value) return false;
+                char* end_ptr = nullptr;
+                const unsigned long value = std::strtoul(token, &end_ptr, 0);
+                if (end_ptr == token) return false;
+                while (end_ptr && (*end_ptr == ' ' || *end_ptr == '\t')) ++end_ptr;
+                if (end_ptr && *end_ptr != '\0') return false;
+                *out_value = static_cast<unsigned int>(value & 0xFFFF'FFFFu);
+                return true;
+            }
+
+            static bool parse_addr_and_hex(char* args, unsigned int* out_addr, char** out_hex) {
+                if (!args || !out_addr || !out_hex) return false;
+                char* addr_token = skip_spaces(args);
+                if (!addr_token || *addr_token == '\0') return false;
+                char* sep = addr_token;
+                while (*sep && *sep != ' ' && *sep != '\t') ++sep;
+                if (*sep == '\0') return false;
+                const char saved = *sep;
+                *sep = '\0';
+                const bool parsed = parse_u32_token(addr_token, out_addr);
+                *sep = saved;
+                if (!parsed) return false;
+                char* hex = skip_spaces(sep);
+                if (!hex || *hex == '\0') return false;
+                *out_hex = hex;
+                return true;
+            }
+
+            static unsigned int jit_read_reg(SimContext* ctx, unsigned int idx) {
+                set_u5(ctx->state, OFF_DEBUG_REG_ADDR, static_cast<uint8_t>(idx & 0x1Fu));
+                riscv_cpu_eval(ctx->state);
+                return get_u32(ctx->state, OFF_DEBUG_REG_DATA);
+            }
+
+            int main(int argc, char** argv) {
+                (void)argc;
+                (void)argv;
+                SimContext* ctx = nullptr;
+
+                fprintf(stdout, "READY\n");
+                fflush(stdout);
+
+                char* line = nullptr;
+                size_t cap = 0u;
+                while (getline(&line, &cap, stdin) != -1) {
+                    size_t len = std::strlen(line);
+                    while (len > 0u && (line[len - 1u] == '\n' || line[len - 1u] == '\r')) {
+                        line[--len] = '\0';
+                    }
+
+                    if (std::strcmp(line, "QUIT") != 0 && !ctx) {
+                        ctx = static_cast<SimContext*>(sim_create(nullptr, 0u, 0u, nullptr));
+                        if (!ctx) {
+                            fprintf(stdout, "ERR INIT\n");
+                            fflush(stdout);
+                            continue;
+                        }
+                    }
+
+                    if (std::strcmp(line, "RESET") == 0) {
+                        sim_reset(ctx);
+                        fprintf(stdout, "OK\n");
+                        fflush(stdout);
+                        continue;
+                    }
+
+                    if (std::strncmp(line, "LOAD_PROGRAM ", 13) == 0 ||
+                        std::strncmp(line, "LOAD_ROM ", 9) == 0 ||
+                        std::strncmp(line, "LOAD_MAIN ", 10) == 0 ||
+                        std::strncmp(line, "LOAD_DISK ", 10) == 0 ||
+                        std::strncmp(line, "UART_RX ", 8) == 0) {
+                        char* payload = line;
+                        unsigned int base_addr = 0u;
+                        char* hex = nullptr;
+                        const bool is_program = std::strncmp(line, "LOAD_PROGRAM ", 13) == 0;
+                        const bool is_rom = std::strncmp(line, "LOAD_ROM ", 9) == 0;
+                        const bool is_main = std::strncmp(line, "LOAD_MAIN ", 10) == 0;
+                        const bool is_disk = std::strncmp(line, "LOAD_DISK ", 10) == 0;
+                        const bool is_uart_rx = std::strncmp(line, "UART_RX ", 8) == 0;
+
+                        if (is_program) {
+                            payload += 13;
+                        } else if (is_rom) {
+                            payload += 9;
+                        } else if (is_main || is_disk) {
+                            payload += 10;
+                        } else {
+                            payload += 8;
+                        }
+
+                        if (is_uart_rx) {
+                            hex = skip_spaces(payload);
+                            if (!hex || *hex == '\0') {
+                                fprintf(stdout, "ERR UART_RX\n");
+                                fflush(stdout);
+                                continue;
+                            }
+                        } else if (!parse_addr_and_hex(payload, &base_addr, &hex)) {
+                            fprintf(stdout, "ERR LOAD\n");
+                            fflush(stdout);
+                            continue;
+                        }
+
+                        const size_t hex_len = std::strlen(hex);
+                        const size_t byte_cap = (hex_len / 2u) + 1u;
+                        unsigned char* bytes = static_cast<unsigned char*>(std::malloc(byte_cap > 0u ? byte_cap : 1u));
+                        size_t payload_len = 0u;
+                        const bool decoded = bytes && decode_hex_payload(hex, bytes, byte_cap, &payload_len);
+                        if (!decoded) {
+                            std::free(bytes);
+                            fprintf(stdout, "%s\n", is_uart_rx ? "ERR UART_RX" : "ERR LOAD");
+                            fflush(stdout);
+                            continue;
+                        }
+
+                        if (is_uart_rx) {
+                            sim_uart_rx_push(ctx, bytes, static_cast<unsigned int>(payload_len));
+                        } else {
+                            if (is_program || is_rom) {
+                                runner_mem(ctx, RUNNER_MEM_OP_LOAD, RUNNER_MEM_SPACE_ROM, base_addr, bytes, payload_len, 0u);
+                            }
+                            if (is_program || is_main) {
+                                runner_mem(ctx, RUNNER_MEM_OP_LOAD, RUNNER_MEM_SPACE_MAIN, base_addr, bytes, payload_len, 0u);
+                            }
+                            if (is_disk) {
+                                runner_mem(ctx, RUNNER_MEM_OP_LOAD, RUNNER_MEM_SPACE_DISK, base_addr, bytes, payload_len, 0u);
+                            }
+                        }
+                        std::free(bytes);
+                        fprintf(stdout, "OK %zu\n", payload_len);
+                        fflush(stdout);
+                        continue;
+                    }
+
+                    if (std::strncmp(line, "RUN ", 4) == 0) {
+                        unsigned int cycles = 0u;
+                        if (!parse_u32_token(line + 4, &cycles)) {
+                            fprintf(stdout, "ERR RUN\n");
+                            fflush(stdout);
+                            continue;
+                        }
+                        RunnerRunResult result;
+                        std::memset(&result, 0, sizeof(result));
+                        if (!runner_run(ctx, cycles, 0u, 0, RUNNER_RUN_MODE_BASIC, &result)) {
+                            fprintf(stdout, "ERR RUN\n");
+                            fflush(stdout);
+                            continue;
+                        }
+                        fprintf(stdout, "RUN %u %u\n", result.cycles_run, sim_uart_tx_len(ctx));
+                        fflush(stdout);
+                        continue;
+                    }
+
+                    if (std::strncmp(line, "GET_REG ", 8) == 0) {
+                        unsigned int idx = 0u;
+                        if (!parse_u32_token(line + 8, &idx)) {
+                            fprintf(stdout, "ERR GET_REG\n");
+                            fflush(stdout);
+                            continue;
+                        }
+                        fprintf(stdout, "REG %u\n", jit_read_reg(ctx, idx));
+                        fflush(stdout);
+                        continue;
+                    }
+
+                    if (std::strcmp(line, "GET_PC") == 0) {
+                        fprintf(stdout, "PC %u\n", sim_peek(ctx, "debug_pc"));
+                        fflush(stdout);
+                        continue;
+                    }
+
+                    if (std::strcmp(line, "GET_INST") == 0) {
+                        fprintf(stdout, "INST %u\n", sim_peek(ctx, "debug_inst"));
+                        fflush(stdout);
+                        continue;
+                    }
+
+                    if (std::strcmp(line, "GET_UART_TX") == 0) {
+                        const unsigned int tx_len = sim_uart_tx_len(ctx);
+                        unsigned char* bytes = static_cast<unsigned char*>(std::malloc(tx_len > 0u ? tx_len : 1u));
+                        const unsigned int copied = (bytes && tx_len > 0u) ? sim_uart_tx_copy(ctx, bytes, tx_len) : 0u;
+                        fputs("UART_TX ", stdout);
+                        if (bytes && copied > 0u) write_hex_bytes(stdout, bytes, copied);
+                        fputc('\n', stdout);
+                        fflush(stdout);
+                        std::free(bytes);
+                        continue;
+                    }
+
+                    if (std::strcmp(line, "CLEAR_UART_TX") == 0) {
+                        sim_uart_tx_clear(ctx);
+                        fprintf(stdout, "OK\n");
+                        fflush(stdout);
+                        continue;
+                    }
+
+                    if (std::strncmp(line, "READ_INST_WORD ", 15) == 0 ||
+                        std::strncmp(line, "READ_DATA_WORD ", 15) == 0) {
+                        unsigned int addr = 0u;
+                        if (!parse_u32_token(line + 15, &addr)) {
+                            fprintf(stdout, "ERR READ_WORD\n");
+                            fflush(stdout);
+                            continue;
+                        }
+                        const int mem_type = (std::strncmp(line, "READ_INST_WORD ", 15) == 0) ? MEM_TYPE_INST : MEM_TYPE_DATA;
+                        fprintf(stdout, "WORD %u\n", sim_read_mem_word(ctx, mem_type, addr));
+                        fflush(stdout);
+                        continue;
+                    }
+
+                    if (std::strncmp(line, "READ_DISK_BYTE ", 15) == 0) {
+                        unsigned int addr = 0u;
+                        if (!parse_u32_token(line + 15, &addr)) {
+                            fprintf(stdout, "ERR READ_DISK_BYTE\n");
+                            fflush(stdout);
+                            continue;
+                        }
+                        fprintf(stdout, "BYTE %u\n", sim_disk_read_byte(ctx, addr) & 0xFFu);
+                        fflush(stdout);
+                        continue;
+                    }
+
+                    if (std::strncmp(line, "SET_PC ", 7) == 0) {
+                        unsigned int value = 0u;
+                        if (!parse_u32_token(line + 7, &value)) {
+                            fprintf(stdout, "ERR SET_PC\n");
+                            fflush(stdout);
+                            continue;
+                        }
+                        sim_write_pc(ctx, value);
+                        fprintf(stdout, "OK\n");
+                        fflush(stdout);
+                        continue;
+                    }
+
+                    if (std::strcmp(line, "QUIT") == 0) {
+                        fprintf(stdout, "OK\n");
+                        fflush(stdout);
+                        break;
+                    }
+
+                    fprintf(stdout, "ERR UNKNOWN\n");
+                    fflush(stdout);
+                }
+
+                std::free(line);
+                if (ctx) sim_destroy(ctx);
+                return 0;
+            }
+            #endif
+          CPP
         end
       end
     end

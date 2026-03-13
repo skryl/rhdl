@@ -4,29 +4,28 @@ require 'spec_helper'
 require 'rhdl/codegen'
 
 RSpec.describe '8-bit CPU IR runner extension' do
-  def cpu_ir_json
-    ir = RHDL::HDL::CPU::CPU.to_flat_ir
-    RHDL::Codegen::IR::IRToJson.convert(ir)
+  def cpu_ir_json(backend)
+    ir = RHDL::HDL::CPU::CPU.to_flat_circt_nodes
+    RHDL::Sim::Native::IR.sim_json(ir, backend: backend)
   end
 
   def backend_available?(backend)
     case backend
     when :interpreter
-      RHDL::Codegen::IR::IR_INTERPRETER_AVAILABLE
+      RHDL::Sim::Native::IR::INTERPRETER_AVAILABLE
     when :jit
-      RHDL::Codegen::IR::JIT_AVAILABLE
+      RHDL::Sim::Native::IR::JIT_AVAILABLE
     when :compiler
-      RHDL::Codegen::IR::COMPILER_AVAILABLE
+      RHDL::Sim::Native::IR::COMPILER_AVAILABLE
     else
       false
     end
   end
 
   def create_simulator(backend)
-    RHDL::Codegen::IR::IrSimulator.new(
-      cpu_ir_json,
-      backend: backend,
-      allow_fallback: false
+    RHDL::Sim::Native::IR::Simulator.new(
+      cpu_ir_json(backend),
+      backend: backend
     )
   end
 

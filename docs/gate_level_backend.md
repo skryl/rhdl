@@ -18,19 +18,21 @@ HDL Component (Ruby DSL)
         │
         ▼
 ┌───────────────────┐
-│   Netlist Lower   │  lib/rhdl/codegen/structure/lower.rb
+│   Netlist Lower   │  lib/rhdl/codegen/netlist/lower.rb
 └───────────────────┘
         │
         ▼
 ┌───────────────────┐
-│  Structure IR     │  Gate-level intermediate representation
+│   Netlist IR      │  Gate-level intermediate representation
 └───────────────────┘
         │
-        ├──────────────┬──────────────┬──────────────┐
-        ▼              ▼              ▼              ▼
-┌─────────────┐ ┌─────────────┐ ┌─────────────┐ ┌─────────────┐
-│  JSON Export│ │ CPU Sim     │ │ GPU Sim     │ │ Verilog Gen │
-└─────────────┘ └─────────────┘ └─────────────┘ └─────────────┘
+        ├──────────────┬───────────────────────────────┐
+        ▼              ▼                               ▼
+┌─────────────┐ ┌─────────────────────┐      ┌─────────────┐
+│  JSON Export│ │ Native Netlist Sim  │      │ Verilog Gen │
+│             │ │ (:interpreter/:jit/ │      │             │
+│             │ │  :compiler backends)│      │             │
+└─────────────┘ └─────────────────────┘      └─────────────┘
 ```
 
 ## Primitive Gates
@@ -55,10 +57,10 @@ The backend uses seven combinational primitives plus flip-flops:
 
 ## Netlist IR Structure
 
-The Structure IR (`RHDL::Codegen::Structure::IR`) represents gate-level designs:
+The Netlist IR (`RHDL::Codegen::Netlist::IR`) represents gate-level designs:
 
 ```ruby
-ir = RHDL::Codegen::Structure::IR.new(
+ir = RHDL::Codegen::Netlist::IR.new(
   name: "component_name",
   net_count: 42,           # Total number of nets
   gates: [...],            # Array of Gate structs
@@ -139,7 +141,7 @@ require 'rhdl'
 alu = RHDL::HDL::ALU.new('alu', width: 8)
 
 # Lower to gate-level IR
-ir = RHDL::Codegen::Structure::Lower.from_components([alu], name: 'alu')
+ir = RHDL::Codegen::Netlist::Lower.from_components([alu], name: 'alu')
 
 # Get statistics
 puts "Gates: #{ir.gates.length}"
@@ -193,14 +195,12 @@ rhdl gates --clean
 ### Rake Tasks
 
 ```bash
-# Export gate-level netlists
-rake cli:gates:export
-
-# Show statistics
-rake cli:gates:stats
+# Build/check native backends used by gate-level simulation
+rake native:build
+rake native:check
 
 # Run gate-level benchmark
-rake bench:native[gates]
+rake bench:native[gates,5000000]
 ```
 
 ## Lowering Algorithms
@@ -269,13 +269,14 @@ out[3] = a[1] AND a[0]
 
 ## Simulation Backends
 
-### CPU Interpreter (`sim_cpu.rb`)
+### Native Netlist Runtime (`simulator.rb`)
 
-The CPU interpreter evaluates gates in topologically sorted order:
+The runtime simulator supports interpreter/JIT/compiler backends and evaluates
+gates in topologically sorted order:
 
 ```ruby
 # Get simulation backend
-sim = RHDL::Codegen.gate_level([component], backend: :interpreter)
+sim = RHDL::Sim.gate_level([component], backend: :interpreter)
 
 # Set inputs
 sim.poke('a', 0x42)
@@ -298,42 +299,17 @@ result = sim.peek('result')
    - Sample D inputs
    - Update Q outputs
 
-### GPU Simulator (`sim_gpu.rb`)
-
-The GPU simulator uses SIMD-style parallel evaluation with 64 test vectors simultaneously:
-
-```ruby
-sim = RHDL::Codegen.gate_level([component], backend: :gpu, lanes: 64)
-
-# Set inputs (bitmask across all lanes)
-sim.poke('a', 0xFFFFFFFFFFFFFFFF)  # All 1s in all 64 lanes
-
-# Evaluate all lanes in parallel
-sim.evaluate
-
-# Read outputs (bitmask)
-result = sim.peek('result')
-```
-
-**SIMD Operations:**
-- Each net is represented as a 64-bit integer
-- Bit i of the integer = value in lane i
-- AND/OR/XOR/NOT operate on full 64-bit words
-- MUX: `(~sel & false_val) | (sel & true_val)`
-
-### Native Rust Backend
-
-For maximum performance, compile to native code:
+For maximum performance, build native backends and pick one explicitly:
 
 ```bash
-# Build native extensions
-rake native:build
+bundle exec rake native:build
+bundle exec rake native:check
+```
 
-# Use native interpreter
-sim = RHDL::Codegen.gate_level([component], backend: :native_interpreter)
-
-# Use JIT-compiled simulation
-sim = RHDL::Codegen.gate_level([component], backend: :jit)
+```ruby
+sim_interp = RHDL::Sim.gate_level([component], backend: :interpreter)
+sim_jit = RHDL::Sim.gate_level([component], backend: :jit)
+sim_compiler = RHDL::Sim.gate_level([component], backend: :compiler)
 ```
 
 ## Topological Sort
@@ -341,7 +317,7 @@ sim = RHDL::Codegen.gate_level([component], backend: :jit)
 Gates must be evaluated in dependency order. The `toposort.rb` module implements Kahn's algorithm:
 
 ```ruby
-schedule = RHDL::Codegen::Structure::Toposort.sort(ir)
+schedule = RHDL::Codegen::Netlist::Toposort.sort(ir)
 # Returns array of gate indices in evaluation order
 ```
 
@@ -380,8 +356,8 @@ component.propagate
 expected = component.get_output(:result)
 
 # Gate-level simulation
-ir = RHDL::Codegen::Structure::Lower.from_components([component])
-sim = RHDL::Codegen.gate_level([component], backend: :interpreter)
+ir = RHDL::Codegen::Netlist::Lower.from_components([component])
+sim = RHDL::Sim.gate_level([component], backend: :interpreter)
 sim.poke('a', 10)
 sim.poke('b', 5)
 sim.poke('op', 0)
@@ -428,13 +404,17 @@ brew install icarus-verilog
 ## File Locations
 
 ```
-lib/rhdl/codegen/structure/
+lib/rhdl/codegen/netlist/
 ├── ir.rb           # Gate-level IR data structures
 ├── lower.rb        # HDL to gate-level lowering (~80 components)
 ├── primitives.rb   # Gate primitive definitions
-├── toposort.rb     # Topological sorting
-├── sim_cpu.rb      # CPU-based interpreter
-└── sim_gpu.rb      # SIMD-style GPU simulator
+└── toposort.rb     # Topological sorting
+
+lib/rhdl/sim/native/netlist/
+├── simulator.rb          # Runtime wrapper API
+├── netlist_interpreter/  # Rust interpreter backend
+├── netlist_jit/          # Rust JIT backend
+└── netlist_compiler/     # Rust AOT compiler backend
 
 export/gates/       # Generated JSON netlists
 ├── arithmetic/     # ALU, adders, multiplier, divider

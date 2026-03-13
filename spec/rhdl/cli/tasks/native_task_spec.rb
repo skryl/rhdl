@@ -2,6 +2,7 @@
 
 require 'spec_helper'
 require 'rhdl/cli'
+require 'tmpdir'
 
 RSpec.describe RHDL::CLI::Tasks::NativeTask do
   describe 'constants' do
@@ -137,6 +138,26 @@ RSpec.describe RHDL::CLI::Tasks::NativeTask do
       it 'returns path under lib directory' do
         result = task.send(:dst_lib_path, ext)
         expect(result).to include('lib')
+      end
+    end
+
+    describe '#build_extension' do
+      it 'skips the copy step when the built library path already matches the load path' do
+        Dir.mktmpdir('native_task_build_extension_spec') do |dir|
+          ext = described_class::EXTENSIONS[:ir_compiler].merge(ext_dir: dir)
+          lib_path = File.join(dir, 'libir_compiler.dylib')
+          File.binwrite(lib_path, 'compiled')
+
+          allow(task).to receive(:ensure_dir)
+          allow(task).to receive(:puts_header)
+          allow(task).to receive(:system).with('cargo build --release').and_return(true)
+          allow(task).to receive(:src_lib_path).with(ext).and_return(lib_path)
+          allow(task).to receive(:dst_lib_path).with(ext).and_return(lib_path)
+          allow(FileUtils).to receive(:cp)
+
+          expect { task.send(:build_extension, :ir_compiler, ext) }.to output(/Built:/).to_stdout
+          expect(FileUtils).not_to have_received(:cp)
+        end
       end
     end
   end

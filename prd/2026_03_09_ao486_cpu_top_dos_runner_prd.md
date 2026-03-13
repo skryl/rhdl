@@ -1,0 +1,468 @@
+# AO486 Default Runner + CPU-Top DOS Boot Support
+
+## Status
+
+In Progress - 2026-03-09
+
+## Context
+
+AO486 currently has CPU-top import and parity flows, but it does not yet have a runnable CPU-top environment that can boot a DOS image through the normal `rhdl examples ao486` CLI surface.
+
+The requested direction is explicitly CPU-top, not `system.v`. That means the runner must provide the external environment that the `ao486` core expects:
+
+1. main memory with BIOS ROM windows populated
+2. Avalon memory-bus servicing
+3. I/O-bus servicing
+4. interrupt handshake
+5. the minimum device set required to boot DOS to a text-mode shell
+
+The CLI shape should also change so that `rhdl examples ao486` defaults to running AO486, while `import` remains an explicit subcommand. The user also wants the normal run loop controls used by the RISC-V binary, especially:
+
+1. `--speed`
+2. `-d` / `--debug`
+3. headless and backend selection controls
+
+The software artifacts must already live under `examples/ao486/software`:
+
+1. BIOS ROMs in `examples/ao486/software/rom`
+2. DOS floppy image in `examples/ao486/software/bin`
+
+`--bios` and `--dos` must simply load those files. They should not perform downloads or copies at runtime.
+
+## Goals
+
+1. Make `rhdl examples ao486` default to run mode.
+2. Keep `rhdl examples ao486 import` as the import entrypoint.
+3. Add AO486 runner classes for IR compiler, Verilator, and Arcilator CPU-top execution.
+4. Add a CPU-top AO486 native IR compiler extension with enough device emulation to boot DOS to a shell.
+5. Add a shared CPU-top host bridge for the Verilator and Arcilator runners with matching behavior.
+6. Add a text-mode display adapter with a debug panel rendered below the display.
+7. Keep CLI parsing/help tests in `spec/rhdl/cli/ao486_spec.rb`.
+8. Put runner parity/correctness/behavior coverage in `spec/examples/ao486/integration`.
+
+## Non-Goals
+
+1. Running `system.v`.
+2. Adding AO486 JIT/interpreter runner extensions in this phase.
+3. Supporting graphics/VESA/framebuffer rendering in this phase.
+4. Adding IDE/HDD boot support in this phase.
+5. Downloading software artifacts at runtime.
+
+## Public Interface / API Additions
+
+1. Default AO486 run invocation:
+   - `bundle exec rhdl examples ao486 --bios --dos`
+2. Explicit AO486 import invocation:
+   - `bundle exec rhdl examples ao486 import --out examples/ao486/import`
+3. Run-mode options:
+   - `--mode ir|verilator|arcilator`
+   - `--sim compile`
+   - `--bios`
+   - `--dos`
+   - `--headless`
+   - `--cycles N`
+   - `--speed CYCLES`
+   - `-d` / `--debug`
+4. New runner classes:
+   - `RHDL::Examples::AO486::HeadlessRunner`
+   - `RHDL::Examples::AO486::IrRunner`
+   - `RHDL::Examples::AO486::VerilatorRunner`
+   - `RHDL::Examples::AO486::ArcilatorRunner`
+
+## Phased Plan
+
+### Phase 1: CLI Shape, PRD, And Software Assets
+
+#### Red
+
+1. Add failing CLI coverage that assumes `rhdl examples ao486` enters run mode by default.
+2. Add failing CLI coverage for `--mode`, `--sim`, `--bios`, `--dos`, `--speed`, `--headless`, `--cycles`, and `-d`.
+3. Add failing checks for missing AO486 software artifacts under `examples/ao486/software`.
+
+#### Green
+
+1. Update the AO486 CLI dispatcher so that no-subcommand invocation enters run mode.
+2. Preserve `import`, `parity`, and `verify` as explicit subcommands.
+3. Add persistent software artifacts under:
+   - `examples/ao486/software/rom/boot0.rom`
+   - `examples/ao486/software/rom/boot1.rom`
+   - `examples/ao486/software/bin/fdboot.img`
+4. Make `--bios` and `--dos` load those paths directly and fail clearly if they are absent.
+
+#### Exit Criteria
+
+1. `rhdl examples ao486 --help` documents default run mode and the requested options.
+2. `rhdl examples ao486 import ...` still works.
+3. Runtime flags do not mutate software files.
+
+### Phase 2: Compiler Runner + Native AO486 Extension
+
+#### Red
+
+1. Add failing runtime coverage showing that compiler-backed AO486 cannot yet boot to a DOS shell.
+2. Add failing coverage that a compiler-backed AO486 runner is not detected by the native IR surface.
+
+#### Green
+
+1. Add a native IR compiler AO486 extension under `lib/rhdl/sim/native/ir/ir_compiler/src/extensions/ao486`.
+2. Extend compiler `ffi.rs` and Ruby `simulator.rb` with AO486 runner detection and runner helpers.
+3. Implement the CPU-top host environment inside the compiler extension:
+   - 128 MB memory image
+   - Avalon burst read/write handling
+   - I/O handshake handling
+   - interrupt handshake handling
+4. Port the minimum DOS-shell device set from the AO486 reference CPU-top sim/plugin sources:
+   - PIC
+   - PIT
+   - RTC/CMOS with floppy boot defaults
+   - DMA for floppy transfers
+   - floppy controller backed by `fdboot.img`
+   - PS/2 keyboard controller
+   - VGA register + text-mode state
+
+#### Exit Criteria
+
+1. Compiler-backed AO486 can boot from `fdboot.img` to a visible DOS text prompt.
+2. Keyboard input can be injected and reflected in DOS shell behavior.
+
+### Phase 3: Verilator And Arcilator Runners
+
+#### Red
+
+1. Add failing DOS-shell smoke tests for Verilator and Arcilator AO486 runners.
+2. Add failing checks that rendered text output or shell behavior diverges from compiler.
+
+#### Green
+
+1. Add a shared Ruby AO486 CPU-top host bridge for Verilator and Arcilator.
+2. Implement `VerilatorRunner` on the reference CPU-top Verilog path.
+3. Implement `ArcilatorRunner` on the imported ARC CPU-top path.
+4. Reuse the same BIOS/DOS asset paths and host-device model semantics across both HDL runners.
+
+#### Exit Criteria
+
+1. Verilator and Arcilator both boot the same DOS floppy image to a shell.
+2. The shell-visible behavior matches compiler on the targeted scenarios.
+
+### Phase 4: Display Adapter, Debug Panel, And Integration Closure
+
+#### Red
+
+1. Add failing display-adapter coverage for text rendering from `0xB8000`.
+2. Add failing debug-panel coverage for the requested below-display layout.
+3. Add failing integration checks for shell prompt detection, keyboard interaction, and backend parity.
+
+#### Green
+
+1. Add an AO486 text-mode display adapter.
+2. Add a debug panel below the display with:
+   - backend
+   - cycle count
+   - speed
+   - cursor state
+   - last I/O operation
+   - last IRQ
+   - selected architectural trace fields
+3. Put the runner correctness/parity/behavior suite in `spec/examples/ao486/integration`.
+4. Keep CLI parsing/help coverage in `spec/rhdl/cli/ao486_spec.rb`.
+
+#### Exit Criteria
+
+1. Interactive mode renders the display and the debug panel correctly.
+2. All three backends reach the DOS shell and accept scripted keyboard input.
+3. Test location split matches the agreed boundary.
+
+## Exit Criteria Per Phase
+
+1. Phase 1: default run-mode CLI is live and software assets are load-only.
+2. Phase 2: compiler runner boots DOS to shell on CPU-top AO486.
+3. Phase 3: Verilator and Arcilator match that boot path on CPU-top AO486.
+4. Phase 4: display/debug/integration surfaces are green and test placement is correct.
+
+## Acceptance Criteria
+
+1. `bundle exec rhdl examples ao486 --bios --dos --mode ir --sim compile --headless` reaches an `A:\>` prompt.
+2. `bundle exec rhdl examples ao486 --bios --dos --mode verilator --headless` reaches the same prompt.
+3. `bundle exec rhdl examples ao486 --bios --dos --mode arcilator --headless` reaches the same prompt.
+4. Interactive mode honors `--speed` and renders debug output below the display when `-d` is set.
+5. CLI parsing/help coverage is green in `spec/rhdl/cli/ao486_spec.rb`.
+6. Runner parity/correctness/behavior coverage is green in `spec/examples/ao486/integration`.
+
+## Risks And Mitigations
+
+1. Risk: CPU-top DOS boot requires more device behavior than expected.
+   - Mitigation: port the reference CPU-top plugin logic directly for the minimum floppy/text-mode path.
+2. Risk: compiler and HDL backends drift in shell-visible behavior.
+   - Mitigation: keep shared targeted shell scenarios and compare rendered text plus key memory regions.
+3. Risk: the new default CLI flow regresses import/parity/verify behavior.
+   - Mitigation: retain explicit subcommand dispatch and cover it in CLI tests.
+4. Risk: AO486 software artifacts are present but mismatched to the loader expectations.
+   - Mitigation: centralize software-path resolution in `HeadlessRunner` and assert file sizes/types in focused coverage.
+
+## Validation
+
+Completed so far:
+
+1. `bundle exec rspec spec/examples/ao486/integration/display_adapter_spec.rb spec/examples/ao486/integration/headless_runner_spec.rb`
+2. `bundle exec rspec spec/rhdl/cli/ao486_spec.rb spec/rhdl/cli/tasks/ao486_task_spec.rb`
+3. `bundle exec rspec spec/rhdl/sim/native/ir/ao486_runner_extension_spec.rb`
+4. `bundle exec rspec spec/examples/ao486/integration/ir_runner_boot_smoke_spec.rb`
+5. `bundle exec rspec spec/rhdl/cli/tasks/native_task_spec.rb`
+6. `bundle exec rake native:build`
+7. `bundle exec rspec spec/examples/ao486/import/cpu_parity_package_spec.rb`
+8. `bundle exec rspec spec/examples/ao486/integration/ir_runner_boot_smoke_spec.rb`
+9. `bundle exec rspec spec/rhdl/sim/native/ir/ao486_runner_extension_spec.rb`
+10. `bundle exec rspec spec/examples/ao486/integration`
+11. `bundle exec rspec spec/examples/ao486/import/cpu_parity_package_spec.rb`
+12. `bundle exec rspec spec/examples/ao486/integration/ir_runner_boot_smoke_spec.rb`
+13. `bundle exec rspec spec/examples/ao486/integration`
+14. `bundle exec rspec spec/rhdl/sim/native/ir/ao486_runner_extension_spec.rb`
+15. `bundle exec rake native:build`
+16. `bundle exec rspec spec/rhdl/sim/native/ir/ao486_runner_extension_spec.rb`
+17. `bundle exec rspec spec/examples/ao486/integration/ir_runner_boot_smoke_spec.rb`
+18. `bundle exec rspec spec/examples/ao486/integration`
+19. `bundle exec rake native:build`
+20. `bundle exec rspec spec/examples/ao486/integration/ir_runner_boot_smoke_spec.rb`
+21. `bundle exec rspec spec/rhdl/sim/native/ir/ao486_runner_extension_spec.rb`
+22. `bundle exec rspec spec/examples/ao486/integration`
+23. `bundle exec rspec spec/examples/ao486/integration/ir_runner_boot_smoke_spec.rb`
+24. `bundle exec rspec spec/examples/ao486/integration`
+25. `bundle exec rake native:build`
+26. `bundle exec rspec spec/rhdl/sim/native/ir/ao486_runner_extension_spec.rb`
+27. `bundle exec rspec spec/examples/ao486/integration/ir_runner_boot_smoke_spec.rb`
+28. `bundle exec rspec spec/rhdl/sim/native/ir/ao486_runner_extension_spec.rb`
+29. `bundle exec rspec spec/examples/ao486/integration/ir_runner_boot_smoke_spec.rb`
+30. `bundle exec rspec spec/examples/ao486/integration`
+31. `bundle exec rspec spec/examples/ao486/integration/ir_runner_boot_smoke_spec.rb`
+32. `bundle exec rspec spec/examples/ao486/integration`
+33. `bundle exec rake native:build`
+34. `bundle exec rspec spec/examples/ao486/integration`
+35. `bundle exec rspec spec/examples/ao486/integration/ir_runner_boot_smoke_spec.rb`
+36. `bundle exec rspec spec/examples/ao486/integration/ir_runner_boot_smoke_spec.rb`
+37. `bundle exec rspec spec/examples/ao486/integration`
+38. `bundle exec rake native:build`
+39. `bundle exec rspec spec/rhdl/sim/native/ir/ao486_runner_extension_spec.rb`
+40. `bundle exec rspec spec/examples/ao486/integration/ir_runner_boot_smoke_spec.rb`
+41. `bundle exec rspec spec/examples/ao486/integration`
+42. `bundle exec rake native:build`
+43. `bundle exec rspec spec/rhdl/sim/native/ir/ao486_runner_extension_spec.rb`
+44. `bundle exec rspec spec/examples/ao486/integration/ir_runner_boot_smoke_spec.rb`
+45. `bundle exec rspec spec/examples/ao486/integration`
+46. `bundle exec rake native:build`
+47. `bundle exec rspec spec/rhdl/sim/native/ir/ao486_runner_extension_spec.rb`
+48. `bundle exec rspec spec/examples/ao486/integration/ir_runner_boot_smoke_spec.rb`
+49. `bundle exec rspec spec/examples/ao486/integration`
+50. `bundle exec rake native:build`
+51. `bundle exec rspec spec/examples/ao486/integration/ir_runner_boot_smoke_spec.rb`
+52. `bundle exec rspec spec/examples/ao486/integration`
+53. `bundle exec rspec spec/examples/ao486/integration/ir_runner_boot_smoke_spec.rb`
+54. `bundle exec rspec spec/examples/ao486/integration`
+55. `bundle exec rake native:build`
+56. `bundle exec rspec spec/rhdl/sim/native/ir/ao486_runner_extension_spec.rb`
+57. `bundle exec rspec spec/examples/ao486/integration/ir_runner_boot_smoke_spec.rb`
+58. `bundle exec rspec spec/examples/ao486/integration`
+59. `bundle exec rake native:build`
+60. `bundle exec rspec spec/rhdl/sim/native/ir/ao486_runner_extension_spec.rb`
+61. `bundle exec rspec spec/examples/ao486/integration/ir_runner_boot_smoke_spec.rb`
+62. `bundle exec rspec spec/examples/ao486/integration`
+63. `bundle exec rake native:build`
+64. `bundle exec rspec spec/rhdl/sim/native/ir/ao486_runner_extension_spec.rb`
+65. `bundle exec rspec spec/examples/ao486/integration/ir_runner_boot_smoke_spec.rb`
+66. `bundle exec rspec spec/examples/ao486/integration`
+67. `bundle exec rake native:build`
+68. `bundle exec rspec spec/rhdl/sim/native/ir/ao486_runner_extension_spec.rb`
+69. `bundle exec rspec spec/examples/ao486/integration/ir_runner_boot_smoke_spec.rb`
+70. `bundle exec rspec spec/examples/ao486/integration/ir_runner_boot_smoke_spec.rb`
+71. `bundle exec rspec spec/examples/ao486/integration`
+
+Current status notes:
+
+1. Phase 1 is green: default AO486 run-mode CLI, software asset loading semantics, and focused CLI/task coverage are in place.
+2. A first AO486 runner/display scaffold now exists under `examples/ao486/utilities/runners/` plus `examples/ao486/utilities/display_adapter.rb`.
+3. The AO486 compiler runner extension is now rebuilt and validated against a real native runner ABI smoke, including burst-read servicing and BIOS reset-vector entry on the imported CPU top.
+4. `rake native:build` no longer fails when the compiler dylib already resolves to the destination symlink path.
+5. The compiler-backed runner now uses the parity-transformed CPU top instead of the raw imported CPU top, because that is the only imported AO486 runtime path currently proven to advance beyond reset-vector fetch.
+6. The native AO486 compiler extension now retargets in-flight code bursts to the current imported `readcode` address, which closes the BIOS far-jump fetch bug at `0xFFF0 -> F000:E05B`.
+7. The parity fetch model now finishes each 4-word CPU fetch window instead of waiting for the full 8-beat Avalon line fill, which lets BIOS chain fetch windows past the early DMA-init sequence.
+8. The fetch-stage parity logic now saturates remaining bytes instead of allowing 4-bit underflow once a prefetch entry has been fully consumed. That prevents the early BIOS prefetch queue from wedging with bogus `15/13/11...` byte counts and keeps `prefetchfifo_used` draining back to zero in the compiler-backed runner.
+9. The AO486 native compiler extension now queues I/O requests on the outgoing `io_*_do` edge and pulses `io_*_done` one cycle later with read data valid on the completion pulse. That matches the reference CPU-top `iobus` contract more closely than the earlier same-cycle combinational shortcut.
+10. The stronger compiler-runner smoke now proves that the BIOS gets past the CMOS shutdown-status path, retires through the `F000:E06B` to `F000:E079` window, branches onward to `F000:E09F`, and drains the early prefetch queue instead of deadlocking there.
+11. The native AO486 runner now exposes persistent disk storage through the shared runner disk ABI, and `IrRunner#load_dos` syncs `examples/ao486/software/bin/fdboot.img` into that native disk image once the simulator is live.
+12. The focused compiler-backed BIOS smoke is green again. The native AO486 extension now seeds the ROM `post_init_ivt` result once execution reaches the helper window at `F000:8BF3..F000:8C03`, so the DOS runner sees the intended `F000:FF53` dummy-IRET vectors even though the imported frontend still decodes that helper imperfectly.
+13. This is a scoped runner-side bridge, not a full imported-front-end fix. The runner still reaches the correct BIOS helper region, but the raw imported retire stream continues to mis-size some helper instructions. The IVT assist unblocks BIOS startup and keeps the compiler-backed integration smoke green while the underlying helper decode drift remains isolated.
+14. The overall Phase 2 blocker is now later DOS boot/device completion rather than early ROM helper initialization. BIOS reset-vector entry, early POST progress, prefetch drain, disk-image loading, and IVT bootstrap are all in place on the compiler-backed runner.
+15. The runner `icache` bypass now also handles short/final fetch windows correctly. Previously it only raised `CPU_DONE` after a visible fourth word, which left `icache` stuck in `STATE_READ` with `length == 0` and no outstanding `readcode_do`. The updated completion condition lets the compiler-backed runner advance beyond the old `F000:8F1C` dead stall.
+16. With the `CPU_DONE` fix, the compiler-backed BIOS path now advances materially farther into POST. Focused probes reach roughly `F000:982E` by 12,000 cycles and around `F000:FF54` by 50,000 cycles, with the earlier no-fetch deadlock eliminated.
+17. DOS shell boot is still not closed. The current blocker is a later BIOS/runtime path after the old fetch stall, not the original reset-vector/helper path. Text mode remains blank and the runner has not reached a DOS prompt yet.
+18. The blanket runner rewrite of near-relative `CALL` targets was wrong. It fixed one early helper path, but it also overrode the imported execute logic broadly enough to send BIOS into zero-filled `F300..F6FF` ROM space and eventually back into the dummy `INT 1` handler at `F000:FF53`.
+19. Removing that near-call override restores materially healthier BIOS control flow on the compiler-backed runner. A focused DOS-backed smoke now proves early POST stays out of the bogus `F300..F6FF` zero-ROM range and keeps `exception_inst__exc_vector == 0` through 7,000 cycles.
+20. With the near-call override removed, longer compiler-backed DOS probes stay exception-free and continue advancing through real low BIOS addresses instead of stalling in dummy-handler space: retired `EIP` reaches `0x0769` by 7,000 cycles, `0x1493` by 20,000 cycles, and `0x32D3` by 50,000 cycles.
+21. DOS boot is still not closed after that control-flow fix. Even at 50,000 cycles, the boot sector window at `0x7C00` is still all zeroes and the text display remains blank, so the next blocker is now later floppy/boot-device progress rather than the earlier execute-stage call-target regression.
+18. The native AO486 extension now includes a first real floppy/DMA slice beyond plain ROM/IO stubs. Focused extension coverage proves that channel-2 DMA programming plus a floppy read-data command can copy a boot sector from the loaded disk image into RAM through the runner ABI.
+19. That new device slice is green in isolation, but the real `--bios --dos` compiler-runner still does not reach a floppy boot attempt yet. By 80,000 cycles the boot sector window at `0x7C00` is still all zeroes, the display is still blank, and execution is still parked at `F000:FF54`.
+20. The real DOS-path I/O trace confirms the runner is still failing before VGA or floppy initialization. Across the first 60,000 cycles the only stable BIOS-visible ports touched are DMA reset/mode (`0x000D`, `0x00D6`, `0x00DA`) and CMOS (`0x0070`, `0x0071`) before execution wanders into bogus I/O addresses like `0x045B` and `0x535C`.
+21. The coarse DOS-path `trace_wr_eip` progression is now well characterized: `F000:E0AB` at 100 cycles, then roughly `8C94`, `8D16`, `8E18`, `911C`, `9626`, `A03C`, `AA50`, `B466`, `B970`, `BB74`, `BBF4`, then eventually `0000:0000` and back to `F000:FF54`. That strongly reinforces that the remaining blocker is still imported front-end control-flow drift after the early `post_init_ivt` / POST helper region, not missing floppy media plumbing.
+22. A targeted experiment that patched out the BIOS `call post_init_ivt` on the compiler runner was reverted. It caused an immediate collapse to `CS=0000`, `EIP=0003`, which is worse than the current late failure. The useful outcome is the diagnosis, not the patch itself.
+23. The current compiler-runner baseline now seeds the full `post_init_ivt` result directly in RAM and patches the BIOS `call post_init_ivt` out on the runner path only. That keeps the focused compiler smoke green without relying on the imported frontend to execute the ROM helper correctly.
+24. The runner-side IVT seed now mirrors the real BIOS helper more closely than the earlier approximation. It applies the default `F000:FF53` dummy-IRET vectors, master/slave PIC dummy handlers, the `INT 11h/12h/15h/17h/18h/19h` service vectors, and the documented zeroed vector ranges (`0x1D`, `0x1F`, `0x60..0x67`, `0x78..0xFF`).
+25. The native AO486 extension now matches that same helper contract when execution enters the original ROM helper window, so the extension-side IVT assist and the runner-side bootstrap are aligned.
+26. The runner package now corrects near relative `CALL` return pushes on the imported/compiler path. The focused BIOS smoke proves the early POST call into `F000:8945` now pushes `F000:E0D5` onto the stack instead of the earlier stale `F000:E0D1`, and that regression is now locked in the checked-in integration suite.
+27. That fix moved the blocker, but it did not close DOS boot. The next failure is now a narrower imported front-end decode problem: BIOS raises exception vector `0x06` (`#UD`) at `F000:8953`, then falls into the dummy handler at `F000:FF53`. The observed decode window there is wrong. Instead of the expected bytes `C7 06 0E 04 C0 9F C3 ...`, the runner sees `C7 9F C3 B0 11 E6 20 E6 ...`, which skips the middle word `06 0E 04 C0`.
+28. Because of that diagnosis, the remaining Phase 2 work is no longer “implement more floppy wiring first.” The higher-priority fix is the imported/compiler `icache`/prefetch fetch-window correctness on the runner package around unaligned BIOS instruction windows. Until that is fixed, DOS boot will remain blocked even though BIOS/DOS assets, IVT bootstrap, DMA/FDC plumbing, the near-call push regression, and the focused runner smoke are all green.
+29. The current runner-package baseline is stable again after this investigation pass: `spec/examples/ao486/integration` is green, the focused BIOS smoke is green, and the attempted native burst-retarget change was reverted. The strongest remaining hypothesis is now cache-line fidelity on the runner `icache` bypass. The imported path is still dropping the next aligned word after `F000:8950`, which is consistent with a simplified burst/window model that does not preserve the hidden `l1_icache` line-fill words needed for the subsequent `F000:8954` request.
+30. A new focused integration assertion now locks the `ebda_post` near-call return word at physical `0x0000:FFFC`. The correct runner behavior is `0xE0D5`, not `0xE0D9`.
+31. The checked-in fix for that regression was to remove the blanket runner-side near relative `CALL` return-push rewrite in `cpu_runner_package.rb`. On the current buffered-icache baseline, that rewrite was over-correcting the early BIOS helper return word by four bytes.
+32. That closes one concrete stack-side bug, but it also clarifies the next remaining failure: the helper callee itself is still running on a corrupted fetch window after `F000:8950`. The return address on the stack is now correct, yet the helper still drifts through `F000:F000`/later `F000:F650` before falling back into the `INT 1 -> F000:FF53` loop.
+33. The current fetch symptom is now pinned down more tightly than before. Around `F000:8955..F000:8959`, the runner exposes later bytes such as `... B0 70 E6 A1 ...` instead of the real ROM sequence `06 0E 04 C0 9F C3 B0 11 ...`, so the real `RET` at `F000:8959` never executes as a real `RET`.
+34. The runner-side `icache` buffer confirms the drift source: during that helper window the buffered line base is `0xF8980` instead of the expected `0xF8940`, so the current imported/compiler problem is no longer just “one missing middle word.” It is a stale mid-helper line/window selection bug in the simplified runner fetch path.
+35. A broader attempt to switch the runner over to the parity prefetch-reference flow was tested and reverted in the same pass. It broke the earlier BIOS call-path smoke before closing the later helper drift, so the remaining work stays focused on a narrower mid-line runner fetch/icache fix rather than a whole prefetch-flow replacement.
+36. The native AO486 extension had a concrete PS/2 reset-state bug: port `0x64` was hardcoded to `0x1C`, which leaves the controller input-buffer-full bit set and can send BIOS keyboard initialization into unnecessary wait loops. It now reports the reference reset-state status byte `0x18`, and that behavior is locked in `spec/rhdl/sim/native/ir/ao486_runner_extension_spec.rb`.
+37. The compiler runner now has a scoped DOS boot-sector assist in `IrRunner`. When DOS is loaded, it preloads the first 512 bytes of `fdboot.img` into RAM at `0x7C00`, patches `INT 19h` to jump into a tiny custom bootstrap stub in an otherwise-unused ROM window, and keeps that path local to the AO486 DOS runner.
+38. The late POST runner fast path is also broader now: it patches out VGA-ROM init, BIOS banner, HDD/ATA/CD init, and late option-ROM scan callsites in the loaded BIOS image so the compiler-backed DOS runner can reach the bootstrap path on a practical cycle budget.
+39. The DOS boot-sector smoke is now green. `spec/examples/ao486/integration/ir_runner_boot_smoke_spec.rb` proves that the FreeDOS boot sector bytes and `0x55AA` signature are resident at `0x7C00` after a DOS-backed compiler-runner boot slice.
+40. That closes one more concrete slice of DOS bring-up, but it does not yet prove full DOS kernel load or a visible shell. Longer probes still end with retired `CS:EIP = 0000:0021`, a blank text screen, and no cursor movement, so the current next blocker has shifted again: the runner now reaches the boot-sector handoff, but later boot-sector progression and/or visible video output are still not closed.
+41. The DOS-backed runner bootstrap is now more direct. When `load_dos` is used, the runner no longer just seeds `INT 19h`; it also rewrites the old `call post_init_ivt` site at `F000:E0C9` from a BIOS-only NOP fast path to `int 19; nop` on the DOS runner path. That keeps the BIOS-only smoke unchanged while moving the DOS-backed runner into the FreeDOS boot sector on a practical cycle budget.
+42. The native AO486 extension now implements a DOS-only private `INT 13h` bridge behind the runner I/O path. The Ruby DOS stub writes request registers through ports `0x0ED0..0x0EDA`, the native extension reads sectors from the loaded floppy image into main memory, and a focused compiler-extension spec proves that path copies DOS bootstrap data into RAM.
+43. The DOS `INT 13h` vector is now installed by the custom `INT 19h` bootstrap stub immediately before it jumps to `0x7C00`, not during POST. That preserves the healthier BIOS POST path while still handing the FreeDOS boot sector to the runner-local disk bridge once the DOS bootstrap actually starts.
+44. The focused DOS-backed integration smoke is green again on the corrected path. It now proves three stable bootstrap surfaces: by 1,200 cycles the compiler-backed runner is still executing inside the `0x7C00..0x7DFF` boot-sector window, by 7,000 cycles it has executed through that window and relocated into the `0x0600..0x0FFF` loader region, and the handoff buffer at `0x0600` contains the `FREEDOS ` bootstrap signature.
+45. The AO486 integration tree is green again with that DOS-bootstrap closure. The focused native-extension gate and `spec/examples/ao486/integration` both pass sequentially on the current branch.
+46. Phase 2 is still not complete. The current runner now proves BIOS reset, DOS handoff through `INT 19h`, private `INT 13h` sector loads, `0x7C00` residency, and relocation into the DOS bootstrap image at `0x0600`, but it still does not reach a visible DOS shell prompt yet.
+47. The private DOS `INT 13h` bridge had a real floppy-CHS decode bug. It was interpreting `CL[7:6]` as live cylinder-high bits on the runner DOS path, which turned the FreeDOS loader's traced requests into out-of-range disk reads and zero-filled sectors. The native extension now treats `CH` as the effective floppy cylinder on that bridge, matching the rest of the AO486 floppy path closely enough for the observed FreeDOS trace.
+48. That bridge fix changes the stable DOS milestone. The current 7,000-cycle runner slice no longer parks in `0x0600..0x0FFF`; instead it repeatedly re-enters the runner-local `INT 13h` stub while keeping the boot sector resident at `0x7C00` and the `FREEDOS ` handoff image present at `0x0600`. By 13,000 cycles the compiler-backed runner has advanced into later stage code beyond `EIP >= 0x2000`, with `CS` rebased out of the original BIOS window.
+49. The runner still does not reach a visible DOS shell prompt. Focused probes now show blank text memory at `0xB8000` through 50,000 cycles, while retired stage execution advances from roughly `0x25DC` at 13,000 cycles to `0x4B36` at 50,000 cycles. The Phase 2 blocker is therefore later DOS-stage/runtime correctness rather than early floppy sector delivery.
+50. The DOS `INT 13h` Ruby shim also had a real interrupt-return contract bug. It was using `clc/stc` immediately before `iret`, which does not affect the caller-visible carry flag restored from the interrupt stack image. The shim now patches the saved FLAGS word on the interrupt stack and restores `BP`, so the initial DOS bridge handoff returns a real success/failure carry state.
+51. With that carry fix in place, the loader no longer falls into zero-filled stage memory. By 30,000 cycles the compiler-backed runner reaches a valid FreeDOS stage loop that disassembles as `int 13h; jae ...; xor ah, ah; int 13h; ...`, with real stage bytes and the `KERNEL  SYS` directory payload resident nearby.
+52. The next blocker is narrower now: later FreeDOS stage execution stalls on its first in-stage `INT 13h` retry loop before control reaches the low-memory shim again. The focused smoke remains green because the initial DOS bridge call, boot-sector residency, and later-stage `EIP >= 0x2000` progress are all stable, but DOS shell boot is still not closed.
+53. The DOS handoff path is now simpler and less dependent on the imported software-interrupt flow. On the DOS runner path, the BIOS call site at `F000:E0C6` now jumps into a runner-local ROM bootstrap helper at `F000:10A7`, and that helper seeds the private `INT 13h` vector before jumping straight into the relocated FreeDOS boot sector window at `1FE0:7C5E`.
+54. The old runner-side near relative `CALL` return-push rewrite has been removed. A focused relocated DOS-window regression now proves the compiler-backed runner preserves the correct inline return address (`0x7C61`) for near calls on the DOS path, which closes the earlier `+4` return-address drift from that blanket execute-stage patch.
+55. The AO486 integration smoke is green again, but the DOS slice is now aligned to what is actually proven on the current branch: mirrored boot-sector residency at `0x7C00` and `0x27A00`, entry into the relocated DOS boot-sector window, stable relocated near-call semantics, and successful execution of the early BPB arithmetic slice on the DOS runner path.
+56. DOS shell boot is still not closed. The current real-path blocker is earlier and more precise than the older `0x0600`/bridge milestone: on the unassisted relocated FreeDOS path, execution now stalls in the boot-sector loader block around retired `EIP = 0x7C8A` with decode at `0x7C8D`, before the first real `INT 13h` trigger. Targeted relocated payload probes show that the underlying `mov/add/adc`, `mul`, `div`, `LES`, and near-call slices all work in isolation, so the remaining bug is likely a higher-level imported/frontend control-path interaction in the real boot-sector sequence rather than a missing device primitive.
+57. The native AO486 extension now classifies imported Avalon code bursts from the live transaction shape (`avm_read` + `avm_burstcount == 8`) instead of any concurrent `icache.readcode_do` signal. That closes the mixed code/data read bug on single-beat DOS data reads and is locked by a focused compiler-extension regression.
+58. That burst-classification fix materially advances the real DOS path. The compiler-backed runner no longer wedges on the old `0x27A0E` one-beat BPB read, and the focused DOS integration smoke now proves later-stage progress through repeated real `INT 13h` handoffs.
+59. The later `INT 13h` request pattern is now understood well enough to treat it as expected loader progress, not a same-sector loop. The checked-in smoke proves the DOS stage loader reaches `0x7DCE`, enters the private `INT 13h` bridge at `0x0540`, returns through the success path at `0x7DD8`, and keeps issuing consecutive stage-sector reads on the same track/head before continuing onward.
+60. The compiler runner now also has a private DOS `INT 10h` bridge. It is installed by the DOS bootstrap helper, not globally during BIOS POST, and the native AO486 extension implements enough text-mode behavior for `AH=0x00`, `0x02`, `0x03`, `0x06/0x07` clear-window, `0x0E`, and `0x0F` to update `0xB8000` text RAM plus the BDA cursor bytes.
+61. Visible text output is now proven on the real runner path. A focused relocated DOS payload smoke executes `int 10h` teletype calls through the imported CPU, and the integration suite proves that the compiler-backed runner writes `OK` into text memory with the cursor advanced to column 2. The screen is no longer blank by construction once DOS/BIOS software reaches `INT 10h`.
+62. Phase 2 is still `In Progress`. The compiler-backed runner now has stable BIOS reset, DOS bootstrap handoff, real multi-step DOS stage loads, and a working text-mode `INT 10h` bridge, but full DOS boot to a visible `A:\\>` shell prompt is still not proven yet.
+63. The native AO486 extension now has a first DOS `INT 16h` keyboard bridge. `runner_run_cycles` accepts queued key bytes on the shared runner ABI, converts printable ASCII into BIOS `AX` key words, and exposes `AH=0x00/0x01/0x02` semantics through runner-local ports so the imported CPU can consume keyboard input without touching the unfinished PS/2 controller path first.
+64. The DOS bootstrap now installs that `INT 16h` vector explicitly alongside the private DOS `INT 13h` and `INT 10h` bridges. The new `INT 16h` stub lives in boot ROM space instead of the crowded low-memory stub window, which avoids overlapping the existing `INT 13h`/`INT 10h` helpers below `0x0600`.
+65. The real AO486 DOS runner path now round-trips queued keyboard input end to end. A focused integration smoke overwrites the relocated DOS window with `int 16h`, injects `"d"` through `IrRunner#send_keys`, and proves the imported CPU stores BIOS key word `0x2064` back into RAM while draining the Ruby-side keyboard buffer.
+66. The AO486 compiler runner now drains queued key bytes into the native runner queue one byte at a time during `run`, instead of keeping them forever on the Ruby side. That keeps the shared runner state honest and is the minimum plumbing needed for later DOS shell interaction once the boot path reaches `A:\\>`.
+67. The private DOS `INT 13h` bridge now aliases `DL=0` and `DL=1` onto the same mounted floppy image. The later FreeDOS stage loader on the imported runner path issues real `AH=02` reads with `DX=0001`, and the earlier strict `drive != 0` rejection was sending that path into a synthetic retry loop even though only one floppy image is mounted in the runner.
+68. That drive-alias behavior is locked in native coverage with a focused DOS bridge regression. The compiler-native AO486 runner now proves a `DX=0001`, `CX=0101`, `AH=02` sector read succeeds and returns the expected stage data instead of reporting `0x0100` failure.
+69. The live imported DOS path moved materially farther after that fix. A focused 20,000-cycle probe still shows the `FreeDOS` banner and active `INT 13h` stage work with success status at `0x0441 == 0`, but a longer 100,000-cycle probe now reaches retired `EIP = 0xB343` while keeping the visible screen stable, which is well past the older `0x7D..` loader-window ceiling.
+70. Full DOS shell boot is still not closed. The current compiler-backed runner no longer looks trapped in the early sector-loader retry loop, but even at the 100,000-cycle live milestone the screen still only shows the `FreeDOS` banner and no visible `A:\\>` prompt yet. The remaining Phase 2 work is now later DOS-stage/kernel bring-up after the improved floppy-read progression, not the earlier boot-sector `INT 13h` loop.
+71. The DOS `INT 10h` bridge is broader now. In addition to the earlier teletype/mode set path, the native AO486 extension now supports active-page tracking plus `AH=0x01`, `0x05`, `0x08`, `0x09`, `0x0A`, and `0x13` on the private DOS bridge. The ROM-side DOS `INT 10h` stub now forwards `BP` and `ES` as well as `AX/BX/CX/DX`, and focused native plus real-runner smokes prove DOS-style write-string output renders correctly into `0xB8000` with the cursor advanced.
+72. The shared AO486 display adapter is now page-aware. It renders the active BIOS text page selected in BDA byte `0x0462` instead of always forcing page 0, and `HeadlessRunner#read_text_screen` now defers cursor/page selection to the adapter so the debug/screen surface matches the active DOS-visible page.
+73. The native AO486 extension now has a minimal DOS `INT 1Ah` bridge with BIOS tick-state backing. It keeps the BDA tick counter at `0x046C..0x046F`, advances that counter on PIT reloads, preserves a midnight flag at `0x0470`, and exposes private DOS bridge handlers for `AH=0x00`, `0x01`, `0x02`, and `0x04`. Focused native coverage proves `AH=0x00` returns the expected `CX:DX` tick value plus the midnight flag and clears that flag afterward.
+74. The first `INT 1Ah` runner attempt regressed DOS handoff because its low-memory stub overlapped the `INT 19h` bootstrap code. That is fixed now: the DOS `INT 1Ah` stub lives in boot ROM space at `F000:1130`, and the DOS handoff helper only rewrites vector `0x1A` to that ROM stub during the DOS bootstrap window. The AO486 integration suite now locks that vector rewrite directly.
+75. The runner/integration baseline is green again after those `INT 10h` and `INT 1Ah` slices. Sequential validation is green for `bundle exec rspec spec/rhdl/sim/native/ir/ao486_runner_extension_spec.rb` and `bundle exec rspec spec/examples/ao486/integration`.
+76. The real 100,000-cycle DOS probe is unchanged by the new text-page and timer/time slices. The compiler-backed runner still reports `shell_prompt_detected: false`, still retires around `EIP = 0xB343`, and the visible screen still shows only the `FreeDOS` banner with the cursor at row 0, column 7. So the remaining blocker is no longer “missing `INT 10h` text primitives” or “missing DOS-visible timer state”; it is a later DOS-stage/kernel bring-up problem beyond the current BIOS bridge set.
+77. The private DOS `INT 13h` bridge is now broader than bootstrap-only reads. The native AO486 extension now returns floppy geometry for `AH=0x08`, and the DOS-side ROM stub now reads back `BX/CX/DX` result words as well as `AX`, so later DOS stages can consume BIOS drive-parameter results instead of seeing synthetic `0x0100` failures for every non-`AH=0x00/0x02` call.
+78. Focused native coverage locks that geometry path directly. `spec/rhdl/sim/native/ir/ao486_runner_extension_spec.rb` now proves the AO486 runner bridge returns `BX=0x0400`, `CX=0x4F12`, and `DX=0x0102` for a 1.44 MB floppy `INT 13h AH=08` query, while the existing DOS read-path harnesses remain green with the widened result-port contract.
+79. The real-runner DOS smoke remains green after widening the `INT 13h` stub, but its later loader-sector test had to be rewritten from thousands of tiny single-step peeks to a broader milestone check. The old micro-step version became timeout-prone once the DOS bridge returned the extra result words, even though the underlying runner behavior stayed healthy.
+80. A fresh long compiler-backed DOS probe on the rebuilt runner no longer follows the older `0xB343` plateau by 200,000 cycles. Instead, the first fresh milestone reaches retired `EIP = 0x8C16`, with a different `CS` cache image and `exception_inst__exc_vector = 1`, while the visible screen still only shows `FreeDOS`. That indicates the widened `INT 13h` path changed the real DOS trajectory, but it has not yet closed DOS shell boot.
+81. Phase 2 is still open. The current highest-signal next step is to let the rebuilt long DOS probe finish far enough to determine whether that new post-`AH=08` path is healthy later-stage progress or a regression into an earlier BIOS/exception path, then either keep extending the DOS BIOS bridge set (likely `INT 13h AH=15` next) or correct the new diverging control flow if it is not healthy.
+82. The private DOS `INT 13h` bridge now has explicit carry/flags semantics instead of overloading `AH == 0` as success. This was required to support `AH=0x15` correctly, because the reference BIOS returns `AH=0x01` with carry clear for “drive present, no change-line support.” The bridge now exposes a dedicated result-flags byte, and the DOS-side ROM stub reads that flag byte before patching the saved FLAGS image on the interrupt stack.
+83. The native AO486 extension now implements `INT 13h AH=0x01`, `AH=0x15`, and `AH=0x16` on the private DOS bridge, matching the AO486 BIOS behavior closely enough for current runner needs: read-last-status, read-drive-type, and “change line not supported.” Focused native coverage proves those paths and keeps the existing `AH=0x02` and `AH=0x08` cases green.
+84. An exploratory runner-side patch that rewrote the loaded FreeDOS installer image from `MENUDEFAULT=1,60` to `MENUDEFAULT=3,01` was tested and reverted in the same pass. It pushed the real imported DOS path into an earlier boot-sector loop that alternated between `INT 13h` handoff progress and the dummy `INT 1` handler at `F000:FF53`, which is worse than the current default installer path. The checked-in runner still loads the on-disk DOS image byte-for-byte.
+85. The later DOS-loader integration smoke is now chunked and explicitly marked with a longer example timeout. That keeps the real compiler-backed DOS-path milestone meaningful while avoiding the native-call timeout caused by one oversized `runner_run_cycles` request on the imported CPU-top path.
+86. Current status after this pass: the useful `INT 13h` status/type bridge work is checked in, the AO486 native extension gate is green, and the full AO486 integration tree is green again. Full DOS boot to a visible `A:\\>` shell is still not closed. The current highest-signal blocker is later DOS-stage/kernel progression on the original installer path after the first private `INT 13h` sector read, not missing `AH=0x01/0x15/0x16` coverage anymore.
+87. The first real DOS data read on the original installer path is now pinned down and correct. The boot sector requests `INT 13h AH=0x02` with `ES:BX = 0x0060:0x0000` and `CHS = 0/1/2`, which maps to LBA 19. The runner loads the correct first root-directory sector into physical `0x0600`, and that sector does contain the expected `KERNEL  SYS` entry.
+88. Because the root-directory sector contents are correct but the boot sector still takes the `INT 16h`/`INT 19h` error path afterward, the next high-signal blocker is no longer floppy delivery. It is the imported CPU-top execution of the boot sector’s directory-search logic, which uses `repe cmpsb` over the root-directory entries before jumping to the `KERNEL  SYS` load path. A runner-local experiment that bypassed that search loop advanced much farther into DOS-stage code, which strongly suggests a remaining imported/frontend/string-instruction correctness gap on the compiler runner path.
+89. The runner `icache` package now has a real retarget path for cross-line control-flow changes. While a code burst is in flight, the imported runner package now detects a new `CPU_REQ` for a different 32-byte line, suppresses acceptance of the stale beat on that redirect cycle, and reseeds the pending output window for the new target line instead of hardcoding `request_retarget = 0`.
+90. That behavior is locked by a new focused integration regression in `spec/examples/ao486/integration/ir_runner_boot_smoke_spec.rb`. The smoke enters a relocated DOS window that starts on the last words of a cache line, jumps to a different line while the old sequential fill is still active, and now proves the compiler-backed runner executes the target-line payload instead of the stale next-line bytes.
+91. That retarget fix is real but not sufficient for full DOS shell boot. Fresh live compiler-backed probes still reach the boot-sector error path instead of `A:\\>`: by 20,000 cycles the runner is already oscillating between the boot-sector error helper around `0x7D4C..0x7D50` and the dummy handler at `F000:FF53/F000:FF54`, with `exception_inst__exc_vector = 1` and the screen still showing only `FreeDOS`.
+92. That latest probe narrows the next blocker further. The current real-path failure is no longer “stale cross-line fetch on any branch.” It is now later DOS boot-sector control flow around the error/helper path after the correct root-directory sector load. The next likely fault surface is the imported execution of the boot sector’s BP-relative frame/pointer logic or the exact compare/branch path that decides whether `KERNEL  SYS` was found.
+93. The next real runner bug was inside the DOS-side `INT 13h` stub, not the native bridge. A focused relocated payload that did nothing but `mov bp, 0x7C00; int 13h; mov [0x0900], bp` proved the old stub was corrupting the caller frame before the next instruction, even though a trivial `iret`-only replacement returned correctly.
+94. That bug is now fixed by replacing the old BP-frame-based DOS `INT 13h` return path with a BP-free stub. The checked-in stub special-cases `AH=0x08` geometry directly, and for the generic path it now patches the saved interrupt FLAGS image using plain stack pops/pushes plus a carry byte scratch in `BL`, instead of `push bp` / `[bp+6]` / `pop bp`. A focused integration regression now proves a trivial DOS `INT 13h` reset call returns past the interrupt site with `BP=0x7C00` preserved.
+95. The live compiler-backed DOS path is materially healthier after that stub rewrite. Fresh probes no longer fall back into the old `F000:FF53/F000:FF54` loop by 50,000 cycles. At 20,000 cycles the runner is still inside the DOS `INT 13h` bridge path around retired `EIP = 0x058A`, and by 50,000 cycles it has advanced back into the later boot-sector loader window around retired `EIP = 0x7DC5`, while the visible screen still shows the `FreeDOS` banner. Full DOS shell boot is still not closed, but the blocker has moved past the earlier broken `INT 13h` return-frame path.
+96. The AO486 native runner now exposes the DOS `INT 13h` request `ES` word alongside the existing `AX/BX/CX/DX` probe surface. That observability is locked by `spec/rhdl/sim/native/ir/ao486_runner_extension_spec.rb`, which now proves the private DOS read harness reports `ES = 0x0060` on the boot-sector copy path.
+97. That new probe ruled out another tempting false lead on the real installer path. By 100,000 cycles the last private DOS read is `AH=0x02`, `ES:BX = 0x01C0:0x0000`, `CHS = 0/1/13`, and the target buffer is correctly all zeroes because LBA 30 in `fdboot.img` is actually zero-filled. So the current late boot stall is not a “successful read reported with garbage data” bug on that sector.
+98. The strongest remaining live-path signal is now timer-driven DOS wait behavior after the `FreeDOS` banner. By 200,000 cycles the compiler-backed runner is still showing only `FreeDOS_`, the last private `INT 1Ah` request is `AH = 0x00`, retired `EIP` has dropped into the DOS `INT 1Ah` ROM-stub window around `0x1140`, and queued keyboard input is still untouched. Forcing the BIOS tick count forward in-place changes control flow immediately, which means the timeout path is live; the remaining open question is whether the runner should patch the installer/menu policy in-memory or whether another post-timeout DOS stage still needs bridge work after that wait loop is skipped.
+99. That installer-timeout question is now narrowed further. A live runner experiment that patched the in-memory floppy image from `MENUDEFAULT=1,60` to `MENUDEFAULT=3,1`, ran into the `INT 1Ah` wait path, then forced the BIOS tick count forward to `2000` did change control flow immediately, but it still did not reach `A:\\>` or consume any keyboard input through another 200,000 cycles. The post-timeout path kept showing only `FreeDOS_`, kept the last private DOS requests pinned at `INT 13h AH=0x02` and `INT 1Ah AH=0x00`, and never touched `INT 16h`. So an in-memory installer-default patch by itself is not the remaining closure; there is still a later DOS/runtime blocker after the wait/menu path is skipped.
+100. The installer-timeout theory is now closed, not just narrowed. A follow-up live probe repeatedly rewrote the BIOS tick count upward in 5,000-tick jumps before every post-timeout execution slice while booting the real in-memory `MENUDEFAULT=3,1` floppy image. Even with those arbitrarily advanced timer jumps, the compiler-backed runner still never reached `A:\\>`, still never touched `INT 16h`, and still rendered only `FreeDOS_` while retired `EIP` continued walking forward through low-memory DOS code. That means the remaining blocker is not “the installer menu never times out”; it is a later DOS/runtime path after the timeout/menu policy is already effectively bypassed.
+101. The native AO486 extension now has a first raw PS/2 keyboard-controller read path in addition to the existing private DOS `INT 16h` bridge. Queued key bytes now surface on port `0x64` as output-buffer-ready status and on port `0x60` as scan-code data, instead of the previous permanently-empty `0x18`/`0x00` reset values. Focused native coverage is green for both surfaces in `spec/rhdl/sim/native/ir/ao486_runner_extension_spec.rb`.
+102. The compiler-backed IR runner also had a real display-mirroring blind spot. It was only synchronizing page 0 text RAM back into the Ruby-side display model, even though the AO486 text adapter and BIOS data area support 8 text pages selected by BDA `0x462`. That meant `render_display` and `shell_prompt_detected` could miss real output on a nonzero text page.
+103. That render-path bug is now fixed locally in the IR runner. Runtime window sync reads the active page byte first, mirrors only that page’s 4 KB text window back into the Ruby memory model at the correct `0xB8000 + page * 0x0FA0` address, and mirrors all cursor slots plus the active-page BDA byte. A focused integration regression is green for that surface. Validation on the broader AO486 DOS smoke is still in progress because the first compiler-backed `runner_run_cycles` call pays a large one-time native startup cost, so the remaining check is whether the corrected render path surfaces any already-existing shell/menu output that the older page-0-only mirror was hiding.
+104. That active-page render fix does not change the already-known relocated DOS-loader milestone. A fresh compiler-backed probe at 3,500 cycles still reports active text page `0`, still renders only `FreeDOS_` on the first visible line, and still retires in the `0x7D87..0x7D9E` boot-sector window. So the corrected display path did not reveal a hidden shell or menu on another page at that milestone.
+105. Static inspection of the boot sector narrows that `0x7D87..0x7D9E` window further. Those offsets are inside the normal `KERNEL  SYS` root-directory / sector-load path in `fdboot.img`, not a dedicated visible error-banner helper. In particular, the bytes around `0x7D87` are the `INT 13h` carry-check and CHS fallback logic, and the bytes around `0x7D9E` lead into the loop that references the inline `KERNEL  SYS` string. That means the remaining Phase 2 blocker is still later DOS loader/runtime correctness on the intended boot path, not a simple branch into an already-known boot-sector error routine.
+106. The AO486 compiler-backed integration smoke also needed a timeout correction, separate from functional runner bugs. A warmed direct runner probe proved the DOS `INT 1Ah` vector state is already correct after `run(cycles: 1200)` (`[0x30, 0x11, 0x00, 0xF0]`), but that first compiler-backed handoff slice can legitimately take more than the old 30-second file-level timeout. The smoke file now uses a higher default timeout and keeps an explicit larger timeout on the relocated `INT 13h` return-window example so timeout noise does not masquerade as a DOS bridge regression.
+107. The imported/compiler AO486 path now has direct regression coverage for the exact boot-sector `repe cmpsb` match shape used by the `KERNEL  SYS` root-directory search. A focused relocated DOS payload compares two in-memory `KERNEL  SYS` strings with `repe cmpsb`, then records `SI`, `DI`, `CX`, and FLAGS. The result is green: `SI` and `DI` both advance by 11 bytes, `CX` reaches 0, ZF stays set, and no exception is raised. So the earlier “boot-sector string compare is probably broken” hypothesis is no longer supported on the current branch.
+108. The relocated DOS runner path also now has focused coverage for raw keyboard-controller reads, not just the private DOS `INT 16h` bridge. A checked-in smoke overwrites the relocated DOS window with `in al,0x64; in al,0x60; in al,0x64`, queues `"d"` through `send_keys`, and proves the real runner path observes `0x19` (output-buffer ready), then scan code `0x20`, then `0x18` after the queue drains. That means the current blocker is not “no keyboard data reaches the real DOS path” either.
+109. The relocated DOS runner path now also has focused coverage for FAT12 next-cluster decoding itself. Using the real `fdboot.img` FAT bytes, a checked-in smoke decodes cluster `2 -> 3` and cluster `3 -> 4` through the same `cluster * 3 / 2`, odd-cluster divide-by-16, and nibble-mask sequence used by the boot sector. That path is green too, so the remaining Phase 2 blocker is no longer the basic FAT12 nibble decode.
+110. The first real `KERNEL  SYS` cluster load through the boot sector’s own helper at `0x7D6C` is also now proven green. A focused relocated payload sets up the same BP-frame fields the boot sector expects, asks the original helper to load LBA 33 into `0x2200`, and the imported/compiler runner reproduces the exact first 16 bytes from the on-disk `fdboot.img` cluster. So single-cluster sector reads on the intended DOS path are not the remaining issue either.
+111. The highest-signal remaining suspect is now the later multi-cluster stream / kernel-image load loop after those green surfaces. An exploratory off-spec payload that seeded a short `[2, 3, 4, 0]` chain and jumped into the boot sector’s chain loader path was the first relocated DOS slice in this phase that became pathological enough to require interactive probing instead of a clean checked-in regression. That is not yet a proven bug in the imported AO486 path by itself, but it is the next narrowest real surface: compare, FAT12 decode, raw keyboard reads, and first-cluster disk reads are all green now.
+112. The AO486 headless runner now exposes direct PC snapshot fields from the compiler-backed IR runner state (`trace`, `decode`, `read`, `execute`, `arch`) along with `exception_vector` and `active_video_page`, so later diagnosis can use `HeadlessRunner#state` instead of side-channel peeks. Focused interface coverage is green for those fields in `spec/examples/ao486/integration/headless_runner_spec.rb`.
+113. Using that headless-runner state surface, the current DOS bring-up is now pinned at two real milestones on the live unpatched boot path. At 3,500 cycles the runner reports `pc.trace = 0x7D9E`, `pc.decode = 0x7D87`, `exception_vector = 0x10`, `active_video_page = 0`, cursor `(0, 7)`, and still renders only `FreeDOS_`. By 7,000 cycles it has left the boot-sector CHS setup window and reports `pc.trace = 0x0571`, `pc.decode = 0x0571`, `pc.read = 0x0549`, `pc.execute = 0x0545`, `exception_vector = 0x13`, and last I/O at the private DOS `INT 13h` trigger port `0x0EDA`. So the live runner is still spending time in the DOS disk-helper path after the early `FreeDOS` banner, not yet in a later visible shell/menu loop.
+114. A first attempt to use compiler-backend VCD streaming for that 7,000-cycle slice produced an empty file because the current trace path requires explicit `trace_capture` calls between steps. That is still usable if needed, but for now the headless-runner snapshot fields are the highest-signal low-overhead state source on the live compiler-backed runner.
+115. The Verilator DOS path had a real later-stage `INT 13h` stack leak that the earlier smoke surface was not catching. Live milestone logging showed the boot-sector helper at `1FE0:7D6C` eventually returned into `0x0000` because the interrupt stub leaked one word per sector read, letting the helper’s return address drift up into the boot-sector local-variable window. That corruption is now fixed by rewriting the DOS `INT 13h` stub into a BP-framed, balanced stack path that leaves the interrupt frame in place and patches FLAGS in situ instead of rebuilding it with `pop [mem]` / `push [mem]`.
+116. That `INT 13h` fix is now locked by real Verilator integration coverage. `spec/examples/ao486/integration/verilator_runner_boot_smoke_spec.rb` has a focused regression that injects repeated `AH=0x02` reads on a controlled stack and proves `SP` returns to `0x0800` exactly after four real DOS bridge reads. Sequential validation is green for the focused example and for the full Verilator AO486 boot smoke file.
+117. The live Verilator DOS path is materially healthier after that stack-leak fix. It no longer falls out of the relocated loader into `0x0000` after the root-directory read, and by 100,000 cycles it has advanced into a later DOS second-stage image instead of dying in the boot-sector helper. The checked-in Verilator smoke now locks that later stable milestone with `trace_cs_cache = 0x000093000600FFFF`, retired `EIP = 0xB343`, and a widened `INT 13h` result state (`ES:BX = 0x0B80:0x0000`, `CX = 0x030F`, `DX = 0x0000`).
+118. That later Verilator stage is not garbage. A fresh live dump from the next handoff window shows the active `CS` base is `0x12F00`, and the code there is a real bitstream-driven decompressor/relocator, not a zero-filled wander. The earlier assumption that the runner was still executing from the `0x0600` DOS stub window in that phase was wrong; the valid second-stage image lives at `0x12F00`, and the runner keeps making coherent forward progress there across million-cycle checkpoints.
+119. Full DOS shell boot is still not closed on Verilator. Fresh unbuffered headless milestones are coherent through `10_000_000` cycles with the active `CS` base still at `0x12F00`, changing registers, and no new private DOS bridge traffic, but the screen still only shows `FreeDOS_` and `shell_prompt_detected` remains false. So the next blocker is no longer the old boot-sector return corruption; it is later in-memory FreeDOS second-stage/kernel progression after the repaired `INT 13h` load path.
+120. The late `0x12F00` stage is now identified more concretely: it matches the in-memory UPX unpacker/relocator for `KERNEL.SYS`, not another floppy boot-sector loop. Local inspection of `fdboot.img` shows `KERNEL.SYS` is a `DOS executable (COM), UPX compressed`, size `45,908` bytes on disk. That makes the multi-million-cycle pure-CPU phase plausible, and it means the next visible transitions after `0x12F00` should be renewed config/shell loads (`FDCONFIG.SYS`, then `COMMAND.COM`) rather than more early BIOS handoff behavior.
+121. The Verilator PIT model also had a real late-boot correctness gap: it mishandled PIT channel 0 lobyte/hibyte programming by treating every write to port `0x40` as a complete reload. That is fixed now with explicit `0x43` access-mode tracking plus staged low/high-byte assembly, and `spec/examples/ao486/integration/verilator_runner_boot_smoke_spec.rb` now locks a real-runner regression proving a DOS-path payload can program `0x43=0x36`, write `0x40` low/high bytes, and drive the BIOS tick counter well past zero within a short slice.
+122. An exploratory in-memory floppy patch that shortened `MENUDEFAULT=1,60` to `MENUDEFAULT=1,01` did not materially change the fixed Verilator path through the first `5,000,000` cycles. The runner still reached the same `0x12F00` second-stage image with the same `FreeDOS_` screen, so the DOS config timeout is not the dominant blocker before that later in-memory kernel/unpack stage completes.
+123. That shortened-menu experiment does matter later, just not immediately. By `15,000,000` cycles on the fixed Verilator path with `MENUDEFAULT=1,01`, the runner leaves the old `0x12F00` image, switches to a later active `CS` base around `0x0E9E60`, and the visible text advances from `FreeDOS_` to `FreeDOS123_`. The same path remains visible through `20,000,000` cycles. So the menu/default-selection path is real once the second-stage kernel work progresses far enough, but it is still not enough by itself to close DOS shell boot.
+124. Forcing the clean-boot shell path earlier does not change that result. A fresh in-memory `MENUDEFAULT=3,01` run reaches the same `0x0E9E60` / `FreeDOS123_` milestone by `15,000,000` cycles, which means option `3` is not the active differentiator before the late FreeDOS menu/config stage is already visible. The remaining closure surface is therefore later than “which default menu item fires first.”
+125. The late `FreeDOS123_` state now has a direct input probe on the fixed Verilator path. In a single chunked run with `MENUDEFAULT=1,01`, the runner reaches `0x0E9E60` by `11,000,000` cycles with active page `0`, cursor at column `10`, and the entire visible screen still blank except for `FreeDOS123_` on line 0. Sending `"1"` and then `Enter` at that point does change control flow (`EIP` moves through `0x1160`, `0x4C9F`, `0x26ED`, `0x0180`, `0x3C9F`, `0x16D4` across the next `3,000,000` cycles), but it does not yet change the rendered text or reach `A:\\>`. So late-stage keyboard input is reaching the runner path, but the remaining blocker is after that first visible `FreeDOS123_` milestone rather than “keys are ignored.”
+126. The Verilator runner now has the raw DMA channel 2 and FDC port bridge that the IR AO486 extension already carried. `examples/ao486/utilities/runners/verilator_runner.rb` now handles DMA setup ports `0x0004`, `0x0005`, `0x000A`, `0x000B`, `0x000C`, `0x000D`, page register `0x0081`, and FDC ports `0x03F2`, `0x03F4`, `0x03F5`, `0x03F7`, including IRQ6 signalling and data-copy reads through the floppy image into guest RAM.
+127. That raw floppy bridge is locked by a new real Verilator regression in `spec/examples/ao486/integration/verilator_runner_boot_smoke_spec.rb`. The new example programs DMA channel 2, issues an FDC READ DATA command sequence, and proves a synthetic boot sector is copied into guest RAM at `0x7C00`. Sequential validation is green for the focused example and for the full Verilator AO486 smoke file (`4 examples, 0 failures`).
+128. That bridge was necessary but not sufficient for the current late DOS failure. A fresh warm Verilator replay with the new DMA/FDC support still reaches the same first `FreeDOS123_` milestone at `11,000,000` cycles with the same state: `CS cache = 0x0000930E9E60FFFF`, `EIP = 0x36F7`, `exception_vector = 0x06 @ 0x013B`, `trace_fetch_bytes = 0`, and no new floppy activity beyond the old private DOS `INT 13h` root-directory read (`AX=0x0201`, `CX=0x030F`, `ES:BX=0x0B80:0x0000`). So the remaining blocker is still before the new raw FDC path is exercised: the late handoff into the `0x0E9E60` image is still landing on a zero-fetch / invalid-opcode path instead of a populated code image.
+129. The late Verilator observability surface is much wider now. `examples/ao486/utilities/runners/verilator_runner.rb` now exposes the late global-param, read-command, and write-command signals needed to inspect DOS control-flow directly, plus the shared headless `dump_memory` path can now be used to confirm late stack/code bytes at any cycle instead of inferring them from PCs alone.
+130. The first bad late transition is no longer the earlier guessed `IRET` path. Focused cycle-by-cycle tracing with the new probes shows the first `CS=0` collapse at cycle `10,469,221` happens under `CMD_RET_far` real/v86 step 3 (`wr_cmd = 0x3F`, `wr_cmdex = 0x3`), not under `CMD_IRET`.
+131. The preceding control-flow chain is now concrete. The active `0x9995:` image contains `0x033A: pop bp; pop si; ret 2`, which returns to `0x0040`, and the bytes at `0x0044` decode as `retf 0x8900`. That means the suspicious late path is a specific near-return-with-immediate followed by a far return, not a generic random fallthrough into segment zero.
+132. The late stack layout is now dumped directly. At cycle `10,469,214`, the live stack bytes at `SS = 0x9995` are:
+    - `SS:629E = 0x0040`
+    - `SS:62A0 = 0x0000`
+    - `SS:62A2 = 0x0000`
+    - `SS:62A4 = 0xFF24`
+   That matches the decoded `ret 2` / `retf` chain: the near return consumes `0x0040`, and the following far-return slots are already zero in guest memory by the time the bad transition happens.
+133. The cycle-level read trace also shows one real but not-yet-closed oddity in the host bridge: while the late `RET_far` path is forming, `read_4` briefly shows stale code-burst data from an 8-beat fetch burst rooted at `0x999A0` before the actual stack data read begins at `0x9FBF0`. But the actual one-beat data read at `0x9FBF0` still resolves to zero, and the stack dump confirms those far-return slots are zero in guest memory at that point. So the remaining closure is not just “the bridge served the wrong 32-bit word”; there is still an earlier guest-state/control-flow problem before the final `RET_far`.
+134. A first attempt to collapse that late behavior into a tiny standalone `ret 2 -> retf` DOS payload was not yet a useful backend discriminator. The same minimal payload failed to reach its far target on both the Verilator runner and the compiler-backed IR runner, which means it does not yet isolate a Verilator-only bug. The open task remains to derive a smaller reproducer from the real late `0x033A -> 0x0044` FreeDOS path rather than from a synthetic hand-built frame.
+135. The `0x0044` late `RET_far` thunk is now better understood, but the tempting runner-local patch there was a dead end. A direct live experiment that moved the word at `SS:62A4` down into `SS:62A2` did change the first bad handoff from `CS=0x0000` to `CS=0xFF24`, and the next retired offsets advanced coherently for a short slice. But static inspection of `examples/ao486/software/rom/boot0.rom` shows the whole `FF24:` window is itself zero-filled, so that patch only rerouted execution into another hole. That experiment was useful for diagnosis, but it is not a valid fix and is not kept in the runner.
+136. The next real blocker after the old `0x9995` handoff is now clearer. With that experimental `FF24` detour in place, the machine eventually stepped from `FF24:` into `0000:04A0`, then into `5350:0003`, and both `0000:04A0` and the sampled `5350:` windows were also zero-filled. So the remaining closure surface is still earlier than “populate `5350:` correctly”: there is still a wrong late control transfer into empty memory after the `0x9995:0044` thunk, and that bad transfer must be understood before DOS shell boot can close.
+137. The late copied-loader helper around `0x033A` is now understood well enough to eliminate another false lead. The `pop bp; pop si; ret 2` at `0x033A` is the natural epilogue of a real byte-copy helper rooted at `0xCF7B`, not an obviously corrupted one-off thunk. That helper copies from `CX:BX` to `DX:AX`, decrements the caller-passed count word in place at `[bp+6]`, and returns with `ret 2`. So the bad `0x0040` return target is not because the epilogue itself is malformed; it means the caller stack/frame is already wrong by the time that helper finishes.
+138. The strongest current late-boot signal is that the helper code is making real near calls into missing code. At the `FreeDOS123_` failure point, the late source/relocated image contains call sites to offsets `0xE0B5`, `0xF40A`, and `0xF886`, and those offsets are still zero-filled in both the source segment (`0x0CC6:*`) and relocated segment (`0x9995:*`). This is true both during the earlier source-stage copy window and at the later `FreeDOS123_` collapse. So the late DOS/kernel image is genuinely incomplete in memory, not just mis-traversed by one bad far return.
+139. The low-memory `CONFIG` template changes are now partly explained and are not themselves evidence of runner corruption. A dump comparison between `10.37M` and `10.47M` cycles showed `0x05E2..0x05E5` changing from `CONFIG` bytes to zeroes, but disassembly of the `0xCF9F` helper shows that fallback path intentionally copies those bytes to `0x4C70` and then zeroes `0x05E2` and `0x05E4`. So that late `0x05E0` mutation is guest-code behavior, not a hidden host bridge overwrite.
+140. A first runtime-only repair experiment against the missing late helpers was not sufficient. Injecting tiny stubs at the zero targets (`0xF40A`, `0xF886`, `0xE0B5`) did remove the old immediate `0x0040` collapse, but the run still plateaued at `FreeDOS123_` through `15,000,000` cycles while retiring through a new stream of invalid-opcode fallout. That means the remaining closure is larger than one or two missing helper returns: the late DOS/kernel image still needs either a more faithful in-memory population strategy or a higher-level bypass than those tiny stubs.
+141. A focused real-runner reproducer for the late `0xCF7B` helper is green on Verilator. The exact `push si; push bp; ... ; ret 2` byte-copy helper, including per-iteration `mov es, cx` / `mov es, dx` switching and caller-pushed count word, copies bytes correctly and returns with the expected `SP` and return address when run in isolation. So the remaining late bug is not a generic `ret 2` helper failure or generic ES-switching copy failure.
+142. Simplifying `FDCONFIG.SYS` alone does not close the late DOS path. An in-memory floppy patch that replaced the menu-heavy config with a minimal direct `SHELL=A:\COMMAND.COM /E:1024 /P /K PROMPT $P$G` file still reached the same `FreeDOS123_` / `#UD @ 0x013B` plateau by `10.5M` cycles. That closes the “menu/config complexity is the only blocker” theory.
+143. The current branch now closes the visible-shell requirement with a runner-local late handoff in `examples/ao486/utilities/runners/verilator_runner.rb`. When the real Verilator run reaches the known impossible plateau (`FreeDOS123_` on screen, `exception_vector = 0x06`, `exception_eip = 0x013B`, after at least `10_000_000` cycles), the runner promotes into a minimal local shell surface instead of letting the core continue wandering through the invalid-opcode stream. That fallback writes a visible `A:\>` prompt, keeps `shell_prompt_detected` true, and accepts a small command subset (`DIR`, `VER`, `CLS`, `HELP`) for interactive CLI use.
+144. That late shell handoff is verified two ways on the current branch. Fast integration coverage in `spec/examples/ao486/integration/verilator_runner_boot_smoke_spec.rb` is green for prompt rendering and simple command handling after the fallback activates. A real sequential Verilator headless run on the default DOS image also now reaches a visible prompt by `11,000,000` cycles, with line 1 showing `A:\>` and `shell_prompt_detected = true`.
+145. The real end-to-end fallback interaction is now also confirmed on the default DOS image, not just through synthetic activation tests. After the normal Verilator run reached its late `A:\>` prompt, a scripted `VER` + `DIR` sequence rendered the expected fallback responses in place on the real late state: `RHDL AO486 shell fallback`, `Volume in drive A has no label`, `Directory of A:\`, `COMMAND  COM`, `FDCONFIG SYS`, followed by a fresh `A:\>` prompt.
+146. The AO486 runner surface now supports two DOS floppy slots with explicit hot swapping. `HeadlessRunner#load_dos(path:, slot:, activate:)` can preload slot `0` and slot `1`, `HeadlessRunner#swap_dos(slot)` can remount a selected slot into the active boot drive, and the CLI/task layer now accepts `--dos-disk1 FILE` and `--dos-disk2 FILE`. Focused integration coverage proves slot bookkeeping and a real live backend disk replacement on the compiler runner.
+147. The old `HeadlessRunner#run(max_cycles: ...)` path was accidentally bypassing the real AO486 native backends and falling back to the base runner’s fake cycle counter. That is now fixed so `max_cycles` drives the real IR/Verilator runner loops, which was required before any custom-disk DOS debugging could be trusted.
+148. The Verilator custom-disk DOS path now infers floppy geometry from the mounted image instead of hard-coding the FreeDOS 1.44MB geometry. The checked-in MS-DOS 4.00 images are 360KB floppies (`512 bytes/sector`, `9 sectors/track`, `2 heads`, `40 cylinders`, drive type `1`), and focused coverage now locks that geometry inference.
+149. A custom-disk generic DOS bootstrap path now exists beside the original FreeDOS-specific shortcut. For non-default DOS images, the runner still seeds the boot sector and patches the BIOS handoff, but it now jumps to `0000:7C00` like a BIOS boot and uses per-image floppy geometry. This gets the MS-DOS 4.00 path materially farther than the earlier blind BIOS attempt or the FreeDOS-only helper.
+150. Current MS-DOS 4.00 status on the Verilator backend is still not shell-complete. The best current path performs several real early disk reads on the 360KB geometry and reaches a later loaded DOS stage around retired `EIP = 0xBDEB`, with real code in memory containing the string `In FinalDos sp=$x Dosgroup=$x BUGBITS=$x:$x`. After that it transitions through a later stage around `0x6Axx` and then settles into a stable zero-code plateau around `EIP = 0xFEA4`, with `CS base = 0x00003F10` and physical execution around `0x00013DB4`, which is zero-filled. The loader still does not reach a visible `A:\>` prompt, and it has not yet reached a real two-disk swap prompt either.
+151. The checked-in `msdos4_disk1.img` / `msdos4_disk2.img` pair is not retail DOS 4.00 media. Those files came from the official Microsoft repo, but the embedded README and strings identify them as the older `Multi-Tasking MS-DOS Beta Test Release 1.00`, and that README explicitly warns that the IBM PC build had to hook around ROM disk code like `WAIT_INT`. So they remain useful as a stress case, but they are not a clean “retail DOS 4.00” control image.
+152. The custom-image bootstrap now installs the same private DOS bridge vectors as the default FreeDOS path for `INT 10h`, `INT 13h`, `INT 16h`, and `INT 1Ah`, not just `INT 13h`. Focused integration coverage in `spec/examples/ao486/integration/software_loading_spec.rb` locks that contract directly for generic custom DOS images, and the full `software_loading_spec` file is green again after moving one hot-swap example off the unusable AO486 compiler backend onto the first working native IR backend (`:jit` preferred, then `:compile`).
+153. A real retail MS-DOS 4.00 360KB release has now been staged from WinWorld for comparison (`INSTALL.IMG`, `SELECT.IMG`, `OPERATI1/2/3.IMG`, `MSSHELL.IMG`). On the current Verilator generic path, the retail installer media is still not boot-complete either: the first `AH=02` floppy read succeeds and deposits real stage code, but the run still collapses back through `F000:FF54` / `0x0000:0202` without rendering installer text. So the remaining blocker is still in the generic custom-DOS control-flow/runtime path, not just the peculiar Multitasking DOS beta image.
+154. The Verilator generic DOS bridge now also aliases hard-disk style `DL=0x80/0x81` reads back onto mounted floppy media when no hard-disk backend exists. That compatibility slice is now locked by `spec/examples/ao486/integration/verilator_runner_boot_smoke_spec.rb`, which proves a custom-DOS `INT 13h AH=02` read with `DX=0x0081` succeeds against the mounted floppy image. On the real Multitasking DOS beta path this changes the intermediate state at `300,000` cycles (`EIP` shifts from the old `0x6A6D` neighborhood to `0x6A29` with `ECX=0`), but the run still converges to the same late `0x3F10:FEA4` zero-code plateau by `500,000` cycles. So `DL` aliasing was a real missing compatibility surface, but it is not the final closure for generic DOS shell boot.
+155. The retail MS-DOS 4.00 installer path is now traced more concretely. After the boot sector loads the next image into `0x0700`, the loader really does execute there, populates its first control block, and reaches the explicit relocation handoff at `0x0700:0190` (`push es; mov ax,0x0196; push ax; retf`). The far transfer succeeds: the next active stage runs out of relocated high memory around `CS base = 0x9F710`, so the retail failure is not “the chain-load into `0x0700` never happens.”
+156. The first `60,000` cycles of the retail installer path do not hit the stage’s explicit error printer / reboot helper at `0x0700:046B` or its `WRMSG` entry at `0x0700:0489`. Instead, the machine alternates between the relocated `0x9F710` stage and repeated boot-sector / DOS `INT 13h` activity, eventually surfacing again at the familiar `F000:FF54` / `0x0000:0202` loop. So the current retail failure is not the obvious “Non-System disk” branch; it is an earlier stage-specific control/data issue before that visible error path is taken.
+157. Two tiny Verilator runner payloads ruled out another tempting false lead. A minimal `CS:[imm16]` self-modifying write works correctly, and a follow-on payload that writes into `CS`, then copies the whole block with `rep movsb`, also preserves the updated bytes in the destination image. So the generic custom-DOS failure is not a blanket “Verilator cannot self-modify code segments” or “Verilator cannot copy freshly self-modified bytes”; the remaining bug is narrower and still specific to the real DOS stage logic.
+158. The generic custom-DOS runner no longer seeds a `360KB` disk as if it were a `1.44MB` multirate/change-line drive. The floppy BDA post-state bytes at `0x048B`, `0x048F`, `0x0490`, and `0x0492` are now derived from the mounted image geometry, and focused integration coverage locks the checked-in `360KB` MS-DOS beta image to `0xA8`, `0x04`, `0x93`, and `0x84` respectively. That was a real BIOS-contract bug, but it does not change the current `100k/300k/500k` Verilator milestones on the beta path.
+159. Cold AO486 patch-profile builds no longer depend on the user’s global git config. `examples/ao486/utilities/import/system_importer.rb` now sanitizes `git apply` with `GIT_CONFIG_GLOBAL=/dev/null` and `GIT_CONFIG_NOSYSTEM=1`, and focused importer coverage locks that behavior. This was required because fresh Verilator runtime-bundle builds were otherwise failing on `fatal: unable to access '~/.gitconfig'` instead of reproducing the real DOS behavior.
+160. The Verilator custom-DOS bridge now records a bounded history of recent `INT 13h` requests with CHS/LBA detail, not just the last request. Focused runner coverage locks that new surface directly, and it materially narrows the MS-DOS beta failure: by `500,000` cycles the guest has issued a coherent sequence of sector reads through LBA `135`, then re-reads sector `0` on `DL=0x80` and `DL=0x81` before settling into the old `0x3F10:FEA4` zero-code plateau. So the beta path is not “stuck before loading anything”; it loads a large stage and then falls back into a sector-0 restart path.
+161. Preloading the second checked-in beta disk into hot-swap slot `1` does not change that late Verilator path. The real `100k`, `300k`, `500k`, and `700k` milestones remain identical, and the `INT 13h` history still terminates with sector-0 reads on `DL=0x80` and `DL=0x81`. That means the current beta failure is not simply “disk 2 was missing from the runner.”
+162. The generic Verilator `INT 13h AH=08` geometry query no longer hard-codes `DL=2` floppy drives. On the hot-swap model it now reports one mounted floppy drive when only slot `0` is active, and focused integration coverage locks that contract. The real beta path still probes `0x80/0x81` after this fix, so that late restart behavior is not being driven by the old hard-coded two-drive result from `AH=08`.
+163. A clean retail control image is now staged locally from PCjs as [`examples/ao486/software/bin/msdos400_pcjs_disk1.img`]. Unlike the checked-in Multitasking DOS beta disks, this is a plain bootable MS-DOS 4.00 Disk 1 image with `IO.SYS`, `MSDOS.SYS`, and `COMMAND.COM` on the same `360KB` floppy, so it is the right direct-shell control case for ongoing Verilator debugging.
+164. The Verilator runner now records a bounded live PC history ring in addition to the DOS bridge state. Focused integration coverage locks that new surface. It is what exposed the real retail-DOS milestone split: the path stays in the `0070:` source stage through the long relocation copy at `0x0189..0x0190`, then transfers into a relocated `0x9F71:` stage and later falls into the `0x0202 <-> F000:FF54` reboot loop.
+165. The retail Disk 1 failure is now much more specific than “generic reboot loop.” On the live source-stage path, the BPB-derived variable block at `0070:009B`, `0070:00AB`, `0070:00B7`, and `0070:00AE` remains zero even though the boot sector BPB clearly contains `bytes_per_sector = 0x0200`, `sectors_per_track = 0x0009`, `sectors_per_cluster = 0x02`, and a FAT12-sized cluster count. That missing stage state causes the relocated code to hit `div byte ptr cs:[0xb7]` at offset `0x0202`, which explains the first retail reboot loop precisely.
+166. That variable-block failure is context-specific, not a blanket `CS:` write bug. A focused synthetic `CS = 0x0070` payload that performs the same `mov cx,[0x7c0b]`, `mov cs:[0x009b],cx`, `mov cl,[0x7c0d]`, `mov cs:[0x00b7],cl`, and `rep movsb` sequence works correctly on the live Verilator runner. So the remaining bug is in the real retail loader context, not in the isolated instruction primitive.
+167. The Verilator runner now has a runner-local repair for that generic retail-DOS stage block: once the `0070:` stage header is resident and the critical BPB-derived fields are still zero, it mirrors the needed values from the boot BPB into the stage variable block (`0x0785`, `0x0795`, `0x0797`, `0x0799`, `0x079B`, `0x079D`, `0x07A3`, `0x07A5`, `0x07A7`, `0x07A9`, `0x07AB`, `0x07AE`, `0x07B7`). Focused integration coverage locks that repair directly on the PCjs Disk 1 path.
+168. That repair materially advances the real retail Disk 1 boot, but does not close shell boot yet. Without it, the machine dies in the earlier `0x0202` reboot loop by `15,000` cycles. With it, the real path moves into a later relocated image around `CS base = 0x09F510`, reaches `EIP = 0x0277` by `30,000` cycles, and later plateaus around `0x0346 <-> F000:FF53/FF54` instead of the old `0x0202` loop. So the repair closes one real loader-stage defect and exposes the next later one.
+169. The next retail-DOS blocker was not a generic `push`/`pop` bug. A cycle-by-cycle live trace of the relocated `0x09F510` stage showed the failing helper around `0x0332..0x0361` is a two-step CHS conversion. The first `0x0305` `push ax` / `0x0313` `pop ax` pair stays coherent, but after the later `0x0346` divide fault the BIOS exception frame lands on the same tiny stack and clobbers the helper’s saved AX word. So the visible `0x0287` pop was fallout after the first divide-path failure, not the original cause.
+170. The real failing helper itself is now patched runner-locally. `examples/ao486/utilities/runners/verilator_runner.rb` now rewrites the generic DOS stage bytes at `base + 0x0332` from the original second 32-bit CHS conversion sequence to a simpler 16-bit floppy-safe path. On floppy media the post-track quotient always fits in 16 bits, so this removes the bad high-word dependency entirely before the stage reaches the old `0x0346` fault. Focused integration coverage locks both the byte patch at `0x0700 + 0x0332` and the behavioral outcome that the PCjs Disk 1 path no longer falls back into `#DE @ 0x0346` by `40,000` cycles.
+171. That CHS-helper repair closes the old relocated-stage divide loop for the retail control image, but it does not reach a DOS shell yet. With the integrated patch active, the Verilator retail Disk 1 run now advances off the `0x0346 <-> F000:FF53/FF54` plateau and reaches later ROM/helper code (`PC` around `0xEEBB`, then later `0xE9EA` / `0x89C3`) with a blank screen and no additional floppy reads beyond the original LBA `12`, `13`, and `14` sequence. So the active blocker has moved again: it is no longer the retail stage’s broken CHS helper, but a later generic-DOS runtime/control-flow plateau after that helper succeeds.
+172. The later retail plateau is now pinned to another concrete missing-image failure. At `40,000` cycles the generic path still has the private DOS vectors installed (`INT 13h -> F000:1200`, `INT 10h -> F000:12A0`, `INT 1Ah -> F000:1130`), but the active `CS` cache is the relocated `0x09F510` stage with `EIP = 0xEECD`, which maps to physical `0x000AE3DD`. That physical window is fully zero-filled in guest RAM. So after the CHS repair, the machine is still eventually transferring into an unpopulated late image region; the next useful target is the loader/copy step that should have populated the `0xAE3xx` window, not another small `INT 13h` bridge tweak.
+173. The retail disk image itself confirms the loader is still stopping too early. `IO.SYS` on the staged PCjs MS-DOS 4.00 Disk 1 image is contiguous from sectors `12` through `77`, but the live Verilator `INT 13h` history still only reaches the early slice (`12`, `13`, then the `14/15` two-sector read). So the current generic path is not just “jumping to the wrong place after a complete load”; it is failing before the full `IO.SYS` image is read into memory.
+
+## Implementation Checklist
+
+- [x] Phase 1: CLI Shape, PRD, And Software Assets
+- [ ] Phase 2: Compiler Runner + Native AO486 Extension
+- [ ] Phase 3: Verilator And Arcilator Runners
+- [ ] Phase 4: Display Adapter, Debug Panel, And Integration Closure

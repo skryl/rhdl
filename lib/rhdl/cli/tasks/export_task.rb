@@ -8,6 +8,9 @@ module RHDL
     module Tasks
       # Task for exporting HDL components to Verilog
       class ExportTask < Task
+        CIRCT_TOOLING_BACKEND = 'circt_tooling'
+        VALID_BACKENDS = [CIRCT_TOOLING_BACKEND].freeze
+
         def run
           if options[:clean]
             clean
@@ -28,7 +31,7 @@ module RHDL
           # Export lib components
           if %w[all lib].include?(options[:scope] || 'all')
             puts "Exporting lib/ components..."
-            components = RHDL::Export.list_components
+            components = RHDL::Codegen.list_components
 
             components.each do |info|
               component = info[:class]
@@ -36,8 +39,7 @@ module RHDL
 
               begin
                 verilog_file = File.join(Config.verilog_dir, "#{relative_path}.v")
-                ensure_dir(File.dirname(verilog_file))
-                File.write(verilog_file, component.to_verilog)
+                write_component_verilog(component, verilog_file)
                 puts_ok(component.name)
                 exported_count += 1
               rescue => e
@@ -56,8 +58,7 @@ module RHDL
                 component = class_name.split('::').inject(Object) { |o, c| o.const_get(c) }
 
                 verilog_file = File.join(Config.verilog_dir, "#{relative_path}.v")
-                ensure_dir(File.dirname(verilog_file))
-                File.write(verilog_file, component.to_verilog)
+                write_component_verilog(component, verilog_file)
                 puts_ok(class_name)
                 exported_count += 1
               rescue => e
@@ -90,7 +91,7 @@ module RHDL
 
           top_name = options[:top] || component_class.name.split("::").last.underscore
           output_path = File.join(out_dir, "#{top_name}.v")
-          RHDL::Export.write_verilog(component_class, path: output_path, top_name: options[:top])
+          write_component_verilog(component_class, output_path, top_name: options[:top])
 
           puts "Wrote #{lang} to #{out_dir}"
         end
@@ -102,6 +103,41 @@ module RHDL
             FileUtils.rmdir(d) if File.directory?(d) && Dir.empty?(d)
           end
           puts "Cleaned: #{Config.verilog_dir}"
+        end
+
+        private
+
+        def write_component_verilog(component_class, path, top_name: nil)
+          verilog = generate_component_verilog(component_class, top_name: top_name)
+          ensure_dir(File.dirname(path))
+          File.write(path, verilog)
+        end
+
+        def generate_component_verilog(component_class, top_name: nil)
+          unless export_backend == CIRCT_TOOLING_BACKEND
+            raise ArgumentError,
+                  "Unknown export backend: #{export_backend.inspect}. Expected one of: #{VALID_BACKENDS.join(', ')}"
+          end
+
+          RHDL::Codegen.verilog_via_circt(
+            component_class,
+            top_name: top_name,
+            tool: export_tool,
+            extra_args: export_tool_args
+          )
+        end
+
+        def export_backend
+          value = options[:backend]
+          value.nil? || value.to_s.strip.empty? ? CIRCT_TOOLING_BACKEND : value.to_s
+        end
+
+        def export_tool
+          options[:tool] || RHDL::Codegen::CIRCT::Tooling::DEFAULT_VERILOG_EXPORT_TOOL
+        end
+
+        def export_tool_args
+          Array(options[:tool_args])
         end
       end
     end

@@ -11,6 +11,8 @@ RSpec.describe 'RISC-V HDL Runners' do
     if @verilator_available || @arcilator_available
       require_relative '../../../../examples/riscv/utilities/runners/headless_runner'
       require_relative '../../../../examples/riscv/utilities/assembler'
+      require_relative '../../../../examples/riscv/utilities/runners/verilator_runner' if @verilator_available
+      require_relative '../../../../examples/riscv/utilities/runners/arcilator_runner' if @arcilator_available
     end
   end
 
@@ -42,6 +44,18 @@ RSpec.describe 'RISC-V HDL Runners' do
           "Missing method: #{method}"
       end
     end
+
+    it 'rejects native libraries that do not expose the standardized RISC-V runner ABI' do
+      skip 'Verilator not available' unless @verilator_available
+
+      runner = RHDL::Examples::RISCV::VerilogRunner.allocate
+      sim = instance_double('Sim', runner_supported?: false, close: true)
+
+      expect(sim).to receive(:close)
+      expect do
+        runner.send(:ensure_runner_abi!, sim, expected_kind: :riscv, backend_label: 'RISC-V Verilator')
+      end.to raise_error(RuntimeError, /runner ABI/)
+    end
   end
 
   describe 'ArcilatorRunner' do
@@ -72,6 +86,18 @@ RSpec.describe 'RISC-V HDL Runners' do
           "Missing method: #{method}"
       end
     end
+
+    it 'rejects native libraries with the wrong runner kind' do
+      skip 'Arcilator not available' unless @arcilator_available
+
+      runner = RHDL::Examples::RISCV::ArcilatorRunner.allocate
+      sim = instance_double('Sim', runner_supported?: true, runner_kind: :apple2, close: true)
+
+      expect(sim).to receive(:close)
+      expect do
+        runner.send(:ensure_runner_abi!, sim, expected_kind: :riscv, backend_label: 'RISC-V Arcilator')
+      end.to raise_error(RuntimeError, /expected :riscv/i)
+    end
   end
 
   describe 'HeadlessRunner integration' do
@@ -97,6 +123,23 @@ RSpec.describe 'RISC-V HDL Runners' do
       expect(runner.cpu.simulator_type).to eq(:hdl_arcilator)
     rescue LoadError, RuntimeError => e
       skip "Arcilator backend unavailable: #{e.message}"
+    end
+
+    it 'exposes the native sim object uniformly when the backend has one' do
+      skip 'Arcilator not available' unless @arcilator_available
+
+      fake_sim = instance_double('Sim')
+      fake_cpu = instance_double(
+        'RHDL::Examples::RISCV::ArcilatorRunner',
+        native?: true,
+        simulator_type: :hdl_arcilator,
+        backend: :arcilator,
+        sim: fake_sim
+      )
+      allow(RHDL::Examples::RISCV::ArcilatorRunner).to receive(:new).and_return(fake_cpu)
+
+      runner = RHDL::Examples::RISCV::HeadlessRunner.new(mode: :circt)
+      expect(runner.sim).to eq(fake_sim)
     end
 
     it 'creates ruby-backed runner' do

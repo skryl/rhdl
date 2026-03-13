@@ -19,10 +19,6 @@ module RHDL
       REG_A = 0
       REG_X = 1
       REG_Y = 2
-
-      # Aliases for backward compatibility
-      StackPointer6502 = StackPointer
-      ProgramCounter6502 = ProgramCounter
     end
   end
 end

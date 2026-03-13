@@ -488,8 +488,12 @@ module RHDL
       def sequential_block(seq)
         lines = []
         if seq.reset
-          lines << "  always @(posedge #{sanitize(seq.clock)} or posedge #{sanitize(seq.reset)}) begin"
-          lines << "    if (#{sanitize(seq.reset)}) begin"
+          active_low_reset = RHDL::DSL::Sequential.active_low_reset_name?(seq.reset)
+          reset_edge = active_low_reset ? 'negedge' : 'posedge'
+          reset_condition = active_low_reset ? "!#{sanitize(seq.reset)}" : sanitize(seq.reset)
+
+          lines << "  always @(posedge #{sanitize(seq.clock)} or #{reset_edge} #{sanitize(seq.reset)}) begin"
+          lines << "    if (#{reset_condition}) begin"
           seq.reset_values.each do |name, value|
             lines << "      #{sanitize(name)} <= #{literal(value, 8)};"
           end

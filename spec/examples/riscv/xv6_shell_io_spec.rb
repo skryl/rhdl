@@ -112,11 +112,11 @@ RSpec.shared_examples 'xv6 shell UART I/O' do |pipeline:, backend_id:, boot_cycl
   it description, :slow, timeout: timeout_seconds do
     case backend_id
     when :jit
-      skip 'IR JIT not available' unless RHDL::Codegen::IR::IR_JIT_AVAILABLE
+      skip 'IR JIT not available' unless RHDL::Sim::Native::IR::JIT_AVAILABLE
     when :compiler
-      skip 'IR Compiler not available' unless RHDL::Codegen::IR::IR_COMPILER_AVAILABLE
+      skip 'IR Compiler not available' unless RHDL::Sim::Native::IR::COMPILER_AVAILABLE
     when :compiler_aot
-      skip 'IR Compiler not available' unless RHDL::Codegen::IR::IR_COMPILER_AVAILABLE
+      skip 'IR Compiler not available' unless RHDL::Sim::Native::IR::COMPILER_AVAILABLE
       skip "IR compiler AOT mode not enabled (set #{AOT_COMPILER_ENV_FLAG}=1 and build ir_compiler with --features aot)" unless ENV[AOT_COMPILER_ENV_FLAG] == '1'
     when :verilator
       skip 'Verilator not available' unless HdlToolchain.verilator_available?
@@ -177,7 +177,7 @@ RSpec.describe RHDL::Examples::RISCV::IRHarness do
   XV6_SINGLE_BACKEND_CASES.each do |test_case|
     context "backend #{test_case[:id]}" do
       let(:backend) { test_case[:harness_backend] }
-      let(:cpu) { described_class.new(mem_size: 4096, backend: backend, allow_fallback: false) }
+      let(:cpu) { described_class.new(mem_size: 4096, backend: backend) }
 
       include_examples 'xv6 shell UART I/O',
                        pipeline: false,
@@ -195,7 +195,7 @@ RSpec.describe RHDL::Examples::RISCV::Pipeline::IRHarness do
   XV6_PIPELINE_BACKEND_CASES.each do |test_case|
     context "backend #{test_case[:id]}" do
       let(:backend) { test_case[:harness_backend] }
-      let(:cpu) { described_class.new("xv6_shell_pipeline_#{backend}", backend: backend, allow_fallback: false) }
+      let(:cpu) { described_class.new("xv6_shell_pipeline_#{backend}", backend: backend) }
 
       include_examples 'xv6 shell UART I/O',
                        pipeline: true,

@@ -23,7 +23,7 @@ module RHDL
         # Export all components to gate-level IR
         def export_all
           require 'rhdl/hdl'
-          require 'rhdl/export'
+          require 'rhdl/codegen'
 
           puts_header("RHDL Gate-Level Synthesis Export")
 
@@ -38,7 +38,7 @@ module RHDL
               subdir = File.dirname(name)
               ensure_dir(File.join(Config.gates_dir, subdir))
 
-              ir = RHDL::Export::Structure::Lower.from_components([component], name: component.name)
+              ir = RHDL::Codegen::Netlist::Lower.from_components([component], name: component.name)
 
               # Export to JSON
               json_file = File.join(Config.gates_dir, "#{name}.json")
@@ -66,7 +66,7 @@ module RHDL
         # Export SimCPU datapath components
         def export_simcpu
           require 'rhdl/hdl'
-          require 'rhdl/export'
+          require 'rhdl/codegen'
 
           puts_header("RHDL SimCPU Gate-Level Export")
 
@@ -89,7 +89,7 @@ module RHDL
             total_dffs = 0
 
             components.each do |name, component|
-              ir = RHDL::Export::Structure::Lower.from_components([component], name: component.name)
+              ir = RHDL::Codegen::Netlist::Lower.from_components([component], name: component.name)
               json_file = File.join(Config.gates_dir, "#{name}.json")
               File.write(json_file, ir.to_json)
               puts "  [OK] #{name}: #{ir.gates.length} gates, #{ir.dffs.length} DFFs"
@@ -110,7 +110,7 @@ module RHDL
         # Show gate-level synthesis statistics
         def show_stats
           require 'rhdl/hdl'
-          require 'rhdl/export'
+          require 'rhdl/codegen'
 
           puts_header("RHDL Gate-Level Synthesis Statistics")
 
@@ -121,7 +121,7 @@ module RHDL
           Config.gate_synth_components.each do |name, creator|
             begin
               component = creator.call
-              ir = RHDL::Export::Structure::Lower.from_components([component], name: component.name)
+              ir = RHDL::Codegen::Netlist::Lower.from_components([component], name: component.name)
               component_stats << {
                 name: name,
                 gates: ir.gates.length,

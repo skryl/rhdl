@@ -34,8 +34,8 @@ RSpec.describe RHDL::HDL::HalfAdder do
     end
 
     it 'generates valid IR' do
-      ir = RHDL::HDL::HalfAdder.to_ir
-      expect(ir).to be_a(RHDL::Export::IR::ModuleDef)
+      ir = RHDL::HDL::HalfAdder.to_flat_circt_nodes
+      expect(ir).to be_a(RHDL::Codegen::CIRCT::IR::ModuleOp)
       expect(ir.ports.length).to eq(4)  # a, b, sum, cout
       expect(ir.assigns.length).to be >= 2
     end
@@ -51,14 +51,14 @@ RSpec.describe RHDL::HDL::HalfAdder do
       expect(verilog).to include('assign cout')
     end
 
-    it 'generates valid FIRRTL' do
-      firrtl = RHDL::HDL::HalfAdder.to_circt
-      expect(firrtl).to include('FIRRTL version')
-      expect(firrtl).to include('circuit half_adder')
-      expect(firrtl).to include('input a')
-      expect(firrtl).to include('input b')
-      expect(firrtl).to include('output sum')
-      expect(firrtl).to include('output cout')
+    it 'generates valid CIRCT MLIR' do
+      mlir = RHDL::HDL::HalfAdder.to_circt
+      expect(mlir).to include('hw.output')
+      expect(mlir).to include('hw.module @half_adder')
+      expect(mlir).to include('%a:')
+      expect(mlir).to include('%b:')
+      expect(mlir).to include('sum:')
+      expect(mlir).to include('cout:')
     end
 
     context 'CIRCT firtool validation', if: HdlToolchain.firtool_available? && HdlToolchain.iverilog_available? do
@@ -132,7 +132,7 @@ RSpec.describe RHDL::HDL::HalfAdder do
 
   describe 'gate-level netlist' do
     let(:component) { RHDL::HDL::HalfAdder.new('half_adder') }
-    let(:ir) { RHDL::Export::Structure::Lower.from_components([component], name: 'half_adder') }
+    let(:ir) { RHDL::Codegen::Netlist::Lower.from_components([component], name: 'half_adder') }
 
     it 'generates correct IR structure' do
       expect(ir.inputs.keys).to include('half_adder.a', 'half_adder.b')

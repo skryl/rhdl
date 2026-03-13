@@ -46,6 +46,15 @@ module RHDL
         # Game Boy screen dimensions
         SCREEN_WIDTH = 160
         SCREEN_HEIGHT = 144
+        KEY_HOLD_SECONDS = 0.10
+        BUTTON_RIGHT = 0
+        BUTTON_LEFT = 1
+        BUTTON_UP = 2
+        BUTTON_DOWN = 3
+        BUTTON_A = 4
+        BUTTON_B = 5
+        BUTTON_SELECT = 6
+        BUTTON_START = 7
 
         # Braille display dimensions
         LCD_CHARS_WIDE = 80   # braille chars (160 pixels / 2)
@@ -148,16 +157,97 @@ module RHDL
         def initialize_runner
           require_relative '../runners/headless_runner'
 
-          mode = options[:mode] || :ruby
-          sim = options[:sim] || (mode == :ir ? :compile : :ruby)
+          mode = options[:mode] || :ir
+          sim = options[:sim] || case mode
+                                 when :ir, :circt, :arcilator then :compile
+                                 else :ruby
+                                 end
+          use_rhdl_source = !!options[:use_rhdl_source]
+          use_normalized_verilog = !!options[:use_normalized_source]
+          imported_source_mode = %i[verilog circt arcilator].include?(mode)
+          use_staged_verilog = if use_rhdl_source
+                                 false
+                               elsif options[:use_staged_source] == true
+                                 true
+                               elsif imported_source_mode
+                                 true
+                               else
+                                 false
+                               end
+          source_dir = options[:source_dir] || options[:hdl_dir] || options[:import_dir]
+          hdl_dir = nil
+          verilog_dir = options[:verilog_dir]
+          route_source_dir!(
+            source_dir: source_dir,
+            mode: mode,
+            use_rhdl_source: use_rhdl_source,
+            use_staged_verilog: use_staged_verilog,
+            use_normalized_verilog: use_normalized_verilog,
+            hdl_dir_ref: ->(value) { hdl_dir = value },
+            verilog_dir_ref: ->(value) { verilog_dir = value }
+          )
 
-          @runner = HeadlessRunner.new(mode: mode, sim: sim)
+          @runner = HeadlessRunner.new(
+            mode: mode,
+            sim: sim,
+            hdl_dir: hdl_dir,
+            verilog_dir: verilog_dir,
+            top: options[:top],
+            use_staged_verilog: use_staged_verilog,
+            use_normalized_verilog: use_normalized_verilog,
+            use_rhdl_source: use_rhdl_source,
+            jit: nil
+          )
+        end
+
+        def route_source_dir!(source_dir:, mode:, use_rhdl_source:, use_staged_verilog:, use_normalized_verilog:,
+                              hdl_dir_ref:, verilog_dir_ref:)
+          return if source_dir.nil?
+
+          if source_mode_requires_import_artifacts?(
+            source_dir: source_dir,
+            mode: mode,
+            use_rhdl_source: use_rhdl_source,
+            use_staged_verilog: use_staged_verilog,
+            use_normalized_verilog: use_normalized_verilog
+          )
+            ensure_import_artifacts_available!(source_dir)
+          end
+
+          if mode == :verilog && !use_rhdl_source && imported_runtime_tree?(source_dir)
+            verilog_dir_ref.call(source_dir)
+          else
+            hdl_dir_ref.call(source_dir)
+          end
+        end
+
+        def source_mode_requires_import_artifacts?(source_dir:, mode:, use_rhdl_source:, use_staged_verilog:, use_normalized_verilog:)
+          return false if use_rhdl_source
+          return true if use_staged_verilog || use_normalized_verilog
+          return false unless imported_runtime_tree?(source_dir)
+
+          %i[verilog circt arcilator].include?(mode)
+        end
+
+        def imported_runtime_tree?(source_dir)
+          return false if source_dir.nil?
+
+          File.file?(File.join(source_dir, 'import_report.json')) ||
+            Dir.exist?(File.join(source_dir, '.mixed_import'))
+        end
+
+        def ensure_import_artifacts_available!(source_dir)
+          mixed_import_dir = File.join(source_dir, '.mixed_import')
+          return if Dir.exist?(mixed_import_dir)
+
+          raise ArgumentError,
+                "Imported source directory #{source_dir} is missing required artifacts at #{mixed_import_dir}"
         end
 
         def initialize_terminal_state
           @running = false
-          @cycles_per_frame = options[:speed] || 100
-          @debug = options[:debug] || false
+          @cycles_per_frame = options[:speed] || 1000
+          @debug = options[:debug] != false
           @dmg_colors = options[:dmg_colors] != false
           @audio_enabled = options[:audio] || false
           @renderer_type = options[:renderer] || :color
@@ -184,6 +274,7 @@ module RHDL
           # Input tracking
           @last_key = nil
           @last_key_time = nil
+          @pressed_buttons = {}
 
           # Keyboard mode
           @keyboard_mode = :normal
@@ -307,6 +398,7 @@ module RHDL
             frame_start = Process.clock_gettime(Process::CLOCK_MONOTONIC)
 
             handle_keyboard_input
+            release_expired_keys
             @runner.run_steps(@cycles_per_frame)
             update_performance_metrics
 
@@ -325,7 +417,7 @@ module RHDL
 
           if @runner.halted?
             state = @runner.cpu_state
-            halt_row = @pad_top + LCD_CHARS_TALL + (@debug ? 9 : 3)
+            halt_row = @pad_top + LCD_CHARS_TALL + (@debug ? 10 : 3)
             print move_cursor(halt_row, @pad_left + 1)
             puts "CPU HALTED at PC=$#{state[:pc].to_s(16).upcase.rjust(4, '0')}"
             print move_cursor(halt_row + 1, @pad_left + 1)
@@ -354,7 +446,7 @@ module RHDL
           end
 
           @lcd_height = @renderer_type == :braille ? LCD_CHARS_TALL : (SCREEN_HEIGHT / 2.0).ceil
-          lcd_height_with_debug = @lcd_height + (@debug ? 8 : 2)
+          lcd_height_with_debug = @lcd_height + (@debug ? 9 : 2)
           @pad_top = [(@term_rows - lcd_height_with_debug) / 2, 0].max
           @pad_left = [(@term_cols - @lcd_width) / 2, 0].max
         end
@@ -381,13 +473,13 @@ module RHDL
 
           case ascii
           when 65, 97, 90, 122  # A or Z - A button
-            inject_key(0)
+            inject_key(BUTTON_A)
           when 83, 115, 88, 120  # S or X - B button
-            inject_key(1)
+            inject_key(BUTTON_B)
           when 13, 10  # Enter - Start
-            inject_key(3)
+            inject_key(BUTTON_START)
           when 127, 8  # Backspace - Select
-            inject_key(2)
+            inject_key(BUTTON_SELECT)
           end
 
           @last_key = ascii
@@ -397,7 +489,22 @@ module RHDL
         end
 
         def inject_key(bit)
-          @runner.runner.inject_key(bit) if @runner.runner.respond_to?(:inject_key)
+          return unless @runner.runner.respond_to?(:inject_key)
+
+          @runner.runner.inject_key(bit)
+          @pressed_buttons[bit] = Time.now + KEY_HOLD_SECONDS
+        end
+
+        def release_expired_keys
+          return if @pressed_buttons.empty?
+          return unless @runner.runner.respond_to?(:release_key)
+
+          now = Time.now
+          expired = @pressed_buttons.select { |_bit, release_at| release_at <= now }.keys
+          expired.each do |bit|
+            @runner.runner.release_key(bit)
+            @pressed_buttons.delete(bit)
+          end
         end
 
         def handle_escape_sequence
@@ -414,13 +521,13 @@ module RHDL
               else
                 case seq
                 when '[A'  # Up
-                  inject_key(6)
+                  inject_key(BUTTON_UP)
                 when '[B'  # Down
-                  inject_key(7)
+                  inject_key(BUTTON_DOWN)
                 when '[C'  # Right
-                  inject_key(4)
+                  inject_key(BUTTON_RIGHT)
                 when '[D'  # Left
-                  inject_key(5)
+                  inject_key(BUTTON_LEFT)
                 end
               end
             rescue IO::WaitReadable, Errno::EAGAIN
@@ -474,39 +581,15 @@ module RHDL
             debug_row = @pad_top + lcd_lines.length + 2
 
             state = @runner.cpu_state
-            kb_mode = @keyboard_mode == :command ? "CMD" : "NRM"
-
-            line1 = format("PC:%04X A:%02X BC:%04X DE:%04X HL:%04X SP:%04X",
-                           state[:pc], state[:a], state[:bc] || 0, state[:de] || 0,
-                           state[:hl] || 0, state[:sp] || 0)
-
-            line2 = format("Sim:%-10s Cyc:%s %s %.1ffps Spd:%d",
-                           @runner.simulator_type.to_s, format_cycles(state[:cycles]),
-                           format_hz(@current_hz), @fps, @cycles_per_frame)
-
-            spk = @runner.runner.respond_to?(:speaker) ? @runner.runner.speaker : nil
-            audio_status = @audio_enabled && spk ? (spk.active? ? "PLAY" : spk.status) : "off"
-            line3 = format("Key:%-3s | KB:%s | Aud:%s | Rend:%s",
-                           format_key(@last_key), kb_mode, audio_status, @renderer_type)
-
-            line4 = "ESC:cmd | R:renderer | Arrows:speed | ZXAS:ABSS"
-
-            line1 = line1.ljust(debug_width)[0, debug_width]
-            line2 = line2.ljust(debug_width)[0, debug_width]
-            line3 = line3.ljust(debug_width)[0, debug_width]
-            line4 = line4.ljust(debug_width)[0, debug_width]
+            lines = debug_overlay_lines(state: state).map { |line| line.ljust(debug_width)[0, debug_width] }
 
             output << move_cursor(debug_row, @pad_left + 1)
             output << "+" << ("-" * debug_width) << "+"
-            output << move_cursor(debug_row + 1, @pad_left + 1)
-            output << "|" << line1 << "|"
-            output << move_cursor(debug_row + 2, @pad_left + 1)
-            output << "|" << line2 << "|"
-            output << move_cursor(debug_row + 3, @pad_left + 1)
-            output << "|" << line3 << "|"
-            output << move_cursor(debug_row + 4, @pad_left + 1)
-            output << "|" << line4 << "|"
-            output << move_cursor(debug_row + 5, @pad_left + 1)
+            lines.each_with_index do |line, index|
+              output << move_cursor(debug_row + index + 1, @pad_left + 1)
+              output << "|" << line << "|"
+            end
+            output << move_cursor(debug_row + lines.length + 1, @pad_left + 1)
             output << "+" << ("-" * debug_width) << "+"
           end
 
@@ -565,6 +648,51 @@ module RHDL
             "DEL"
           else
             "'#{ascii.chr}'"
+          end
+        end
+
+        def debug_overlay_lines(state:)
+          kb_mode = @keyboard_mode == :command ? "CMD" : "NRM"
+          spk = @runner.runner.respond_to?(:speaker) ? @runner.runner.speaker : nil
+          audio_status = @audio_enabled && spk ? (spk.active? ? "PLAY" : spk.status) : "off"
+
+          [
+            format("PC:%04X A:%02X BC:%04X DE:%04X HL:%04X SP:%04X",
+                   state[:pc], state[:a], state[:bc] || 0, state[:de] || 0,
+                   state[:hl] || 0, state[:sp] || 0),
+            format("Cyc:%s %s %.1ffps Spd:%d",
+                   format_cycles(state[:cycles]), format_hz(@current_hz), @fps, @cycles_per_frame),
+            format("Mode:%-8s Sim:%-10s Source:%s",
+                   debug_mode_label, debug_sim_label, debug_source_label),
+            format("Key:%-3s | KB:%s | Aud:%s | Rend:%s",
+                   format_key(@last_key), kb_mode, audio_status, @renderer_type),
+            "ESC:cmd | R:renderer | Arrows:speed | ZXAS:ABSS"
+          ]
+        end
+
+        def debug_mode_label
+          case @runner.mode
+          when :arcilator then 'circt'
+          else @runner.mode.to_s
+          end
+        end
+
+        def debug_sim_label
+          backend = @runner.respond_to?(:backend) ? @runner.backend : nil
+          return backend.to_s if backend
+
+          @runner.simulator_type.to_s.sub(/\Ahdl_/, '')
+        end
+
+        def debug_source_label
+          if @runner.respond_to?(:use_rhdl_source) && @runner.use_rhdl_source
+            'rhdl'
+          elsif @runner.respond_to?(:use_normalized_verilog) && @runner.use_normalized_verilog
+            'normalized'
+          elsif @runner.respond_to?(:use_staged_verilog) && @runner.use_staged_verilog
+            'staged'
+          else
+            'rhdl'
           end
         end
 

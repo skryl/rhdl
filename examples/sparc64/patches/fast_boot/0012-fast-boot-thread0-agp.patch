@@ -1,0 +1,25 @@
+diff --git a/T1-CPU/tlu/tlu_tcl.v b/T1-CPU/tlu/tlu_tcl.v
+--- a/T1-CPU/tlu/tlu_tcl.v
++++ b/T1-CPU/tlu/tlu_tcl.v
+@@ -667,6 +667,7 @@
+ //
+ // Added for bug 1575
+ wire agp_tid_sel;	
++wire fast_boot_agp_tid_force;
+ // modified due to timing
+ // wire update_pstate0_g,update_pstate1_g;
+ // wire update_pstate2_g,update_pstate3_g;
+@@ -6309,10 +6310,12 @@
+ //=========================================================================================
+ // modified for bug 3827
+ //
++assign fast_boot_agp_tid_force = por_rstint_g;
+ assign agp_tid_sel = 
+            (dnrtry_inst_g) | (tlu_gl_rw_g & wsr_inst_g); 
+ assign	agp_tid_g[1:0] = 
+-            agp_tid_sel ? thrid_g[1:0] : trap_tid_g[1:0]; 
++            fast_boot_agp_tid_force ? 2'b00 :
++            (agp_tid_sel ? thrid_g[1:0] : trap_tid_g[1:0]); 
+ 
+ dff_s #(2) dff_tlu_agp_tid_w2 (
+     .din (agp_tid_g[1:0]),

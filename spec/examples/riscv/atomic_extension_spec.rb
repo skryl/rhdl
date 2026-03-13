@@ -86,20 +86,20 @@ RSpec.shared_examples 'rv32a core behavior' do |pipeline:|
 end
 
 RSpec.describe RHDL::Examples::RISCV::IRHarness do
-  let(:cpu) { described_class.new(mem_size: 4096, backend: :jit, allow_fallback: false) }
+  let(:cpu) { described_class.new(mem_size: 4096, backend: :jit) }
 
   before(:each) do
-    skip 'IR JIT not available' unless RHDL::Codegen::IR::IR_JIT_AVAILABLE
+    skip 'IR JIT not available' unless RHDL::Sim::Native::IR::JIT_AVAILABLE
   end
 
   include_examples 'rv32a core behavior', pipeline: false
 end
 
 RSpec.describe RHDL::Examples::RISCV::Pipeline::IRHarness do
-  let(:cpu) { described_class.new('rv32a_pipeline', backend: :jit, allow_fallback: false) }
+  let(:cpu) { described_class.new('rv32a_pipeline', backend: :jit) }
 
   before(:each) do
-    skip 'IR JIT not available' unless RHDL::Codegen::IR::IR_JIT_AVAILABLE
+    skip 'IR JIT not available' unless RHDL::Sim::Native::IR::JIT_AVAILABLE
   end
 
   include_examples 'rv32a core behavior', pipeline: true
@@ -109,15 +109,15 @@ RSpec.describe 'RV32A differential parity', timeout: 30 do
   let(:asm) { RHDL::Examples::RISCV::Assembler }
 
   before(:each) do
-    skip 'IR JIT not available' unless RHDL::Codegen::IR::IR_JIT_AVAILABLE
+    skip 'IR JIT not available' unless RHDL::Sim::Native::IR::JIT_AVAILABLE
   end
 
   def build_single
-    RHDL::Examples::RISCV::IRHarness.new(mem_size: 65_536, backend: :jit, allow_fallback: false)
+    RHDL::Examples::RISCV::IRHarness.new(mem_size: 65_536, backend: :jit)
   end
 
   def build_pipeline
-    RHDL::Examples::RISCV::Pipeline::IRHarness.new('rv32a_diff', backend: :jit, allow_fallback: false)
+    RHDL::Examples::RISCV::Pipeline::IRHarness.new('rv32a_diff', backend: :jit)
   end
 
   it 'matches single-cycle and pipelined architectural state on atomic sequences' do

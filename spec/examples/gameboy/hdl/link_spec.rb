@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 require 'spec_helper'
-require_relative '../../../../examples/gameboy/gameboy'
+require_relative '../../../../examples/gameboy/hdl/gameboy'
 
 # Game Boy Link Port Unit Tests
 # Tests the Link (serial communication) component
@@ -29,7 +29,7 @@ RSpec.describe 'GameBoy Link Port' do
 
   describe 'Link Component Structure' do
     let(:link) { RHDL::Examples::GameBoy::Link.new('link') }
-    let(:ir) { link.class.to_ir }
+    let(:ir) { link.class.to_flat_circt_nodes }
     let(:port_names) { ir.ports.map { |p| p.name.to_sym } }
 
     describe 'Input Ports (via IR)' do
@@ -117,7 +117,7 @@ RSpec.describe 'GameBoy Link Port' do
       end
 
       it 'can generate flattened IR' do
-        flat_ir = link.class.to_flat_ir
+        flat_ir = link.class.to_flat_circt_nodes
         expect(flat_ir).not_to be_nil
       end
 
@@ -132,7 +132,7 @@ RSpec.describe 'GameBoy Link Port' do
     before(:all) do
       begin
         require_relative '../../../../examples/gameboy/utilities/runners/ir_runner'
-        @ir_available = RHDL::Codegen::IR::COMPILER_AVAILABLE rescue false
+        @ir_available = RHDL::Sim::Native::IR::COMPILER_AVAILABLE rescue false
         # Try to actually initialize a runner to verify it works
         if @ir_available
           test_runner = RHDL::Examples::GameBoy::IrRunner.new(backend: :compile)

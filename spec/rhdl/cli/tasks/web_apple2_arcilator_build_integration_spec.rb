@@ -80,7 +80,7 @@ RSpec.describe 'WebApple2ArcilatorBuild WASM compilation integration', :slow do
 
     system(
       'wasm-ld', '--no-entry', '--export-dynamic', '--allow-undefined',
-      '--initial-memory=4194304', '--max-memory=16777216',
+      '--initial-memory=16777216', '--max-memory=67108864',
       '-o', @wasm_output, wrapper_obj, stub_obj
     ) or raise 'wasm-ld linking failed'
   end

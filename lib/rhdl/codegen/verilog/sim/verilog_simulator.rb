@@ -6,10 +6,8 @@ require 'rbconfig'
 
 module RHDL
   module Codegen
-    module Verilog
-      # Backend manager for native Verilog simulators (Verilator today).
-      # The API is backend-parameterized so additional backends (e.g. Icarus)
-      # can be added without changing runner call sites.
+  module Verilog
+      # Backend manager for native Verilog simulation (Verilator).
       class VerilogSimulator
         DEFAULT_WARNING_FLAGS = %w[
           -Wno-fatal
@@ -38,8 +36,8 @@ module RHDL
           @backend = backend.to_sym
           @build_dir = build_dir
           @verilog_dir = File.join(build_dir, 'verilog')
-          @obj_dir = File.join(build_dir, 'obj_dir')
           @library_basename = library_basename
+          @obj_dir = File.join(build_dir, 'obj_dir', sanitize_path_component(@library_basename))
           @top_module = top_module
           @verilator_prefix = verilator_prefix
           @cxx = cxx
@@ -52,7 +50,6 @@ module RHDL
         def ensure_backend_available!
           cmd = case backend
                 when :verilator then 'verilator'
-                when :iverilog then 'iverilog'
                 else
                   raise ArgumentError, "Unsupported Verilog simulator backend: #{backend.inspect}"
                 end
@@ -66,14 +63,6 @@ module RHDL
                           Ubuntu/Debian: sudo apt-get install verilator
                           macOS: brew install verilator
                           Fedora: sudo dnf install verilator
-                      MSG
-                    when :iverilog
-                      <<~MSG
-                        Icarus Verilog not found in PATH.
-                        Install Icarus Verilog:
-                          Ubuntu/Debian: sudo apt-get install iverilog
-                          macOS: brew install icarus-verilog
-                          Fedora: sudo dnf install iverilog
                       MSG
                     end
           raise LoadError, message
@@ -95,14 +84,19 @@ module RHDL
           File.join(obj_dir, "lib#{library_basename}.#{library_suffix}")
         end
 
-        def compile_backend(verilog_file:, wrapper_file:, log_file: File.join(build_dir, 'build.log'))
-          case backend
-          when :verilator
-            compile_verilator(verilog_file: verilog_file, wrapper_file: wrapper_file, log_file: log_file)
-          when :iverilog
-            raise NotImplementedError, 'Icarus backend is not implemented yet'
-          else
-            raise ArgumentError, "Unsupported Verilog simulator backend: #{backend.inspect}"
+        def compile_backend(verilog_file: nil, verilog_files: nil, wrapper_file:, log_file: File.join(build_dir, 'build.log'))
+          with_build_lock do
+            case backend
+            when :verilator
+              compile_verilator(
+                verilog_file: verilog_file,
+                verilog_files: verilog_files,
+                wrapper_file: wrapper_file,
+                log_file: log_file
+              )
+            else
+              raise ArgumentError, "Unsupported Verilog simulator backend: #{backend.inspect}"
+            end
           end
         end
 
@@ -110,8 +104,6 @@ module RHDL
           case backend
           when :verilator
             link_verilator_shared_library
-          when :iverilog
-            raise NotImplementedError, 'Icarus backend is not implemented yet'
           else
             raise ArgumentError, "Unsupported Verilog simulator backend: #{backend.inspect}"
           end
@@ -121,15 +113,35 @@ module RHDL
           unless File.exist?(lib_path)
             raise LoadError, "Verilog simulator shared library not found: #{lib_path}"
           end
+
+          sign_darwin_shared_library(lib_path)
+          Fiddle.dlopen(lib_path)
+        rescue Fiddle::DLError
+          raise unless RbConfig::CONFIG['host_os'] =~ /darwin/
+
+          # Freshly linked dylibs can occasionally trip macOS library policy on
+          # the first load even after an ad-hoc sign. Re-sign and retry once.
+          sign_darwin_shared_library(lib_path)
+          sleep 0.1
           Fiddle.dlopen(lib_path)
         end
 
         private
 
-        def compile_verilator(verilog_file:, wrapper_file:, log_file:)
+        def sanitize_path_component(value)
+          value.to_s.gsub(/[^A-Za-z0-9_.-]/, '_')
+        end
+
+        def compile_verilator(verilog_file: nil, verilog_files: nil, wrapper_file:, log_file:)
+          sources = Array(verilog_files || verilog_file).compact
+          raise ArgumentError, 'No Verilog sources provided for Verilator compilation' if sources.empty?
+
           lib_path = shared_library_path
           lib_name = File.basename(lib_path)
           makefile_name = "#{verilator_prefix}.mk"
+          wrapper_include_dir = File.dirname(File.expand_path(wrapper_file))
+          verilator_cflags = [cflags, "-I#{wrapper_include_dir}"].join(' ')
+          clean_verilator_obj_dir!
 
           verilate_cmd = [
             'verilator',
@@ -140,13 +152,13 @@ module RHDL
             '--x-initial', x_initial,
             '--noassert',
             *DEFAULT_WARNING_FLAGS,
-            '-CFLAGS', cflags,
+            '-CFLAGS', verilator_cflags,
             '-LDFLAGS', '-shared',
             '--Mdir', obj_dir,
             '--prefix', verilator_prefix,
             '-o', lib_name,
             wrapper_file,
-            verilog_file,
+            *sources,
             *@extra_verilator_flags
           ]
 
@@ -157,12 +169,21 @@ module RHDL
             end
 
             Dir.chdir(obj_dir) do
-              result = system('make', '-f', makefile_name, "CXX=#{cxx}", out: log, err: log)
+              result = system({ 'MAKEFLAGS' => '-j1' }, 'make', '-j1', '-f', makefile_name, "CXX=#{cxx}", out: log, err: log)
               raise "Verilator make failed. See #{log_file} for details." unless result
             end
           end
 
           ensure_verilator_library_fresh
+        end
+
+        def clean_verilator_obj_dir!
+          Dir.glob(File.join(obj_dir, '*'), File::FNM_DOTMATCH).each do |path|
+            basename = File.basename(path)
+            next if ['.', '..'].include?(basename)
+
+            FileUtils.rm_rf(path)
+          end
         end
 
         def ensure_verilator_library_fresh
@@ -197,6 +218,16 @@ module RHDL
                       end
 
           raise "Failed to link Verilator shared library: #{lib_path}" unless system(*link_args)
+
+          sign_darwin_shared_library(lib_path)
+        end
+
+        def sign_darwin_shared_library(lib_path)
+          return unless RbConfig::CONFIG['host_os'] =~ /darwin/
+          return unless File.exist?(lib_path)
+          return unless command_available?('codesign')
+
+          system('codesign', '--force', '--sign', '-', '--timestamp=none', lib_path, out: File::NULL, err: File::NULL)
         end
 
         def ensure_darwin_hash_memory_shim
@@ -243,6 +274,16 @@ module RHDL
         def command_available?(cmd)
           ENV['PATH'].split(File::PATH_SEPARATOR).any? do |path|
             File.executable?(File.join(path, cmd))
+          end
+        end
+
+        def with_build_lock
+          FileUtils.mkdir_p(build_dir)
+          File.open(File.join(build_dir, '.verilator_build.lock'), File::RDWR | File::CREAT, 0o644) do |lock|
+            lock.flock(File::LOCK_EX)
+            yield
+          ensure
+            lock.flock(File::LOCK_UN) rescue nil
           end
         end
       end

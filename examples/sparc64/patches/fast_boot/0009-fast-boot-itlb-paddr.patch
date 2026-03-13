@@ -1,0 +1,65 @@
+diff --git a/T1-CPU/ifu/sparc_ifu.v b/T1-CPU/ifu/sparc_ifu.v
+--- a/T1-CPU/ifu/sparc_ifu.v
++++ b/T1-CPU/ifu/sparc_ifu.v
+@@ -797,6 +797,13 @@
+    wire           itlb_fcl_tlbmiss_f_l;   // To fcl of sparc_ifu_fcl.v
+    wire [3:0]     itlb_wsel_waysel_s1;     // To icd of sparc_ifu_icd.v
+    wire [39:10]   itlb_ifq_paddr_s;       // To ifqdp of sparc_ifu_ifqdp.v, ...
++   wire [39:10]   itlb_ifq_paddr_raw_s;   // Raw ITLB output before fast boot overrides
++   wire           fast_boot_prom_ifetch_bf;
++   wire           fast_boot_prom_ifetch_window_bf;
++   wire           fast_boot_dram_ifetch_bf;
++   wire           fast_boot_ifq_icache_en_s_l;
++   localparam [47:2] FAST_BOOT_PROM_PC_LO = 46'h0000_0000_2000;
++   localparam [47:2] FAST_BOOT_PROM_PC_HI = 46'h0000_0000_2010;
+    wire [42:0]    itlb_rd_tte_data;       // To errdp of sparc_ifu_errdp.v
+    wire [58:0]    itlb_rd_tte_tag;        // To errdp of sparc_ifu_errdp.v
+    
+@@ -1298,7 +1305,7 @@
+                      .fcl_ifq_grant_bf  (fcl_ifq_grant_bf),
+                      .fcl_ifq_icmiss_s1 (fcl_ifq_icmiss_s1),
+                      .fcl_ifq_rdreq_s1  (fcl_ifq_rdreq_s1),
+-                     .fcl_ifq_icache_en_s_l(fcl_ifq_icache_en_s_l),
++                     .fcl_ifq_icache_en_s_l(fast_boot_ifq_icache_en_s_l),
+                      .fcl_ifq_thr_s1    (fcl_ifq_thr_s1[1:0]),
+                      .fcl_ifq_canthr    (fcl_ifq_canthr[3:0]),
+                      .fcl_erb_ievld_s1  (fcl_erb_ievld_s1),
+@@ -1550,7 +1557,7 @@
+ 		              // Outputs
+ 		              .tlb_rd_tte_tag	 (itlb_rd_tte_tag[58:0]),  // 2
+ 		              .tlb_rd_tte_data (itlb_rd_tte_data[42:0]), // 2
+-		              .tlb_pgnum	     (itlb_ifq_paddr_s[`IC_TAG_HI:10]), // 2
++		              .tlb_pgnum      (itlb_ifq_paddr_raw_s[`IC_TAG_HI:10]), // 2
+ 		              .tlb_cam_hit	   (itlb_fcl_tlbmiss_f_l),    // 1
+ 		              .cache_way_hit   (itlb_wsel_waysel_s1[3:0]), // 2
+ 		              .cache_hit       (itlb_fcl_imiss_s_l),      // 2
+@@ -1633,6 +1640,20 @@
+                  // tlb expects this to be asynchronous reset!
+                   .arst_l     (arst_l),
+ 		              .rst_soft_l (fcl_itlb_invall_f_l));  // 1
++
++   assign fast_boot_prom_ifetch_window_bf = (fdp_icd_vaddr_bf[47:2] >= FAST_BOOT_PROM_PC_LO) &&
++                                            (fdp_icd_vaddr_bf[47:2] < FAST_BOOT_PROM_PC_HI);
++   assign fast_boot_prom_ifetch_bf = fast_boot_prom_ifetch_window_bf;
++   assign fast_boot_dram_ifetch_bf = ~fast_boot_prom_ifetch_bf &&
++                                     (fdp_icd_vaddr_bf[47:18] == 30'b0);
++   assign fast_boot_ifq_icache_en_s_l = fast_boot_dram_ifetch_bf ?
++                                        1'b0 :
++                                        fcl_ifq_icache_en_s_l;
++   assign itlb_ifq_paddr_s[39:10] = fast_boot_prom_ifetch_bf ?
++                                    30'b0 :
++                                    (fast_boot_dram_ifetch_bf ?
++                                     fdp_icd_vaddr_bf[39:10] :
++                                     itlb_ifq_paddr_raw_s[39:10]);
+    
+ 
+    sparc_ifu_wseldp wseldp(
+@@ -1994,7 +2015,7 @@
+                            .lsu_ifu_asi_state(lsu_ifu_asi_state[7:0]),
+                            .lsu_ifu_asi_load(lsu_ifu_asi_load),
+                            .lsu_ifu_asi_thrid(lsu_ifu_asi_thrid[1:0]),
+-                           .fcl_ifq_icache_en_s_l(fcl_ifq_icache_en_s_l),
++                           .fcl_ifq_icache_en_s_l(fast_boot_ifq_icache_en_s_l),
+                            .mbist_ifq_run_bist(mbist_ifq_run_bist),
+                            .mbist_icache_write(mbist_icache_write),
+                            .mbist_icache_read(mbist_icache_read),

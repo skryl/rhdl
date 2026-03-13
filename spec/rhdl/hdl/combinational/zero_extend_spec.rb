@@ -19,8 +19,8 @@ RSpec.describe RHDL::HDL::ZeroExtend do
     end
 
     it 'generates valid IR' do
-      ir = RHDL::HDL::ZeroExtend.to_ir
-      expect(ir).to be_a(RHDL::Export::IR::ModuleDef)
+      ir = RHDL::HDL::ZeroExtend.to_flat_circt_nodes
+      expect(ir).to be_a(RHDL::Codegen::CIRCT::IR::ModuleOp)
     end
 
     it 'generates valid Verilog' do
@@ -29,12 +29,12 @@ RSpec.describe RHDL::HDL::ZeroExtend do
       expect(verilog).to include('assign y')
     end
 
-    it 'generates valid FIRRTL' do
-      firrtl = RHDL::HDL::ZeroExtend.to_circt
-      expect(firrtl).to include('FIRRTL version')
-      expect(firrtl).to include('circuit zero_extend')
-      expect(firrtl).to include('input a')
-      expect(firrtl).to include('output y')
+    it 'generates valid CIRCT MLIR' do
+      mlir = RHDL::HDL::ZeroExtend.to_circt
+      expect(mlir).to include('hw.output')
+      expect(mlir).to include('hw.module @zero_extend')
+      expect(mlir).to include('%a:')
+      expect(mlir).to include('y:')
     end
 
     context 'CIRCT firtool validation', if: HdlToolchain.firtool_available? do
@@ -51,7 +51,7 @@ RSpec.describe RHDL::HDL::ZeroExtend do
 
   describe 'gate-level netlist' do
     let(:component) { RHDL::HDL::ZeroExtend.new('zero_extend', in_width: 4, out_width: 8) }
-    let(:ir) { RHDL::Export::Structure::Lower.from_components([component], name: 'zero_extend') }
+    let(:ir) { RHDL::Codegen::Netlist::Lower.from_components([component], name: 'zero_extend') }
 
     it 'generates correct IR structure' do
       expect(ir.inputs.keys).to include('zero_extend.a')

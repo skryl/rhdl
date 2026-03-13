@@ -59,6 +59,13 @@ module RHDL
     module Sequential
       extend RHDL::Support::Concern
 
+      class << self
+        def active_low_reset_name?(name)
+          reset_name = name.to_s
+          reset_name.end_with?('_n', '_l')
+        end
+      end
+
       # Case expression for synthesis - maps to Verilog case
       class BehaviorCase < Behavior::BehaviorExpr
         attr_reader :selector, :cases, :default_case
@@ -75,7 +82,7 @@ module RHDL
         end
 
         def to_ir
-          RHDL::Export::IR::Case.new(
+          RHDL::Codegen::CIRCT::IR::Case.new(
             selector: @selector.to_ir,
             cases: @cases.transform_keys { |k| k.is_a?(Array) ? k : [k] }
                         .transform_values(&:to_ir),
@@ -111,9 +118,9 @@ module RHDL
 
         def to_ir
           # Convert to nested muxes for IR
-          result = @else_branch&.to_ir || RHDL::Export::IR::Literal.new(value: 0, width: @width)
+          result = @else_branch&.to_ir || RHDL::Codegen::CIRCT::IR::Literal.new(value: 0, width: @width)
           @conditions.reverse.zip(@branches.reverse).each do |cond, branch|
-            result = RHDL::Export::IR::Mux.new(
+            result = RHDL::Codegen::CIRCT::IR::Mux.new(
               condition: cond.to_ir,
               when_true: branch.to_ir,
               when_false: result,
@@ -135,6 +142,9 @@ module RHDL
           @block = block
         end
       end
+
+      SequentialAssign = Struct.new(:target, :expr, keyword_init: true)
+      SequentialIR = Struct.new(:clock, :reset, :reset_values, :assignments, keyword_init: true)
 
       # Context for sequential evaluation
       class SequentialContext < Behavior::BehaviorContext
@@ -184,12 +194,12 @@ module RHDL
           evaluator = SequentialEvaluator.new(self, proxies)
           evaluator.evaluate(&block)
 
-          RHDL::Export::IR::Sequential.new(
+          SequentialIR.new(
             clock: @clock,
             reset: @reset,
             reset_values: @reset_values,
             assignments: @assignments.map do |a|
-              RHDL::Export::IR::Assign.new(
+              SequentialAssign.new(
                 target: a.target.name,
                 expr: a.expr.to_ir
               )
@@ -239,6 +249,7 @@ module RHDL
           else
             Behavior::BehaviorLiteral.new(expr, width: width || 8)
           end
+          wrapped = Behavior::BehaviorResize.new(wrapped, width: width) if width && wrapped.width != width
           # Store as a signal proxy for later reference
           @local_vars ||= {}
           @local_vars[name] = wrapped
@@ -265,7 +276,8 @@ module RHDL
         #   end
         #
         def sequential(clock:, reset: nil, reset_values: {}, &block)
-          @_sequential_block = SequentialBlock.new(
+          @_sequential_blocks ||= []
+          @_sequential_blocks << SequentialBlock.new(
             clock: clock,
             reset: reset,
             reset_values: reset_values,
@@ -273,7 +285,9 @@ module RHDL
           )
 
           # Store reset values at class level for state initialization
-          @_reset_values = reset_values
+          @_reset_values = _reset_values.merge(
+            reset_values.each_with_object({}) { |(name, value), acc| acc[name.to_sym] = value }
+          )
 
           # Define state initialization method
           define_method(:_init_seq_state) do
@@ -294,23 +308,48 @@ module RHDL
           # IMPORTANT: This ONLY samples inputs. Next state is computed in update phase.
           define_method(:sample_inputs) do
             _init_seq_state
+            blocks = self.class._sequential_blocks
+            return false if blocks.empty?
 
-            # Check for rising edge
-            clk_val = in_val(clock)
-            @_prev_clk ||= 0
-            rising = (@_prev_clk == 0 && clk_val == 1)
-            @_prev_clk = clk_val
-
-            # Handle reset - sample but mark as needing reset
-            @_needs_reset = reset && in_val(reset) == 1
-
-            if @_needs_reset
-              return true
+            @_prev_clk_by_name ||= {}
+            rising_by_clock = {}
+            blocks.map(&:clock).compact.map(&:to_sym).uniq.each do |clock_name|
+              clk_val = in_val(clock_name)
+              prev_clk = @_prev_clk_by_name.fetch(clock_name, 0)
+              rising_by_clock[clock_name] = (prev_clk == 0 && clk_val == 1)
+              @_prev_clk_by_name[clock_name] = clk_val
             end
 
-            # On rising edge, ONLY sample input values
-            # Next state will be computed in update_outputs using these sampled values
-            if rising
+            @_pending_sequential_blocks = []
+            @_pending_rising_clocks = {}
+
+            blocks.each do |seq_block|
+              needs_reset =
+                if seq_block.reset
+                  reset_value = in_val(seq_block.reset)
+                  if RHDL::DSL::Sequential.active_low_reset_name?(seq_block.reset)
+                    reset_value == 0
+                  else
+                    reset_value == 1
+                  end
+                else
+                  false
+                end
+
+              clock_name = seq_block.clock.to_sym
+              rising = rising_by_clock.fetch(clock_name, false)
+              next unless needs_reset || rising
+
+              @_pending_sequential_blocks << {
+                block: seq_block,
+                reset: needs_reset
+              }
+              @_pending_rising_clocks[clock_name] = true if rising
+            end
+
+            # On any rising edge, ONLY sample input values. Next state will be
+            # computed in update_outputs using these sampled values.
+            if @_pending_rising_clocks.any?
               # Sample ALL input wire values NOW, before any register updates
               @_sampled_inputs = {}
               @inputs.each do |name, wire|
@@ -320,9 +359,11 @@ module RHDL
               @internal_signals.each do |name, wire|
                 @_sampled_inputs[name] = wire.get
               end
+            else
+              @_sampled_inputs = nil
             end
 
-            rising
+            @_pending_sequential_blocks.any?
           end
 
           # Helper to set state value on outputs OR internal signals
@@ -339,33 +380,42 @@ module RHDL
           define_method(:update_outputs) do
             _init_seq_state
 
-            if @_needs_reset
-              # Apply reset values
-              reset_values.each do |name, value|
-                @_seq_state[name] = value
-                _set_state_value(name, value)
-              end
-              @_needs_reset = false
-              # Execute combinational parts
-              process_memory_async_reads if respond_to?(:process_memory_async_reads)
-              process_memory_lookup_tables if respond_to?(:process_memory_lookup_tables)
-              self.class.execute_behavior_for_simulation(self) if self.class.respond_to?(:behavior_defined?) && self.class.behavior_defined?
-              return
-            end
-
-            # If we have sampled inputs (from rising edge), compute next state NOW
-            # using the sampled values (not current wire values)
-            if @_sampled_inputs && !@_sampled_inputs.empty?
+            pending_blocks = Array(@_pending_sequential_blocks)
+            if pending_blocks.any?
               # Process memory sync writes FIRST (using current register values)
-              if respond_to?(:process_memory_sync_writes)
-                rising_clocks = { clock => true }
-                process_memory_sync_writes(rising_clocks)
+              if respond_to?(:process_memory_sync_writes) && @_pending_rising_clocks&.any?
+                process_memory_sync_writes(@_pending_rising_clocks)
               end
 
-              # Compute next state using SAMPLED input values
-              self.class.execute_sequential_with_sampled_inputs(self, @_sampled_inputs)
-              @_sampled_inputs = nil  # Clear sampled inputs
+              next_state_updates = {}
+              pending_blocks.each do |entry|
+                seq_block = entry.fetch(:block)
+                block_updates =
+                  if entry[:reset]
+                    seq_block.reset_values.each_with_object({}) do |(name, value), acc|
+                      acc[name.to_sym] = value
+                    end
+                  else
+                    self.class.evaluate_sequential_blocks_with_inputs(
+                      component: self,
+                      input_values: @_sampled_inputs || {},
+                      sequential_blocks: [seq_block]
+                    )
+                  end
+
+                block_updates.each do |name, value|
+                  next_state_updates[name.to_sym] = value
+                end
+              end
+
+              next_state_updates.each do |name, value|
+                @_seq_state[name.to_sym] = value
+              end
             end
+
+            @_pending_sequential_blocks = []
+            @_pending_rising_clocks = {}
+            @_sampled_inputs = nil
 
             # Output state values (to both outputs and internal signals)
             @_seq_state.each do |name, value|
@@ -413,17 +463,21 @@ module RHDL
           @_reset_values || {}
         end
 
+        def _sequential_blocks
+          @_sequential_blocks || []
+        end
+
         def _sequential_block
-          @_sequential_block
+          _sequential_blocks.last
         end
 
         def sequential_defined?
-          !@_sequential_block.nil?
+          _sequential_blocks.any?
         end
 
         # Execute sequential block for simulation
         def execute_sequential_for_simulation(component)
-          return unless @_sequential_block
+          return unless sequential_defined?
 
           # Gather input values from current wire values
           input_values = {}
@@ -437,50 +491,74 @@ module RHDL
         # Execute sequential block with pre-sampled input values
         # This is used for two-phase propagation where inputs were sampled earlier
         def execute_sequential_with_sampled_inputs(component, sampled_inputs)
-          return unless @_sequential_block
+          return unless sequential_defined?
 
           execute_sequential_with_inputs(component, sampled_inputs)
         end
 
         # Internal: execute sequential block with given input values
         def execute_sequential_with_inputs(component, input_values)
-          return unless @_sequential_block
+          return unless sequential_defined?
 
+          outputs = evaluate_sequential_blocks_with_inputs(
+            component: component,
+            input_values: input_values,
+            sequential_blocks: _sequential_blocks
+          )
+
+          outputs.each do |name, value|
+            component.instance_variable_get(:@_seq_state)[name.to_sym] = value
+          end
+          outputs
+        end
+
+        def evaluate_sequential_blocks_with_inputs(component:, input_values:, sequential_blocks:)
+          return {} if Array(sequential_blocks).empty?
+
+          Array(sequential_blocks).each_with_object({}) do |sequential_block, merged_outputs|
+            block_outputs = evaluate_single_sequential_block_with_inputs(
+              component: component,
+              input_values: input_values,
+              sequential_block: sequential_block
+            )
+            block_outputs.each do |name, value|
+              merged_outputs[name.to_sym] = value
+            end
+          end
+        end
+
+        def evaluate_single_sequential_block_with_inputs(component:, input_values:, sequential_block:)
           # Also include current state values (for register feedback)
           component._init_seq_state
+          eval_inputs = input_values.each_with_object({}) { |(name, value), acc| acc[name.to_sym] = value }
           component.instance_variable_get(:@_seq_state).each do |name, value|
-            input_values[name] = value
+            eval_inputs[name.to_sym] = value
           end
 
           context = SequentialContext.new(
             self,
-            clock: @_sequential_block.clock,
-            reset: @_sequential_block.reset,
-            reset_values: @_sequential_block.reset_values
+            clock: sequential_block.clock,
+            reset: sequential_block.reset,
+            reset_values: sequential_block.reset_values
           )
           # Set component reference for memory access in mem_read_expr
           context.component = component
-          outputs = context.evaluate_for_simulation(input_values, &@_sequential_block.block)
-
-          # Store outputs in component's internal state
-          # DO NOT call out_set here - outputs are set at start of NEXT propagate cycle
-          # This mimics how a real register updates on clock edge but outputs on next cycle
-          outputs.each do |name, value|
-            component.instance_variable_get(:@_seq_state)[name] = value
-          end
+          context.evaluate_for_simulation(eval_inputs, &sequential_block.block)
         end
 
         # Execute sequential block for synthesis - returns IR
         def execute_sequential_for_synthesis
-          return nil unless @_sequential_block
+          return nil unless sequential_defined?
 
-          context = SequentialContext.new(
-            self,
-            clock: @_sequential_block.clock,
-            reset: @_sequential_block.reset,
-            reset_values: @_sequential_block.reset_values
-          )
-          context.to_sequential_ir(&@_sequential_block.block)
+          _sequential_blocks.map do |sequential_block|
+            context = SequentialContext.new(
+              self,
+              clock: sequential_block.clock,
+              reset: sequential_block.reset,
+              reset_values: sequential_block.reset_values
+            )
+            context.to_sequential_ir(&sequential_block.block)
+          end
         end
       end
     end

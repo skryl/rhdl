@@ -17,12 +17,14 @@ def show_help
       tui           Launch interactive TUI debugger
       diagram       Generate circuit diagrams
       export        Export components to Verilog
+      import        Import Verilog/mixed/CIRCT into RHDL DSL
       gates         Gate-level synthesis
-      examples      Run example emulators (mos6502, apple2)
+      examples      Run example emulators (mos6502, apple2, gameboy, riscv, ao486, sparc64)
       disk          Disk image utilities for Apple II
       generate      Generate all output files (diagrams + HDL exports)
       clean         Clean all generated files
       regenerate    Clean and regenerate all output files
+      hygiene       Run repository hygiene checks
 
     Run 'rhdl <command> --help' for more information on a command.
   HELP
@@ -147,7 +149,9 @@ def handle_export(args)
     top: nil,
     all: false,
     scope: 'all',
-    clean: false
+    clean: false,
+    tool: 'circt-translate',
+    tool_args: []
   }
 
   parser = OptionParser.new do |opts|
@@ -164,6 +168,9 @@ def handle_export(args)
         rhdl export --all --scope lib
         rhdl export --all --scope examples
 
+      CIRCT tooling export:
+        rhdl export --lang verilog --tool circt-translate --out ./output RHDL::HDL::Counter
+
       Options:
     BANNER
 
@@ -171,6 +178,10 @@ def handle_export(args)
     opts.on('--scope SCOPE', 'Batch scope: all, lib, or examples') { |v| options[:scope] = v }
     opts.on('--clean', 'Clean all generated HDL files') { options[:clean] = true }
     opts.on('--lang LANG', 'Target language: verilog') { |v| options[:lang] = v }
+    opts.on('--tool CMD', 'External tool command for CIRCT MLIR->Verilog export (default: circt-translate)') { |v| options[:tool] = v }
+    opts.on('--tool-arg ARG', 'Extra argument for external tool (repeatable)') do |v|
+      options[:tool_args] << v
+    end
     opts.on('--out DIR', 'Output directory') { |v| options[:out] = v }
     opts.on('--top NAME', 'Override top module/entity name') { |v| options[:top] = v }
     opts.on('-h', '--help', 'Show this help') do
@@ -183,6 +194,65 @@ def handle_export(args)
   options[:component] = args.shift unless options[:all] || options[:clean]
 
   RHDL::CLI::Tasks::ExportTask.new(options).run
+end
+
+def handle_import(args)
+  options = {
+    mode: nil,
+    input: nil,
+    out: nil,
+    mlir_out: nil,
+    tool_args: [],
+    raise_to_dsl: true,
+    format_output: false,
+    strict: true,
+    extern_modules: [],
+    report: nil,
+    manifest: nil,
+    top: nil
+  }
+
+  parser = OptionParser.new do |opts|
+    opts.banner = <<~BANNER
+      Usage: rhdl import [options]
+
+      Import paths:
+        1) Verilog -> (circt-verilog) -> CIRCT MLIR -> RHDL DSL
+        2) Mixed Verilog+VHDL -> (ghdl + circt-verilog) -> CIRCT MLIR -> RHDL DSL
+        3) CIRCT MLIR -> RHDL DSL
+
+      Examples:
+        rhdl import --mode verilog --input ./cpu.v --out ./generated
+        rhdl import --mode mixed --manifest ./import.yml --out ./generated
+        rhdl import --mode mixed --input ./rtl/top.sv --top top --out ./generated
+        rhdl import --mode verilog --input ./cpu.v --out ./generated --no-raise
+        rhdl import --mode circt --input ./cpu.mlir --out ./generated
+
+      Options:
+    BANNER
+
+    opts.on('--mode MODE', [:verilog, :mixed, :circt], 'Import mode: verilog, mixed, or circt') { |v| options[:mode] = v }
+    opts.on('--input FILE', 'Input file (.v for verilog mode, top source file for mixed autoscan, .mlir for circt mode)') { |v| options[:input] = v }
+    opts.on('--manifest FILE', 'Mixed mode: YAML/JSON manifest describing mixed-language import inputs') { |v| options[:manifest] = v }
+    opts.on('--out DIR', 'Output directory for generated files') { |v| options[:out] = v }
+    opts.on('--mlir-out FILE', 'Verilog mode: write intermediate CIRCT MLIR to this path') { |v| options[:mlir_out] = v }
+    opts.on('--tool-arg ARG', 'Verilog/mixed mode: extra argument forwarded to circt-verilog (repeatable)') do |v|
+      options[:tool_args] << v
+    end
+    opts.on('--[no-]strict', 'Enable strict no-skip import and strict raise checks (default: true)') { |v| options[:strict] = v }
+    opts.on('--extern NAME', 'Declare unresolved external module (repeatable)') { |v| options[:extern_modules] << v }
+    opts.on('--report FILE', 'Write import report JSON (default: <out>/import_report.json)') { |v| options[:report] = v }
+    opts.on('--[no-]raise', 'Raise CIRCT MLIR into RHDL DSL (default: true)') { |v| options[:raise_to_dsl] = v }
+    opts.on('--[no-]format', 'Format raised RHDL output with RuboCop (default: false)') { |v| options[:format_output] = v }
+    opts.on('--top NAME', 'Optional top module name for CIRCT->DSL raise') { |v| options[:top] = v }
+    opts.on('-h', '--help', 'Show this help') do
+      puts opts
+      exit 0
+    end
+  end
+
+  parser.parse!(args)
+  RHDL::CLI::Tasks::ImportTask.new(options).run
 end
 
 def handle_gates(args)
@@ -319,6 +389,8 @@ def show_examples_help
         apple2        Apple II HDL emulator (cycle-accurate, supports netlist mode)
         gameboy       Game Boy HDL emulator (cycle-accurate with terminal renderers)
         riscv         RISC-V ISA emulator (with xv6 and interactive debugger support)
+        ao486         AO486 CIRCT import/parity workflow
+        sparc64       SPARC64 CIRCT import workflow
 
       Examples:
         rhdl examples mos6502 --demo
@@ -327,6 +399,8 @@ def show_examples_help
         rhdl examples apple2 --mode netlist --sim jit --demo
         rhdl examples gameboy --demo
         rhdl examples riscv --xv6
+        rhdl examples ao486 import --out examples/ao486/import
+        rhdl examples sparc64 import
 
     Run 'rhdl examples <subcommand> --help' for more information.
   HELP
@@ -535,6 +609,10 @@ def handle_examples(args)
     handle_examples_gameboy(args)
   when 'riscv'
     handle_examples_riscv(args)
+  when 'ao486'
+    handle_examples_ao486(args)
+  when 'sparc64'
+    handle_examples_sparc64(args)
   when '-h', '--help', 'help', nil
     show_examples_help
     exit 0
@@ -544,6 +622,16 @@ def handle_examples(args)
     show_examples_help
     exit 1
   end
+end
+
+def handle_examples_ao486(args)
+  script = File.expand_path('../examples/ao486/bin/ao486', __dir__)
+  exec(script, *args)
+end
+
+def handle_examples_sparc64(args)
+  script = File.expand_path('../examples/sparc64/bin/sparc64', __dir__)
+  exec(script, *args)
 end
 
 def handle_generate(args)
@@ -575,12 +663,23 @@ def handle_clean(args)
     opts.banner = <<~BANNER
       Usage: rhdl clean [options]
 
-      Clean all generated files.
+      Clean generated files and local build artifacts.
 
       This is equivalent to running:
         rhdl diagram --clean
         rhdl export --clean
         rhdl gates --clean
+        rake native:clean
+
+      Also removes local simulator/web/temp build directories:
+        **/.verilator_build*
+        **/.arcilator_build*
+        **/.hdl_build
+        web/dist
+        web/build/* (preserving tracked .gitignore sentinels)
+        web/test-results
+        tmp
+        .tmp
 
       Options:
     BANNER
@@ -619,6 +718,26 @@ def handle_regenerate(args)
   RHDL::CLI::Tasks::GenerateTask.new(action: :regenerate).run
 end
 
+def handle_hygiene(args)
+  parser = OptionParser.new do |opts|
+    opts.banner = <<~BANNER
+      Usage: rhdl hygiene [options]
+
+      Run repository hygiene checks (submodules, ignore rules, tracked ephemera, shared symlink policy).
+
+      Options:
+    BANNER
+
+    opts.on('-h', '--help', 'Show this help') do
+      puts opts
+      exit 0
+    end
+  end
+
+  parser.parse!(args)
+  RHDL::CLI::Tasks::HygieneTask.new.run
+end
+
 # =============================================================================
 # Main Entry Point
 # =============================================================================
@@ -632,6 +751,8 @@ when 'diagram', 'diagrams'
   handle_diagram(ARGV)
 when 'export', 'exports'
   handle_export(ARGV)
+when 'import'
+  handle_import(ARGV)
 when 'gates', 'gate'
   handle_gates(ARGV)
 when 'examples'
@@ -644,6 +765,8 @@ when 'clean', 'clean_all'
   handle_clean(ARGV)
 when 'regenerate'
   handle_regenerate(ARGV)
+when 'hygiene'
+  handle_hygiene(ARGV)
 when '-h', '--help', 'help', nil
   show_help
 else

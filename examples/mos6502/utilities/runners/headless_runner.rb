@@ -6,11 +6,13 @@
 require_relative '../apple2/harness'
 require_relative 'isa_runner'
 require_relative 'ruby_runner'
+require 'rhdl/sim/native/headless_trace'
 
 module RHDL
   module Examples
     module MOS6502
       class HeadlessRunner
+        include RHDL::Sim::Native::HeadlessTrace
         attr_reader :runner, :mode, :sim_backend
 
         # @param mode [Symbol] :isa, :ruby, :ir, :netlist, :verilog
@@ -105,6 +107,12 @@ module RHDL
         # Check if using native implementation
         def native?
           @runner.native?
+        end
+
+        def sim
+          return nil unless @runner.respond_to?(:sim)
+
+          @runner.sim
         end
 
         # Get simulator type

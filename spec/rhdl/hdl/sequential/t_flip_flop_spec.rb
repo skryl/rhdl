@@ -46,8 +46,8 @@ RSpec.describe RHDL::HDL::TFlipFlop do
     end
 
     it 'generates valid IR' do
-      ir = RHDL::HDL::TFlipFlop.to_ir
-      expect(ir).to be_a(RHDL::Export::IR::ModuleDef)
+      ir = RHDL::HDL::TFlipFlop.to_flat_circt_nodes
+      expect(ir).to be_a(RHDL::Codegen::CIRCT::IR::ModuleOp)
       expect(ir.ports.length).to eq(6)  # t, clk, rst, en, q, qn
     end
 
@@ -58,13 +58,13 @@ RSpec.describe RHDL::HDL::TFlipFlop do
       expect(verilog).to match(/output.*q/)
     end
 
-    it 'generates valid FIRRTL' do
-      firrtl = RHDL::HDL::TFlipFlop.to_circt
-      expect(firrtl).to include('FIRRTL version')
-      expect(firrtl).to include('circuit t_flip_flop')
-      expect(firrtl).to include('input t')
-      expect(firrtl).to include('input clk')
-      expect(firrtl).to include('output q')
+    it 'generates valid CIRCT MLIR' do
+      mlir = RHDL::HDL::TFlipFlop.to_circt
+      expect(mlir).to include('hw.output')
+      expect(mlir).to include('hw.module @t_flip_flop')
+      expect(mlir).to include('%t:')
+      expect(mlir).to include('%clk:')
+      expect(mlir).to include('q:')
     end
 
     context 'CIRCT firtool validation', if: HdlToolchain.firtool_available? && HdlToolchain.iverilog_available? do
@@ -168,7 +168,7 @@ RSpec.describe RHDL::HDL::TFlipFlop do
 
   describe 'gate-level netlist' do
     let(:component) { RHDL::HDL::TFlipFlop.new('tff') }
-    let(:ir) { RHDL::Export::Structure::Lower.from_components([component], name: 'tff') }
+    let(:ir) { RHDL::Codegen::Netlist::Lower.from_components([component], name: 'tff') }
 
     it 'generates correct IR structure' do
       expect(ir.inputs.keys).to include('tff.t', 'tff.clk', 'tff.rst', 'tff.en')

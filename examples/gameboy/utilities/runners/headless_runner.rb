@@ -7,19 +7,40 @@
 # but without any terminal/display dependencies.
 
 require_relative 'ruby_runner'
+require 'rhdl/sim/native/headless_trace'
 
 module RHDL
   module Examples
     module GameBoy
       class HeadlessRunner
-      attr_reader :runner, :mode, :sim_backend
+      include RHDL::Sim::Native::HeadlessTrace
+      attr_reader :runner, :mode, :sim_backend, :hdl_dir, :verilog_dir, :top,
+                  :use_staged_verilog, :use_normalized_verilog, :use_rhdl_source, :jit
 
       # Create a headless runner with the specified options
-      # @param mode [Symbol] Simulation mode: :ruby, :ir, :verilog
+      # @param mode [Symbol] Simulation mode: :ruby, :ir, :verilog, :circt
       # @param sim [Symbol] Simulator backend for :ir mode: :interpret, :jit, :compile
-      def initialize(mode: :ruby, sim: nil)
+      #   and for :circt/:arcilator mode: :jit or :compile
+      # @param hdl_dir [String, nil] Optional HDL directory override.
+      # @param verilog_dir [String, nil] Optional direct Verilog directory/file override for :verilog mode.
+      # @param top [String, nil] Imported top component/module override for imported HDL trees.
+      # @param use_staged_verilog [Boolean] Prefer/force the staged imported Verilog artifact when available.
+      # @param use_normalized_verilog [Boolean] Force the normalized imported Verilog artifact when available.
+      # @param use_rhdl_source [Boolean] Force export from the selected RHDL top instead of imported Verilog.
+      # @param jit [Boolean, nil] Compatibility override for the arcilator JIT path.
+      def initialize(mode: :ruby, sim: nil, hdl_dir: nil, verilog_dir: nil, top: nil,
+                     use_staged_verilog: true, use_normalized_verilog: false, use_rhdl_source: false, jit: nil)
         @mode = mode
         @sim_backend = sim || default_backend(mode)
+        @hdl_dir = hdl_dir
+        @verilog_dir = verilog_dir
+        @top = top
+        @use_staged_verilog = !!use_staged_verilog
+        @use_normalized_verilog = !!use_normalized_verilog
+        @use_rhdl_source = !!use_rhdl_source
+        normalize_source_selection!
+        @sim_backend = normalize_backend_for_mode(@sim_backend)
+        @jit = jit.nil? ? (@sim_backend == :jit) : !!jit
 
         # Create runner based on mode and sim backend
         @runner = case mode
@@ -27,12 +48,33 @@ module RHDL
                     RHDL::Examples::GameBoy::RubyRunner.new
                   when :ir
                     require_relative 'ir_runner'
-                    RHDL::Examples::GameBoy::IrRunner.new(backend: normalize_native_backend(@sim_backend))
+                    RHDL::Examples::GameBoy::IrRunner.new(
+                      backend: normalize_native_backend(@sim_backend),
+                      hdl_dir: @hdl_dir,
+                      top: @top
+                    )
                   when :verilog
                     require_relative 'verilator_runner'
-                    RHDL::Examples::GameBoy::VerilogRunner.new
+                    RHDL::Examples::GameBoy::VerilogRunner.new(
+                      hdl_dir: @hdl_dir,
+                      verilog_dir: @verilog_dir,
+                      top: @top,
+                      use_staged_verilog: @use_staged_verilog,
+                      use_normalized_verilog: @use_normalized_verilog,
+                      use_rhdl_source: @use_rhdl_source
+                    )
+                  when :circt, :arcilator
+                    require_relative 'arcilator_runner'
+                    RHDL::Examples::GameBoy::ArcilatorRunner.new(
+                      hdl_dir: @hdl_dir,
+                      top: @top,
+                      use_staged_verilog: @use_staged_verilog,
+                      use_normalized_verilog: @use_normalized_verilog,
+                      use_rhdl_source: @use_rhdl_source,
+                      jit: @jit
+                    )
                   else
-                    raise ArgumentError, "Unknown mode: #{mode}. Valid modes: ruby, ir, verilog"
+                    raise ArgumentError, "Unknown mode: #{mode}. Valid modes: ruby, ir, verilog, circt"
                   end
       end
 
@@ -44,6 +86,13 @@ module RHDL
                   path_or_bytes
                 end
         @runner.load_rom(bytes, base_addr: base_addr)
+      end
+
+      def load_boot_rom(path_or_bytes = nil)
+        return false unless @runner.respond_to?(:load_boot_rom)
+
+        @runner.load_boot_rom(path_or_bytes)
+        true
       end
 
       # Load RAM (for testing)
@@ -76,9 +125,33 @@ module RHDL
         @runner.cycle_count
       end
 
+      def frame_count
+        return 0 unless @runner.respond_to?(:frame_count)
+
+        @runner.frame_count
+      end
+
+      def read_framebuffer
+        return Array.new(0) unless @runner.respond_to?(:read_framebuffer)
+
+        @runner.read_framebuffer
+      end
+
+      def debug_state
+        return {} unless @runner.respond_to?(:debug_state)
+
+        @runner.debug_state
+      end
+
       # Check if using native implementation
       def native?
         @runner.native?
+      end
+
+      def sim
+        return nil unless @runner.respond_to?(:sim)
+
+        @runner.sim
       end
 
       # Get simulator type
@@ -89,13 +162,19 @@ module RHDL
       # Get backend
       def backend
         case @mode
-        when :ruby, :ir
+        when :ruby, :ir, :circt, :arcilator
           @sim_backend
         when :verilog
           nil
         else
           @sim_backend
         end
+      end
+
+      def close
+        return false unless @runner.respond_to?(:close)
+
+        @runner.close
       end
 
       # Get ROM size (for verification)
@@ -160,14 +239,48 @@ module RHDL
       end
 
       # Create a headless runner with test ROM loaded
-      def self.with_test_rom(mode: :ruby, sim: nil)
-        runner = new(mode: mode, sim: sim)
+      def self.with_test_rom(mode: :ruby, sim: nil, hdl_dir: nil, verilog_dir: nil, top: nil,
+                             use_staged_verilog: true, use_normalized_verilog: false, use_rhdl_source: false, jit: nil)
+        runner = new(
+          mode: mode,
+          sim: sim,
+          hdl_dir: hdl_dir,
+          verilog_dir: verilog_dir,
+          top: top,
+          use_staged_verilog: use_staged_verilog,
+          use_normalized_verilog: use_normalized_verilog,
+          use_rhdl_source: use_rhdl_source,
+          jit: jit
+        )
         test_rom = create_test_rom
         runner.load_rom(test_rom)
         runner
       end
 
       private
+
+      def normalize_backend_for_mode(backend)
+        case @mode
+        when :ir
+          normalize_native_backend(backend)
+        when :circt, :arcilator
+          normalize_arcilator_backend(backend)
+        else
+          backend
+        end
+      end
+
+      def normalize_source_selection!
+        if @use_rhdl_source
+          @use_staged_verilog = false
+          @use_normalized_verilog = false
+        elsif @use_normalized_verilog
+          @use_staged_verilog = false
+        elsif !@use_staged_verilog
+          @use_staged_verilog = true
+          @use_normalized_verilog = false
+        end
+      end
 
       def normalize_native_backend(backend)
         case backend
@@ -178,13 +291,23 @@ module RHDL
         end
       end
 
+      def normalize_arcilator_backend(backend)
+        case backend
+        when :jit, :compile
+          backend
+        else
+          raise ArgumentError, "Invalid backend #{backend.inspect} for #{mode} mode. Use :jit or :compile."
+        end
+      end
+
       def default_backend(mode)
         case mode
         when :ruby then :ruby
         when :ir then :compile
         when :verilog then nil
+        when :circt, :arcilator then :compile
         else
-          raise ArgumentError, "Unknown mode: #{mode}. Valid modes: ruby, ir, verilog"
+          raise ArgumentError, "Unknown mode: #{mode}. Valid modes: ruby, ir, verilog, circt"
         end
       end
       end

@@ -33,8 +33,8 @@ RSpec.describe RHDL::HDL::Subtractor do
     end
 
     it 'generates valid IR' do
-      ir = RHDL::HDL::Subtractor.to_ir
-      expect(ir).to be_a(RHDL::Export::IR::ModuleDef)
+      ir = RHDL::HDL::Subtractor.to_flat_circt_nodes
+      expect(ir).to be_a(RHDL::Codegen::CIRCT::IR::ModuleOp)
       expect(ir.ports.length).to eq(6)  # a, b, bin, diff, bout, overflow
     end
 
@@ -45,13 +45,13 @@ RSpec.describe RHDL::HDL::Subtractor do
       expect(verilog).to include('output [7:0] diff')
     end
 
-    it 'generates valid FIRRTL' do
-      firrtl = RHDL::HDL::Subtractor.to_circt
-      expect(firrtl).to include('FIRRTL version')
-      expect(firrtl).to include('circuit subtractor')
-      expect(firrtl).to include('input a')
-      expect(firrtl).to include('input b')
-      expect(firrtl).to include('output diff')
+    it 'generates valid CIRCT MLIR' do
+      mlir = RHDL::HDL::Subtractor.to_circt
+      expect(mlir).to include('hw.output')
+      expect(mlir).to include('hw.module @subtractor')
+      expect(mlir).to include('%a:')
+      expect(mlir).to include('%b:')
+      expect(mlir).to include('diff:')
     end
 
     context 'CIRCT firtool validation', if: HdlToolchain.firtool_available? do
@@ -68,7 +68,7 @@ RSpec.describe RHDL::HDL::Subtractor do
 
   describe 'gate-level netlist' do
     let(:component) { RHDL::HDL::Subtractor.new('sub', width: 4) }
-    let(:ir) { RHDL::Export::Structure::Lower.from_components([component], name: 'sub') }
+    let(:ir) { RHDL::Codegen::Netlist::Lower.from_components([component], name: 'sub') }
 
     it 'generates correct IR structure' do
       expect(ir.inputs.keys).to include('sub.a', 'sub.b', 'sub.bin')

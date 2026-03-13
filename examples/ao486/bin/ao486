@@ -1,0 +1,6 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+require_relative '../utilities/cli'
+
+exit(RHDL::Examples::AO486::CLI.run(ARGV, program_name: 'rhdl examples ao486'))

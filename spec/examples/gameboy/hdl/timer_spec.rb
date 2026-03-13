@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 require 'spec_helper'
-require_relative '../../../../examples/gameboy/gameboy'
+require_relative '../../../../examples/gameboy/hdl/gameboy'
 
 # Game Boy Timer Unit Tests
 # Tests the Timer component (DIV, TIMA, TMA, TAC registers)
@@ -29,7 +29,7 @@ RSpec.describe 'GameBoy Timer' do
 
   describe 'Timer Component Structure' do
     let(:timer) { RHDL::Examples::GameBoy::Timer.new('timer') }
-    let(:ir) { timer.class.to_ir }
+    let(:ir) { timer.class.to_flat_circt_nodes }
     let(:port_names) { ir.ports.map { |p| p.name.to_sym } }
 
     describe 'Input Ports (via IR)' do
@@ -79,7 +79,7 @@ RSpec.describe 'GameBoy Timer' do
       end
 
       it 'can generate flattened IR' do
-        flat_ir = timer.class.to_flat_ir
+        flat_ir = timer.class.to_flat_circt_nodes
         expect(flat_ir).not_to be_nil
       end
 
@@ -95,7 +95,7 @@ RSpec.describe 'GameBoy Timer' do
     before(:all) do
       begin
         require_relative '../../../../examples/gameboy/utilities/runners/ir_runner'
-        @ir_available = RHDL::Codegen::IR::COMPILER_AVAILABLE rescue false
+        @ir_available = RHDL::Sim::Native::IR::COMPILER_AVAILABLE rescue false
         # Try to actually initialize a runner to verify it works
         if @ir_available
           test_runner = RHDL::Examples::GameBoy::IrRunner.new(backend: :compile)

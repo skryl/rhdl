@@ -53,27 +53,27 @@ RSpec.describe RHDL::Examples::MOS6502::CPU do
       expect(verilog).to include('module mos6502_cpu')  # Top module last
     end
 
-    it 'generates valid FIRRTL' do
-      firrtl = described_class.to_circt
-      expect(firrtl).to include('FIRRTL version')
-      expect(firrtl).to include('circuit mos6502_cpu')
-      expect(firrtl).to include('input clk')
-      expect(firrtl).to include('output addr')
+    it 'generates valid CIRCT MLIR' do
+      mlir = described_class.to_circt
+      expect(mlir).to include('hw.output')
+      expect(mlir).to include('hw.module @mos6502_cpu')
+      expect(mlir).to include('%clk:')
+      expect(mlir).to include('addr:')
     end
 
-    it 'generates hierarchical FIRRTL with all submodules' do
-      firrtl = described_class.to_circt_hierarchy
-      expect(firrtl).to include('FIRRTL version')
-      expect(firrtl).to include('circuit mos6502_cpu')
+    it 'generates hierarchical CIRCT MLIR with all submodules' do
+      mlir = described_class.to_circt_hierarchy
+      expect(mlir).to include('hw.output')
+      expect(mlir).to include('hw.module @mos6502_cpu')
       # Should include submodule definitions
-      expect(firrtl).to include('module mos6502_registers')
-      expect(firrtl).to include('module mos6502_alu')
-      expect(firrtl).to include('module mos6502_control_unit')
-      expect(firrtl).to include('public module mos6502_cpu')  # Top module marked as public
+      expect(mlir).to include('hw.module @mos6502_registers')
+      expect(mlir).to include('hw.module @mos6502_alu')
+      expect(mlir).to include('hw.module @mos6502_control_unit')
+      expect(mlir).to include('hw.module @mos6502_cpu')  # Top module marked as public
     end
 
     context 'CIRCT firtool validation', if: HdlToolchain.firtool_available? do
-      it 'firtool can compile hierarchical FIRRTL to Verilog' do
+      it 'firtool can compile hierarchical CIRCT MLIR to Verilog' do
         result = CirctHelper.validate_hierarchical_firrtl(
           described_class,
           base_dir: 'tmp/circt_test/mos6502_cpu'
@@ -119,7 +119,7 @@ RSpec.describe RHDL::Examples::MOS6502::CPU do
 
   describe 'gate-level netlist' do
     let(:component) { described_class.new('mos6502_cpu') }
-    let(:ir) { RHDL::Export::Structure::Lower.from_components([component], name: 'mos6502_cpu') }
+    let(:ir) { RHDL::Codegen::Netlist::Lower.from_components([component], name: 'mos6502_cpu') }
 
     it 'generates correct IR structure' do
       expect(ir.inputs.keys).to include('mos6502_cpu.clk', 'mos6502_cpu.rst')

@@ -80,8 +80,8 @@ RSpec.describe RHDL::HDL::JKFlipFlop do
     end
 
     it 'generates valid IR' do
-      ir = RHDL::HDL::JKFlipFlop.to_ir
-      expect(ir).to be_a(RHDL::Export::IR::ModuleDef)
+      ir = RHDL::HDL::JKFlipFlop.to_flat_circt_nodes
+      expect(ir).to be_a(RHDL::Codegen::CIRCT::IR::ModuleOp)
       expect(ir.ports.length).to eq(7)  # j, k, clk, rst, en, q, qn
     end
 
@@ -93,14 +93,14 @@ RSpec.describe RHDL::HDL::JKFlipFlop do
       expect(verilog).to match(/output.*q/)
     end
 
-    it 'generates valid FIRRTL' do
-      firrtl = RHDL::HDL::JKFlipFlop.to_circt
-      expect(firrtl).to include('FIRRTL version')
-      expect(firrtl).to include('circuit jk_flip_flop')
-      expect(firrtl).to include('input j')
-      expect(firrtl).to include('input k')
-      expect(firrtl).to include('input clk')
-      expect(firrtl).to include('output q')
+    it 'generates valid CIRCT MLIR' do
+      mlir = RHDL::HDL::JKFlipFlop.to_circt
+      expect(mlir).to include('hw.output')
+      expect(mlir).to include('hw.module @jk_flip_flop')
+      expect(mlir).to include('%j:')
+      expect(mlir).to include('%k:')
+      expect(mlir).to include('%clk:')
+      expect(mlir).to include('q:')
     end
 
     context 'CIRCT firtool validation', if: HdlToolchain.firtool_available? do
@@ -117,7 +117,7 @@ RSpec.describe RHDL::HDL::JKFlipFlop do
 
   describe 'gate-level netlist' do
     let(:component) { RHDL::HDL::JKFlipFlop.new('jkff') }
-    let(:ir) { RHDL::Export::Structure::Lower.from_components([component], name: 'jkff') }
+    let(:ir) { RHDL::Codegen::Netlist::Lower.from_components([component], name: 'jkff') }
 
     it 'generates correct IR structure' do
       expect(ir.inputs.keys).to include('jkff.j', 'jkff.k', 'jkff.clk', 'jkff.rst', 'jkff.en')

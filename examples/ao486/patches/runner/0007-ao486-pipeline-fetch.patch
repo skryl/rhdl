@@ -1,0 +1,159 @@
+diff --git a/ao486/pipeline/fetch.v b/ao486/pipeline/fetch.v
+--- a/ao486/pipeline/fetch.v
++++ b/ao486/pipeline/fetch.v
+@@ -1,104 +1,54 @@
+-/*
+- * Copyright (c) 2014, Aleksander Osman
+- * All rights reserved.
+- * 
+- * Redistribution and use in source and binary forms, with or without
+- * modification, are permitted provided that the following conditions are met:
+- * 
+- * * Redistributions of source code must retain the above copyright notice, this
+- *   list of conditions and the following disclaimer.
+- * 
+- * * Redistributions in binary form must reproduce the above copyright notice,
+- *   this list of conditions and the following disclaimer in the documentation
+- *   and/or other materials provided with the distribution.
+- * 
+- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+- * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+- * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+- * DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+- * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+- * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+- * SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+- * CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+- * OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+- * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+- */
+-
+-`include "defines.v"
+-
+ module fetch(
+-    input               clk,
+-    input               rst_n,
+-    
+-    input               pr_reset,
+-    
+-    // get prefetch_eip
+-    input       [31:0]  wr_eip,
+-    
+-    output      [31:0]  prefetch_eip,
+-    
+-    // prefetch_fifo
+-    output              prefetchfifo_accept_do,
+-    input       [67:0]  prefetchfifo_accept_data,
+-    input               prefetchfifo_accept_empty,
+-    
+-    // fetch interface to decode
+-    output      [3:0]   fetch_valid,
+-    output      [63:0]  fetch,
+-    output              fetch_limit,
+-    output              fetch_page_fault,
+-    
+-    // feedback from decode
+-    input       [3:0]   dec_acceptable
++  input         clk,
++                rst_n,
++                pr_reset,
++  input  [31:0] wr_eip,
++  input  [67:0] prefetchfifo_accept_data,
++  input         prefetchfifo_accept_empty,
++  input  [3:0]  dec_acceptable,
++  output [31:0] prefetch_eip,
++  output        prefetchfifo_accept_do,
++  output [3:0]  fetch_valid,
++  output [63:0] fetch,
++  output        fetch_limit,
++                fetch_page_fault
+ );
+ 
+-//------------------------------------------------------------------------------
+-
+-wire partial;
+-
+-reg [3:0] fetch_count;
+-
+-//------------------------------------------------------------------------------
+-
+-assign prefetch_eip = wr_eip;
+-
+-//------------------------------------------------------------------------------
+-
+-assign fetch_valid      = (prefetchfifo_accept_empty || prefetchfifo_accept_data[67:64] >= `PREFETCH_MIN_FAULT)? 4'd0 : prefetchfifo_accept_data[67:64] - fetch_count;
+-
+-assign fetch_limit      = prefetchfifo_accept_empty == `FALSE && prefetchfifo_accept_data[67:64] == `PREFETCH_GP_FAULT;
+-assign fetch_page_fault = prefetchfifo_accept_empty == `FALSE && prefetchfifo_accept_data[67:64] == `PREFETCH_PF_FAULT;
+-
+-assign fetch =
+-    (prefetchfifo_accept_empty)?      64'd0 :
+-    (fetch_count == 4'd0)?                   prefetchfifo_accept_data[63:0] :
+-    (fetch_count == 4'd1)?          {  8'd0, prefetchfifo_accept_data[63:8] } :
+-    (fetch_count == 4'd2)?          { 16'd0, prefetchfifo_accept_data[63:16] } :
+-    (fetch_count == 4'd3)?          { 24'd0, prefetchfifo_accept_data[63:24] } :
+-    (fetch_count == 4'd4)?          { 32'd0, prefetchfifo_accept_data[63:32] } :
+-    (fetch_count == 4'd5)?          { 40'd0, prefetchfifo_accept_data[63:40] } :
+-    (fetch_count == 4'd6)?          { 48'd0, prefetchfifo_accept_data[63:48] } :
+-                                    { 56'd0, prefetchfifo_accept_data[63:56] };
+-
+-//------------------------------------------------------------------------------
+-
+-assign prefetchfifo_accept_do   = dec_acceptable >= fetch_valid && prefetchfifo_accept_empty == `FALSE && prefetchfifo_accept_data[67:64] < `PREFETCH_MIN_FAULT;
+-
+-assign partial                  = dec_acceptable <  fetch_valid && prefetchfifo_accept_empty == `FALSE && prefetchfifo_accept_data[67:64] < `PREFETCH_MIN_FAULT;
+-
+-//------------------------------------------------------------------------------
+-
+-always @(posedge clk) begin
+-    if(rst_n == 1'b0)               fetch_count <= 4'd0;
+-    else if(pr_reset)               fetch_count <= 4'd0;
+-    else if(prefetchfifo_accept_do) fetch_count <= 4'd0;
+-    else if(partial)                fetch_count <= fetch_count + dec_acceptable;
+-end
+-
+-//------------------------------------------------------------------------------
+-                                        
+-//------------------------------------------------------------------------------
+-
+-//------------------------------------------------------------------------------
+-
++  reg  [3:0] rt_tmp_1_4;
++  wire       _GEN = ~prefetchfifo_accept_empty & prefetchfifo_accept_data[67:64] < 4'h9;	// /var/folders/fx/2jqq5cks33g297zlybsqw6c40000gn/T/ao486_patch_profile_ws20260311-55795-e9mvr1/runner.mlir:11068:17, :11069:17, :11070:17, :11071:17, :11072:18
++  wire [3:0] _GEN_0 =
++    _GEN & rt_tmp_1_4 < prefetchfifo_accept_data[67:64]
++      ? prefetchfifo_accept_data[67:64] - rt_tmp_1_4
++      : 4'h0;	// /var/folders/fx/2jqq5cks33g297zlybsqw6c40000gn/T/ao486_patch_profile_ws20260311-55795-e9mvr1/runner.mlir:11067:17, :11069:17, :11072:18, :11073:18, :11074:18, :11076:18, :11088:17
++  wire       _GEN_1 = _GEN & (|_GEN_0);	// /var/folders/fx/2jqq5cks33g297zlybsqw6c40000gn/T/ao486_patch_profile_ws20260311-55795-e9mvr1/runner.mlir:11072:18, :11076:18, :11078:18, :11079:18
++  wire       _GEN_2 = dec_acceptable >= _GEN_0 & _GEN_1;	// /var/folders/fx/2jqq5cks33g297zlybsqw6c40000gn/T/ao486_patch_profile_ws20260311-55795-e9mvr1/runner.mlir:11076:18, :11077:18, :11079:18, :11080:18
++  always_ff @(posedge clk)
++    rt_tmp_1_4 <=
++      ~rst_n | pr_reset | _GEN_2
++        ? 4'h0
++        : dec_acceptable < _GEN_0 & _GEN_1 ? rt_tmp_1_4 + dec_acceptable : rt_tmp_1_4;	// /var/folders/fx/2jqq5cks33g297zlybsqw6c40000gn/T/ao486_patch_profile_ws20260311-55795-e9mvr1/runner.mlir:11066:17, :11067:17, :11076:18, :11079:18, :11080:18, :11081:18, :11082:18, :11083:18, :11084:18, :11086:18, :11087:18, :11088:17
++  assign prefetch_eip = wr_eip;
++  assign prefetchfifo_accept_do = _GEN_2;	// /var/folders/fx/2jqq5cks33g297zlybsqw6c40000gn/T/ao486_patch_profile_ws20260311-55795-e9mvr1/runner.mlir:11080:18, :11140:3
++  assign fetch_valid = _GEN_0;	// /var/folders/fx/2jqq5cks33g297zlybsqw6c40000gn/T/ao486_patch_profile_ws20260311-55795-e9mvr1/runner.mlir:11076:18, :11140:3
++  assign fetch =
++    prefetchfifo_accept_empty
++      ? 64'h0
++      : rt_tmp_1_4 == 4'h0
++          ? prefetchfifo_accept_data[63:0]
++          : rt_tmp_1_4 == 4'h1
++              ? {8'h0, prefetchfifo_accept_data[63:8]}
++              : rt_tmp_1_4 == 4'h2
++                  ? {16'h0, prefetchfifo_accept_data[63:16]}
++                  : rt_tmp_1_4 == 4'h3
++                      ? {24'h0, prefetchfifo_accept_data[63:24]}
++                      : rt_tmp_1_4 == 4'h4
++                          ? {32'h0, prefetchfifo_accept_data[63:32]}
++                          : rt_tmp_1_4 == 4'h5
++                              ? {40'h0, prefetchfifo_accept_data[63:40]}
++                              : rt_tmp_1_4 == 4'h6
++                                  ? {48'h0, prefetchfifo_accept_data[63:48]}
++                                  : {56'h0, prefetchfifo_accept_data[63:56]};	// /var/folders/fx/2jqq5cks33g297zlybsqw6c40000gn/T/ao486_patch_profile_ws20260311-55795-e9mvr1/runner.mlir:11067:17, :11088:17, :11089:19, :11091:18, :11092:19, :11093:18, :11094:18, :11095:18, :11096:19, :11097:19, :11098:18, :11099:18, :11100:19, :11101:19, :11102:19, :11103:18, :11104:18, :11105:19, :11106:19, :11107:19, :11108:18, :11109:18, :11110:19, :11111:19, :11112:19, :11113:18, :11114:18, :11115:19, :11116:19, :11117:19, :11118:18, :11119:18, :11120:19, :11121:19, :11122:19, :11123:19, :11124:18, :11125:19, :11126:19, :11127:19, :11128:19, :11129:19, :11130:19, :11131:19, :11132:19, :11133:19, :11140:3
++  assign fetch_limit = ~prefetchfifo_accept_empty & (&(prefetchfifo_accept_data[67:64]));	// /var/folders/fx/2jqq5cks33g297zlybsqw6c40000gn/T/ao486_patch_profile_ws20260311-55795-e9mvr1/runner.mlir:11068:17, :11069:17, :11135:18, :11136:18, :11140:3
++  assign fetch_page_fault =
++    ~prefetchfifo_accept_empty & prefetchfifo_accept_data[67:64] == 4'hE;	// /var/folders/fx/2jqq5cks33g297zlybsqw6c40000gn/T/ao486_patch_profile_ws20260311-55795-e9mvr1/runner.mlir:11068:17, :11069:17, :11137:18, :11138:18, :11139:18, :11140:3
+ endmodule
+
