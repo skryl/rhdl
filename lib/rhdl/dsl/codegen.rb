@@ -424,11 +424,6 @@ module RHDL
                     target: child_signal,
                     expr: RHDL::Codegen::CIRCT::IR::Signal.new(name: parent_sig, width: port_width)
                   )
-                else
-                  all_assigns << RHDL::Codegen::CIRCT::IR::Assign.new(
-                    target: parent_sig,
-                    expr: RHDL::Codegen::CIRCT::IR::Signal.new(name: child_signal, width: port_width)
-                  )
                 end
 
                 append_flat_net!(all_nets, net_names, reg_names: reg_names, name: child_signal.to_sym, width: port_width)

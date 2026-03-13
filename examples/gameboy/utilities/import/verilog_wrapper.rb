@@ -312,7 +312,7 @@ module RHDL
             return '' unless profile.fetch(:boot_mode) == :upload
 
             <<~UPLOAD
-              always @(posedge clk_sys or posedge reset) begin
+              always @(posedge clk_sys) begin
                 if (reset) begin
                   boot_upload_active <= 1'b1;
                   boot_upload_phase <= 1'b0;

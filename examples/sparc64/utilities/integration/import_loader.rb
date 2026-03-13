@@ -84,7 +84,7 @@ module RHDL
                 clean_output: true,
                 strict: false,
                 patches_dir: resolved_patches_dir,
-                emit_runtime_json: false,
+                emit_runtime_json: true,
                 progress: ->(_message) {}
               )
               result = importer.run
@@ -112,6 +112,13 @@ module RHDL
             private
 
             def build_digest(reference_root:, import_top:, import_top_file:, patches_dir:, patch_files:)
+              shared_import_pipeline = [
+                File.expand_path('../../../../lib/rhdl/cli/tasks/import_task.rb', __dir__),
+                File.expand_path('../../../../lib/rhdl/codegen/circt/tooling.rb', __dir__),
+                File.expand_path('../../../../lib/rhdl/codegen/circt/import_cleanup.rb', __dir__),
+                File.expand_path('../../../../lib/rhdl/codegen/circt/import.rb', __dir__),
+                File.expand_path('../../../../lib/rhdl/codegen/circt/raise.rb', __dir__)
+              ]
               patch_digests = Array(patch_files).map do |path|
                 [path, Digest::SHA256.file(path).hexdigest]
               end
@@ -123,7 +130,10 @@ module RHDL
                   patches_dir: patches_dir,
                   patch_files: patch_digests,
                   importer_sha: Digest::SHA256.file(File.expand_path('../import/system_importer.rb', __dir__)).hexdigest,
-                  helper_sha: Digest::SHA256.file(__FILE__).hexdigest
+                  helper_sha: Digest::SHA256.file(__FILE__).hexdigest,
+                  shared_import_pipeline: shared_import_pipeline.map do |path|
+                    [path, Digest::SHA256.file(path).hexdigest]
+                  end
                 )
               )
             end
@@ -175,6 +185,9 @@ module RHDL
               files = Dir.glob(File.join(root, '**', '*.rb')).sort
               raise ArgumentError, "No Ruby HDL files found in #{root}" if files.empty?
 
+              class_names_by_path = files.each_with_object({}) do |path, acc|
+                acc[path] = generated_class_name_for_path(path)
+              end
               pending = files
               last_errors = {}
 
@@ -187,6 +200,7 @@ module RHDL
                     load path
                     progressed = true
                   rescue NameError => e
+                    remove_component_constant(class_names_by_path[path]) if class_names_by_path[path]
                     still_pending << path
                     last_errors[path] = e
                   end
@@ -202,6 +216,11 @@ module RHDL
 
                 pending = still_pending
               end
+            end
+
+            def generated_class_name_for_path(path)
+              source = File.read(path)
+              source[/^\s*class\s+([A-Za-z_][A-Za-z0-9_:]*)\s*</, 1]
             end
 
             def constantize(class_name)

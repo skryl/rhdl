@@ -50,7 +50,9 @@ module RHDL
           )
 
           runner.load_bios if options[:bios]
-          runner.load_dos if options[:dos]
+          runner.load_dos(path: options[:dos_disk1], slot: 0, activate: true) if options[:dos_disk1]
+          runner.load_dos if options[:dos] && !options[:dos_disk1]
+          runner.load_dos(path: options[:dos_disk2], slot: 1, activate: false) if options[:dos_disk2]
           runner.run
         end
 

@@ -4,11 +4,13 @@ require_relative '../display_adapter'
 require_relative 'ir_runner'
 require_relative 'verilator_runner'
 require_relative 'arcilator_runner'
+require 'rhdl/sim/native/headless_trace'
 
 module RHDL
   module Examples
     module AO486
       class HeadlessRunner
+        include RHDL::Sim::Native::HeadlessTrace
         ESC = "\e"
         CLEAR_SCREEN = "#{ESC}[2J"
         MOVE_HOME = "#{ESC}[H"
@@ -89,16 +91,27 @@ module RHDL
           @runner.bios_paths
         end
 
-        def dos_path
-          @runner.dos_path
+        def dos_path(slot = 0)
+          return @runner.dos_path if slot.to_i.zero?
+
+          software_path('bin', "dos_slot#{slot}.img")
         end
 
         def load_bios
           @runner.load_bios
         end
 
-        def load_dos
-          @runner.load_dos
+        def load_dos(path: nil, slot: 0, activate: nil)
+          kwargs = { slot: slot }
+          kwargs[:path] = path unless path.nil?
+          kwargs[:activate] = activate unless activate.nil?
+          @runner.load_dos(**kwargs)
+          self
+        end
+
+        def swap_dos(slot)
+          @runner.swap_dos(slot)
+          self
         end
 
         def load_bytes(base, bytes)
@@ -113,6 +126,10 @@ module RHDL
 
         def read_bytes(base, length, mapped: true)
           @runner.read_bytes(base, length, mapped: mapped)
+        end
+
+        def dump_memory(base, length, mapped: true, bytes_per_row: 16)
+          @runner.dump_memory(base, length, mapped: mapped, bytes_per_row: bytes_per_row)
         end
 
         def memory
@@ -212,7 +229,53 @@ module RHDL
           )
         end
 
+        def progress_line
+          snapshot = state
+          parts = ["cyc=#{snapshot[:cycles_run]}"]
+
+          pc = snapshot[:pc]
+          if pc
+            parts << "pc[t/d/r/x/a]=#{%i[trace decode read execute arch].map { |key| hex(snapshot.dig(:pc, key)) }.join('/')}"
+          end
+
+          arch = snapshot[:arch]
+          if arch
+            regs = %i[eax ebx ecx edx esi edi esp ebp eip].map do |key|
+              "#{key}=#{hex(arch[key])}"
+            end
+            parts << "regs=#{regs.join(',')}"
+          end
+
+          if snapshot.key?(:exception_vector) || snapshot.key?(:exception_eip)
+            parts << "exc=#{hex(snapshot[:exception_vector], digits: 2)}@#{hex(snapshot[:exception_eip])}"
+          end
+
+          parts << "irq=#{hex(snapshot[:last_irq], digits: 2)}" if snapshot[:last_irq]
+          parts << "intdone=#{snapshot[:interrupt_done].to_i}" if snapshot.key?(:interrupt_done)
+
+          if (io = snapshot[:last_io])
+            parts << "io=#{hex(io[:address], digits: 4)}/#{io[:length]}=#{hex(io[:data])}"
+          end
+
+          if (int13 = snapshot.dig(:dos_bridge, :int13))
+            parts << "dos13=ax=#{hex(int13[:ax], digits: 4)} es:bx=#{hex(int13[:es], digits: 4)}:#{hex(int13[:bx], digits: 4)} cx=#{hex(int13[:cx], digits: 4)} dx=#{hex(int13[:dx], digits: 4)}"
+          end
+
+          parts << "shell=#{snapshot[:shell_prompt_detected] ? 1 : 0}"
+
+          line0 = read_text_screen.lines.first.to_s.rstrip
+          parts << "line0=#{line0.inspect}" unless line0.empty?
+
+          parts.join(' ')
+        end
+
         private
+
+        def hex(value, digits: 8)
+          return '--' if value.nil?
+
+          format("0x%0#{digits}X", value)
+        end
 
         def run_headless
           running = true
@@ -287,10 +350,11 @@ module RHDL
               format_cycle_limit(speed)
             ),
             format(
-              "BIOS:%-3s DOS:%-3s Floppy:%s KBuf:%s",
+              "BIOS:%-3s DOS:%-3s Floppy:%s Slot:%s KBuf:%s",
               format_bool(snapshot[:bios_loaded]),
               format_bool(snapshot[:dos_loaded]),
               format_number(snapshot[:floppy_image_size]),
+              snapshot[:active_floppy_slot].nil? ? '--' : snapshot[:active_floppy_slot].to_i.to_s,
               format_number(snapshot[:keyboard_buffer_size])
             ),
             format(

@@ -66,6 +66,33 @@ RSpec.describe RHDL::Codegen::CIRCT::Tooling do
     end
   end
 
+  describe '.arcilator_command' do
+    it 'adds the shared split-functions threshold by default' do
+      expect(
+        described_class.arcilator_command(
+          mlir_path: 'in.mlir',
+          state_file: 'state.json',
+          out_path: 'out.ll'
+        )
+      ).to eq(
+        ['arcilator', 'in.mlir', '--split-funcs-threshold=100', '--state-file=state.json', '-o', 'out.ll']
+      )
+    end
+
+    it 'preserves an explicit split-functions threshold override' do
+      expect(
+        described_class.arcilator_command(
+          mlir_path: 'in.mlir',
+          state_file: 'state.json',
+          out_path: 'out.ll',
+          extra_args: ['--observe-registers', '--split-funcs-threshold=250']
+        )
+      ).to eq(
+        ['arcilator', 'in.mlir', '--observe-registers', '--split-funcs-threshold=250', '--state-file=state.json', '-o', 'out.ll']
+      )
+    end
+  end
+
   describe '.verilog_to_circt_mlir' do
     it 'invokes circt-verilog import command with expected args and writes stdout to the target file' do
       Dir.mktmpdir('tooling_spec_import') do |dir|
@@ -271,6 +298,28 @@ RSpec.describe RHDL::Codegen::CIRCT::Tooling do
       end
     end
 
+    it 'supports syntax-only ARC cleanup without the importer cleanup round-trip' do
+      skip 'circt-opt not available' unless HdlToolchain.which('circt-opt')
+
+      Dir.mktmpdir('tooling_prepare_arc_circt_syntax_only') do |dir|
+        mlir_path = File.join(dir, 'dff.normalized.llhd.mlir')
+        File.write(mlir_path, simple_dff_llhd)
+
+        allow(RHDL::Codegen::CIRCT::ImportCleanup).to receive(:cleanup_imported_core_mlir).and_call_original
+
+        result = described_class.prepare_arc_mlir_from_circt_mlir(
+          mlir_path: mlir_path,
+          work_dir: File.join(dir, 'work'),
+          base_name: 'dff',
+          cleanup_mode: :syntax_only
+        )
+
+        expect(result[:success]).to be(true), result.dig(:arc, :stderr).to_s
+        expect(RHDL::Codegen::CIRCT::ImportCleanup).not_to have_received(:cleanup_imported_core_mlir)
+        expect(File.read(result.fetch(:hwseq_mlir_path))).not_to include('llhd.')
+      end
+    end
+
     it 'applies requested module stubs before ARC preparation' do
       skip 'circt-opt not available' unless HdlToolchain.which('circt-opt')
 
@@ -323,6 +372,60 @@ RSpec.describe RHDL::Codegen::CIRCT::Tooling do
       end
     end
 
+    it 'runs a cleanup opt pass on flattened hwseq before ARC conversion' do
+      status = instance_double(Process::Status, success?: true)
+
+      Dir.mktmpdir('tooling_prepare_arc_circt_cleanup') do |dir|
+        mlir_path = File.join(dir, 'top.mlir')
+        work_dir = File.join(dir, 'work')
+        File.write(mlir_path, <<~MLIR)
+          hw.module @top(out out : i1) {
+            %false = hw.constant false
+            hw.output %false : i1
+          }
+        MLIR
+
+        hwseq_path = File.join(work_dir, 'top.hwseq.mlir')
+        flattened_path = File.join(work_dir, 'top.flattened.hwseq.mlir')
+        cleaned_path = File.join(work_dir, 'top.flattened.cleaned.hwseq.mlir')
+        arc_path = File.join(work_dir, 'top.arc.mlir')
+
+        expect(Open3).to receive(:capture3).with(
+          'circt-opt',
+          hwseq_path,
+          "--pass-pipeline=#{described_class::DEFAULT_ARC_FLATTEN_PIPELINE}",
+          '-o',
+          flattened_path
+        ).ordered.and_return(['', '', status])
+
+        expect(Open3).to receive(:capture3).with(
+          'circt-opt',
+          flattened_path,
+          '--canonicalize',
+          '--cse',
+          '-o',
+          cleaned_path
+        ).ordered.and_return(['', '', status])
+
+        expect(Open3).to receive(:capture3).with(
+          'circt-opt',
+          flattened_path,
+          '--convert-to-arcs',
+          '-o',
+          arc_path
+        ).ordered.and_return(['', '', status])
+
+        result = described_class.prepare_arc_mlir_from_circt_mlir(
+          mlir_path: mlir_path,
+          work_dir: work_dir,
+          base_name: 'top'
+        )
+
+        expect(result[:success]).to be(true)
+        expect(result.dig(:flatten_cleanup, :success)).to be(true)
+      end
+    end
+
     it 'emits ARC MLIR that arcilator can lower on a simple design' do
       skip 'circt-opt or arcilator not available' unless HdlToolchain.which('circt-opt') && HdlToolchain.which('arcilator')
 
@@ -370,6 +473,41 @@ RSpec.describe RHDL::Codegen::CIRCT::Tooling do
 
         expect(export[:success]).to be(true), export[:stderr].to_s
         expect(File.read(verilog_path)).to include('module dff')
+      end
+    end
+  end
+
+  describe '.preferred_arcilator_input_mlir_path' do
+    it 'prefers flattened hwseq output when available' do
+      Dir.mktmpdir('tooling_arcilator_input') do |dir|
+        flattened = File.join(dir, 'design.flattened.hwseq.mlir')
+        hwseq = File.join(dir, 'design.hwseq.mlir')
+        arc = File.join(dir, 'design.arc.mlir')
+        [flattened, hwseq, arc].each { |path| File.write(path, "module {}\n") }
+
+        expect(
+          described_class.preferred_arcilator_input_mlir_path(
+            flattened_hwseq_mlir_path: flattened,
+            hwseq_mlir_path: hwseq,
+            arc_mlir_path: arc
+          )
+        ).to eq(flattened)
+      end
+    end
+
+    it 'falls back to the first existing artifact when flattened hwseq is unavailable' do
+      Dir.mktmpdir('tooling_arcilator_input_fallback') do |dir|
+        hwseq = File.join(dir, 'design.hwseq.mlir')
+        arc = File.join(dir, 'design.arc.mlir')
+        [hwseq, arc].each { |path| File.write(path, "module {}\n") }
+
+        expect(
+          described_class.preferred_arcilator_input_mlir_path(
+            flattened_hwseq_mlir_path: File.join(dir, 'missing.flattened.hwseq.mlir'),
+            hwseq_mlir_path: hwseq,
+            arc_mlir_path: arc
+          )
+        ).to eq(hwseq)
       end
     end
   end

@@ -108,6 +108,18 @@ RSpec.describe 'ArcilatorRunner' do
       runner_class = RHDL::Examples::Apple2::ArcilatorRunner
       expect(runner_class.instance_method(:native?).source_location).not_to be_nil
     end
+
+    it 'rejects native libraries that do not expose the standardized Apple2 runner ABI' do
+      skip 'Arcilator not available' unless arcilator_available?
+
+      runner = RHDL::Examples::Apple2::ArcilatorRunner.allocate
+      sim = instance_double('Sim', runner_supported?: false, close: true)
+
+      expect(sim).to receive(:close)
+      expect do
+        runner.send(:ensure_runner_abi!, sim, expected_kind: :apple2, backend_label: 'Apple2 Arcilator')
+      end.to raise_error(RuntimeError, /runner ABI/)
+    end
   end
 
   describe 'constants' do

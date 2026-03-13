@@ -38,6 +38,7 @@ RSpec.describe 'AO486 imported CPU Arcilator compile', slow: true do
 
         expect(prepared[:success]).to be(true), prepared.dig(:arc, :stderr).to_s
         expect(prepared.dig(:flatten, :success)).to be(true), prepared.dig(:flatten, :stderr).to_s
+        expect(prepared.dig(:flatten_cleanup, :success)).to be(true), prepared.dig(:flatten_cleanup, :stderr).to_s
         expect(File.exist?(prepared.fetch(:flattened_hwseq_mlir_path))).to be(true)
 
         ll_path = File.join(out_dir, 'arc', 'ao486_cpu.ll')

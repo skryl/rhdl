@@ -142,6 +142,74 @@ RSpec.describe RHDL::Examples::GameBoy::Tasks::RunTask do
     end
   end
 
+  describe 'debug defaults' do
+    it 'enables debug by default for interactive terminal state' do
+      task = described_class.new
+
+      task.send(:initialize_terminal_state)
+
+      expect(task.instance_variable_get(:@debug)).to eq(true)
+    end
+
+    it 'honors explicit debug disable for interactive terminal state' do
+      task = described_class.new(debug: false)
+
+      task.send(:initialize_terminal_state)
+
+      expect(task.instance_variable_get(:@debug)).to eq(false)
+    end
+
+    it 'defaults the interactive speed to 1000 cycles per frame' do
+      task = described_class.new
+
+      task.send(:initialize_terminal_state)
+
+      expect(task.instance_variable_get(:@cycles_per_frame)).to eq(1000)
+    end
+  end
+
+  describe 'debug overlay' do
+    it 'reports mode, sim, and source on a dedicated row after cycle and speed info' do
+      backend_runner = instance_double('BackendRunner', speaker: nil)
+      headless_runner = instance_double(
+        'RHDL::Examples::GameBoy::HeadlessRunner',
+        mode: :circt,
+        backend: :jit,
+        simulator_type: :hdl_arcilator,
+        use_rhdl_source: false,
+        use_normalized_verilog: true,
+        use_staged_verilog: false,
+        runner: backend_runner
+      )
+
+      task = described_class.new
+      task.instance_variable_set(:@runner, headless_runner)
+      task.instance_variable_set(:@keyboard_mode, :command)
+      task.instance_variable_set(:@audio_enabled, false)
+      task.instance_variable_set(:@renderer_type, :color)
+      task.instance_variable_set(:@current_hz, 123_456.0)
+      task.instance_variable_set(:@fps, 59.9)
+      task.instance_variable_set(:@cycles_per_frame, 1000)
+      task.instance_variable_set(:@last_key, nil)
+      task.instance_variable_set(:@last_key_time, nil)
+
+      lines = task.send(
+        :debug_overlay_lines,
+        state: { pc: 0x1234, a: 0x56, bc: 0x1111, de: 0x2222, hl: 0x3333, sp: 0x4444, cycles: 12_345 }
+      )
+
+      expect(lines.length).to eq(5)
+      expect(lines[0]).to include('PC:1234')
+      expect(lines[1]).to include('Cyc:12.3K')
+      expect(lines[1]).to include('Spd:1000')
+      expect(lines[2]).to include('Mode:circt')
+      expect(lines[2]).to include('Sim:jit')
+      expect(lines[2]).to include('Source:normalized')
+      expect(lines[3]).to include('Key:---')
+      expect(lines[4]).to include('ESC:cmd')
+    end
+  end
+
   describe 'HeadlessRunner integration' do
     let(:task) { described_class.new(headless: true, demo: true, mode: :ruby, sim: :ruby, cycles: 50) }
 
@@ -181,7 +249,130 @@ RSpec.describe RHDL::Examples::GameBoy::Tasks::RunTask do
       expect(custom.runner.hdl_dir).to eq('/tmp/gameboy_import')
     end
 
-    it 'passes verilog_dir override to HeadlessRunner for direct Verilator runs' do
+    it 'routes source_dir through direct Verilator mode for imported Verilog runs' do
+      require_relative '../../../../../examples/gameboy/utilities/runners/headless_runner'
+
+      Dir.mktmpdir('rhdl_gameboy_import') do |dir|
+        FileUtils.mkdir_p(File.join(dir, '.mixed_import'))
+
+        fake_headless_runner = instance_double(
+          'RHDL::Examples::GameBoy::HeadlessRunner',
+          load_rom: nil,
+          reset: nil,
+          run_steps: nil,
+          cpu_state: { pc: 0x1234, a: 0x56, cycles: 1 }
+        )
+        allow(RHDL::Examples::GameBoy::HeadlessRunner).to receive(:new).and_return(fake_headless_runner)
+
+        custom = described_class.new(
+          headless: true,
+          demo: true,
+          mode: :verilog,
+          cycles: 1,
+          source_dir: dir,
+          top: 'Gameboy',
+          use_staged_source: true
+        )
+
+        custom.run
+
+        expect(RHDL::Examples::GameBoy::HeadlessRunner).to have_received(:new).with(
+        mode: :verilog,
+        sim: :ruby,
+        hdl_dir: nil,
+        verilog_dir: dir,
+        top: 'Gameboy',
+        use_staged_verilog: true,
+        use_normalized_verilog: false,
+        use_rhdl_source: false,
+        jit: nil
+      )
+      end
+    end
+
+    it 'passes jit through to HeadlessRunner for arcilator runs' do
+      require_relative '../../../../../examples/gameboy/utilities/runners/headless_runner'
+
+      Dir.mktmpdir('rhdl_gameboy_import') do |dir|
+        FileUtils.mkdir_p(File.join(dir, '.mixed_import'))
+
+        fake_headless_runner = instance_double(
+          'RHDL::Examples::GameBoy::HeadlessRunner',
+          load_rom: nil,
+          reset: nil,
+          run_steps: nil,
+          cpu_state: { pc: 0x1234, a: 0x56, cycles: 1 }
+        )
+        allow(RHDL::Examples::GameBoy::HeadlessRunner).to receive(:new).and_return(fake_headless_runner)
+
+        custom = described_class.new(
+        headless: true,
+        demo: true,
+        mode: :arcilator,
+        sim: :jit,
+        cycles: 1,
+        source_dir: dir,
+        top: 'Gameboy',
+      )
+
+        custom.run
+
+        expect(RHDL::Examples::GameBoy::HeadlessRunner).to have_received(:new).with(
+        mode: :arcilator,
+        sim: :jit,
+        hdl_dir: dir,
+        verilog_dir: nil,
+        top: 'Gameboy',
+        use_staged_verilog: true,
+        use_normalized_verilog: false,
+        use_rhdl_source: false,
+        jit: nil
+      )
+      end
+    end
+
+    it 'passes normalized imported-source selection to HeadlessRunner' do
+      require_relative '../../../../../examples/gameboy/utilities/runners/headless_runner'
+
+      Dir.mktmpdir('rhdl_gameboy_import') do |dir|
+        FileUtils.mkdir_p(File.join(dir, '.mixed_import'))
+
+        fake_headless_runner = instance_double(
+          'RHDL::Examples::GameBoy::HeadlessRunner',
+          load_rom: nil,
+          reset: nil,
+          run_steps: nil,
+          cpu_state: { pc: 0x1234, a: 0x56, cycles: 1 }
+        )
+        allow(RHDL::Examples::GameBoy::HeadlessRunner).to receive(:new).and_return(fake_headless_runner)
+
+        custom = described_class.new(
+          headless: true,
+          demo: true,
+          mode: :verilog,
+          cycles: 1,
+          source_dir: dir,
+          top: 'Gameboy',
+          use_normalized_source: true
+        )
+
+        custom.run
+
+        expect(RHDL::Examples::GameBoy::HeadlessRunner).to have_received(:new).with(
+        mode: :verilog,
+        sim: :ruby,
+        hdl_dir: nil,
+        verilog_dir: dir,
+        top: 'Gameboy',
+        use_staged_verilog: false,
+        use_normalized_verilog: true,
+        use_rhdl_source: false,
+        jit: nil
+      )
+      end
+    end
+
+    it 'passes rhdl source selection to HeadlessRunner' do
       require_relative '../../../../../examples/gameboy/utilities/runners/headless_runner'
 
       fake_headless_runner = instance_double(
@@ -196,23 +387,103 @@ RSpec.describe RHDL::Examples::GameBoy::Tasks::RunTask do
       custom = described_class.new(
         headless: true,
         demo: true,
-        mode: :verilog,
+        mode: :arcilator,
+        sim: :jit,
         cycles: 1,
-        verilog_dir: '/tmp/gameboy_import',
+        source_dir: '/tmp/gameboy_import',
         top: 'Gameboy',
-        use_staged_verilog: true
+        use_rhdl_source: true
       )
 
       custom.run
 
       expect(RHDL::Examples::GameBoy::HeadlessRunner).to have_received(:new).with(
-        mode: :verilog,
-        sim: :ruby,
-        hdl_dir: nil,
-        verilog_dir: '/tmp/gameboy_import',
+        mode: :arcilator,
+        sim: :jit,
+        hdl_dir: '/tmp/gameboy_import',
+        verilog_dir: nil,
         top: 'Gameboy',
-        use_staged_verilog: true
+        use_staged_verilog: false,
+        use_normalized_verilog: false,
+        use_rhdl_source: true,
+        jit: nil
       )
+    end
+
+    it 'raises when imported-artifact-dependent source modes are requested without .mixed_import' do
+      Dir.mktmpdir('rhdl_gameboy_missing_mixed') do |dir|
+        File.write(File.join(dir, 'import_report.json'), '{}')
+
+        task = described_class.new(
+          headless: true,
+          demo: true,
+          mode: :verilog,
+          cycles: 1,
+          source_dir: dir,
+          use_staged_source: true
+        )
+
+        expect { task.send(:initialize_runner) }.to raise_error(ArgumentError, /\.mixed_import/)
+      end
+    end
+
+    it 'defaults verilog mode to staged imported source even when CLI-style false flags are present' do
+      Dir.mktmpdir('rhdl_gameboy_cli_style_flags') do |dir|
+        File.write(File.join(dir, 'import_report.json'), '{}')
+
+        task = described_class.new(
+          headless: true,
+          demo: true,
+          mode: :verilog,
+          cycles: 1,
+          source_dir: dir,
+          use_staged_source: false,
+          use_normalized_source: false,
+          use_rhdl_source: false
+        )
+
+        expect { task.send(:initialize_runner) }.to raise_error(ArgumentError, /\.mixed_import/)
+      end
+    end
+
+    it 'does not default ir mode to imported staged source' do
+      require_relative '../../../../../examples/gameboy/utilities/runners/headless_runner'
+
+      fake_headless_runner = instance_double(
+        'RHDL::Examples::GameBoy::HeadlessRunner',
+        load_rom: nil,
+        reset: nil,
+        run_steps: nil,
+        cpu_state: { pc: 0x1234, a: 0x56, cycles: 1 }
+      )
+      allow(RHDL::Examples::GameBoy::HeadlessRunner).to receive(:new).and_return(fake_headless_runner)
+
+      Dir.mktmpdir('rhdl_gameboy_ir_source_dir') do |dir|
+        task = described_class.new(
+          headless: true,
+          demo: true,
+          mode: :ir,
+          cycles: 1,
+          source_dir: dir,
+          use_staged_source: false,
+          use_normalized_source: false,
+          use_rhdl_source: false
+        )
+
+        expect { task.run }.not_to raise_error
+
+        expect(RHDL::Examples::GameBoy::HeadlessRunner).to have_received(:new).with(
+          mode: :ir,
+          sim: :compile,
+          hdl_dir: dir,
+          verilog_dir: nil,
+          top: nil,
+          use_staged_verilog: false,
+          use_normalized_verilog: false,
+          use_rhdl_source: false,
+          jit: nil
+        )
+      end
     end
   end
 

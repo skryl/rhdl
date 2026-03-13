@@ -3,6 +3,7 @@
 //! This module contains the generic IR simulation infrastructure without
 //! any example-specific code (Apple II, MOS6502, etc.)
 
+use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 #[cfg(not(feature = "aot"))]
 use std::fs;
@@ -30,7 +31,7 @@ type CompiledLibrary = ();
 #[cfg(not(feature = "aot"))]
 type CompiledLibrary = libloading::Library;
 #[cfg(not(feature = "aot"))]
-type CompiledEvalFn = unsafe extern "C" fn(*mut SignalValue, usize);
+type CompiledEvalFn = unsafe extern "C" fn(*mut SignalValue, *const u64, *const *const u64, usize);
 #[cfg(not(feature = "aot"))]
 type CompiledTickFn = unsafe extern "C" fn(*mut SignalValue, usize, *mut SignalValue, *mut SignalValue);
 
@@ -38,15 +39,31 @@ const CHUNKED_EVALUATE_ASSIGN_THRESHOLD: usize = 256;
 const CHUNKED_EVALUATE_ASSIGNS_PER_FN: usize = 32;
 const LARGE_NON_TICK_CHUNKED_EVALUATE_ASSIGN_THRESHOLD: usize = 8_192;
 const LARGE_NON_TICK_CHUNKED_EVALUATE_ASSIGNS_PER_FN: usize = 1_024;
-const RUNTIME_ONLY_EXPR_THRESHOLD: usize = 100_000;
+const LARGE_RUSTC_SOURCE_BYTES_THRESHOLD: usize = 8 * 1024 * 1024;
 const RUNTIME_RUSTC_OPT_LEVEL: &str = "2";
 const RUNTIME_RUSTC_CODEGEN_UNITS: &str = "64";
+const LARGE_RUNTIME_RUSTC_OPT_LEVEL: &str = "0";
+const LARGE_RUNTIME_RUSTC_CODEGEN_UNITS: &str = "256";
 const RUNTIME_RUSTC_TARGET_CPU: &str = "native";
+const COMPILED_WIDE_SIGNAL_WORDS: usize = 2;
+const LARGE_NARROW_CONCAT_PART_THRESHOLD: usize = 16;
+const SINGLE_USE_EXPR_MATERIALIZE_COMPLEXITY_THRESHOLD: u32 = 131_072;
+const SINGLE_USE_EXPR_MATERIALIZE_COMPLEXITY_THRESHOLD_BIT1: u32 = 8_192;
+const SINGLE_USE_EXPR_MATERIALIZE_MAX_WIDTH: usize = 8;
 
 #[derive(Default)]
 struct ExprCodegenState {
     emitted: HashSet<usize>,
     emitting: HashSet<usize>,
+    temp_counter: usize,
+}
+
+impl ExprCodegenState {
+    fn fresh_temp(&mut self, prefix: &str) -> String {
+        let name = format!("{}_{}", prefix, self.temp_counter);
+        self.temp_counter += 1;
+        name
+    }
 }
 
 // ============================================================================
@@ -86,10 +103,14 @@ pub struct RegDef {
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ExprDef {
     Signal { name: String, width: usize },
+    #[serde(rename = "signal_index")]
+    SignalIndex { idx: usize, width: usize },
     Literal {
         #[serde(deserialize_with = "deserialize_integer_text")]
         value: String,
-        width: usize
+        width: usize,
+        #[serde(skip, default)]
+        parsed: Option<RuntimeValue>,
     },
     ExprRef { id: usize, width: usize },
     #[serde(alias = "unary")]
@@ -813,6 +834,48 @@ fn expr_width(expr: Option<&Value>) -> Option<usize> {
     obj.get("width").map(|w| value_to_usize(Some(w)))
 }
 
+#[derive(Default)]
+struct RuntimeExprEvalCache {
+    epoch: u32,
+    marks: Vec<u32>,
+    values: Vec<RuntimeValue>,
+}
+
+impl RuntimeExprEvalCache {
+    fn new(expr_count: usize) -> Self {
+        Self {
+            epoch: 1,
+            marks: vec![0; expr_count],
+            values: vec![RuntimeValue::Narrow(0); expr_count],
+        }
+    }
+
+    fn next_epoch(&mut self) {
+        self.epoch = self.epoch.wrapping_add(1);
+        if self.epoch == 0 {
+            self.marks.fill(0);
+            self.epoch = 1;
+        }
+    }
+
+    fn get(&self, id: usize) -> Option<RuntimeValue> {
+        if self.marks.get(id).copied() == Some(self.epoch) {
+            self.values.get(id).cloned()
+        } else {
+            None
+        }
+    }
+
+    fn store(&mut self, id: usize, value: RuntimeValue) {
+        if let Some(mark) = self.marks.get_mut(id) {
+            *mark = self.epoch;
+        }
+        if let Some(slot) = self.values.get_mut(id) {
+            *slot = value;
+        }
+    }
+}
+
 // ============================================================================
 // Core Simulator State
 // ============================================================================
@@ -825,12 +888,20 @@ pub struct CoreSimulator {
     pub signals: Vec<SignalValue>,
     /// Overwide signal words above bit 127, little-endian 64-bit limbs.
     pub wide_signal_words: Vec<Vec<u64>>,
+    /// Fixed transport view for compiled evaluate (bits 128..255).
+    pub compiled_wide_signal_words: Vec<[u64; COMPILED_WIDE_SIGNAL_WORDS]>,
+    /// Stable pointers to signal high-word storage for signals wider than 256 bits.
+    pub compiled_overwide_signal_ptrs: Vec<*const u64>,
     /// Signal widths
     pub widths: Vec<usize>,
     /// Signal name to index mapping
     pub name_to_idx: HashMap<String, usize>,
     /// Direct incoming reference count for each compact expr id
     pub expr_ref_use_counts: Vec<usize>,
+    /// Approximate compact expr complexity, capped for selective materialization.
+    pub expr_ref_complexities: Vec<u32>,
+    /// Per-root memoization for compact expr evaluation on the runtime-only path.
+    runtime_expr_cache: RefCell<RuntimeExprEvalCache>,
     /// Input names
     pub input_names: Vec<String>,
     /// Output names
@@ -855,12 +926,22 @@ pub struct CoreSimulator {
     pub seq_targets: Vec<usize>,
     /// Clock signal index for each sequential assignment
     pub seq_clocks: Vec<usize>,
+    /// Clock-domain slot for each sequential assignment
+    pub seq_clock_slots: Vec<usize>,
     /// All unique clock signal indices
     pub clock_indices: Vec<usize>,
     /// Old clock values for edge detection
     pub old_clocks: Vec<SignalValue>,
     /// Pre-grouped: for each clock domain, list of (seq_assign_idx, target_idx)
     pub clock_domain_assigns: Vec<Vec<(usize, usize)>>,
+    /// Reused tick scratch: updated sequential assignments
+    tick_updated: Vec<bool>,
+    /// Reused tick scratch: prior clock values for iterative settle
+    tick_clock_before: Vec<SignalValue>,
+    /// Reused tick scratch: rising edges on clock domains
+    tick_rising_clocks: Vec<bool>,
+    /// Reused tick scratch: iterative derived rising edges on clock domains
+    tick_derived_rising: Vec<bool>,
     /// Memory arrays
     pub memory_arrays: Vec<Vec<SignalValue>>,
     /// Overwide memory words above bit 127, little-endian 64-bit limbs.
@@ -877,18 +958,152 @@ pub struct CoreSimulator {
     pub compiled_tick_fn: Option<CompiledTickFn>,
     /// Whether compilation succeeded
     pub compiled: bool,
-    /// Adaptive pure-core fallback that skips per-module rustc and uses the
-    /// native runtime evaluator in this crate instead.
-    pub runtime_only: bool,
-    /// Design contains over-128-bit state that may require runtime-assisted
-    /// evaluation when generated tick helpers are needed.
-    pub requires_runtime_only: bool,
+    /// Design contains over-128-bit state that the generated tick-helper path
+    /// cannot yet compile directly.
+    pub has_overwide_tick_helper_state: bool,
 }
 
 impl CoreSimulator {
+    fn rustc_profile_for_generated_code(code: &str) -> (&'static str, &'static str, &'static str) {
+        if code.len() > LARGE_RUSTC_SOURCE_BYTES_THRESHOLD {
+            (
+                LARGE_RUNTIME_RUSTC_OPT_LEVEL,
+                LARGE_RUNTIME_RUSTC_CODEGEN_UNITS,
+                RUNTIME_RUSTC_TARGET_CPU,
+            )
+        } else {
+            (
+                RUNTIME_RUSTC_OPT_LEVEL,
+                RUNTIME_RUSTC_CODEGEN_UNITS,
+                RUNTIME_RUSTC_TARGET_CPU,
+            )
+        }
+    }
+
+    fn resolve_signal_indices_in_ir(ir: &mut ModuleIR, name_to_idx: &HashMap<String, usize>) {
+        for expr in &mut ir.exprs {
+            Self::resolve_signal_indices_in_expr(expr, name_to_idx);
+        }
+        for assign in &mut ir.assigns {
+            Self::resolve_signal_indices_in_expr(&mut assign.expr, name_to_idx);
+        }
+        for process in &mut ir.processes {
+            for stmt in &mut process.statements {
+                Self::resolve_signal_indices_in_expr(&mut stmt.expr, name_to_idx);
+            }
+        }
+        for port in &mut ir.write_ports {
+            Self::resolve_signal_indices_in_expr(&mut port.addr, name_to_idx);
+            Self::resolve_signal_indices_in_expr(&mut port.data, name_to_idx);
+            Self::resolve_signal_indices_in_expr(&mut port.enable, name_to_idx);
+        }
+        for port in &mut ir.sync_read_ports {
+            Self::resolve_signal_indices_in_expr(&mut port.addr, name_to_idx);
+            if let Some(enable) = &mut port.enable {
+                Self::resolve_signal_indices_in_expr(enable, name_to_idx);
+            }
+        }
+    }
+
+    fn resolve_signal_indices_in_expr(expr: &mut ExprDef, name_to_idx: &HashMap<String, usize>) {
+        match expr {
+            ExprDef::Signal { name, width } => {
+                if let Some(&idx) = name_to_idx.get(name) {
+                    *expr = ExprDef::SignalIndex { idx, width: *width };
+                }
+            }
+            ExprDef::SignalIndex { .. } | ExprDef::Literal { .. } | ExprDef::ExprRef { .. } => {}
+            ExprDef::UnaryOp { operand, .. } => {
+                Self::resolve_signal_indices_in_expr(operand, name_to_idx);
+            }
+            ExprDef::BinaryOp { left, right, .. } => {
+                Self::resolve_signal_indices_in_expr(left, name_to_idx);
+                Self::resolve_signal_indices_in_expr(right, name_to_idx);
+            }
+            ExprDef::Mux {
+                condition,
+                when_true,
+                when_false,
+                ..
+            } => {
+                Self::resolve_signal_indices_in_expr(condition, name_to_idx);
+                Self::resolve_signal_indices_in_expr(when_true, name_to_idx);
+                Self::resolve_signal_indices_in_expr(when_false, name_to_idx);
+            }
+            ExprDef::Slice { base, .. } => {
+                Self::resolve_signal_indices_in_expr(base, name_to_idx);
+            }
+            ExprDef::Concat { parts, .. } => {
+                for part in parts {
+                    Self::resolve_signal_indices_in_expr(part, name_to_idx);
+                }
+            }
+            ExprDef::Resize { expr, .. } => {
+                Self::resolve_signal_indices_in_expr(expr, name_to_idx);
+            }
+            ExprDef::MemRead { addr, .. } => {
+                Self::resolve_signal_indices_in_expr(addr, name_to_idx);
+            }
+        }
+    }
+
+    fn prime_literal_runtime_values_in_ir(ir: &mut ModuleIR) {
+        for expr in &mut ir.exprs {
+            Self::prime_literal_runtime_values_in_expr(expr);
+        }
+        for assign in &mut ir.assigns {
+            Self::prime_literal_runtime_values_in_expr(&mut assign.expr);
+        }
+        for process in &mut ir.processes {
+            for stmt in &mut process.statements {
+                Self::prime_literal_runtime_values_in_expr(&mut stmt.expr);
+            }
+        }
+        for port in &mut ir.write_ports {
+            Self::prime_literal_runtime_values_in_expr(&mut port.addr);
+            Self::prime_literal_runtime_values_in_expr(&mut port.data);
+            Self::prime_literal_runtime_values_in_expr(&mut port.enable);
+        }
+        for port in &mut ir.sync_read_ports {
+            Self::prime_literal_runtime_values_in_expr(&mut port.addr);
+            if let Some(enable) = &mut port.enable {
+                Self::prime_literal_runtime_values_in_expr(enable);
+            }
+        }
+    }
+
+    fn prime_literal_runtime_values_in_expr(expr: &mut ExprDef) {
+        match expr {
+            ExprDef::Literal { value, width, parsed } => {
+                if parsed.is_none() {
+                    *parsed = Some(RuntimeValue::from_signed_text(value, *width));
+                }
+            }
+            ExprDef::UnaryOp { operand, .. } => Self::prime_literal_runtime_values_in_expr(operand),
+            ExprDef::BinaryOp { left, right, .. } => {
+                Self::prime_literal_runtime_values_in_expr(left);
+                Self::prime_literal_runtime_values_in_expr(right);
+            }
+            ExprDef::Mux { condition, when_true, when_false, .. } => {
+                Self::prime_literal_runtime_values_in_expr(condition);
+                Self::prime_literal_runtime_values_in_expr(when_true);
+                Self::prime_literal_runtime_values_in_expr(when_false);
+            }
+            ExprDef::Slice { base, .. } => Self::prime_literal_runtime_values_in_expr(base),
+            ExprDef::Concat { parts, .. } => {
+                for part in parts {
+                    Self::prime_literal_runtime_values_in_expr(part);
+                }
+            }
+            ExprDef::Resize { expr, .. } => Self::prime_literal_runtime_values_in_expr(expr),
+            ExprDef::MemRead { addr, .. } => Self::prime_literal_runtime_values_in_expr(addr),
+            ExprDef::Signal { .. } | ExprDef::SignalIndex { .. } | ExprDef::ExprRef { .. } => {}
+        }
+    }
+
     pub fn new(json: &str) -> Result<Self, String> {
-        let ir = parse_module_ir(json)?;
-        let expr_ref_use_counts = Self::compute_expr_ref_use_counts(&ir);
+        let mut ir = parse_module_ir(json)?;
+        let expr_count = ir.exprs.len();
 
         let mut signals = Vec::new();
         let mut widths = Vec::new();
@@ -956,8 +1171,15 @@ impl CoreSimulator {
         // Sort clock indices for deterministic ordering (HashSet iteration order is undefined)
         let mut clock_indices: Vec<usize> = clock_indices_set.into_iter().collect();
         clock_indices.sort();
+        let clock_index_to_slot: HashMap<usize, usize> = clock_indices
+            .iter()
+            .enumerate()
+            .map(|(slot, &clk_idx)| (clk_idx, slot))
+            .collect();
         let old_clocks = vec![0u128; clock_indices.len()];
+        let clock_domain_count = old_clocks.len();
         let next_regs = vec![0u128; seq_targets.len()];
+        let seq_assign_count = next_regs.len();
         let wide_next_reg_words = seq_targets
             .iter()
             .map(|&target_idx| {
@@ -969,11 +1191,15 @@ impl CoreSimulator {
                 }
             })
             .collect();
+        let seq_clock_slots: Vec<usize> = seq_clocks
+            .iter()
+            .map(|clk_idx| clock_index_to_slot.get(clk_idx).copied().unwrap_or(0))
+            .collect();
 
         // Pre-group assignments by clock domain
         let mut clock_domain_assigns: Vec<Vec<(usize, usize)>> = vec![Vec::new(); clock_indices.len()];
-        for (seq_idx, &clk_idx) in seq_clocks.iter().enumerate() {
-            if let Some(domain_idx) = clock_indices.iter().position(|&c| c == clk_idx) {
+        for (seq_idx, &domain_idx) in seq_clock_slots.iter().enumerate() {
+            if domain_idx < clock_domain_assigns.len() {
                 clock_domain_assigns[domain_idx].push((seq_idx, seq_targets[seq_idx]));
             }
         }
@@ -999,7 +1225,12 @@ impl CoreSimulator {
             memory_name_to_idx.insert(mem.name.clone(), idx);
         }
 
-        let wide_signal_words = widths
+        Self::resolve_signal_indices_in_ir(&mut ir, &name_to_idx);
+        Self::prime_literal_runtime_values_in_ir(&mut ir);
+        let expr_ref_use_counts = Self::compute_expr_ref_use_counts(&ir);
+        let expr_ref_complexities = Self::compute_expr_ref_complexities(&ir);
+
+        let wide_signal_words: Vec<Vec<u64>> = widths
             .iter()
             .enumerate()
             .map(|(idx, &width)| {
@@ -1010,16 +1241,43 @@ impl CoreSimulator {
                 }
             })
             .collect();
-        let requires_runtime_only =
+        let compiled_wide_signal_words = widths
+            .iter()
+            .enumerate()
+            .map(|(idx, &width)| {
+                if width > 128 {
+                    let value = RuntimeValue::from_split_words(signals[idx], &wide_signal_words[idx], width);
+                    Self::compiled_high_words_for_runtime_value(&value, width)
+                } else {
+                    [0; COMPILED_WIDE_SIGNAL_WORDS]
+                }
+            })
+            .collect();
+        let compiled_overwide_signal_ptrs = widths
+            .iter()
+            .enumerate()
+            .map(|(idx, &width)| {
+                if width > 256 {
+                    wide_signal_words[idx].as_ptr()
+                } else {
+                    std::ptr::null()
+                }
+            })
+            .collect();
+        let has_overwide_tick_helper_state =
             widths.iter().any(|&width| width > 128) || ir.memories.iter().any(|memory| memory.width > 128);
 
         let mut sim = Self {
             ir,
             signals,
             wide_signal_words,
+            compiled_wide_signal_words,
+            compiled_overwide_signal_ptrs,
             widths,
             name_to_idx,
             expr_ref_use_counts,
+            expr_ref_complexities,
+            runtime_expr_cache: RefCell::new(RuntimeExprEvalCache::new(expr_count)),
             input_names,
             output_names,
             reset_values,
@@ -1031,9 +1289,14 @@ impl CoreSimulator {
             seq_exprs,
             seq_targets,
             seq_clocks,
+            seq_clock_slots,
             clock_indices,
             old_clocks,
             clock_domain_assigns,
+            tick_updated: vec![false; seq_assign_count],
+            tick_clock_before: vec![0u128; clock_domain_count],
+            tick_rising_clocks: vec![false; clock_domain_count],
+            tick_derived_rising: vec![false; clock_domain_count],
             memory_arrays,
             wide_memory_words,
             memory_name_to_idx,
@@ -1043,8 +1306,7 @@ impl CoreSimulator {
             #[cfg(not(feature = "aot"))]
             compiled_tick_fn: None,
             compiled: cfg!(feature = "aot"),
-            runtime_only: false,
-            requires_runtime_only,
+            has_overwide_tick_helper_state,
         };
 
         let levels = sim.compute_assignment_levels();
@@ -1074,8 +1336,12 @@ impl CoreSimulator {
         wide_mask(width)
     }
 
-    pub fn requires_runtime_only_compile(&self, include_tick_helpers: bool) -> bool {
-        include_tick_helpers && self.requires_runtime_only
+    pub fn compile_fast_path_tick_helper_blocked(&self, include_tick_helpers: bool) -> bool {
+        include_tick_helpers && self.has_overwide_tick_helper_state
+    }
+
+    fn supports_compiled_wide_width(width: usize) -> bool {
+        width > 128 && width <= 256
     }
 
     fn expr_requires_runtime_eval(
@@ -1085,7 +1351,7 @@ impl CoreSimulator {
     ) -> bool {
         match self.resolve_expr(expr) {
             ExprDef::Signal { name, width } => {
-                if *width > 128 {
+                if *width > 256 {
                     return true;
                 }
 
@@ -1095,20 +1361,30 @@ impl CoreSimulator {
                     .map(|idx| runtime_signals.contains(&idx))
                     .unwrap_or(false)
             }
-            ExprDef::Literal { width, .. } => *width > 128,
+            ExprDef::SignalIndex { idx, width } => *width > 256 || runtime_signals.contains(idx),
+            ExprDef::Literal { width, .. } => *width > 256,
             ExprDef::ExprRef { .. } => false,
             ExprDef::UnaryOp { operand, width, .. } => {
-                *width > 128 || self.expr_requires_runtime_eval(operand, runtime_signals)
+                *width > 256 || self.expr_requires_runtime_eval(operand, runtime_signals)
             }
             ExprDef::BinaryOp {
+                op,
                 left,
                 right,
                 width,
                 ..
             } => {
-                *width > 128
-                    || self.expr_requires_runtime_eval(left, runtime_signals)
-                    || self.expr_requires_runtime_eval(right, runtime_signals)
+                if *width > 256 {
+                    return true;
+                }
+                if Self::supports_compiled_wide_width(*width) {
+                    !matches!(op.as_str(), "|" | "&" | "^" | "<<" | ">>")
+                        || self.expr_requires_runtime_eval(left, runtime_signals)
+                        || self.expr_requires_runtime_eval(right, runtime_signals)
+                } else {
+                    self.expr_requires_runtime_eval(left, runtime_signals)
+                        || self.expr_requires_runtime_eval(right, runtime_signals)
+                }
             }
             ExprDef::Mux {
                 condition,
@@ -1116,22 +1392,34 @@ impl CoreSimulator {
                 when_false,
                 width,
             } => {
-                *width > 128
+                *width > 256
                     || self.expr_requires_runtime_eval(condition, runtime_signals)
                     || self.expr_requires_runtime_eval(when_true, runtime_signals)
                     || self.expr_requires_runtime_eval(when_false, runtime_signals)
             }
             ExprDef::Slice { base, width, .. } => {
-                *width > 128 || self.expr_requires_runtime_eval(base, runtime_signals)
+                if *width > 256 {
+                    true
+                } else {
+                    match self.resolve_expr(base) {
+                    ExprDef::Signal { width: base_width, .. }
+                    | ExprDef::SignalIndex { width: base_width, .. }
+                        if *base_width > 256 =>
+                    {
+                        false
+                    }
+                    _ => self.expr_requires_runtime_eval(base, runtime_signals),
+                    }
+                }
             }
             ExprDef::Concat { parts, width } => {
-                *width > 128
+                *width > 256
                     || parts
                         .iter()
                         .any(|part| self.expr_requires_runtime_eval(part, runtime_signals))
             }
             ExprDef::Resize { expr, width } => {
-                *width > 128 || self.expr_requires_runtime_eval(expr, runtime_signals)
+                *width > 256 || self.expr_requires_runtime_eval(expr, runtime_signals)
             }
             ExprDef::MemRead {
                 memory,
@@ -1158,7 +1446,7 @@ impl CoreSimulator {
             .widths
             .iter()
             .enumerate()
-            .filter_map(|(idx, &width)| if width > 128 { Some(idx) } else { None })
+            .filter_map(|(idx, &width)| if width > 256 { Some(idx) } else { None })
             .collect();
 
         loop {
@@ -1173,7 +1461,7 @@ impl CoreSimulator {
                 };
 
                 let target_width = self.widths.get(target_idx).copied().unwrap_or(0);
-                if target_width > 128
+                if target_width > 256
                     || runtime_signals.contains(&target_idx)
                     || self.expr_requires_runtime_eval(&assign.expr, &runtime_signals)
                 {
@@ -1210,9 +1498,28 @@ impl CoreSimulator {
     }
 
     fn signal_runtime_value(&self, idx: usize, width: usize) -> RuntimeValue {
+        if width <= 128 {
+            let low = self.signals.get(idx).copied().unwrap_or(0);
+            return RuntimeValue::Narrow(low & Self::compute_mask(width));
+        }
         let low = self.signals.get(idx).copied().unwrap_or(0);
         let high_words = self.wide_signal_words.get(idx).map(Vec::as_slice).unwrap_or(&[]);
         RuntimeValue::from_split_words(low, high_words, width).mask(width)
+    }
+
+    fn refresh_compiled_overwide_signal_ptr(&mut self, idx: usize, width: usize) {
+        if idx >= self.compiled_overwide_signal_ptrs.len() {
+            return;
+        }
+
+        self.compiled_overwide_signal_ptrs[idx] = if width > 256 {
+            self.wide_signal_words
+                .get(idx)
+                .map(|words| words.as_ptr())
+                .unwrap_or(std::ptr::null())
+        } else {
+            std::ptr::null()
+        };
     }
 
     fn store_signal_runtime_value(&mut self, idx: usize, width: usize, value: RuntimeValue) {
@@ -1220,6 +1527,12 @@ impl CoreSimulator {
         self.signals[idx] = masked.low_u128() & Self::compute_mask(width.min(128));
         if width > 128 {
             self.wide_signal_words[idx] = masked.high_words(width);
+            self.compiled_wide_signal_words[idx] =
+                Self::compiled_high_words_for_runtime_value(&masked, width);
+            self.refresh_compiled_overwide_signal_ptr(idx, width);
+        } else if idx < self.compiled_wide_signal_words.len() {
+            self.compiled_wide_signal_words[idx] = [0; COMPILED_WIDE_SIGNAL_WORDS];
+            self.refresh_compiled_overwide_signal_ptr(idx, width);
         }
     }
 
@@ -1232,12 +1545,68 @@ impl CoreSimulator {
     }
 
     fn next_reg_runtime_value(&self, idx: usize, width: usize) -> RuntimeValue {
+        if width <= 128 {
+            let low = self.next_regs.get(idx).copied().unwrap_or(0);
+            return RuntimeValue::Narrow(low & Self::compute_mask(width));
+        }
         let low = self.next_regs.get(idx).copied().unwrap_or(0);
         let high_words = self.wide_next_reg_words.get(idx).map(Vec::as_slice).unwrap_or(&[]);
         RuntimeValue::from_split_words(low, high_words, width).mask(width)
     }
 
+    fn compiled_high_words_for_runtime_value(
+        value: &RuntimeValue,
+        width: usize,
+    ) -> [u64; COMPILED_WIDE_SIGNAL_WORDS] {
+        let mut out = [0u64; COMPILED_WIDE_SIGNAL_WORDS];
+        if width <= 128 {
+            return out;
+        }
+
+        for (index, word) in value
+            .high_words(width)
+            .into_iter()
+            .take(COMPILED_WIDE_SIGNAL_WORDS)
+            .enumerate()
+        {
+            out[index] = word;
+        }
+
+        out
+    }
+
+    fn sync_compiled_wide_signal_words_from_fast_path(&mut self) {
+        for idx in 0..self.widths.len() {
+            let width = self.widths[idx];
+            if width <= 128 || width > 256 {
+                continue;
+            }
+
+            let word_count = width.div_ceil(64).saturating_sub(2);
+            let Some(words) = self.wide_signal_words.get_mut(idx) else {
+                continue;
+            };
+            words.resize(word_count, 0);
+            for word_idx in 0..word_count.min(COMPILED_WIDE_SIGNAL_WORDS) {
+                words[word_idx] = self.compiled_wide_signal_words[idx][word_idx];
+            }
+            for word_idx in COMPILED_WIDE_SIGNAL_WORDS..word_count {
+                words[word_idx] = 0;
+            }
+            self.refresh_compiled_overwide_signal_ptr(idx, width);
+        }
+    }
+
     fn memory_runtime_value(&self, memory_idx: usize, width: usize, addr: usize) -> RuntimeValue {
+        if width <= 128 {
+            let low = self
+                .memory_arrays
+                .get(memory_idx)
+                .and_then(|mem| mem.get(addr))
+                .copied()
+                .unwrap_or(0);
+            return RuntimeValue::Narrow(low & Self::compute_mask(width));
+        }
         let low = self
             .memory_arrays
             .get(memory_idx)
@@ -1326,7 +1695,7 @@ impl CoreSimulator {
 
     fn accumulate_direct_expr_ref_uses(expr: &ExprDef, counts: &mut [usize]) {
         match expr {
-            ExprDef::Signal { .. } | ExprDef::Literal { .. } => {}
+            ExprDef::Signal { .. } | ExprDef::SignalIndex { .. } | ExprDef::Literal { .. } => {}
             ExprDef::ExprRef { id, .. } => {
                 if let Some(count) = counts.get_mut(*id) {
                     *count += 1;
@@ -1372,6 +1741,140 @@ impl CoreSimulator {
         format!("0x{:X}u128", value)
     }
 
+    fn expr_complexity_cap() -> u32 {
+        SINGLE_USE_EXPR_MATERIALIZE_COMPLEXITY_THRESHOLD.saturating_add(1)
+    }
+
+    fn capped_expr_complexity_add(lhs: u32, rhs: u32) -> u32 {
+        lhs.saturating_add(rhs).min(Self::expr_complexity_cap())
+    }
+
+    fn expr_inline_complexity(expr: &ExprDef, expr_ref_complexities: &[u32]) -> u32 {
+        match expr {
+            ExprDef::Signal { .. } | ExprDef::SignalIndex { .. } | ExprDef::Literal { .. } => 1,
+            ExprDef::ExprRef { id, .. } => expr_ref_complexities
+                .get(*id)
+                .copied()
+                .unwrap_or(1)
+                .max(1),
+            ExprDef::UnaryOp { operand, .. } => {
+                Self::capped_expr_complexity_add(1, Self::expr_inline_complexity(operand, expr_ref_complexities))
+            }
+            ExprDef::BinaryOp { left, right, .. } => {
+                let left_score = Self::expr_inline_complexity(left, expr_ref_complexities);
+                let right_score = Self::expr_inline_complexity(right, expr_ref_complexities);
+                Self::capped_expr_complexity_add(1, Self::capped_expr_complexity_add(left_score, right_score))
+            }
+            ExprDef::Mux {
+                condition,
+                when_true,
+                when_false,
+                ..
+            } => {
+                let cond = Self::expr_inline_complexity(condition, expr_ref_complexities);
+                let when_true = Self::expr_inline_complexity(when_true, expr_ref_complexities);
+                let when_false = Self::expr_inline_complexity(when_false, expr_ref_complexities);
+                Self::capped_expr_complexity_add(
+                    1,
+                    Self::capped_expr_complexity_add(cond, Self::capped_expr_complexity_add(when_true, when_false)),
+                )
+            }
+            ExprDef::Slice { base, .. } => {
+                Self::capped_expr_complexity_add(1, Self::expr_inline_complexity(base, expr_ref_complexities))
+            }
+            ExprDef::Concat { parts, .. } => {
+                let mut total = 1u32;
+                for part in parts {
+                    total = Self::capped_expr_complexity_add(
+                        total,
+                        Self::expr_inline_complexity(part, expr_ref_complexities),
+                    );
+                    if total >= Self::expr_complexity_cap() {
+                        break;
+                    }
+                }
+                total
+            }
+            ExprDef::Resize { expr, .. } => {
+                Self::capped_expr_complexity_add(1, Self::expr_inline_complexity(expr, expr_ref_complexities))
+            }
+            ExprDef::MemRead { addr, .. } => {
+                Self::capped_expr_complexity_add(1, Self::expr_inline_complexity(addr, expr_ref_complexities))
+            }
+        }
+    }
+
+    fn collect_expr_ref_ids(expr: &ExprDef, out: &mut Vec<usize>) {
+        match expr {
+            ExprDef::Signal { .. } | ExprDef::SignalIndex { .. } | ExprDef::Literal { .. } => {}
+            ExprDef::ExprRef { id, .. } => out.push(*id),
+            ExprDef::UnaryOp { operand, .. } => Self::collect_expr_ref_ids(operand, out),
+            ExprDef::BinaryOp { left, right, .. } => {
+                Self::collect_expr_ref_ids(left, out);
+                Self::collect_expr_ref_ids(right, out);
+            }
+            ExprDef::Mux {
+                condition,
+                when_true,
+                when_false,
+                ..
+            } => {
+                Self::collect_expr_ref_ids(condition, out);
+                Self::collect_expr_ref_ids(when_true, out);
+                Self::collect_expr_ref_ids(when_false, out);
+            }
+            ExprDef::Slice { base, .. } => Self::collect_expr_ref_ids(base, out),
+            ExprDef::Concat { parts, .. } => {
+                for part in parts {
+                    Self::collect_expr_ref_ids(part, out);
+                }
+            }
+            ExprDef::Resize { expr, .. } => Self::collect_expr_ref_ids(expr, out),
+            ExprDef::MemRead { addr, .. } => Self::collect_expr_ref_ids(addr, out),
+        }
+    }
+
+    fn compute_expr_ref_complexities(ir: &ModuleIR) -> Vec<u32> {
+        let mut scores = vec![1u32; ir.exprs.len()];
+        let mut state = vec![0u8; ir.exprs.len()];
+        let mut deps = Vec::new();
+
+        for start in 0..ir.exprs.len() {
+            if state[start] == 2 {
+                continue;
+            }
+
+            let mut stack = vec![(start, false)];
+            while let Some((id, expanded)) = stack.pop() {
+                if id >= ir.exprs.len() || state[id] == 2 {
+                    continue;
+                }
+
+                if expanded {
+                    scores[id] = Self::expr_inline_complexity(&ir.exprs[id], &scores);
+                    state[id] = 2;
+                    continue;
+                }
+
+                if state[id] == 1 {
+                    continue;
+                }
+
+                state[id] = 1;
+                stack.push((id, true));
+                deps.clear();
+                Self::collect_expr_ref_ids(&ir.exprs[id], &mut deps);
+                for dep in deps.iter().rev() {
+                    if *dep < ir.exprs.len() && state[*dep] == 0 {
+                        stack.push((*dep, false));
+                    }
+                }
+            }
+        }
+
+        scores
+    }
+
     fn resolve_expr<'a>(&'a self, expr: &'a ExprDef) -> &'a ExprDef {
         match expr {
             ExprDef::ExprRef { id, .. } => self
@@ -1387,6 +1890,7 @@ impl CoreSimulator {
     pub fn expr_width(&self, expr: &ExprDef) -> usize {
         match self.resolve_expr(expr) {
             ExprDef::Signal { width, .. } => *width,
+            ExprDef::SignalIndex { width, .. } => *width,
             ExprDef::Literal { width, .. } => *width,
             ExprDef::ExprRef { width, .. } => *width,
             ExprDef::UnaryOp { width, .. } => *width,
@@ -1399,21 +1903,83 @@ impl CoreSimulator {
         }
     }
 
-    pub fn should_use_runtime_only_compile(&self, include_tick_helpers: bool) -> bool {
-        self.requires_runtime_only_compile(include_tick_helpers)
-            || (!include_tick_helpers
-                && self.ir.exprs.len() > RUNTIME_ONLY_EXPR_THRESHOLD
-                && self.runtime_comb_assigns.is_empty())
+    fn same_repeatable_concat_expr(&self, lhs: &ExprDef, rhs: &ExprDef) -> bool {
+        match (self.resolve_expr(lhs), self.resolve_expr(rhs)) {
+            (
+                ExprDef::Signal { name: lhs_name, width: lhs_width },
+                ExprDef::Signal { name: rhs_name, width: rhs_width },
+            ) => lhs_name == rhs_name && lhs_width == rhs_width,
+            (
+                ExprDef::SignalIndex { idx: lhs_idx, width: lhs_width },
+                ExprDef::SignalIndex { idx: rhs_idx, width: rhs_width },
+            ) => lhs_idx == rhs_idx && lhs_width == rhs_width,
+            (
+                ExprDef::Literal { value: lhs_value, width: lhs_width, .. },
+                ExprDef::Literal { value: rhs_value, width: rhs_width, .. },
+            ) => lhs_value == rhs_value && lhs_width == rhs_width,
+            (
+                ExprDef::Slice { base: lhs_base, low: lhs_low, width: lhs_width, .. },
+                ExprDef::Slice { base: rhs_base, low: rhs_low, width: rhs_width, .. },
+            ) => lhs_low == rhs_low && lhs_width == rhs_width && self.same_repeatable_concat_expr(lhs_base, rhs_base),
+            _ => false,
+        }
     }
 
-    pub fn enable_runtime_only_compile(&mut self) {
-        self.compiled_lib = None;
-        self.compiled = true;
-        self.runtime_only = true;
+    fn repeated_concat_part<'a>(&self, parts: &'a [ExprDef], total_width: usize) -> Option<(&'a ExprDef, usize, usize)> {
+        let first = parts.first()?;
+        let part_width = self.expr_width(first);
+        if part_width == 0 {
+            return None;
+        }
+
+        let repeat_count = parts.len();
+        if part_width.saturating_mul(repeat_count) != total_width {
+            return None;
+        }
+
+        if !parts
+            .iter()
+            .all(|part| self.expr_width(part) == part_width && self.same_repeatable_concat_expr(first, part))
+        {
+            return None;
+        }
+
+        Some((first, part_width, repeat_count))
+    }
+
+    pub fn compile_fast_path_blocker(&self, include_tick_helpers: bool) -> Option<String> {
+        if self.compile_fast_path_tick_helper_blocked(include_tick_helpers) {
+            return Some(
+                "compiled fast path does not support overwide (>128-bit) runtime signals when tick helpers are required"
+                    .to_string(),
+            );
+        }
+
+        if !self.runtime_comb_assigns.is_empty() {
+            let samples = self
+                .runtime_comb_assigns
+                .iter()
+                .take(8)
+                .filter_map(|(_, assign_idx)| self.ir.assigns.get(*assign_idx))
+                .map(|assign| assign.target.clone())
+                .collect::<Vec<_>>();
+            let sample_text = if samples.is_empty() {
+                String::new()
+            } else {
+                format!("; first targets: {}", samples.join(", "))
+            };
+            return Some(format!(
+                "compiled fast path requires runtime fallback for {} combinational assigns{}",
+                self.runtime_comb_assigns.len(),
+                sample_text
+            ));
+        }
+
+        None
     }
 
     fn shed_compiled_ir_state(&mut self) {
-        if self.runtime_only || !self.runtime_comb_assigns.is_empty() {
+        if !self.runtime_comb_assigns.is_empty() {
             return;
         }
 
@@ -1433,6 +1999,8 @@ impl CoreSimulator {
         self.ir.assigns.shrink_to_fit();
         self.expr_ref_use_counts.clear();
         self.expr_ref_use_counts.shrink_to_fit();
+        self.expr_ref_complexities.clear();
+        self.expr_ref_complexities.shrink_to_fit();
 
         for process in &mut self.ir.processes {
             process.name.clear();
@@ -1444,7 +2012,7 @@ impl CoreSimulator {
     }
 
     pub fn shed_batched_gameboy_state(&mut self) {
-        if self.runtime_only || !self.runtime_comb_assigns.is_empty() {
+        if !self.runtime_comb_assigns.is_empty() {
             return;
         }
 
@@ -1486,60 +2054,110 @@ impl CoreSimulator {
 
     #[inline(always)]
     fn evaluate_compiled_without_clock_capture(&mut self) {
-        if self.runtime_only {
-            for (target_idx, assign_idx) in self.comb_assigns.clone() {
-                let Some(assign) = self.ir.assigns.get(assign_idx) else {
-                    continue;
-                };
-                let width = self.widths.get(target_idx).copied().unwrap_or(0);
-                let value = self.eval_expr_runtime_value(&assign.expr);
-                self.store_signal_runtime_value(target_idx, width, value);
-            }
-            return;
-        }
         if !self.compiled {
             return;
         }
         #[cfg(feature = "aot")]
         unsafe {
-            crate::aot_generated::evaluate(self.signals.as_mut_ptr(), self.signals.len());
+            crate::aot_generated::evaluate(
+                self.signals.as_mut_ptr(),
+                self.compiled_wide_signal_words.as_ptr() as *const u64,
+                self.compiled_overwide_signal_ptrs.as_ptr(),
+                self.signals.len(),
+            );
         }
         #[cfg(not(feature = "aot"))]
         {
             let func = self
                 .compiled_eval_fn
                 .expect("compiled evaluate function not bound");
-            unsafe { func(self.signals.as_mut_ptr(), self.signals.len()); }
+            unsafe {
+                func(
+                    self.signals.as_mut_ptr(),
+                    self.compiled_wide_signal_words.as_ptr() as *const u64,
+                    self.compiled_overwide_signal_ptrs.as_ptr(),
+                    self.signals.len(),
+                );
+            }
         }
+
+        self.sync_compiled_wide_signal_words_from_fast_path();
 
         if self.runtime_comb_assigns.is_empty() {
             return;
         }
 
-        for (target_idx, assign_idx) in self.runtime_comb_assigns.clone() {
-            let Some(assign) = self.ir.assigns.get(assign_idx) else {
-                continue;
-            };
-            let width = self.widths.get(target_idx).copied().unwrap_or(0);
-            let value = self.eval_expr_runtime_value(&assign.expr);
-            self.store_signal_runtime_value(target_idx, width, value);
+        let cache = self.runtime_expr_cache.get_mut() as *mut RuntimeExprEvalCache;
+        unsafe {
+            (*cache).next_epoch();
+            for assign_pos in 0..self.runtime_comb_assigns.len() {
+                let (target_idx, assign_idx) = self.runtime_comb_assigns[assign_pos];
+                let Some(assign) = self.ir.assigns.get(assign_idx) else {
+                    continue;
+                };
+                let width = self.widths.get(target_idx).copied().unwrap_or(0);
+                let value = self.eval_expr_runtime_value_with_cache(&assign.expr, &mut *cache);
+                self.store_signal_runtime_value(target_idx, width, value);
+            }
         }
     }
 
     fn runtime_expr_width(&self, expr: &ExprDef) -> usize {
-        self.expr_width(expr)
+        match expr {
+            ExprDef::Signal { width, .. }
+            | ExprDef::SignalIndex { width, .. }
+            | ExprDef::Literal { width, .. }
+            | ExprDef::ExprRef { width, .. }
+            | ExprDef::UnaryOp { width, .. }
+            | ExprDef::BinaryOp { width, .. }
+            | ExprDef::Mux { width, .. }
+            | ExprDef::Slice { width, .. }
+            | ExprDef::Concat { width, .. }
+            | ExprDef::Resize { width, .. }
+            | ExprDef::MemRead { width, .. } => *width,
+        }
     }
 
-    fn eval_expr_runtime_value(&self, expr: &ExprDef) -> RuntimeValue {
-        match self.resolve_expr(expr) {
+    fn eval_expr_runtime_value_with_cache(
+        &self,
+        expr: &ExprDef,
+        cache: &mut RuntimeExprEvalCache,
+    ) -> RuntimeValue {
+        match expr {
+            ExprDef::ExprRef { id, width } => {
+                let should_cache = self
+                    .expr_ref_use_counts
+                    .get(*id)
+                    .copied()
+                    .unwrap_or(0)
+                    > 1;
+                if should_cache {
+                    if let Some(value) = cache.get(*id) {
+                        return value;
+                    }
+                }
+                let value = self
+                    .ir
+                    .exprs
+                    .get(*id)
+                    .map(|inner| self.eval_expr_runtime_value_with_cache(inner, cache))
+                    .unwrap_or_else(|| RuntimeValue::zero(*width));
+                if should_cache {
+                    cache.store(*id, value.clone());
+                }
+                value
+            }
+            _ => match expr {
             ExprDef::Signal { name, width } => {
                 let idx = self.name_to_idx.get(name).copied().unwrap_or(0);
                 self.signal_runtime_value(idx, *width)
             }
-            ExprDef::Literal { value, width } => RuntimeValue::from_signed_text(value, *width),
-            ExprDef::ExprRef { .. } => RuntimeValue::zero(1),
+            ExprDef::SignalIndex { idx, width } => self.signal_runtime_value(*idx, *width),
+            ExprDef::Literal { value, width, parsed } => {
+                parsed.clone().unwrap_or_else(|| RuntimeValue::from_signed_text(value, *width))
+            }
             ExprDef::UnaryOp { op, operand, width } => {
-                let src = self.eval_expr_runtime_value(operand);
+                let src = self.eval_expr_runtime_value_with_cache(operand, cache);
                 match op.as_str() {
                     "~" | "not" => RuntimeValue::from_u128(Self::compute_mask(*width), *width)
                         .bitxor(&src, *width),
@@ -1553,8 +2171,8 @@ impl CoreSimulator {
                 }
             }
             ExprDef::BinaryOp { op, left, right, width } => {
-                let l = self.eval_expr_runtime_value(left);
-                let r = self.eval_expr_runtime_value(right);
+                let l = self.eval_expr_runtime_value_with_cache(left, cache);
+                let r = self.eval_expr_runtime_value_with_cache(right, cache);
                 match op.as_str() {
                     "&" => l.bitand(&r, *width),
                     "|" => l.bitor(&r, *width),
@@ -1590,24 +2208,31 @@ impl CoreSimulator {
                 }
             }
             ExprDef::Mux { condition, when_true, when_false, width } => {
-                let cond = self.eval_expr_runtime_value(condition);
+                let cond = self.eval_expr_runtime_value_with_cache(condition, cache);
                 let selected = if cond.is_zero() {
-                    self.eval_expr_runtime_value(when_false)
+                    self.eval_expr_runtime_value_with_cache(when_false, cache)
                 } else {
-                    self.eval_expr_runtime_value(when_true)
+                    self.eval_expr_runtime_value_with_cache(when_true, cache)
                 };
                 selected.mask(*width)
             }
             ExprDef::Slice { base, low, width, .. } => {
-                let base_val = self.eval_expr_runtime_value(base);
+                let base_val = self.eval_expr_runtime_value_with_cache(base, cache);
                 base_val.slice(*low, *width)
             }
             ExprDef::Concat { parts, width } => {
-                let values = parts.iter().map(|part| (self.eval_expr_runtime_value(part), self.runtime_expr_width(part))).collect::<Vec<_>>();
-                let refs = values.iter().map(|(value, part_width)| (value, *part_width)).collect::<Vec<_>>();
-                RuntimeValue::concat(&refs, *width)
+                let mut result = RuntimeValue::zero(*width);
+                for part in parts {
+                    let part_width = self.runtime_expr_width(part);
+                    let value = self.eval_expr_runtime_value_with_cache(part, cache);
+                    result = result.shl(part_width, *width);
+                    result = result.bitor(&value.mask(part_width), *width);
+                }
+                result.mask(*width)
             }
-            ExprDef::Resize { expr, width } => self.eval_expr_runtime_value(expr).resize(*width),
+            ExprDef::Resize { expr, width } => self
+                .eval_expr_runtime_value_with_cache(expr, cache)
+                .resize(*width),
             ExprDef::MemRead { memory, addr, width } => {
                 let Some(&memory_idx) = self.memory_name_to_idx.get(memory) else {
                     return RuntimeValue::zero(*width);
@@ -1618,30 +2243,38 @@ impl CoreSimulator {
                 if mem.is_empty() {
                     return RuntimeValue::zero(*width);
                 }
-                let addr_val = self.eval_expr_runtime_value(addr).low_u128() as usize % mem.len();
+                let addr_val =
+                    self.eval_expr_runtime_value_with_cache(addr, cache).low_u128() as usize % mem.len();
                 let memory_width = self.ir.memories.get(memory_idx).map(|mem| mem.width).unwrap_or(*width);
                 self.memory_runtime_value(memory_idx, memory_width, addr_val).resize(*width)
             }
+            ExprDef::ExprRef { .. } => RuntimeValue::zero(1),
+        },
         }
     }
 
     fn sample_next_regs_runtime(&mut self) {
-        for (idx, (process_idx, stmt_idx)) in self.seq_exprs.clone().into_iter().enumerate() {
-            let Some(process) = self.ir.processes.get(process_idx) else {
-                continue;
-            };
-            let Some(stmt) = process.statements.get(stmt_idx) else {
-                continue;
-            };
-            let target_idx = self.seq_targets.get(idx).copied().unwrap_or(0);
-            let target_width = self.widths.get(target_idx).copied().unwrap_or(0);
-            let value = self.eval_expr_runtime_value(&stmt.expr);
-            self.store_next_reg_runtime_value(idx, target_width, value);
+        let cache = self.runtime_expr_cache.get_mut() as *mut RuntimeExprEvalCache;
+        unsafe {
+            (*cache).next_epoch();
+            for idx in 0..self.seq_exprs.len() {
+                let (process_idx, stmt_idx) = self.seq_exprs[idx];
+                let Some(process) = self.ir.processes.get(process_idx) else {
+                    continue;
+                };
+                let Some(stmt) = process.statements.get(stmt_idx) else {
+                    continue;
+                };
+                let target_idx = self.seq_targets.get(idx).copied().unwrap_or(0);
+                let target_width = self.widths.get(target_idx).copied().unwrap_or(0);
+                let value = self.eval_expr_runtime_value_with_cache(&stmt.expr, &mut *cache);
+                self.store_next_reg_runtime_value(idx, target_width, value);
+            }
         }
     }
 
     fn write_compiled_memory_word(&self, memory_idx: usize, addr: usize, value: SignalValue) {
-        if !self.compiled || self.runtime_only {
+        if !self.compiled {
             return;
         }
 
@@ -1667,29 +2300,33 @@ impl CoreSimulator {
         }
 
         let mut writes: Vec<(usize, usize, usize, RuntimeValue)> = Vec::new();
-        for wp in &self.ir.write_ports {
-            let Some(&memory_idx) = self.memory_name_to_idx.get(&wp.memory) else {
-                continue;
-            };
-            let Some(memory) = self.ir.memories.get(memory_idx) else {
-                continue;
-            };
-            if memory.depth == 0 {
-                continue;
-            }
-            let Some(&clock_idx) = self.name_to_idx.get(&wp.clock) else {
-                continue;
-            };
-            if self.signals.get(clock_idx).copied().unwrap_or(0) == 0 {
-                continue;
-            }
-            if (self.eval_expr_runtime_value(&wp.enable).low_u128() & 1) == 0 {
-                continue;
-            }
+        let cache = self.runtime_expr_cache.get_mut() as *mut RuntimeExprEvalCache;
+        unsafe {
+            (*cache).next_epoch();
+            for wp in &self.ir.write_ports {
+                let Some(&memory_idx) = self.memory_name_to_idx.get(&wp.memory) else {
+                    continue;
+                };
+                let Some(memory) = self.ir.memories.get(memory_idx) else {
+                    continue;
+                };
+                if memory.depth == 0 {
+                    continue;
+                }
+                let Some(&clock_idx) = self.name_to_idx.get(&wp.clock) else {
+                    continue;
+                };
+                if self.signals.get(clock_idx).copied().unwrap_or(0) == 0 {
+                    continue;
+                }
+                if (self.eval_expr_runtime_value_with_cache(&wp.enable, &mut *cache).low_u128() & 1) == 0 {
+                    continue;
+                }
 
-            let addr = (self.eval_expr_runtime_value(&wp.addr).low_u128() as usize) % memory.depth;
-            let data = self.eval_expr_runtime_value(&wp.data).mask(memory.width);
-            writes.push((memory_idx, addr, memory.width, data));
+                let addr = (self.eval_expr_runtime_value_with_cache(&wp.addr, &mut *cache).low_u128() as usize) % memory.depth;
+                let data = self.eval_expr_runtime_value_with_cache(&wp.data, &mut *cache).mask(memory.width);
+                writes.push((memory_idx, addr, memory.width, data));
+            }
         }
 
         for (memory_idx, addr, width, value) in writes {
@@ -1703,35 +2340,39 @@ impl CoreSimulator {
         }
 
         let mut updates: Vec<(usize, usize, RuntimeValue)> = Vec::new();
-        for rp in &self.ir.sync_read_ports {
-            let Some(&memory_idx) = self.memory_name_to_idx.get(&rp.memory) else {
-                continue;
-            };
-            let Some(mem) = self.memory_arrays.get(memory_idx) else {
-                continue;
-            };
-            if mem.is_empty() {
-                continue;
-            }
-            let Some(&clock_idx) = self.name_to_idx.get(&rp.clock) else {
-                continue;
-            };
-            if self.signals.get(clock_idx).copied().unwrap_or(0) == 0 {
-                continue;
-            }
-            if let Some(enable) = &rp.enable {
-                if (self.eval_expr_runtime_value(enable).low_u128() & 1) == 0 {
+        let cache = self.runtime_expr_cache.get_mut() as *mut RuntimeExprEvalCache;
+        unsafe {
+            (*cache).next_epoch();
+            for rp in &self.ir.sync_read_ports {
+                let Some(&memory_idx) = self.memory_name_to_idx.get(&rp.memory) else {
+                    continue;
+                };
+                let Some(mem) = self.memory_arrays.get(memory_idx) else {
+                    continue;
+                };
+                if mem.is_empty() {
                     continue;
                 }
+                let Some(&clock_idx) = self.name_to_idx.get(&rp.clock) else {
+                    continue;
+                };
+                if self.signals.get(clock_idx).copied().unwrap_or(0) == 0 {
+                    continue;
+                }
+                if let Some(enable) = &rp.enable {
+                    if (self.eval_expr_runtime_value_with_cache(enable, &mut *cache).low_u128() & 1) == 0 {
+                        continue;
+                    }
+                }
+                let Some(&data_idx) = self.name_to_idx.get(&rp.data) else {
+                    continue;
+                };
+                let data_width = self.widths.get(data_idx).copied().unwrap_or(64);
+                let addr = (self.eval_expr_runtime_value_with_cache(&rp.addr, &mut *cache).low_u128() as usize) % mem.len();
+                let memory_width = self.ir.memories.get(memory_idx).map(|memory| memory.width).unwrap_or(data_width);
+                let data = self.memory_runtime_value(memory_idx, memory_width, addr).resize(data_width);
+                updates.push((data_idx, data_width, data));
             }
-            let Some(&data_idx) = self.name_to_idx.get(&rp.data) else {
-                continue;
-            };
-            let data_width = self.widths.get(data_idx).copied().unwrap_or(64);
-            let addr = (self.eval_expr_runtime_value(&rp.addr).low_u128() as usize) % mem.len();
-            let memory_width = self.ir.memories.get(memory_idx).map(|memory| memory.width).unwrap_or(data_width);
-            let data = self.memory_runtime_value(memory_idx, memory_width, addr).resize(data_width);
-            updates.push((data_idx, data_width, data));
         }
 
         for (idx, width, value) in updates {
@@ -1876,44 +2517,43 @@ impl CoreSimulator {
         self.apply_write_ports_runtime();
         self.sample_next_regs_runtime();
 
-        let mut updated: Vec<bool> = vec![false; self.seq_targets.len()];
-        let mut rising_clocks: Vec<bool> = vec![false; self.signals.len()];
+        self.tick_updated.fill(false);
+        self.tick_rising_clocks.fill(false);
         for (i, &clk_idx) in self.clock_indices.iter().enumerate() {
             let before = self.old_clocks.get(i).copied().unwrap_or(0);
             let after = self.signals.get(clk_idx).copied().unwrap_or(0);
             if before == 0 && after == 1 {
-                rising_clocks[clk_idx] = true;
+                self.tick_rising_clocks[i] = true;
             }
         }
 
         for i in 0..self.seq_targets.len() {
             let target_idx = self.seq_targets[i];
-            let clk_idx = self.seq_clocks[i];
-            if rising_clocks.get(clk_idx).copied().unwrap_or(false) && !updated[i] {
+            let clock_slot = self.seq_clock_slots.get(i).copied().unwrap_or(0);
+            if self.tick_rising_clocks.get(clock_slot).copied().unwrap_or(false) && !self.tick_updated[i] {
                 let width = self.widths.get(target_idx).copied().unwrap_or(0);
                 let value = self.next_reg_runtime_value(i, width);
                 self.store_signal_runtime_value(target_idx, width, value);
-                updated[i] = true;
+                self.tick_updated[i] = true;
             }
         }
 
         for _iteration in 0..10 {
-            let clock_before: Vec<SignalValue> = self.clock_indices
-                .iter()
-                .map(|&clk_idx| self.signals.get(clk_idx).copied().unwrap_or(0))
-                .collect();
+            for (i, &clk_idx) in self.clock_indices.iter().enumerate() {
+                self.tick_clock_before[i] = self.signals.get(clk_idx).copied().unwrap_or(0);
+            }
+            self.tick_derived_rising.fill(false);
 
             self.evaluate_compiled_without_clock_capture();
             self.apply_write_ports_runtime();
             self.sample_next_regs_runtime();
 
             let mut any_rising = false;
-            let mut derived_rising: Vec<bool> = vec![false; self.signals.len()];
             for (i, &clk_idx) in self.clock_indices.iter().enumerate() {
-                let before = clock_before[i];
+                let before = self.tick_clock_before[i];
                 let after = self.signals.get(clk_idx).copied().unwrap_or(0);
                 if before == 0 && after == 1 {
-                    derived_rising[clk_idx] = true;
+                    self.tick_derived_rising[i] = true;
                     any_rising = true;
                 }
             }
@@ -1924,12 +2564,12 @@ impl CoreSimulator {
 
             for i in 0..self.seq_targets.len() {
                 let target_idx = self.seq_targets[i];
-                let clk_idx = self.seq_clocks[i];
-                if derived_rising.get(clk_idx).copied().unwrap_or(false) && !updated[i] {
+                let clock_slot = self.seq_clock_slots.get(i).copied().unwrap_or(0);
+                if self.tick_derived_rising.get(clock_slot).copied().unwrap_or(false) && !self.tick_updated[i] {
                     let width = self.widths.get(target_idx).copied().unwrap_or(0);
                     let value = self.next_reg_runtime_value(i, width);
                     self.store_signal_runtime_value(target_idx, width, value);
-                    updated[i] = true;
+                    self.tick_updated[i] = true;
                 }
             }
         }
@@ -1944,6 +2584,14 @@ impl CoreSimulator {
         }
     }
 
+    #[inline(always)]
+    pub fn tick_forced(&mut self) {
+        // The compiler core already uses old_clocks from the previous phase as
+        // the "before" edge values and updates them at the end of tick().
+        // That matches the forced two-phase runner usage in the other backends.
+        self.tick();
+    }
+
     pub fn reset(&mut self) {
         for val in self.signals.iter_mut() {
             *val = 0;
@@ -1951,7 +2599,8 @@ impl CoreSimulator {
         for words in self.wide_signal_words.iter_mut() {
             words.fill(0);
         }
-        for (idx, reset_val) in self.reset_values.clone() {
+        for reset_idx in 0..self.reset_values.len() {
+            let (idx, reset_val) = self.reset_values[reset_idx];
             let width = self.widths.get(idx).copied().unwrap_or(0);
             self.store_signal_runtime_value(idx, width, RuntimeValue::from_u128(reset_val, width));
         }
@@ -2028,6 +2677,9 @@ impl CoreSimulator {
                 if let Some(&idx) = self.name_to_idx.get(name) {
                     deps.insert(idx);
                 }
+            }
+            ExprDef::SignalIndex { idx, .. } => {
+                deps.insert(*idx);
             }
             ExprDef::Literal { .. } => {}
             ExprDef::ExprRef { .. } => {}
@@ -2165,18 +2817,18 @@ impl CoreSimulator {
         // Find all signals that are direct copies of the input clock
         // These are assignments of the form: signals[X] = signals[input_clk_idx]
         for assign in &self.ir.assigns {
-            if let ExprDef::Signal { name, .. } = self.resolve_expr(&assign.expr) {
-                // Check if this assignment copies from the input clock
-                if let Some(&source_idx) = self.name_to_idx.get(name) {
-                    if source_idx == input_clk_idx {
-                        // Found an assignment that copies from input clock
-                        if let Some(&target_idx) = self.name_to_idx.get(&assign.target) {
-                            // Check if this target is in clock_indices
-                            if let Some(pos) = self.clock_indices.iter().position(|&ci| ci == target_idx) {
-                                if !domains.contains(&pos) {
-                                    domains.push(pos);
-                                }
-                            }
+            let source_idx = match self.resolve_expr(&assign.expr) {
+                ExprDef::Signal { name, .. } => self.name_to_idx.get(name).copied(),
+                ExprDef::SignalIndex { idx, .. } => Some(*idx),
+                _ => None,
+            };
+            if source_idx == Some(input_clk_idx) {
+                // Found an assignment that copies from input clock
+                if let Some(&target_idx) = self.name_to_idx.get(&assign.target) {
+                    // Check if this target is in clock_indices
+                    if let Some(pos) = self.clock_indices.iter().position(|&ci| ci == target_idx) {
+                        if !domains.contains(&pos) {
+                            domains.push(pos);
                         }
                     }
                 }
@@ -2266,6 +2918,178 @@ impl CoreSimulator {
         code.push_str("    }\n");
         code.push_str("}\n\n");
 
+        code.push_str("#[derive(Clone, Copy)]\n");
+        code.push_str("struct WideValue256 { words: [u64; 4] }\n\n");
+        code.push_str("#[inline(always)]\n");
+        code.push_str("fn wide_zero() -> WideValue256 { WideValue256 { words: [0u64; 4] } }\n\n");
+        code.push_str("#[inline(always)]\n");
+        code.push_str("fn wide_from_u128(value: u128) -> WideValue256 {\n");
+        code.push_str("    WideValue256 { words: [value as u64, (value >> 64) as u64, 0u64, 0u64] }\n");
+        code.push_str("}\n\n");
+        code.push_str("#[inline(always)]\n");
+        code.push_str("fn wide_word_mask(width: usize) -> u64 {\n");
+        code.push_str("    let rem = width % 64;\n");
+        code.push_str("    if rem == 0 { u64::MAX } else { (1u64 << rem) - 1 }\n");
+        code.push_str("}\n\n");
+        code.push_str("#[inline(always)]\n");
+        code.push_str("fn wide_mask(mut value: WideValue256, width: usize) -> WideValue256 {\n");
+        code.push_str("    if width <= 128 { value.words[2] = 0; value.words[3] = 0; }\n");
+        code.push_str("    let count = width.div_ceil(64).max(1).min(4);\n");
+        code.push_str("    for idx in count..4 { value.words[idx] = 0; }\n");
+        code.push_str("    value.words[count - 1] &= wide_word_mask(width);\n");
+        code.push_str("    value\n");
+        code.push_str("}\n\n");
+        code.push_str("#[inline(always)]\n");
+        code.push_str("fn wide_load_signal(signals: *mut u128, wide_hi: *const u64, idx: usize) -> WideValue256 {\n");
+        code.push_str("    let low = unsafe { *signals.add(idx) };\n");
+        code.push_str("    let base = idx * 2;\n");
+        code.push_str("    WideValue256 {\n");
+        code.push_str("        words: [\n");
+        code.push_str("            low as u64,\n");
+        code.push_str("            (low >> 64) as u64,\n");
+        code.push_str("            unsafe { *wide_hi.add(base) },\n");
+        code.push_str("            unsafe { *wide_hi.add(base + 1) },\n");
+        code.push_str("        ]\n");
+        code.push_str("    }\n");
+        code.push_str("}\n\n");
+        code.push_str("#[inline(always)]\n");
+        code.push_str("fn wide_store_signal(signals: *mut u128, wide_hi: *const u64, idx: usize, width: usize, value: WideValue256) {\n");
+        code.push_str("    let masked = wide_mask(value, width);\n");
+        code.push_str("    let low = (masked.words[0] as u128) | ((masked.words[1] as u128) << 64);\n");
+        code.push_str("    unsafe {\n");
+        code.push_str("        *signals.add(idx) = low;\n");
+        code.push_str("        let base = idx * 2;\n");
+        code.push_str("        *(wide_hi as *mut u64).add(base) = masked.words[2];\n");
+        code.push_str("        *(wide_hi as *mut u64).add(base + 1) = masked.words[3];\n");
+        code.push_str("    }\n");
+        code.push_str("}\n\n");
+        code.push_str("#[inline(always)]\n");
+        code.push_str("fn wide_or(lhs: WideValue256, rhs: WideValue256) -> WideValue256 {\n");
+        code.push_str("    WideValue256 { words: [lhs.words[0] | rhs.words[0], lhs.words[1] | rhs.words[1], lhs.words[2] | rhs.words[2], lhs.words[3] | rhs.words[3]] }\n");
+        code.push_str("}\n\n");
+        code.push_str("#[inline(always)]\n");
+        code.push_str("fn wide_and(lhs: WideValue256, rhs: WideValue256) -> WideValue256 {\n");
+        code.push_str("    WideValue256 { words: [lhs.words[0] & rhs.words[0], lhs.words[1] & rhs.words[1], lhs.words[2] & rhs.words[2], lhs.words[3] & rhs.words[3]] }\n");
+        code.push_str("}\n\n");
+        code.push_str("#[inline(always)]\n");
+        code.push_str("fn wide_xor(lhs: WideValue256, rhs: WideValue256) -> WideValue256 {\n");
+        code.push_str("    WideValue256 { words: [lhs.words[0] ^ rhs.words[0], lhs.words[1] ^ rhs.words[1], lhs.words[2] ^ rhs.words[2], lhs.words[3] ^ rhs.words[3]] }\n");
+        code.push_str("}\n\n");
+        code.push_str("#[inline(always)]\n");
+        code.push_str("fn wide_shift_left(value: WideValue256, shift: usize) -> WideValue256 {\n");
+        code.push_str("    if shift == 0 { return value; }\n");
+        code.push_str("    if shift >= 256 { return wide_zero(); }\n");
+        code.push_str("    let word_shift = shift / 64;\n");
+        code.push_str("    let bit_shift = shift % 64;\n");
+        code.push_str("    let mut out = [0u64; 4];\n");
+        code.push_str("    for idx in (0..4).rev() {\n");
+        code.push_str("        if idx < word_shift { continue; }\n");
+        code.push_str("        let src = idx - word_shift;\n");
+        code.push_str("        out[idx] |= value.words[src] << bit_shift;\n");
+        code.push_str("        if bit_shift != 0 && src > 0 { out[idx] |= value.words[src - 1] >> (64 - bit_shift); }\n");
+        code.push_str("    }\n");
+        code.push_str("    WideValue256 { words: out }\n");
+        code.push_str("}\n\n");
+        code.push_str("#[inline(always)]\n");
+        code.push_str("fn wide_shift_right(value: WideValue256, shift: usize) -> WideValue256 {\n");
+        code.push_str("    if shift == 0 { return value; }\n");
+        code.push_str("    if shift >= 256 { return wide_zero(); }\n");
+        code.push_str("    let word_shift = shift / 64;\n");
+        code.push_str("    let bit_shift = shift % 64;\n");
+        code.push_str("    let mut out = [0u64; 4];\n");
+        code.push_str("    for idx in 0..4 {\n");
+        code.push_str("        let src = idx + word_shift;\n");
+        code.push_str("        if src >= 4 { break; }\n");
+        code.push_str("        out[idx] |= value.words[src] >> bit_shift;\n");
+        code.push_str("        if bit_shift != 0 && src + 1 < 4 { out[idx] |= value.words[src + 1] << (64 - bit_shift); }\n");
+        code.push_str("    }\n");
+        code.push_str("    WideValue256 { words: out }\n");
+        code.push_str("}\n\n");
+        code.push_str("#[inline(always)]\n");
+        code.push_str("fn wide_read_word(value: WideValue256, bit_low: usize) -> u64 {\n");
+        code.push_str("    let src_word = bit_low / 64;\n");
+        code.push_str("    let bit_off = bit_low % 64;\n");
+        code.push_str("    if src_word >= 4 { return 0; }\n");
+        code.push_str("    let mut out = value.words[src_word] >> bit_off;\n");
+        code.push_str("    if bit_off != 0 && src_word + 1 < 4 { out |= value.words[src_word + 1] << (64 - bit_off); }\n");
+        code.push_str("    out\n");
+        code.push_str("}\n\n");
+        code.push_str("#[inline(always)]\n");
+        code.push_str("fn wide_slice(value: WideValue256, low: usize, width: usize) -> WideValue256 {\n");
+        code.push_str("    let mut out = WideValue256 { words: [0u64; 4] };\n");
+        code.push_str("    if width == 0 { return out; }\n");
+        code.push_str("    out.words[0] = wide_read_word(value, low);\n");
+        code.push_str("    if width > 64 { out.words[1] = wide_read_word(value, low + 64); }\n");
+        code.push_str("    if width > 128 { out.words[2] = wide_read_word(value, low + 128); }\n");
+        code.push_str("    if width > 192 { out.words[3] = wide_read_word(value, low + 192); }\n");
+        code.push_str("    wide_mask(out, width)\n");
+        code.push_str("}\n\n");
+        code.push_str("#[inline(always)]\n");
+        code.push_str("fn wide_slice_u128(value: WideValue256, low: usize, width: usize) -> u128 {\n");
+        code.push_str("    let sliced = wide_slice(value, low, width);\n");
+        code.push_str("    ((sliced.words[0] as u128) | ((sliced.words[1] as u128) << 64)) & ");
+        code.push_str(&Self::mask_const(128));
+        code.push_str("\n}\n\n");
+        code.push_str("#[inline(always)]\n");
+        code.push_str("fn overwide_signal_word(signals: *mut u128, overwide_ptrs: *const *const u64, idx: usize, word_idx: usize) -> u64 {\n");
+        code.push_str("    let low = unsafe { *signals.add(idx) };\n");
+        code.push_str("    match word_idx {\n");
+        code.push_str("        0 => low as u64,\n");
+        code.push_str("        1 => (low >> 64) as u64,\n");
+        code.push_str("        _ => {\n");
+        code.push_str("            let ptr = unsafe { *overwide_ptrs.add(idx) };\n");
+        code.push_str("            if ptr.is_null() { 0 } else { unsafe { *ptr.add(word_idx - 2) } }\n");
+        code.push_str("        }\n");
+        code.push_str("    }\n");
+        code.push_str("}\n\n");
+        code.push_str("#[inline(always)]\n");
+        code.push_str("fn overwide_signal_slice_u128(signals: *mut u128, overwide_ptrs: *const *const u64, idx: usize, low: usize, width: usize) -> u128 {\n");
+        code.push_str("    if width == 0 { return 0; }\n");
+        code.push_str("    let mut out = 0u128;\n");
+        code.push_str("    let mut bit = low;\n");
+        code.push_str("    let mut written = 0usize;\n");
+        code.push_str("    while written < width {\n");
+        code.push_str("        let bit_off = bit % 64;\n");
+        code.push_str("        let chunk = (64 - bit_off).min(width - written);\n");
+        code.push_str("        let word = overwide_signal_word(signals, overwide_ptrs, idx, bit / 64);\n");
+        code.push_str("        let part = if chunk == 64 { word } else { (word >> bit_off) & ((1u64 << chunk) - 1) };\n");
+        code.push_str("        out |= (part as u128) << written;\n");
+        code.push_str("        bit += chunk;\n");
+        code.push_str("        written += chunk;\n");
+        code.push_str("    }\n");
+        code.push_str("    out & ");
+        code.push_str(&Self::mask_const(128));
+        code.push_str("\n}\n\n");
+        code.push_str("#[inline(always)]\n");
+        code.push_str("fn dynamic_mask_u128(width: usize) -> u128 {\n");
+        code.push_str("    if width == 0 { 0u128 } else if width >= 128 { u128::MAX } else { (1u128 << width) - 1 }\n");
+        code.push_str("}\n\n");
+        code.push_str("#[inline(always)]\n");
+        code.push_str("fn slice_u128(value: u128, low: usize, width: usize) -> u128 {\n");
+        code.push_str("    (value >> low) & dynamic_mask_u128(width)\n");
+        code.push_str("}\n\n");
+        code.push_str("#[inline(always)]\n");
+        code.push_str("fn signal_slice_u128(signals: *mut u128, idx: usize, low: usize, width: usize) -> u128 {\n");
+        code.push_str("    slice_u128(unsafe { *signals.add(idx) }, low, width)\n");
+        code.push_str("}\n\n");
+        code.push_str("#[inline(always)]\n");
+        code.push_str("fn bool_to_u128(value: bool) -> u128 {\n");
+        code.push_str("    value as u8 as u128\n");
+        code.push_str("}\n\n");
+        code.push_str("#[inline(always)]\n");
+        code.push_str("fn mux_u128(cond: u128, when_true: u128, when_false: u128, mask: u128) -> u128 {\n");
+        code.push_str("    (if cond != 0 { when_true } else { when_false }) & mask\n");
+        code.push_str("}\n\n");
+        code.push_str("#[inline(always)]\n");
+        code.push_str("fn repeat_pattern_u128(value: u128, part_width: usize, repeat_count: usize) -> u128 {\n");
+        code.push_str("    let masked = value & dynamic_mask_u128(part_width);\n");
+        code.push_str("    let mut out = 0u128;\n");
+        code.push_str("    for _ in 0..repeat_count {\n");
+        code.push_str("        out = (out << part_width) | masked;\n");
+        code.push_str("    }\n");
+        code.push_str("    out\n");
+        code.push_str("}\n\n");
+
         let flat_assign_indices = &self.compiled_comb_assign_indices;
         // Compact CIRCT payloads already carry an explicit shared-expression
         // pool. Fine-grained chunking duplicates those expr-ref definitions
@@ -2293,8 +3117,10 @@ impl CoreSimulator {
             // Generate evaluate function (inline for performance)
             code.push_str("/// Evaluate all combinational assignments (topologically sorted)\n");
             code.push_str("#[inline(always)]\n");
-            code.push_str("pub unsafe fn evaluate_inline(signals: &mut [u128]) {\n");
+            code.push_str("pub unsafe fn evaluate_inline(signals: &mut [u128], wide_hi: *const u64, overwide_ptrs: *const *const u64) {\n");
             code.push_str("    let s = signals.as_mut_ptr();\n");
+            code.push_str("    let wh = wide_hi;\n");
+            code.push_str("    let ow = overwide_ptrs;\n");
 
             // Cache frequently-used signals to reduce pointer loads in hot evaluate loop.
             // We cache:
@@ -2376,9 +3202,28 @@ impl CoreSimulator {
                     let width = self.widths.get(idx).copied().unwrap_or(64);
                     let expr_width = self.expr_width(&assign.expr);
                     let mut expr_lines = Vec::new();
+                    if width > 128 {
+                        let expr_code = self.expr_to_rust_wide_cached_emitting(
+                            &assign.expr,
+                            "s",
+                            "wh",
+                            "ow",
+                            Some(&comb_cache_names),
+                            &mut expr_state,
+                            &mut expr_lines,
+                        );
+                        self.append_indented_lines(&mut code, "    ", &expr_lines);
+                        code.push_str(&format!(
+                            "    wide_store_signal(s, wh, {}, {}, {});\n",
+                            idx, width, expr_code
+                        ));
+                        continue;
+                    }
                     let expr_code = self.expr_to_rust_ptr_cached_emitting(
                         &assign.expr,
                         "s",
+                        Some("wh"),
+                        Some("ow"),
                         Some(&comb_cache_names),
                         &mut expr_state,
                         &mut expr_lines,
@@ -2423,9 +3268,9 @@ impl CoreSimulator {
 
         // Generate extern "C" wrapper for evaluate
         code.push_str("#[no_mangle]\n");
-        code.push_str("pub unsafe extern \"C\" fn evaluate(signals: *mut u128, len: usize) {\n");
+        code.push_str("pub unsafe extern \"C\" fn evaluate(signals: *mut u128, wide_hi: *const u64, overwide_ptrs: *const *const u64, len: usize) {\n");
         code.push_str("    let signals = std::slice::from_raw_parts_mut(signals, len);\n");
-        code.push_str("    evaluate_inline(signals);\n");
+        code.push_str("    evaluate_inline(signals, wide_hi, overwide_ptrs);\n");
         code.push_str("}\n\n");
 
         if include_tick_helpers {
@@ -2445,12 +3290,12 @@ impl CoreSimulator {
         for (chunk_idx, chunk) in assign_indices.chunks(assigns_per_fn).enumerate() {
             code.push_str("/// Evaluate a chunk of combinational assignments\n");
             code.push_str("#[inline(never)]\n");
-            code.push_str(&format!("unsafe fn evaluate_chunk_{}(s: *mut u128) {{\n", chunk_idx));
+            code.push_str(&format!("unsafe fn evaluate_chunk_{}(s: *mut u128, wh: *const u64, ow: *const *const u64) {{\n", chunk_idx));
             let mut expr_state = ExprCodegenState::default();
             for &assign_idx in chunk {
                 let assign = &self.ir.assigns[assign_idx];
                 if let Some(&idx) = self.name_to_idx.get(&assign.target) {
-                    self.generate_direct_assign_store(code, assign, idx, "s", &mut expr_state);
+                    self.generate_direct_assign_store(code, assign, idx, "s", Some("wh"), Some("ow"), &mut expr_state);
                 }
             }
             code.push_str("}\n\n");
@@ -2458,10 +3303,12 @@ impl CoreSimulator {
 
         code.push_str("/// Evaluate all combinational assignments (topologically sorted)\n");
         code.push_str("#[inline(always)]\n");
-        code.push_str("pub unsafe fn evaluate_inline(signals: &mut [u128]) {\n");
+        code.push_str("pub unsafe fn evaluate_inline(signals: &mut [u128], wide_hi: *const u64, overwide_ptrs: *const *const u64) {\n");
         code.push_str("    let s = signals.as_mut_ptr();\n");
+        code.push_str("    let wh = wide_hi;\n");
+        code.push_str("    let ow = overwide_ptrs;\n");
         for chunk_idx in 0..chunk_count {
-            code.push_str(&format!("    evaluate_chunk_{}(s);\n", chunk_idx));
+            code.push_str(&format!("    evaluate_chunk_{}(s, wh, ow);\n", chunk_idx));
         }
         code.push_str("}\n\n");
     }
@@ -2480,12 +3327,44 @@ impl CoreSimulator {
         assign: &AssignDef,
         target_idx: usize,
         signals_ptr: &str,
+        wide_words_ptr: Option<&str>,
+        overwide_ptrs: Option<&str>,
         expr_state: &mut ExprCodegenState,
     ) {
         let width = self.widths.get(target_idx).copied().unwrap_or(64);
+        if width > 128 {
+            let mut expr_lines = Vec::new();
+            let expr_code = self.expr_to_rust_wide_cached_emitting(
+                &assign.expr,
+                signals_ptr,
+                wide_words_ptr.unwrap_or("wh"),
+                overwide_ptrs.unwrap_or("ow"),
+                None,
+                expr_state,
+                &mut expr_lines,
+            );
+            self.append_indented_lines(code, "    ", &expr_lines);
+            code.push_str(&format!(
+                "    wide_store_signal({}, {}, {}, {}, {});\n",
+                signals_ptr,
+                wide_words_ptr.unwrap_or("wh"),
+                target_idx,
+                width,
+                expr_code
+            ));
+            return;
+        }
+
         let expr_width = self.expr_width(&assign.expr);
         let mut expr_lines = Vec::new();
-        let expr_code = self.expr_to_rust_ptr_emitting(&assign.expr, signals_ptr, expr_state, &mut expr_lines);
+        let expr_code = self.expr_to_rust_ptr_emitting(
+            &assign.expr,
+            signals_ptr,
+            wide_words_ptr,
+            overwide_ptrs,
+            expr_state,
+            &mut expr_lines
+        );
         self.append_indented_lines(code, "    ", &expr_lines);
         if expr_width == width {
             code.push_str(&format!("    *{}.add({}) = {};\n", signals_ptr, target_idx, expr_code));
@@ -2500,10 +3379,44 @@ impl CoreSimulator {
         }
     }
 
+    fn emit_wide_expr_ref_value(
+        &self,
+        id: usize,
+        signals_ptr: &str,
+        wide_words_ptr: &str,
+        overwide_ptrs: &str,
+        cache: Option<&HashMap<usize, String>>,
+        state: &mut ExprCodegenState,
+        emitted_lines: &mut Vec<String>,
+    ) -> String {
+        if state.emitting.contains(&id) {
+            return "wide_zero()".to_string();
+        }
+
+        let Some(expr) = self.ir.exprs.get(id) else {
+            return "wide_zero()".to_string();
+        };
+
+        state.emitting.insert(id);
+        let expr_code = self.expr_to_rust_wide_cached_emitting(
+            expr,
+            signals_ptr,
+            wide_words_ptr,
+            overwide_ptrs,
+            cache,
+            state,
+            emitted_lines,
+        );
+        state.emitting.remove(&id);
+        expr_code
+    }
+
     fn emit_expr_ref_value(
         &self,
         id: usize,
         signals_ptr: &str,
+        wide_words_ptr: Option<&str>,
+        overwide_ptrs: Option<&str>,
         cache: Option<&HashMap<usize, String>>,
         state: &mut ExprCodegenState,
         emitted_lines: &mut Vec<String>,
@@ -2521,16 +3434,28 @@ impl CoreSimulator {
         };
 
         state.emitting.insert(id);
-        let expr_code = self.expr_to_rust_ptr_cached_emitting(expr, signals_ptr, cache, state, emitted_lines);
+        let expr_code = self.expr_to_rust_ptr_cached_emitting(
+            expr,
+            signals_ptr,
+            wide_words_ptr,
+            overwide_ptrs,
+            cache,
+            state,
+            emitted_lines
+        );
         state.emitting.remove(&id);
 
-        if self
-            .expr_ref_use_counts
-            .get(id)
-            .copied()
-            .unwrap_or(0)
-            <= 1
-        {
+        let use_count = self.expr_ref_use_counts.get(id).copied().unwrap_or(0);
+        let complexity = self.expr_ref_complexities.get(id).copied().unwrap_or(1);
+        let width = self.expr_width(expr);
+        let single_use_threshold = if width <= 1 {
+            SINGLE_USE_EXPR_MATERIALIZE_COMPLEXITY_THRESHOLD_BIT1
+        } else {
+            SINGLE_USE_EXPR_MATERIALIZE_COMPLEXITY_THRESHOLD
+        };
+        let should_materialize_single_use =
+            width <= SINGLE_USE_EXPR_MATERIALIZE_MAX_WIDTH && complexity > single_use_threshold;
+        if use_count <= 1 && !should_materialize_single_use {
             expr_code
         } else {
             state.emitted.insert(id);
@@ -2543,20 +3468,32 @@ impl CoreSimulator {
         &self,
         expr: &ExprDef,
         signals_ptr: &str,
+        wide_words_ptr: Option<&str>,
+        overwide_ptrs: Option<&str>,
         state: &mut ExprCodegenState,
         emitted_lines: &mut Vec<String>,
     ) -> String {
-        self.expr_to_rust_ptr_cached_emitting(expr, signals_ptr, None, state, emitted_lines)
+        self.expr_to_rust_ptr_cached_emitting(
+            expr,
+            signals_ptr,
+            wide_words_ptr,
+            overwide_ptrs,
+            None,
+            state,
+            emitted_lines
+        )
     }
 
     fn expr_to_rust_ptr_cached_emitting(
         &self,
         expr: &ExprDef,
         signals_ptr: &str,
+        wide_words_ptr: Option<&str>,
+        overwide_ptrs: Option<&str>,
         cache: Option<&HashMap<usize, String>>,
         state: &mut ExprCodegenState,
         emitted_lines: &mut Vec<String>,
-    ) -> String {
+        ) -> String {
         match expr {
             ExprDef::Signal { name, .. } => {
                 let idx = self.name_to_idx.get(name).copied().unwrap_or(0);
@@ -2567,33 +3504,40 @@ impl CoreSimulator {
                 }
                 format!("(*{}.add({}))", signals_ptr, idx)
             }
-            ExprDef::Literal { value, width } => {
+            ExprDef::SignalIndex { idx, .. } => {
+                if let Some(cache) = cache {
+                    if let Some(temp) = cache.get(idx) {
+                        return temp.clone();
+                    }
+                }
+                format!("(*{}.add({}))", signals_ptr, idx)
+            }
+            ExprDef::Literal { value, width, .. } => {
                 let parsed = value.parse::<i128>().unwrap_or(0);
                 let masked = mask_signed_value(parsed, *width);
                 Self::value_const(masked)
             }
             ExprDef::ExprRef { id, .. } => {
-                self.emit_expr_ref_value(*id, signals_ptr, cache, state, emitted_lines)
+                self.emit_expr_ref_value(*id, signals_ptr, wide_words_ptr, overwide_ptrs, cache, state, emitted_lines)
             }
             ExprDef::UnaryOp { op, operand, width } => {
                 let operand_code =
-                    self.expr_to_rust_ptr_cached_emitting(operand, signals_ptr, cache, state, emitted_lines);
+                    self.expr_to_rust_ptr_cached_emitting(operand, signals_ptr, wide_words_ptr, overwide_ptrs, cache, state, emitted_lines);
                 match op.as_str() {
                     "~" | "not" => format!("((!{}) & {})", operand_code, Self::mask_const(*width)),
                     "&" | "reduce_and" => {
                         let op_width = self.expr_width(operand);
                         let m = Self::mask_const(op_width);
-                        format!("(if ({} & {}) == {} {{ 1u128 }} else {{ 0u128 }})",
-                                operand_code, m, m)
+                        format!("bool_to_u128(({} & {}) == {})", operand_code, m, m)
                     }
-                    "|" | "reduce_or" => format!("(if {} != 0 {{ 1u128 }} else {{ 0u128 }})", operand_code),
+                    "|" | "reduce_or" => format!("bool_to_u128({} != 0)", operand_code),
                     "^" | "reduce_xor" => format!("(({}).count_ones() as u128 & 1u128)", operand_code),
                     _ => operand_code,
                 }
             }
             ExprDef::BinaryOp { op, left, right, width } => {
-                let l = self.expr_to_rust_ptr_cached_emitting(left, signals_ptr, cache, state, emitted_lines);
-                let r = self.expr_to_rust_ptr_cached_emitting(right, signals_ptr, cache, state, emitted_lines);
+                let l = self.expr_to_rust_ptr_cached_emitting(left, signals_ptr, wide_words_ptr, overwide_ptrs, cache, state, emitted_lines);
+                let r = self.expr_to_rust_ptr_cached_emitting(right, signals_ptr, wide_words_ptr, overwide_ptrs, cache, state, emitted_lines);
                 let m = Self::mask_const(*width);
                 match op.as_str() {
                     "&" => format!("({} & {})", l, r),
@@ -2606,56 +3550,181 @@ impl CoreSimulator {
                     "%" => format!("(if {} != 0 {{ {} % {} }} else {{ 0u128 }})", r, l, r),
                     "<<" => format!("(({} << (({}).min(127u128) as u32)) & {})", l, r, m),
                     ">>" => format!("({} >> (({}).min(127u128) as u32))", l, r),
-                    "==" => format!("(if {} == {} {{ 1u128 }} else {{ 0u128 }})", l, r),
-                    "!=" => format!("(if {} != {} {{ 1u128 }} else {{ 0u128 }})", l, r),
-                    "<" => format!("(if {} < {} {{ 1u128 }} else {{ 0u128 }})", l, r),
-                    ">" => format!("(if {} > {} {{ 1u128 }} else {{ 0u128 }})", l, r),
-                    "<=" | "le" => format!("(if {} <= {} {{ 1u128 }} else {{ 0u128 }})", l, r),
-                    ">=" => format!("(if {} >= {} {{ 1u128 }} else {{ 0u128 }})", l, r),
+                    "==" => format!("bool_to_u128({} == {})", l, r),
+                    "!=" => format!("bool_to_u128({} != {})", l, r),
+                    "<" => format!("bool_to_u128({} < {})", l, r),
+                    ">" => format!("bool_to_u128({} > {})", l, r),
+                    "<=" | "le" => format!("bool_to_u128({} <= {})", l, r),
+                    ">=" => format!("bool_to_u128({} >= {})", l, r),
                     _ => "0u128".to_string(),
                 }
             }
             ExprDef::Mux { condition, when_true, when_false, width } => {
                 let cond =
-                    self.expr_to_rust_ptr_cached_emitting(condition, signals_ptr, cache, state, emitted_lines);
+                    self.expr_to_rust_ptr_cached_emitting(condition, signals_ptr, wide_words_ptr, overwide_ptrs, cache, state, emitted_lines);
                 let t =
-                    self.expr_to_rust_ptr_cached_emitting(when_true, signals_ptr, cache, state, emitted_lines);
+                    self.expr_to_rust_ptr_cached_emitting(when_true, signals_ptr, wide_words_ptr, overwide_ptrs, cache, state, emitted_lines);
                 let f =
-                    self.expr_to_rust_ptr_cached_emitting(when_false, signals_ptr, cache, state, emitted_lines);
-                format!(
-                    "((if {} != 0 {{ {} }} else {{ {} }}) & {})",
-                    cond,
-                    t,
-                    f,
-                    Self::mask_const(*width)
-                )
+                    self.expr_to_rust_ptr_cached_emitting(when_false, signals_ptr, wide_words_ptr, overwide_ptrs, cache, state, emitted_lines);
+                format!("mux_u128({}, {}, {}, {})", cond, t, f, Self::mask_const(*width))
             }
             ExprDef::Slice { base, low, width, .. } => {
-                if *low >= 128 {
-                    "0u128".to_string()
-                } else {
-                    let base_code = self.expr_to_rust_ptr_cached_emitting(
+                let base_width = self.expr_width(base);
+                if base_width > 256 {
+                    match self.resolve_expr(base) {
+                        ExprDef::Signal { name, .. } => {
+                            let idx = self.name_to_idx.get(name).copied().unwrap_or(0);
+                            format!(
+                                "overwide_signal_slice_u128({}, {}, {}, {}, {})",
+                                signals_ptr,
+                                overwide_ptrs.unwrap_or("ow"),
+                                idx,
+                                low,
+                                width
+                            )
+                        }
+                        ExprDef::SignalIndex { idx, .. } => {
+                            format!(
+                                "overwide_signal_slice_u128({}, {}, {}, {}, {})",
+                                signals_ptr,
+                                overwide_ptrs.unwrap_or("ow"),
+                                idx,
+                                low,
+                                width
+                            )
+                        }
+                        _ => "0u128".to_string(),
+                    }
+                } else if base_width > 128 {
+                    let wide_base = self.expr_to_rust_wide_cached_emitting(
                         base,
                         signals_ptr,
+                        wide_words_ptr.unwrap_or("wh"),
+                        overwide_ptrs.unwrap_or("ow"),
                         cache,
                         state,
                         emitted_lines,
                     );
-                    format!(
-                        "(({} >> {}usize) & {})",
-                        base_code,
-                        low,
-                        Self::mask_const(*width)
-                    )
+                    format!("wide_slice_u128({}, {}, {})", wide_base, low, width)
+                } else if *low >= 128 {
+                    "0u128".to_string()
+                } else {
+                    match self.resolve_expr(base) {
+                        ExprDef::Signal { name, .. } => {
+                            let idx = self.name_to_idx.get(name).copied().unwrap_or(0);
+                            if let Some(cache) = cache {
+                                if let Some(temp) = cache.get(&idx) {
+                                    format!("slice_u128({}, {}, {})", temp, low, width)
+                                } else {
+                                    format!("signal_slice_u128({}, {}, {}, {})", signals_ptr, idx, low, width)
+                                }
+                            } else {
+                                format!("signal_slice_u128({}, {}, {}, {})", signals_ptr, idx, low, width)
+                            }
+                        }
+                        ExprDef::SignalIndex { idx, .. } => {
+                            if let Some(cache) = cache {
+                                if let Some(temp) = cache.get(idx) {
+                                    format!("slice_u128({}, {}, {})", temp, low, width)
+                                } else {
+                                    format!("signal_slice_u128({}, {}, {}, {})", signals_ptr, idx, low, width)
+                                }
+                            } else {
+                                format!("signal_slice_u128({}, {}, {}, {})", signals_ptr, idx, low, width)
+                            }
+                        }
+                        _ => {
+                            let base_code = self.expr_to_rust_ptr_cached_emitting(
+                                base,
+                                signals_ptr,
+                                wide_words_ptr,
+                                overwide_ptrs,
+                                cache,
+                                state,
+                                emitted_lines,
+                            );
+                            format!("slice_u128({}, {}, {})", base_code, low, width)
+                        }
+                    }
                 }
             }
             ExprDef::Concat { parts, width } => {
+                if let Some((repeat_part, part_width, repeat_count)) =
+                    self.repeated_concat_part(parts, *width)
+                {
+                    let part_code = self.expr_to_rust_ptr_cached_emitting(
+                        repeat_part,
+                        signals_ptr,
+                        wide_words_ptr,
+                        overwide_ptrs,
+                        cache,
+                        state,
+                        emitted_lines,
+                    );
+                    return format!(
+                        "(repeat_pattern_u128(({} & {}), {}, {}) & {})",
+                        part_code,
+                        Self::mask_const(part_width),
+                        part_width,
+                        repeat_count,
+                        Self::mask_const(*width)
+                    );
+                }
+
+                if parts.len() >= LARGE_NARROW_CONCAT_PART_THRESHOLD {
+                    let temp_name = state.fresh_temp("concat");
+                    emitted_lines.push(format!("let mut {} = 0u128;", temp_name));
+                    let mut shift = 0usize;
+                    for part in parts.iter().rev() {
+                        let part_width = self.expr_width(part);
+                        if part_width == 0 {
+                            continue;
+                        }
+                        if shift >= 128 {
+                            shift += part_width;
+                            continue;
+                        }
+                        let part_code = self.expr_to_rust_ptr_cached_emitting(
+                            part,
+                            signals_ptr,
+                            wide_words_ptr,
+                            overwide_ptrs,
+                            cache,
+                            state,
+                            emitted_lines,
+                        );
+                        if shift > 0 {
+                            emitted_lines.push(format!(
+                                "{} |= ({} & {}) << {};",
+                                temp_name,
+                                part_code,
+                                Self::mask_const(part_width),
+                                shift
+                            ));
+                        } else {
+                            emitted_lines.push(format!(
+                                "{} |= {} & {};",
+                                temp_name,
+                                part_code,
+                                Self::mask_const(part_width)
+                            ));
+                        }
+                        shift += part_width;
+                    }
+                    emitted_lines.push(format!(
+                        "{} &= {};",
+                        temp_name,
+                        Self::mask_const(*width)
+                    ));
+                    return temp_name;
+                }
+
                 let mut result = String::from("((");
                 let mut shift = 0usize;
                 let mut first = true;
                 for part in parts.iter().rev() {
                     let part_code =
-                        self.expr_to_rust_ptr_cached_emitting(part, signals_ptr, cache, state, emitted_lines);
+                        self.expr_to_rust_ptr_cached_emitting(part, signals_ptr, wide_words_ptr, overwide_ptrs, cache, state, emitted_lines);
                     let part_width = self.expr_width(part);
                     if shift >= 128 {
                         shift += part_width;
@@ -2676,15 +3745,288 @@ impl CoreSimulator {
                 result
             }
             ExprDef::Resize { expr, width } => {
-                let expr_code = self.expr_to_rust_ptr_cached_emitting(expr, signals_ptr, cache, state, emitted_lines);
+                let expr_code = self.expr_to_rust_ptr_cached_emitting(expr, signals_ptr, wide_words_ptr, overwide_ptrs, cache, state, emitted_lines);
                 format!("({} & {})", expr_code, Self::mask_const(*width))
             }
             ExprDef::MemRead { memory, addr, width } => {
                 let mem_idx = self.memory_name_to_idx.get(memory).copied().unwrap_or(0);
-                let addr_code = self.expr_to_rust_ptr_cached_emitting(addr, signals_ptr, cache, state, emitted_lines);
+                let addr_code = self.expr_to_rust_ptr_cached_emitting(addr, signals_ptr, wide_words_ptr, overwide_ptrs, cache, state, emitted_lines);
                 format!("(MEM_{}.get({} as usize).copied().unwrap_or(0) & {})",
                         mem_idx, addr_code, Self::mask_const(*width))
             }
+        }
+    }
+
+    fn wide_literal_const(&self, value: &str, width: usize) -> String {
+        let runtime_value = RuntimeValue::from_signed_text(value, width);
+        format!(
+            "WideValue256 {{ words: [0x{:X}u64, 0x{:X}u64, 0x{:X}u64, 0x{:X}u64] }}",
+            runtime_value.word(width, 0),
+            runtime_value.word(width, 1),
+            runtime_value.word(width, 2),
+            runtime_value.word(width, 3)
+        )
+    }
+
+    fn expr_to_rust_wide_cached_emitting(
+        &self,
+        expr: &ExprDef,
+        signals_ptr: &str,
+        wide_words_ptr: &str,
+        overwide_ptrs: &str,
+        cache: Option<&HashMap<usize, String>>,
+        state: &mut ExprCodegenState,
+        emitted_lines: &mut Vec<String>,
+    ) -> String {
+        match self.resolve_expr(expr) {
+            ExprDef::Signal { name, width } => {
+                let idx = self.name_to_idx.get(name).copied().unwrap_or(0);
+                if *width <= 128 {
+                    format!("wide_from_u128(*{}.add({}))", signals_ptr, idx)
+                } else {
+                    if let Some(cache) = cache {
+                        if let Some(temp) = cache.get(&idx) {
+                            return format!("wide_from_u128({})", temp);
+                        }
+                    }
+                    format!("wide_load_signal({}, {}, {})", signals_ptr, wide_words_ptr, idx)
+                }
+            }
+            ExprDef::SignalIndex { idx, width } => {
+                if *width <= 128 {
+                    format!("wide_from_u128(*{}.add({}))", signals_ptr, idx)
+                } else {
+                    if let Some(cache) = cache {
+                        if let Some(temp) = cache.get(idx) {
+                            return format!("wide_from_u128({})", temp);
+                        }
+                    }
+                    format!("wide_load_signal({}, {}, {})", signals_ptr, wide_words_ptr, idx)
+                }
+            }
+            ExprDef::Literal { value, width, .. } => self.wide_literal_const(value, *width),
+            ExprDef::ExprRef { id, .. } => self.emit_wide_expr_ref_value(
+                *id,
+                signals_ptr,
+                wide_words_ptr,
+                overwide_ptrs,
+                cache,
+                state,
+                emitted_lines,
+            ),
+            ExprDef::Mux {
+                condition,
+                when_true,
+                when_false,
+                width,
+            } => {
+                let cond = self.expr_to_rust_ptr_cached_emitting(
+                    condition,
+                    signals_ptr,
+                    Some(wide_words_ptr),
+                    Some(overwide_ptrs),
+                    cache,
+                    state,
+                    emitted_lines,
+                );
+                let when_true_code = self.expr_to_rust_wide_cached_emitting(
+                    when_true,
+                    signals_ptr,
+                    wide_words_ptr,
+                    overwide_ptrs,
+                    cache,
+                    state,
+                    emitted_lines,
+                );
+                let when_false_code = self.expr_to_rust_wide_cached_emitting(
+                    when_false,
+                    signals_ptr,
+                    wide_words_ptr,
+                    overwide_ptrs,
+                    cache,
+                    state,
+                    emitted_lines,
+                );
+                let temp = state.fresh_temp("wide_mux");
+                emitted_lines.push(format!(
+                    "let {} = wide_mask(if {} != 0 {{ {} }} else {{ {} }}, {});",
+                    temp, cond, when_true_code, when_false_code, width
+                ));
+                temp
+            }
+            ExprDef::Concat { parts, width } => {
+                let temp = state.fresh_temp("wide_concat");
+                emitted_lines.push(format!("let mut {} = wide_zero();", temp));
+                for part in parts {
+                    let part_width = self.expr_width(part);
+                    let part_code = if part_width > 128 {
+                        self.expr_to_rust_wide_cached_emitting(
+                            part,
+                            signals_ptr,
+                            wide_words_ptr,
+                            overwide_ptrs,
+                            cache,
+                            state,
+                            emitted_lines,
+                        )
+                    } else {
+                        let narrow_part = self.expr_to_rust_ptr_cached_emitting(
+                            part,
+                            signals_ptr,
+                            Some(wide_words_ptr),
+                            Some(overwide_ptrs),
+                            cache,
+                            state,
+                            emitted_lines,
+                        );
+                        format!("wide_from_u128(({}) & {})", narrow_part, Self::mask_const(part_width))
+                    };
+                    emitted_lines.push(format!(
+                        "{} = wide_shift_left({}, {});",
+                        temp, temp, part_width
+                    ));
+                    emitted_lines.push(format!(
+                        "{} = wide_or({}, wide_mask({}, {}));",
+                        temp, temp, part_code, part_width
+                    ));
+                }
+                emitted_lines.push(format!("{} = wide_mask({}, {});", temp, temp, width));
+                temp
+            }
+            ExprDef::BinaryOp { op, left, right, width } => {
+                let temp = state.fresh_temp("wide_bin");
+                if matches!(op.as_str(), "<<" | ">>") {
+                    let lhs = self.expr_to_rust_wide_cached_emitting(
+                        left,
+                        signals_ptr,
+                        wide_words_ptr,
+                        overwide_ptrs,
+                        cache,
+                        state,
+                        emitted_lines,
+                    );
+                    let rhs = self.expr_to_rust_ptr_cached_emitting(
+                        right,
+                        signals_ptr,
+                        Some(wide_words_ptr),
+                        Some(overwide_ptrs),
+                        cache,
+                        state,
+                        emitted_lines,
+                    );
+                    let helper = if op.as_str() == "<<" { "wide_shift_left" } else { "wide_shift_right" };
+                    emitted_lines.push(format!(
+                        "let {} = wide_mask({}({}, (({}).min(255u128) as usize)), {});",
+                        temp, helper, lhs, rhs, width
+                    ));
+                } else {
+                    let lhs = self.expr_to_rust_wide_cached_emitting(
+                        left,
+                        signals_ptr,
+                        wide_words_ptr,
+                        overwide_ptrs,
+                        cache,
+                        state,
+                        emitted_lines,
+                    );
+                    let rhs = self.expr_to_rust_wide_cached_emitting(
+                        right,
+                        signals_ptr,
+                        wide_words_ptr,
+                        overwide_ptrs,
+                        cache,
+                        state,
+                        emitted_lines,
+                    );
+                    let helper = match op.as_str() {
+                        "|" => "wide_or",
+                        "&" => "wide_and",
+                        "^" => "wide_xor",
+                        _ => "wide_zero",
+                    };
+                    if helper == "wide_zero" {
+                        emitted_lines.push(format!("let {} = wide_zero();", temp));
+                    } else {
+                        emitted_lines.push(format!(
+                            "let {} = wide_mask({}({}, {}), {});",
+                            temp, helper, lhs, rhs, width
+                        ));
+                    }
+                }
+                temp
+            }
+            ExprDef::Resize { expr, width } => {
+                let inner = if self.expr_width(expr) > 128 {
+                    self.expr_to_rust_wide_cached_emitting(
+                        expr,
+                        signals_ptr,
+                        wide_words_ptr,
+                        overwide_ptrs,
+                        cache,
+                        state,
+                        emitted_lines,
+                    )
+                } else {
+                    let narrow = self.expr_to_rust_ptr_cached_emitting(
+                        expr,
+                        signals_ptr,
+                        Some(wide_words_ptr),
+                        Some(overwide_ptrs),
+                        cache,
+                        state,
+                        emitted_lines,
+                    );
+                    format!("wide_from_u128({})", narrow)
+                };
+                let temp = state.fresh_temp("wide_resize");
+                emitted_lines.push(format!("let {} = wide_mask({}, {});", temp, inner, width));
+                temp
+            }
+            ExprDef::Slice { base, low, width, .. } => {
+                let base_code = self.expr_to_rust_wide_cached_emitting(
+                    base,
+                    signals_ptr,
+                    wide_words_ptr,
+                    overwide_ptrs,
+                    cache,
+                    state,
+                    emitted_lines,
+                );
+                let temp = state.fresh_temp("wide_slice");
+                emitted_lines.push(format!(
+                    "let {} = wide_slice({}, {}, {});",
+                    temp, base_code, low, width
+                ));
+                temp
+            }
+            ExprDef::UnaryOp { operand, width, .. } => {
+                let operand_code = if self.expr_width(operand) > 128 {
+                    self.expr_to_rust_wide_cached_emitting(
+                        operand,
+                        signals_ptr,
+                        wide_words_ptr,
+                        overwide_ptrs,
+                        cache,
+                        state,
+                        emitted_lines,
+                    )
+                } else {
+                    let narrow = self.expr_to_rust_ptr_cached_emitting(
+                        operand,
+                        signals_ptr,
+                        Some(wide_words_ptr),
+                        Some(overwide_ptrs),
+                        cache,
+                        state,
+                        emitted_lines,
+                    );
+                    format!("wide_from_u128({})", narrow)
+                };
+                let temp = state.fresh_temp("wide_unary");
+                emitted_lines.push(format!("let {} = wide_mask({}, {});", temp, operand_code, width));
+                temp
+            }
+            ExprDef::MemRead { .. } => "wide_zero()".to_string(),
         }
     }
 
@@ -2736,6 +4078,8 @@ impl CoreSimulator {
                     let expr_code = self.expr_to_rust_ptr_cached_emitting(
                         &stmt.expr,
                         "s",
+                        None,
+                        None,
                         Some(&seq_cache_names),
                         &mut seq_expr_state,
                         &mut expr_lines,
@@ -2779,10 +4123,10 @@ impl CoreSimulator {
 
             let mut port_expr_state = ExprCodegenState::default();
             let mut enable_lines = Vec::new();
-            let enable_code = self.expr_to_rust_ptr_emitting(&wp.enable, "s", &mut port_expr_state, &mut enable_lines);
+            let enable_code = self.expr_to_rust_ptr_emitting(&wp.enable, "s", None, None, &mut port_expr_state, &mut enable_lines);
             let mut data_lines = Vec::new();
-            let addr_code = self.expr_to_rust_ptr_emitting(&wp.addr, "s", &mut port_expr_state, &mut data_lines);
-            let data_code = self.expr_to_rust_ptr_emitting(&wp.data, "s", &mut port_expr_state, &mut data_lines);
+            let addr_code = self.expr_to_rust_ptr_emitting(&wp.addr, "s", None, None, &mut port_expr_state, &mut data_lines);
+            let data_code = self.expr_to_rust_ptr_emitting(&wp.data, "s", None, None, &mut port_expr_state, &mut data_lines);
             write_port_code.push_str(&format!("    if *s.add({}) != 0 {{\n", clock_idx));
             self.append_indented_lines(&mut write_port_code, "        ", &enable_lines);
             write_port_code.push_str(&format!("        if (({}) & 1) != 0 {{\n", enable_code));
@@ -2825,12 +4169,12 @@ impl CoreSimulator {
             let data_width = self.widths.get(data_idx).copied().unwrap_or(64);
             let mut port_expr_state = ExprCodegenState::default();
             let mut addr_lines = Vec::new();
-            let addr_code = self.expr_to_rust_ptr_emitting(&rp.addr, "s", &mut port_expr_state, &mut addr_lines);
+            let addr_code = self.expr_to_rust_ptr_emitting(&rp.addr, "s", None, None, &mut port_expr_state, &mut addr_lines);
             sync_read_port_code.push_str(&format!("    if *s.add({}) != 0 {{\n", clock_idx));
             if let Some(enable) = &rp.enable {
                 let mut enable_lines = Vec::new();
                 let enable_code =
-                    self.expr_to_rust_ptr_emitting(enable, "s", &mut port_expr_state, &mut enable_lines);
+                    self.expr_to_rust_ptr_emitting(enable, "s", None, None, &mut port_expr_state, &mut enable_lines);
                 self.append_indented_lines(&mut sync_read_port_code, "        ", &enable_lines);
                 sync_read_port_code.push_str(&format!("        if (({}) & 1) != 0 {{\n", enable_code));
                 self.append_indented_lines(&mut sync_read_port_code, "            ", &addr_lines);
@@ -2925,12 +4269,12 @@ impl CoreSimulator {
             "pub unsafe fn tick_forced_inline(signals: &mut [u128], next_regs: &mut [u128; {}]) {{\n",
             num_regs.max(1)
         ));
-        code.push_str("    evaluate_inline(signals);\n");
+        code.push_str("    evaluate_inline(signals, std::ptr::null(), std::ptr::null());\n");
         code.push_str("    apply_write_ports_inline(signals);\n\n");
         code.push_str("    sample_next_regs_inline(signals, next_regs);\n");
         code.push_str("    apply_next_regs_inline(signals, next_regs);\n");
         code.push_str("    apply_sync_read_ports_inline(signals);\n");
-        code.push_str("    evaluate_inline(signals);\n");
+        code.push_str("    evaluate_inline(signals, std::ptr::null(), std::ptr::null());\n");
         code.push_str("}\n\n");
 
         code.push_str("/// Drive a specific clock low and evaluate combinational logic.\n");
@@ -2939,7 +4283,7 @@ impl CoreSimulator {
         code.push_str("pub unsafe fn drive_clock_low_inline(signals: &mut [u128], clk_idx: usize) {\n");
         code.push_str("    let s = signals.as_mut_ptr();\n");
         code.push_str("    *s.add(clk_idx) = 0;\n");
-        code.push_str("    evaluate_inline(signals);\n");
+        code.push_str("    evaluate_inline(signals, std::ptr::null(), std::ptr::null());\n");
         code.push_str("}\n\n");
 
         code.push_str("/// Drive a specific clock high and execute edge-triggered updates.\n");
@@ -2969,7 +4313,7 @@ impl CoreSimulator {
         code.push_str("    *s.add(clk_idx) = 1;\n");
         code.push_str("    tick_forced_inline(signals, next_regs);\n");
         code.push_str("    *s.add(clk_idx) = 0;\n");
-        code.push_str("    evaluate_inline(signals);\n");
+        code.push_str("    evaluate_inline(signals, std::ptr::null(), std::ptr::null());\n");
         code.push_str("}\n\n");
 
         code.push_str("/// Combined tick: evaluate + edge-triggered register update\n");
@@ -2981,7 +4325,7 @@ impl CoreSimulator {
         code.push_str("    let s = signals.as_mut_ptr();\n");
 
         // Evaluate combinational logic (this propagates clock changes to derived clocks)
-        code.push_str("    evaluate_inline(signals);\n");
+        code.push_str("    evaluate_inline(signals, std::ptr::null(), std::ptr::null());\n");
         code.push_str("    apply_write_ports_inline(signals);\n\n");
 
         // Compute next values for all registers ONCE (like JIT's seq_sample)
@@ -3013,7 +4357,7 @@ impl CoreSimulator {
             code.push_str(&format!("        clock_before[{}] = *s.add({});\n", domain_idx, clk_idx));
         }
         code.push_str("\n");
-        code.push_str("        evaluate_inline(signals);\n");
+        code.push_str("        evaluate_inline(signals, std::ptr::null(), std::ptr::null());\n");
         code.push_str("        apply_write_ports_inline(signals);\n");
         code.push_str("        sample_next_regs_inline(signals, next_regs);\n\n");
 
@@ -3034,7 +4378,7 @@ impl CoreSimulator {
 
         code.push_str("    apply_sync_read_ports_inline(signals);\n");
         // Final evaluate (like JIT)
-        code.push_str("    evaluate_inline(signals);\n\n");
+        code.push_str("    evaluate_inline(signals, std::ptr::null(), std::ptr::null());\n\n");
 
         // Note: Do NOT update old_clocks here - caller manages it
         // This is consistent with interpreter's tick_forced behavior
@@ -3066,10 +4410,6 @@ impl CoreSimulator {
     // ========================================================================
 
     pub fn compile_code(&mut self, code: &str) -> Result<bool, String> {
-        if self.runtime_only {
-            self.compiled = true;
-            return Ok(true);
-        }
         #[cfg(feature = "aot")]
         {
             let _ = code;
@@ -3079,14 +4419,15 @@ impl CoreSimulator {
 
         #[cfg(not(feature = "aot"))]
         {
+        let (opt_level, codegen_units, target_cpu) = Self::rustc_profile_for_generated_code(code);
         // Compute hash for caching
         let code_hash = {
             let mut hash: u64 = 0xcbf29ce484222325;
             let cache_profile = format!(
                 "opt={};cgu={};cpu={}",
-                RUNTIME_RUSTC_OPT_LEVEL,
-                RUNTIME_RUSTC_CODEGEN_UNITS,
-                RUNTIME_RUSTC_TARGET_CPU
+                opt_level,
+                codegen_units,
+                target_cpu
             );
             for byte in cache_profile.bytes() {
                 hash ^= byte as u64;
@@ -3142,9 +4483,9 @@ impl CoreSimulator {
 
         // Write source and compile into a unique temporary output file.
         fs::write(&tmp_src_path, code).map_err(|e| e.to_string())?;
-        let opt_level_flag = format!("opt-level={}", RUNTIME_RUSTC_OPT_LEVEL);
-        let codegen_units_flag = format!("codegen-units={}", RUNTIME_RUSTC_CODEGEN_UNITS);
-        let target_cpu_flag = format!("target-cpu={}", RUNTIME_RUSTC_TARGET_CPU);
+        let opt_level_flag = format!("opt-level={}", opt_level);
+        let codegen_units_flag = format!("codegen-units={}", codegen_units);
+        let target_cpu_flag = format!("target-cpu={}", target_cpu);
 
         let output = Command::new("rustc")
             .args(&[
@@ -3201,7 +4542,7 @@ impl CoreSimulator {
 
     #[cfg(not(feature = "aot"))]
     fn init_compiled_memories(&mut self) -> Result<(), String> {
-        if !self.compiled || self.runtime_only {
+        if !self.compiled {
             return Ok(());
         }
         let lib = self.compiled_lib.as_ref().ok_or_else(|| "Compiled library not loaded".to_string())?;
@@ -3235,5 +4576,82 @@ impl CoreSimulator {
         }
         self.compiled_lib = Some(lib);
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn uses_default_rustc_profile_for_small_generated_units() {
+        let code = "fn evaluate() {}\n";
+        let profile = CoreSimulator::rustc_profile_for_generated_code(code);
+        assert_eq!(
+            profile,
+            (
+                RUNTIME_RUSTC_OPT_LEVEL,
+                RUNTIME_RUSTC_CODEGEN_UNITS,
+                RUNTIME_RUSTC_TARGET_CPU,
+            )
+        );
+    }
+
+    #[test]
+    fn uses_large_design_rustc_profile_for_huge_generated_units() {
+        let code = "x".repeat(LARGE_RUSTC_SOURCE_BYTES_THRESHOLD + 1);
+        let profile = CoreSimulator::rustc_profile_for_generated_code(&code);
+        assert_eq!(
+            profile,
+            (
+                LARGE_RUNTIME_RUSTC_OPT_LEVEL,
+                LARGE_RUNTIME_RUSTC_CODEGEN_UNITS,
+                RUNTIME_RUSTC_TARGET_CPU,
+            )
+        );
+    }
+
+    #[test]
+    fn reports_fast_path_blockers_for_runtime_fallback_assigns() {
+        let json = serde_json::json!({
+            "circt_json_version": 1,
+            "modules": [{
+                "name": "top",
+                "ports": [
+                    { "name": "a", "direction": "in", "width": 64 },
+                    { "name": "b", "direction": "in", "width": 64 },
+                    { "name": "wide_out", "direction": "out", "width": 145 }
+                ],
+                "nets": [],
+                "regs": [],
+                "assigns": [
+                    {
+                        "target": "wide_out",
+                        "expr": {
+                            "kind": "concat",
+                            "parts": [
+                                { "kind": "literal", "value": 1, "width": 17 },
+                                { "kind": "signal", "name": "a", "width": 64 },
+                                { "kind": "signal", "name": "b", "width": 64 }
+                            ],
+                            "width": 145
+                        }
+                    }
+                ],
+                "processes": [],
+                "memories": [],
+                "write_ports": [],
+                "sync_read_ports": []
+            }]
+        })
+        .to_string();
+
+        let sim = CoreSimulator::new(&json).expect("parse overwide compile blocker payload");
+        let blocker = sim
+            .compile_fast_path_blocker(false)
+            .expect("runtime fallback should be rejected");
+
+        assert!(blocker.contains("runtime fallback"));
+        assert!(blocker.contains("wide_out"));
     }
 }

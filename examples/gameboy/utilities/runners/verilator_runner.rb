@@ -18,6 +18,7 @@ require_relative '../output/speaker'
 require_relative '../renderers/lcd_renderer'
 require_relative '../clock_enable_waveform'
 require 'rhdl/codegen'
+require 'rhdl/sim/native/verilog/verilator/runtime'
 require 'fileutils'
 require 'set'
 require 'json'
@@ -97,16 +98,34 @@ module RHDL
       # @param hdl_dir [String, nil] Optional HDL directory override.
       # @param verilog_dir [String, nil] Optional direct Verilog directory/file override.
       # @param top [String, nil] Imported top component/module override for imported HDL trees.
-      # @param use_staged_verilog [Boolean] Use the staged imported Verilog artifact when available.
-      def initialize(hdl_dir: nil, verilog_dir: nil, top: nil, use_staged_verilog: false)
+      # @param use_staged_verilog [Boolean] Prefer/force the staged imported Verilog artifact when available.
+      # @param use_normalized_verilog [Boolean] Force the normalized imported Verilog artifact when available.
+      # @param use_rhdl_source [Boolean] Force export from the selected RHDL top instead of imported Verilog.
+      def initialize(hdl_dir: nil, verilog_dir: nil, top: nil,
+                     use_staged_verilog: true, use_normalized_verilog: false, use_rhdl_source: false)
         if hdl_dir && verilog_dir
           raise ArgumentError, 'Pass either hdl_dir or verilog_dir, not both'
         end
 
         @import_top_name = top&.to_s
         @use_staged_verilog = !!use_staged_verilog
+        @use_normalized_verilog = !!use_normalized_verilog
+        @use_rhdl_source = !!use_rhdl_source
+        normalize_import_verilog_selection!
         if verilog_dir
-          configure_direct_verilog!(verilog_dir: verilog_dir, top: @import_top_name)
+          raise ArgumentError, '--use-rhdl-source requires --hdl-dir, not --verilog-dir' if @use_rhdl_source
+
+          configure_direct_verilog!(
+            verilog_dir: verilog_dir,
+            top: default_direct_verilog_top(verilog_root: verilog_dir, requested_top: @import_top_name)
+          )
+        elsif imported_hdl_dir?(hdl_dir) && !@use_rhdl_source
+          resolved_hdl_dir = HdlLoader.resolve_hdl_dir(hdl_dir: hdl_dir)
+          @resolved_hdl_dir = resolved_hdl_dir
+          configure_direct_verilog!(
+            verilog_dir: resolved_hdl_dir,
+            top: default_direct_verilog_top(verilog_root: resolved_hdl_dir, requested_top: @import_top_name)
+          )
         else
           configure_component_mode!(hdl_dir: hdl_dir, top: @import_top_name)
         end
@@ -160,6 +179,10 @@ module RHDL
         true
       end
 
+      def sim
+        @sim
+      end
+
       def simulator_type
         :hdl_verilator
       end
@@ -180,10 +203,7 @@ module RHDL
         @cartridge = cartridge_state_for_rom(bytes)
 
         # Bulk load into C++ side
-        if @sim_load_rom_fn && @sim_ctx
-          data_ptr = Fiddle::Pointer[bytes.pack('C*')]
-          @sim_load_rom_fn.call(@sim_ctx, data_ptr, bytes.size)
-        end
+        @sim&.runner_load_rom(bytes, base_addr)
 
         log "Loaded #{bytes.size} bytes ROM"
       end
@@ -207,10 +227,7 @@ module RHDL
         @boot_rom.concat(Array.new(256 - @boot_rom.size, 0)) if @boot_rom.size < 256
 
         # Bulk load into C++ side
-        if @sim_load_boot_rom_fn && @sim_ctx
-          data_ptr = Fiddle::Pointer[bytes.pack('C*')]
-          @sim_load_boot_rom_fn.call(@sim_ctx, data_ptr, bytes.size)
-        end
+        @sim&.runner_load_boot_rom(bytes, 0)
 
         log "Loaded #{bytes.size} bytes boot ROM"
         @boot_rom_loaded = true
@@ -243,14 +260,9 @@ module RHDL
 
       # Main entry point for running cycles
       def run_steps(steps)
-        if @sim_run_cycles_fn
-          # Use batch execution - run all cycles in C++
-          result_ptr = Fiddle::Pointer.malloc(16)  # GbCycleResult struct
-          @sim_run_cycles_fn.call(@sim_ctx, steps, result_ptr)
-          # Unpack result: cycles_run (usize) + frames_completed (u32)
-          values = result_ptr.to_s(16).unpack('QL')
-          cycles_run = values[0]
-          frames_completed = values[1]
+        if (result = @sim&.runner_run_cycles(steps))
+          cycles_run = result[:cycles_run]
+          frames_completed = result[:frames_completed]
           @cycles += cycles_run
           @screen_dirty = true if frames_completed > 0
           @frame_count += frames_completed
@@ -327,10 +339,8 @@ module RHDL
 
       def read_framebuffer
         # Read framebuffer from C++ side
-        if @sim_read_framebuffer_fn && @sim_ctx
-          buffer = Fiddle::Pointer.malloc(160 * 144)
-          @sim_read_framebuffer_fn.call(@sim_ctx, buffer)
-          flat = buffer.to_s(160 * 144).bytes
+        if @sim
+          flat = @sim.runner_read_framebuffer(0, SCREEN_WIDTH * SCREEN_HEIGHT)
           # Reshape to 2D array
           Array.new(SCREEN_HEIGHT) do |y|
             Array.new(SCREEN_WIDTH) do |x|
@@ -446,6 +456,51 @@ module RHDL
         @frame_count
       end
 
+      def close
+        return false unless @sim_ctx
+
+        if @sim
+          @sim.close
+          @sim = nil
+        else
+          @sim_destroy&.call(@sim_ctx)
+        end
+        @sim_ctx = nil
+        @sim_create = nil
+        @sim_destroy = nil
+        @sim_reset = nil
+        @sim_eval = nil
+        @sim_poke = nil
+        @sim_peek = nil
+        @sim_load_rom_fn = nil
+        @sim_load_boot_rom_fn = nil
+        @sim_read_boot_rom_fn = nil
+        @sim_write_vram_fn = nil
+        @sim_read_vram_fn = nil
+        @sim_read_framebuffer_fn = nil
+        @sim_get_frame_count_fn = nil
+        @sim_get_vram_write_count_fn = nil
+        @sim_get_ff40_write_count_fn = nil
+        @sim_get_ff50_write_count_fn = nil
+        @sim_run_cycles_fn = nil
+
+        begin
+          @lib.close if @lib&.respond_to?(:close)
+        rescue StandardError
+          nil
+        end
+        @lib = nil
+
+        @rom = nil
+        @vram = nil
+        @wram = nil
+        @hram = nil
+        @boot_rom = nil
+        @framebuffer = nil
+        @speaker = nil
+        true
+      end
+
       def speaker
         @speaker
       end
@@ -510,6 +565,36 @@ module RHDL
         install_port_declarations!(@direct_verilog_source_plan.fetch(:port_declarations))
         @top_module_name = @direct_verilog_source_plan.fetch(:top_module_name)
         @verilator_prefix = "V#{@top_module_name}"
+      end
+
+      def normalize_import_verilog_selection!
+        if @use_rhdl_source
+          @use_staged_verilog = false
+          @use_normalized_verilog = false
+        elsif @use_normalized_verilog
+          @use_staged_verilog = false
+        elsif !@use_staged_verilog
+          @use_staged_verilog = true
+          @use_normalized_verilog = false
+        end
+      end
+
+      def imported_hdl_dir?(hdl_dir)
+        return false if hdl_dir.nil?
+
+        resolved_hdl_dir = HdlLoader.resolve_hdl_dir(hdl_dir: hdl_dir)
+        return false if resolved_hdl_dir == HdlLoader::DEFAULT_HDL_DIR
+
+        report_path = File.join(resolved_hdl_dir, 'import_report.json')
+        mixed_core = File.join(resolved_hdl_dir, '.mixed_import', 'gb.core.mlir')
+        File.file?(report_path) || File.file?(mixed_core)
+      end
+
+      def default_direct_verilog_top(verilog_root:, requested_top:)
+        top_name = requested_top.to_s.strip
+        return top_name unless top_name.empty?
+
+        default_import_top_name(resolved_hdl_dir: File.expand_path(verilog_root))
       end
 
       def install_component_ports!(component_class)
@@ -600,7 +685,8 @@ module RHDL
         top_module_name = normalize_direct_verilog_top_name(requested_top)
         wrapper_source = nil
         port_source_text = nil
-        if top_module_name == gameboy_wrapper_top_module
+        if top_module_name == gameboy_wrapper_top_module &&
+           !file_declares_module?(artifact.fetch(:core_verilog_path), gameboy_wrapper_top_module)
           profile = gb_wrapper_profile(artifact.fetch(:core_verilog_path))
           wrapper_source = gameboy_wrapper_source(
             profile: profile,
@@ -777,17 +863,30 @@ module RHDL
         return nil if use_staged_verilog
 
         top_module_name = normalize_direct_verilog_top_name(top)
-        core_module_name = top_module_name == gameboy_wrapper_top_module ? 'gb' : top_module_name
         verilog_files = raw_direct_verilog_files(resolved)
         return nil if verilog_files.empty?
 
-        top_file = raw_direct_verilog_top_file(verilog_files: verilog_files, top_module_name: core_module_name)
+        top_candidates = if top_module_name == gameboy_wrapper_top_module
+                           [top_module_name, 'gb']
+                         else
+                           [top_module_name]
+                         end
+        top_file = nil
+        selected_module_name = nil
+        top_candidates.each do |candidate_module_name|
+          top_file = raw_direct_verilog_top_file(verilog_files: verilog_files, top_module_name: candidate_module_name)
+          if top_file
+            selected_module_name = candidate_module_name
+            break
+          end
+        end
         return nil unless top_file
 
         {
           resolved_root: resolved,
           source_verilog_path: top_file,
           core_verilog_path: top_file,
+          resolved_module_name: selected_module_name,
           dependency_paths: verilog_files,
           support_verilog_paths: verilog_files.reject { |path| path == top_file },
           support_modules: []
@@ -950,6 +1049,26 @@ module RHDL
         aliases.compact
       end
 
+      def abi_signal_aliases
+        @abi_signal_aliases ||= begin
+          input_aliases = @input_port_aliases.to_a
+          output_aliases = @output_port_aliases.reject { |name, _| @input_port_aliases.key?(name) }.to_a
+          (input_aliases + output_aliases).uniq { |(name, _)| name }
+        end
+      end
+
+      def abi_signal_widths_by_name
+        @abi_signal_widths_by_name ||= abi_signal_aliases.each_with_object({}) do |(api_name, port_name), widths|
+          widths[api_name.to_s] = [port_width_for(port_name), 1].max
+        end
+      end
+
+      def abi_signal_widths_by_idx
+        @abi_signal_widths_by_idx ||= abi_signal_aliases.map do |(api_name, _port_name)|
+          abi_signal_widths_by_name.fetch(api_name.to_s, 32)
+        end
+      end
+
       def c_poke_dispatch_lines
         lines = []
         @input_port_aliases.each_with_index do |(api_name, port_name), idx|
@@ -1104,9 +1223,39 @@ module RHDL
           lines << "else if (strcmp(name, \"video_lcd_clkena_internal\") == 0) return ctx->dut->rootp->gameboy__DOT__gb_core__DOT__video__DOT__lcd_clkena;"
           lines << "else if (strcmp(name, \"video_lcd_vsync_internal\") == 0) return ctx->dut->rootp->gameboy__DOT__gb_core__DOT__video__DOT__lcd_vsync;"
           lines << "else if (strcmp(name, \"video_mode_internal\") == 0) return ctx->dut->rootp->gameboy__DOT__gb_core__DOT___video_mode;"
+          lines << "else if (strcmp(name, \"video_lcdc_internal\") == 0) return ctx->dut->rootp->gameboy__DOT__gb_core__DOT__video__DOT__rt_tmp_12_8;"
+          lines << "else if (strcmp(name, \"video_scy_internal\") == 0) return ctx->dut->rootp->gameboy__DOT__gb_core__DOT__video__DOT__rt_tmp_15_8;"
+          lines << "else if (strcmp(name, \"video_scx_internal\") == 0) return ctx->dut->rootp->gameboy__DOT__gb_core__DOT__video__DOT__rt_tmp_16_8;"
+          lines << "else if (strcmp(name, \"video_h_cnt_internal\") == 0) return ctx->dut->rootp->gameboy__DOT__gb_core__DOT__video__DOT__rt_tmp_32_8;"
+          lines << "else if (strcmp(name, \"video_v_cnt_internal\") == 0) return ctx->dut->rootp->gameboy__DOT__gb_core__DOT__video__DOT__rt_tmp_36_8;"
           lines << "else if (strcmp(name, \"ce_internal\") == 0) return ctx->dut->rootp->gameboy__DOT__ce;"
           lines << "else if (strcmp(name, \"ce_n_internal\") == 0) return ctx->dut->rootp->gameboy__DOT__ce_n;"
           lines << "else if (strcmp(name, \"ce_2x_internal\") == 0) return ctx->dut->rootp->gameboy__DOT__ce_2x;"
+          lines << "else if (strcmp(name, \"boot_upload_active_internal\") == 0) return ctx->dut->rootp->gameboy__DOT__boot_upload_active;"
+          lines << "else if (strcmp(name, \"boot_upload_phase_internal\") == 0) return ctx->dut->rootp->gameboy__DOT__boot_upload_phase;"
+          lines << "else if (strcmp(name, \"boot_upload_index_internal\") == 0) return ctx->dut->rootp->gameboy__DOT__boot_upload_index;"
+        elsif raw_direct_verilog_import_wrapper_gameboy?
+          lines << "#{keyword} (strcmp(name, \"cpu_pc_internal\") == 0) return ctx->last_fetch_addr;"
+          lines << "else if (strcmp(name, \"cpu_addr_internal\") == 0) return ctx->dut->rootp->gameboy__DOT__gb_core__DOT___md_swizz_a_out;"
+          lines << "else if (strcmp(name, \"boot_rom_enabled_internal\") == 0) return ctx->dut->rootp->gameboy__DOT__gb_core__DOT__rt_tmp_22_1;"
+          lines << "else if (strcmp(name, \"cpu_do_internal\") == 0) return ctx->dut->rootp->gameboy__DOT__gb_core__DOT___cpu_DO;"
+          lines << "else if (strcmp(name, \"cpu_rd_n_internal\") == 0) return ctx->dut->rootp->gameboy__DOT__gb_core__DOT___cpu_RD_n;"
+          lines << "else if (strcmp(name, \"cpu_wr_n_internal\") == 0) return ctx->dut->rootp->gameboy__DOT__gb_core__DOT___cpu_WR_n;"
+          lines << "else if (strcmp(name, \"interrupt_flags_internal\") == 0) return ctx->dut->rootp->gameboy__DOT__gb_core__DOT__rt_tmp_11_8;"
+          lines << "else if (strcmp(name, \"video_vblank_irq_internal\") == 0) return ctx->dut->rootp->gameboy__DOT__gb_core__DOT___video_vblank_irq;"
+          lines << "else if (strcmp(name, \"sel_ff50_internal\") == 0) return ctx->dut->rootp->gameboy__DOT__gb_core__DOT___md_swizz_a_out == 0xFF50u ? 1u : 0u;"
+          lines << "else if (strcmp(name, \"savestate_reset_out_internal\") == 0) return ctx->dut->rootp->gameboy__DOT__gb_core__DOT___gb_savestates_reset_out;"
+          lines << "else if (strcmp(name, \"video_lcd_on_internal\") == 0) return ctx->dut->rootp->gameboy__DOT__gb_core__DOT__video__DOT__lcd_on;"
+          lines << "else if (strcmp(name, \"video_lcd_clkena_internal\") == 0) return ctx->dut->rootp->gameboy__DOT__gb_core__DOT__video__DOT__lcd_clkena;"
+          lines << "else if (strcmp(name, \"video_lcd_vsync_internal\") == 0) return ctx->dut->rootp->gameboy__DOT__gb_core__DOT__video__DOT__lcd_vsync;"
+          lines << "else if (strcmp(name, \"video_lcdc_internal\") == 0) return ctx->dut->rootp->gameboy__DOT__gb_core__DOT__video__DOT__lcdc;"
+          lines << "else if (strcmp(name, \"video_scy_internal\") == 0) return ctx->dut->rootp->gameboy__DOT__gb_core__DOT__video__DOT__scy;"
+          lines << "else if (strcmp(name, \"video_scx_internal\") == 0) return ctx->dut->rootp->gameboy__DOT__gb_core__DOT__video__DOT__scx;"
+          lines << "else if (strcmp(name, \"video_h_cnt_internal\") == 0) return ctx->dut->rootp->gameboy__DOT__gb_core__DOT__video__DOT__h_cnt;"
+          lines << "else if (strcmp(name, \"video_v_cnt_internal\") == 0) return ctx->dut->rootp->gameboy__DOT__gb_core__DOT__video__DOT__v_cnt;"
+          lines << "else if (strcmp(name, \"ce_internal\") == 0) return ctx->dut->rootp->gameboy__DOT___speed_ctrl_ce;"
+          lines << "else if (strcmp(name, \"ce_n_internal\") == 0) return ctx->dut->rootp->gameboy__DOT___speed_ctrl_ce_n;"
+          lines << "else if (strcmp(name, \"ce_2x_internal\") == 0) return ctx->dut->rootp->gameboy__DOT___speed_ctrl_ce_2x;"
           lines << "else if (strcmp(name, \"boot_upload_active_internal\") == 0) return ctx->dut->rootp->gameboy__DOT__boot_upload_active;"
           lines << "else if (strcmp(name, \"boot_upload_phase_internal\") == 0) return ctx->dut->rootp->gameboy__DOT__boot_upload_phase;"
           lines << "else if (strcmp(name, \"boot_upload_index_internal\") == 0) return ctx->dut->rootp->gameboy__DOT__boot_upload_index;"
@@ -1140,6 +1289,11 @@ module RHDL
           lines << "else if (strcmp(name, \"video_lcd_on_internal\") == 0) return ctx->dut->rootp->gameboy__DOT__gb_core__DOT__video__DOT__lcd_on;"
           lines << "else if (strcmp(name, \"video_lcd_clkena_internal\") == 0) return ctx->dut->rootp->gameboy__DOT__gb_core__DOT__video__DOT__lcd_clkena;"
           lines << "else if (strcmp(name, \"video_lcd_vsync_internal\") == 0) return ctx->dut->rootp->gameboy__DOT__gb_core__DOT__video__DOT__lcd_vsync;"
+          lines << "else if (strcmp(name, \"video_lcdc_internal\") == 0) return ctx->dut->rootp->gameboy__DOT__gb_core__DOT__video__DOT__lcdc;"
+          lines << "else if (strcmp(name, \"video_scy_internal\") == 0) return ctx->dut->rootp->gameboy__DOT__gb_core__DOT__video__DOT__scy;"
+          lines << "else if (strcmp(name, \"video_scx_internal\") == 0) return ctx->dut->rootp->gameboy__DOT__gb_core__DOT__video__DOT__scx;"
+          lines << "else if (strcmp(name, \"video_h_cnt_internal\") == 0) return ctx->dut->rootp->gameboy__DOT__gb_core__DOT__video__DOT__h_cnt;"
+          lines << "else if (strcmp(name, \"video_v_cnt_internal\") == 0) return ctx->dut->rootp->gameboy__DOT__gb_core__DOT__video__DOT__v_cnt;"
           lines << "else if (strcmp(name, \"ce_internal\") == 0) return ctx->dut->rootp->gameboy__DOT__ce;"
           lines << "else if (strcmp(name, \"ce_n_internal\") == 0) return ctx->dut->rootp->gameboy__DOT__ce_n;"
           lines << "else if (strcmp(name, \"ce_2x_internal\") == 0) return ctx->dut->rootp->gameboy__DOT__ce_2x;"
@@ -1188,6 +1342,12 @@ module RHDL
               "#{indent}write_data = ctx->dut->rootp->game_boy_gameboy__DOT__gb_core__DOT___cpu_data_out & 0xFFu;"
             ]
           elsif normalized_direct_verilog_import_wrapper_gameboy?
+            [
+              "#{indent}write_active = (ctx->dut->rootp->gameboy__DOT__gb_core__DOT___cpu_WR_n == 0u);",
+              "#{indent}write_addr = ctx->dut->rootp->gameboy__DOT__gb_core__DOT___md_swizz_a_out;",
+              "#{indent}write_data = ctx->dut->rootp->gameboy__DOT__gb_core__DOT___cpu_DO & 0xFFu;"
+            ]
+          elsif raw_direct_verilog_import_wrapper_gameboy?
             [
               "#{indent}write_active = (ctx->dut->rootp->gameboy__DOT__gb_core__DOT___cpu_WR_n == 0u);",
               "#{indent}write_addr = ctx->dut->rootp->gameboy__DOT__gb_core__DOT___md_swizz_a_out;",
@@ -1410,6 +1570,13 @@ module RHDL
         return false unless @top_module_name == 'gameboy'
 
         File.basename(@direct_verilog_source_plan[:source_verilog_path].to_s) == 'pure_verilog_entry.v'
+      end
+
+      def raw_direct_verilog_import_wrapper_gameboy?
+        return false unless direct_verilog_mode?
+        return false unless @top_module_name == 'gameboy'
+
+        File.basename(@direct_verilog_source_plan[:source_verilog_path].to_s) == 'gameboy.v'
       end
 
       def immediate_cartridge_response?
@@ -1641,17 +1808,24 @@ module RHDL
       end
 
       def create_cpp_wrapper(cpp_file, header_file)
+        header_basename = File.basename(header_file)
         header_content = <<~HEADER
           #ifndef SIM_WRAPPER_H
           #define SIM_WRAPPER_H
+
+          #include <stddef.h>
 
           #ifdef __cplusplus
           extern "C" {
           #endif
 
           // Lifecycle
-          void* sim_create(void);
+          void* sim_create(const char* json, size_t json_len, unsigned int sub_cycles, char** err_out);
           void sim_destroy(void* sim);
+          void sim_free_error(char* error);
+          void sim_free_string(char* string);
+          void* sim_wasm_alloc(size_t size);
+          void sim_wasm_dealloc(void* ptr, size_t size);
           void sim_reset(void* sim);
           void sim_eval(void* sim);
 
@@ -1682,6 +1856,12 @@ module RHDL
           // Batch execution
           void sim_run_cycles(void* sim, unsigned int n_cycles, struct GbCycleResult* result);
 
+          int sim_get_caps(void* sim, unsigned int* caps_out);
+          int sim_signal(void* sim, unsigned int op, const char* name, unsigned int idx, unsigned long value, unsigned long* out_value);
+          int sim_exec(void* sim, unsigned int op, unsigned long arg0, unsigned long arg1, unsigned long* out_value, char** err_out);
+          int sim_trace(void* sim, unsigned int op, const char* str_arg, unsigned long* out_value);
+          size_t sim_blob(void* sim, unsigned int op, unsigned char* out_ptr, size_t out_len);
+
           #ifdef __cplusplus
           }
           #endif
@@ -1699,13 +1879,30 @@ module RHDL
         ce_feed_high = c_ce_drive_lines(indent: '        ')
         reset_cycle_advance = '              ctx->clk_counter++;'
         constant_tieoffs = c_constant_tieoff_lines(indent: '        ')
+        abi_input_signal_aliases = @input_port_aliases.to_a
+        abi_output_signal_aliases = @output_port_aliases.reject { |name, _| @input_port_aliases.key?(name) }.to_a
+        abi_signal_aliases = (abi_input_signal_aliases + abi_output_signal_aliases).uniq { |(name, _)| name }
+        abi_input_names_csv = abi_input_signal_aliases.map(&:first).join(',')
+        abi_output_names_csv = abi_output_signal_aliases.map(&:first).join(',')
+        abi_signal_name_table = abi_signal_aliases.map { |api_name, _| %("#{api_name}") }.join(",\n            ")
+        abi_signal_index_lookup = abi_signal_aliases.each_with_index.map do |(api_name, _), idx|
+          %(if (std::strcmp(name, "#{api_name}") == 0) return #{idx};)
+        end.join("\n              ")
+        abi_signal_peek_cases = abi_signal_aliases.each_with_index.map do |(api_name, port_name), idx|
+          %(case #{idx}: return ctx->dut->#{port_name};)
+        end.join("\n                ")
+        abi_signal_poke_cases = abi_input_signal_aliases.each_with_index.map do |(_api_name, port_name), idx|
+          %(case #{idx}: ctx->dut->#{port_name} = static_cast<unsigned int>(value); return 1;)
+        end.join("\n                ")
 
         cpp_content = <<~CPP
           #include "#{@verilator_prefix}.h"
           #include "#{@verilator_prefix}___024root.h"  // For internal signal access
           #include "verilated.h"
-          #include "sim_wrapper.h"
+          #include "#{header_basename}"
           #include <cstring>
+          #include <cstdlib>
+          #include <string>
 
           // Verilator runtime expects this symbol when linking libverilated.
           // Our simulation doesn't use SystemC time, so return 0.
@@ -1742,6 +1939,191 @@ module RHDL
               unsigned long ff40_write_count;
               unsigned long ff50_write_count;
           };
+
+          struct RunnerCaps {
+              int kind;
+              unsigned int mem_spaces;
+              unsigned int control_ops;
+              unsigned int probe_ops;
+          };
+
+          struct RunnerRunResult {
+              int text_dirty;
+              int key_cleared;
+              unsigned int cycles_run;
+              unsigned int speaker_toggles;
+              unsigned int frames_completed;
+          };
+
+          static const char* k_input_signal_names[] = {
+            #{abi_signal_name_table.empty? ? '' : abi_input_signal_aliases.map { |api_name, _| %("#{api_name}") }.join(",\n            ")}
+          };
+
+          static const char* k_output_signal_names[] = {
+            #{abi_signal_aliases.empty? ? '' : abi_output_signal_aliases.map { |api_name, _| %("#{api_name}") }.join(",\n            ")}
+          };
+
+          static const char* k_signal_names[] = {
+            #{abi_signal_name_table}
+          };
+
+          static const char k_input_names_csv[] = "#{abi_input_names_csv}";
+          static const char k_output_names_csv[] = "#{abi_output_names_csv}";
+
+          static const unsigned int k_input_signal_count = static_cast<unsigned int>(sizeof(k_input_signal_names) / sizeof(k_input_signal_names[0]));
+          static const unsigned int k_output_signal_count = static_cast<unsigned int>(sizeof(k_output_signal_names) / sizeof(k_output_signal_names[0]));
+          static const unsigned int k_signal_count = static_cast<unsigned int>(sizeof(k_signal_names) / sizeof(k_signal_names[0]));
+
+          enum {
+              SIM_CAP_SIGNAL_INDEX = 1u << 0,
+              SIM_CAP_FORCED_CLOCK = 1u << 1,
+              SIM_CAP_TRACE = 1u << 2,
+              SIM_CAP_TRACE_STREAMING = 1u << 3,
+              SIM_CAP_COMPILE = 1u << 4,
+              SIM_CAP_GENERATED_CODE = 1u << 5,
+              SIM_CAP_RUNNER = 1u << 6
+          };
+
+          enum {
+              SIM_SIGNAL_HAS = 0u,
+              SIM_SIGNAL_GET_INDEX = 1u,
+              SIM_SIGNAL_PEEK = 2u,
+              SIM_SIGNAL_POKE = 3u,
+              SIM_SIGNAL_PEEK_INDEX = 4u,
+              SIM_SIGNAL_POKE_INDEX = 5u
+          };
+
+          enum {
+              SIM_EXEC_EVALUATE = 0u,
+              SIM_EXEC_TICK = 1u,
+              SIM_EXEC_TICK_FORCED = 2u,
+              SIM_EXEC_SET_PREV_CLOCK = 3u,
+              SIM_EXEC_GET_CLOCK_LIST_IDX = 4u,
+              SIM_EXEC_RESET = 5u,
+              SIM_EXEC_RUN_TICKS = 6u,
+              SIM_EXEC_SIGNAL_COUNT = 7u,
+              SIM_EXEC_REG_COUNT = 8u,
+              SIM_EXEC_COMPILE = 9u,
+              SIM_EXEC_IS_COMPILED = 10u
+          };
+
+          enum {
+              SIM_TRACE_START = 0u,
+              SIM_TRACE_START_STREAMING = 1u,
+              SIM_TRACE_STOP = 2u,
+              SIM_TRACE_ENABLED = 3u,
+              SIM_TRACE_CAPTURE = 4u,
+              SIM_TRACE_ADD_SIGNAL = 5u,
+              SIM_TRACE_ADD_SIGNALS_MATCHING = 6u,
+              SIM_TRACE_ALL_SIGNALS = 7u,
+              SIM_TRACE_CLEAR_SIGNALS = 8u,
+              SIM_TRACE_CLEAR = 9u,
+              SIM_TRACE_CHANGE_COUNT = 10u,
+              SIM_TRACE_SIGNAL_COUNT = 11u,
+              SIM_TRACE_SET_TIMESCALE = 12u,
+              SIM_TRACE_SET_MODULE_NAME = 13u,
+              SIM_TRACE_SAVE_VCD = 14u
+          };
+
+          enum {
+              SIM_BLOB_INPUT_NAMES = 0u,
+              SIM_BLOB_OUTPUT_NAMES = 1u,
+              SIM_BLOB_TRACE_TO_VCD = 2u,
+              SIM_BLOB_TRACE_TAKE_LIVE_VCD = 3u,
+              SIM_BLOB_GENERATED_CODE = 4u
+          };
+
+          enum {
+              RUNNER_KIND_NONE = 0,
+              RUNNER_KIND_APPLE2 = 1,
+              RUNNER_KIND_MOS6502 = 2,
+              RUNNER_KIND_GAMEBOY = 3,
+              RUNNER_KIND_CPU8BIT = 4,
+              RUNNER_KIND_RISCV = 5,
+              RUNNER_KIND_SPARC64 = 6,
+              RUNNER_KIND_AO486 = 7
+          };
+
+          enum {
+              RUNNER_MEM_OP_LOAD = 0u,
+              RUNNER_MEM_OP_READ = 1u,
+              RUNNER_MEM_OP_WRITE = 2u
+          };
+
+          enum {
+              RUNNER_MEM_SPACE_MAIN = 0u,
+              RUNNER_MEM_SPACE_ROM = 1u,
+              RUNNER_MEM_SPACE_BOOT_ROM = 2u,
+              RUNNER_MEM_SPACE_VRAM = 3u,
+              RUNNER_MEM_SPACE_ZPRAM = 4u,
+              RUNNER_MEM_SPACE_WRAM = 5u,
+              RUNNER_MEM_SPACE_FRAMEBUFFER = 6u
+          };
+
+          enum {
+              RUNNER_RUN_MODE_BASIC = 0u
+          };
+
+          enum {
+              RUNNER_CONTROL_SET_RESET_VECTOR = 0u,
+              RUNNER_CONTROL_RESET_SPEAKER_TOGGLES = 1u,
+              RUNNER_CONTROL_RESET_LCD = 2u
+          };
+
+          enum {
+              RUNNER_PROBE_KIND = 0u,
+              RUNNER_PROBE_IS_MODE = 1u,
+              RUNNER_PROBE_FRAMEBUFFER_LEN = 3u,
+              RUNNER_PROBE_FRAME_COUNT = 4u,
+              RUNNER_PROBE_SIGNAL = 9u,
+              RUNNER_PROBE_LCDC_ON = 10u,
+              RUNNER_PROBE_LCD_X = 12u,
+              RUNNER_PROBE_LCD_Y = 13u,
+              RUNNER_PROBE_LCD_PREV_CLKENA = 14u,
+              RUNNER_PROBE_LCD_PREV_VSYNC = 15u,
+              RUNNER_PROBE_LCD_FRAME_COUNT = 16u
+          };
+
+          static inline void write_out_u32(unsigned int* out, unsigned int value) {
+              if (out) *out = value;
+          }
+
+          static inline void write_out_ulong(unsigned long* out, unsigned long value) {
+              if (out) *out = value;
+          }
+
+          static inline size_t copy_blob(unsigned char* out_ptr, size_t out_len, const char* text) {
+              const size_t required = text ? std::strlen(text) : 0u;
+              if (out_ptr && out_len && required) {
+                  const size_t copy_len = required < out_len ? required : out_len;
+                  std::memcpy(out_ptr, text, copy_len);
+              }
+              return required;
+          }
+
+          static inline int signal_index_from_name(const char* name) {
+              if (!name) return -1;
+              #{abi_signal_index_lookup}
+              return -1;
+          }
+
+          static inline const char* signal_name_from_index(unsigned int idx) {
+              return idx < k_signal_count ? k_signal_names[idx] : nullptr;
+          }
+
+          static unsigned long signal_peek_by_index(SimContext* ctx, unsigned int idx) {
+              switch (idx) {
+                #{abi_signal_peek_cases}
+                default: return 0ul;
+              }
+          }
+
+          static int signal_poke_by_index(SimContext* ctx, unsigned int idx, unsigned long value) {
+              switch (idx) {
+                #{abi_signal_poke_cases}
+                default: return 0;
+              }
+          }
 
           static unsigned short cart_rom_bank_count(unsigned char rom_size_code) {
               switch (rom_size_code) {
@@ -1847,7 +2229,11 @@ module RHDL
 
           extern "C" {
 
-          void* sim_create(void) {
+          void* sim_create(const char* json, size_t json_len, unsigned int sub_cycles, char** err_out) {
+              (void)json;
+              (void)json_len;
+              (void)sub_cycles;
+              if (err_out) *err_out = nullptr;
               const char* empty_args[] = {""};
               Verilated::commandArgs(1, empty_args);
               SimContext* ctx = new SimContext();
@@ -1879,6 +2265,23 @@ module RHDL
               SimContext* ctx = static_cast<SimContext*>(sim);
               delete ctx->dut;
               delete ctx;
+          }
+
+          void sim_free_error(char* error) {
+              if (error) std::free(error);
+          }
+
+          void sim_free_string(char* string) {
+              if (string) std::free(string);
+          }
+
+          void* sim_wasm_alloc(size_t size) {
+              return std::malloc(size);
+          }
+
+          void sim_wasm_dealloc(void* ptr, size_t size) {
+              (void)size;
+              std::free(ptr);
           }
 
           void sim_reset(void* sim) {
@@ -1989,6 +2392,56 @@ module RHDL
               return 0;
           }
 
+          int sim_get_caps(void* sim, unsigned int* caps_out) {
+              (void)sim;
+              write_out_u32(caps_out, SIM_CAP_SIGNAL_INDEX | SIM_CAP_RUNNER);
+              return 1;
+          }
+
+          int sim_signal(void* sim, unsigned int op, const char* name, unsigned int idx, unsigned long value, unsigned long* out_value) {
+              SimContext* ctx = static_cast<SimContext*>(sim);
+              if (!ctx) {
+                  write_out_ulong(out_value, 0ul);
+                  return 0;
+              }
+
+              int resolved_idx = (name && name[0]) ? signal_index_from_name(name) : static_cast<int>(idx);
+              switch (op) {
+              case SIM_SIGNAL_HAS:
+                  write_out_ulong(out_value, resolved_idx >= 0 ? 1ul : 0ul);
+                  return resolved_idx >= 0 ? 1 : 0;
+              case SIM_SIGNAL_GET_INDEX:
+                  if (resolved_idx < 0) {
+                      write_out_ulong(out_value, 0ul);
+                      return 0;
+                  }
+                  write_out_ulong(out_value, static_cast<unsigned long>(resolved_idx));
+                  return 1;
+              case SIM_SIGNAL_PEEK:
+              case SIM_SIGNAL_PEEK_INDEX:
+                  if (resolved_idx < 0) {
+                      write_out_ulong(out_value, 0ul);
+                      return 0;
+                  }
+                  write_out_ulong(out_value, signal_peek_by_index(ctx, static_cast<unsigned int>(resolved_idx)));
+                  return 1;
+              case SIM_SIGNAL_POKE:
+              case SIM_SIGNAL_POKE_INDEX:
+                  if (resolved_idx < 0) {
+                      write_out_ulong(out_value, 0ul);
+                      return 0;
+                  }
+                  {
+                      int rc = signal_poke_by_index(ctx, static_cast<unsigned int>(resolved_idx), value);
+                      write_out_ulong(out_value, rc != 0 ? 1ul : 0ul);
+                      return rc;
+                  }
+              default:
+                  write_out_ulong(out_value, 0ul);
+                  return 0;
+              }
+          }
+
           void sim_load_rom(void* sim, const unsigned char* data, unsigned int len) {
               SimContext* ctx = static_cast<SimContext*>(sim);
               memset(ctx->rom, 0, sizeof(ctx->rom));
@@ -2041,7 +2494,13 @@ module RHDL
 
           unsigned char sim_read_vram(void* sim, unsigned int addr) {
               SimContext* ctx = static_cast<SimContext*>(sim);
-      #{if normalized_direct_verilog_import_wrapper_gameboy? || staged_direct_verilog_import_wrapper_gameboy?
+      #{if staged_direct_verilog_import_wrapper_gameboy?
+          <<~CPP.chomp
+              if (addr < 8192u) {
+                  return ctx->dut->rootp->gameboy__DOT__gb_core__DOT__vram0__DOT__altsyncram_component__DOT__mem[addr & 0x1FFFu];
+              }
+          CPP
+        elsif normalized_direct_verilog_import_wrapper_gameboy?
           <<~CPP.chomp
               if (addr < 8192u) {
                   return ctx->dut->rootp->gameboy__DOT__gb_core__DOT__vram0__DOT__altsyncram_component__DOT__mem[addr];
@@ -2079,6 +2538,63 @@ module RHDL
           unsigned long sim_get_ff50_write_count(void* sim) {
               SimContext* ctx = static_cast<SimContext*>(sim);
               return ctx->ff50_write_count;
+          }
+
+          int sim_exec(void* sim, unsigned int op, unsigned long arg0, unsigned long arg1, unsigned long* out_value, char** err_out) {
+              (void)arg1;
+              if (err_out) *err_out = nullptr;
+              write_out_ulong(out_value, 0ul);
+
+              switch (op) {
+              case SIM_EXEC_EVALUATE:
+                  sim_eval(sim);
+                  return 1;
+              case SIM_EXEC_TICK: {
+                  GbCycleResult result = {0u, 0u};
+                  sim_run_cycles(sim, 1u, &result);
+                  write_out_ulong(out_value, result.cycles_run);
+                  return 1;
+              }
+              case SIM_EXEC_RESET:
+                  sim_reset(sim);
+                  return 1;
+              case SIM_EXEC_RUN_TICKS: {
+                  GbCycleResult result = {0u, 0u};
+                  sim_run_cycles(sim, static_cast<unsigned int>(arg0), &result);
+                  write_out_ulong(out_value, result.cycles_run);
+                  return 1;
+              }
+              case SIM_EXEC_SIGNAL_COUNT:
+                  write_out_ulong(out_value, static_cast<unsigned long>(k_signal_count));
+                  return 1;
+              case SIM_EXEC_REG_COUNT:
+                  return 1;
+              default:
+                  return 0;
+              }
+          }
+
+          int sim_trace(void* sim, unsigned int op, const char* str_arg, unsigned long* out_value) {
+              (void)sim;
+              (void)str_arg;
+              if (op == SIM_TRACE_ENABLED) {
+                  write_out_ulong(out_value, 0ul);
+                  return 1;
+              }
+              write_out_ulong(out_value, 0ul);
+              return 0;
+          }
+
+          size_t sim_blob(void* sim, unsigned int op, unsigned char* out_ptr, size_t out_len) {
+              (void)sim;
+              switch (op) {
+              case SIM_BLOB_INPUT_NAMES:
+                  return copy_blob(out_ptr, out_len, k_input_names_csv);
+              case SIM_BLOB_OUTPUT_NAMES:
+                  return copy_blob(out_ptr, out_len, k_output_names_csv);
+              default:
+                  return 0u;
+              }
           }
 
           // Batch cycle execution - runs until n_cycles CPU cycles completed
@@ -2145,6 +2661,157 @@ module RHDL
               }
           }
 
+          int runner_get_caps(void* sim, RunnerCaps* caps_out) {
+              (void)sim;
+              if (!caps_out) return 0;
+              caps_out->kind = RUNNER_KIND_GAMEBOY;
+              caps_out->mem_spaces =
+                  (1u << RUNNER_MEM_SPACE_ROM) |
+                  (1u << RUNNER_MEM_SPACE_BOOT_ROM) |
+                  (1u << RUNNER_MEM_SPACE_VRAM) |
+                  (1u << RUNNER_MEM_SPACE_FRAMEBUFFER);
+              caps_out->control_ops = (1u << RUNNER_CONTROL_RESET_LCD);
+              caps_out->probe_ops =
+                  (1u << RUNNER_PROBE_KIND) |
+                  (1u << RUNNER_PROBE_IS_MODE) |
+                  (1u << RUNNER_PROBE_FRAMEBUFFER_LEN) |
+                  (1u << RUNNER_PROBE_FRAME_COUNT) |
+                  (1u << RUNNER_PROBE_SIGNAL) |
+                  (1u << RUNNER_PROBE_LCDC_ON) |
+                  (1u << RUNNER_PROBE_LCD_X) |
+                  (1u << RUNNER_PROBE_LCD_Y) |
+                  (1u << RUNNER_PROBE_LCD_PREV_CLKENA) |
+                  (1u << RUNNER_PROBE_LCD_PREV_VSYNC) |
+                  (1u << RUNNER_PROBE_LCD_FRAME_COUNT);
+              return 1;
+          }
+
+          size_t runner_mem(void* sim, unsigned int op, unsigned int space, size_t offset, unsigned char* ptr, size_t len, unsigned int flags) {
+              (void)flags;
+              SimContext* ctx = static_cast<SimContext*>(sim);
+              if (!ctx) return 0u;
+
+              if (op == RUNNER_MEM_OP_LOAD) {
+                  if (!ptr || len == 0u) return 0u;
+                  if (space == RUNNER_MEM_SPACE_ROM) {
+                      sim_load_rom(sim, ptr, static_cast<unsigned int>(len));
+                      return len;
+                  }
+                  if (space == RUNNER_MEM_SPACE_BOOT_ROM) {
+                      sim_load_boot_rom(sim, ptr, static_cast<unsigned int>(len));
+                      return len;
+                  }
+                  if (space == RUNNER_MEM_SPACE_VRAM) {
+                      for (size_t i = 0; i < len; ++i) sim_write_vram(sim, static_cast<unsigned int>(offset + i), ptr[i]);
+                      return len;
+                  }
+                  return 0u;
+              }
+
+              if (!ptr) return 0u;
+              if (op == RUNNER_MEM_OP_READ) {
+                  if (space == RUNNER_MEM_SPACE_BOOT_ROM) {
+                      size_t copied = 0u;
+                      for (; copied < len; ++copied) ptr[copied] = sim_read_boot_rom(sim, static_cast<unsigned int>(offset + copied));
+                      return copied;
+                  }
+                  if (space == RUNNER_MEM_SPACE_VRAM) {
+                      size_t copied = 0u;
+                      for (; copied < len; ++copied) ptr[copied] = sim_read_vram(sim, static_cast<unsigned int>(offset + copied));
+                      return copied;
+                  }
+                  if (space == RUNNER_MEM_SPACE_FRAMEBUFFER) {
+                      const size_t total = sizeof(ctx->framebuffer);
+                      if (offset >= total) return 0u;
+                      const size_t available = total - offset;
+                      const size_t copy_len = available < len ? available : len;
+                      std::memcpy(ptr, ctx->framebuffer + offset, copy_len);
+                      return copy_len;
+                  }
+                  if (space == RUNNER_MEM_SPACE_ROM) {
+                      if (offset >= sizeof(ctx->rom)) return 0u;
+                      const size_t available = sizeof(ctx->rom) - offset;
+                      const size_t copy_len = available < len ? available : len;
+                      std::memcpy(ptr, ctx->rom + offset, copy_len);
+                      return copy_len;
+                  }
+                  return 0u;
+              }
+
+              if (op == RUNNER_MEM_OP_WRITE) {
+                  if (space == RUNNER_MEM_SPACE_VRAM) {
+                      for (size_t i = 0; i < len; ++i) sim_write_vram(sim, static_cast<unsigned int>(offset + i), ptr[i]);
+                      return len;
+                  }
+                  return 0u;
+              }
+
+              return 0u;
+          }
+
+          int runner_run(void* sim, unsigned int cycles, unsigned char key_data, int key_ready, unsigned int mode, RunnerRunResult* result_out) {
+              (void)key_data;
+              (void)key_ready;
+              (void)mode;
+              GbCycleResult result = {0u, 0u};
+              sim_run_cycles(sim, cycles, &result);
+              if (result_out) {
+                  result_out->text_dirty = result.frames_completed > 0 ? 1 : 0;
+                  result_out->key_cleared = 0;
+                  result_out->cycles_run = static_cast<unsigned int>(result.cycles_run);
+                  result_out->speaker_toggles = 0u;
+                  result_out->frames_completed = result.frames_completed;
+              }
+              return 1;
+          }
+
+          int runner_control(void* sim, unsigned int op, unsigned int arg0, unsigned int arg1) {
+              (void)arg0;
+              (void)arg1;
+              SimContext* ctx = static_cast<SimContext*>(sim);
+              if (!ctx) return 0;
+              if (op == RUNNER_CONTROL_RESET_LCD) {
+                  std::memset(ctx->framebuffer, 0, sizeof(ctx->framebuffer));
+                  ctx->lcd_x = 0u;
+                  ctx->lcd_y = 0u;
+                  ctx->prev_lcd_clkena = 0u;
+                  ctx->prev_lcd_vsync = 0u;
+                  ctx->frame_count = 0u;
+                  return 1;
+              }
+              return 0;
+          }
+
+          unsigned long long runner_probe(void* sim, unsigned int op, unsigned int arg0) {
+              SimContext* ctx = static_cast<SimContext*>(sim);
+              if (!ctx) return 0ull;
+              switch (op) {
+              case RUNNER_PROBE_KIND:
+                  return RUNNER_KIND_GAMEBOY;
+              case RUNNER_PROBE_IS_MODE:
+                  return 0ull;
+              case RUNNER_PROBE_FRAMEBUFFER_LEN:
+                  return sizeof(ctx->framebuffer);
+              case RUNNER_PROBE_FRAME_COUNT:
+              case RUNNER_PROBE_LCD_FRAME_COUNT:
+                  return ctx->frame_count;
+              case RUNNER_PROBE_SIGNAL:
+                  return signal_peek_by_index(ctx, arg0);
+              case RUNNER_PROBE_LCDC_ON:
+                  return sim_peek(sim, "lcd_on") & 0x1u;
+              case RUNNER_PROBE_LCD_X:
+                  return ctx->lcd_x;
+              case RUNNER_PROBE_LCD_Y:
+                  return ctx->lcd_y;
+              case RUNNER_PROBE_LCD_PREV_CLKENA:
+                  return ctx->prev_lcd_clkena;
+              case RUNNER_PROBE_LCD_PREV_VSYNC:
+                  return ctx->prev_lcd_vsync;
+              default:
+                  return 0ull;
+              }
+          }
+
           } // extern "C"
         CPP
 
@@ -2173,119 +2840,40 @@ module RHDL
       end
 
       def load_shared_library(lib_path)
-        @lib = verilog_simulator.load_library!(lib_path)
-
-        # Bind FFI functions
-        @sim_create = Fiddle::Function.new(
-          @lib['sim_create'],
-          [],
-          Fiddle::TYPE_VOIDP
+        @sim = RHDL::Sim::Native::Verilog::Verilator::Runtime.open(
+          lib_path: lib_path,
+          signal_widths_by_name: abi_signal_widths_by_name,
+          signal_widths_by_idx: abi_signal_widths_by_idx,
+          backend_label: 'Game Boy Verilator'
         )
+        ensure_runner_abi!(@sim, expected_kind: :gameboy, backend_label: 'Game Boy Verilator')
 
-        @sim_destroy = Fiddle::Function.new(
-          @lib['sim_destroy'],
-          [Fiddle::TYPE_VOIDP],
-          Fiddle::TYPE_VOID
-        )
-
-        @sim_reset = Fiddle::Function.new(
-          @lib['sim_reset'],
-          [Fiddle::TYPE_VOIDP],
-          Fiddle::TYPE_VOID
-        )
-
-        @sim_eval = Fiddle::Function.new(
-          @lib['sim_eval'],
-          [Fiddle::TYPE_VOIDP],
-          Fiddle::TYPE_VOID
-        )
-
-        @sim_poke = Fiddle::Function.new(
-          @lib['sim_poke'],
-          [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP, Fiddle::TYPE_INT],
-          Fiddle::TYPE_VOID
-        )
-
-        @sim_peek = Fiddle::Function.new(
-          @lib['sim_peek'],
-          [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP],
-          Fiddle::TYPE_INT
-        )
-
-        @sim_load_rom_fn = Fiddle::Function.new(
-          @lib['sim_load_rom'],
-          [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP, Fiddle::TYPE_INT],
-          Fiddle::TYPE_VOID
-        )
-
-        @sim_load_boot_rom_fn = Fiddle::Function.new(
-          @lib['sim_load_boot_rom'],
-          [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP, Fiddle::TYPE_INT],
-          Fiddle::TYPE_VOID
-        )
-
-        @sim_read_boot_rom_fn = Fiddle::Function.new(
-          @lib['sim_read_boot_rom'],
-          [Fiddle::TYPE_VOIDP, Fiddle::TYPE_INT],
-          Fiddle::TYPE_CHAR
-        )
-
-        @sim_write_vram_fn = Fiddle::Function.new(
-          @lib['sim_write_vram'],
-          [Fiddle::TYPE_VOIDP, Fiddle::TYPE_INT, Fiddle::TYPE_CHAR],
-          Fiddle::TYPE_VOID
-        )
-
-        @sim_read_vram_fn = Fiddle::Function.new(
-          @lib['sim_read_vram'],
-          [Fiddle::TYPE_VOIDP, Fiddle::TYPE_INT],
-          Fiddle::TYPE_CHAR
-        )
-
-        @sim_read_framebuffer_fn = Fiddle::Function.new(
-          @lib['sim_read_framebuffer'],
-          [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP],
-          Fiddle::TYPE_VOID
-        )
-
-        @sim_get_frame_count_fn = Fiddle::Function.new(
-          @lib['sim_get_frame_count'],
-          [Fiddle::TYPE_VOIDP],
-          Fiddle::TYPE_LONG
-        )
-
-        @sim_get_vram_write_count_fn = Fiddle::Function.new(
-          @lib['sim_get_vram_write_count'],
-          [Fiddle::TYPE_VOIDP],
-          Fiddle::TYPE_LONG
-        )
-
-        @sim_get_ff40_write_count_fn = Fiddle::Function.new(
-          @lib['sim_get_ff40_write_count'],
-          [Fiddle::TYPE_VOIDP],
-          Fiddle::TYPE_LONG
-        )
-
-        @sim_get_ff50_write_count_fn = Fiddle::Function.new(
-          @lib['sim_get_ff50_write_count'],
-          [Fiddle::TYPE_VOIDP],
-          Fiddle::TYPE_LONG
-        )
-
-        @sim_run_cycles_fn = Fiddle::Function.new(
-          @lib['sim_run_cycles'],
-          [Fiddle::TYPE_VOIDP, Fiddle::TYPE_INT, Fiddle::TYPE_VOIDP],
-          Fiddle::TYPE_VOID
-        )
-
-        # Create simulation context
-        @sim_ctx = @sim_create.call
+        @sim_ctx = @sim.raw_context
+        @sim_destroy = @sim.bind_optional_function('sim_destroy', [Fiddle::TYPE_VOIDP], Fiddle::TYPE_VOID)
+        @sim_poke = @sim.bind_optional_function('sim_poke', [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP, Fiddle::TYPE_INT], Fiddle::TYPE_VOID)
+        @sim_peek = @sim.bind_optional_function('sim_peek', [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP], Fiddle::TYPE_INT)
+        @sim_get_vram_write_count_fn = @sim.bind_optional_function('sim_get_vram_write_count', [Fiddle::TYPE_VOIDP], Fiddle::TYPE_LONG)
+        @sim_get_ff40_write_count_fn = @sim.bind_optional_function('sim_get_ff40_write_count', [Fiddle::TYPE_VOIDP], Fiddle::TYPE_LONG)
+        @sim_get_ff50_write_count_fn = @sim.bind_optional_function('sim_get_ff50_write_count', [Fiddle::TYPE_VOIDP], Fiddle::TYPE_LONG)
       end
 
       def reset_simulation
         initialize_inputs
-        @sim_reset&.call(@sim_ctx) if @sim_ctx
+        @sim&.reset if @sim
         initialize_inputs
+      end
+
+      def ensure_runner_abi!(sim, expected_kind:, backend_label:)
+        unless sim.runner_supported?
+          sim.close
+          raise RuntimeError, "#{backend_label} shared library does not expose runner ABI"
+        end
+
+        actual_kind = sim.runner_kind
+        return if actual_kind == expected_kind
+
+        sim.close
+        raise RuntimeError, "#{backend_label} shared library exposes runner kind #{actual_kind.inspect}, expected #{expected_kind.inspect}"
       end
 
       def initialize_inputs
@@ -2401,22 +2989,34 @@ module RHDL
 
       def verilator_poke(name, value)
         return unless @sim_ctx
-        @sim_poke.call(@sim_ctx, name, value.to_i)
+
+        if @sim&.has_signal?(name)
+          @sim.poke(name, value.to_i)
+        else
+          @sim_poke&.call(@sim_ctx, name, value.to_i)
+        end
       end
 
       def verilator_peek(name)
         return 0 unless @sim_ctx
-        @sim_peek.call(@sim_ctx, name)
+
+        if @sim&.has_signal?(name)
+          @sim.peek(name).to_i
+        elsif @sim_peek
+          @sim_peek.call(@sim_ctx, name).to_i
+        else
+          0
+        end
       end
 
       def verilator_eval
-        return unless @sim_ctx
-        @sim_eval.call(@sim_ctx)
+        @sim&.evaluate
       end
 
       def verilator_write_vram(addr, value)
-        return unless @sim_ctx
-        @sim_write_vram_fn.call(@sim_ctx, addr, value)
+        return unless @sim
+
+        @sim.runner_write_vram(addr, [value & 0xFF])
       end
 
       def verilator_vram_write_count
@@ -2435,14 +3035,41 @@ module RHDL
       end
 
       def verilator_read_vram(addr)
-        return 0 unless @sim_ctx
-        @sim_read_vram_fn.call(@sim_ctx, addr) & 0xFF
+        return 0 unless @sim
+
+        @sim.runner_read_vram(addr, 1).first.to_i & 0xFF
       end
 
       def verilator_read_boot_rom(addr)
-        return 0 unless @sim_ctx
-        @sim_read_boot_rom_fn.call(@sim_ctx, addr) & 0xFF
+        return 0 unless @sim
+
+        @sim.runner_read_boot_rom(addr, 1).first.to_i & 0xFF
       end
+
+      def debug_state
+        {
+          lcd_on: verilator_peek('video_lcd_on_internal') & 0x1,
+          lcd_clkena: verilator_peek('video_lcd_clkena_internal') & 0x1,
+          lcd_vsync: verilator_peek('video_lcd_vsync_internal') & 0x1,
+          frame_count: @frame_count.to_i,
+          gb_core_boot_rom_enabled: verilator_peek('boot_rom_enabled_internal') & 0x1,
+          gb_core_cpu_pc: verilator_peek('cpu_pc_internal') & 0xFFFF,
+          gb_core_cpu_addr: verilator_peek('cpu_addr_internal') & 0xFFFF,
+          gb_core_cpu_di: verilator_peek('cpu_di_internal') & 0xFF,
+          gb_core_cpu_do: verilator_peek('cpu_do_internal') & 0xFF,
+          gb_core_cpu_rd_n: verilator_peek('cpu_rd_n_internal') & 0x1,
+          gb_core_cpu_wr_n: verilator_peek('cpu_wr_n_internal') & 0x1,
+          gb_core_cpu_m1_n: verilator_peek('cpu_m1_n_internal') & 0x1,
+          gb_core_cpu_tstate: verilator_peek('cpu_tstate_internal') & 0x7,
+          gb_core_cpu_mcycle: verilator_peek('cpu_mcycle_internal') & 0x7,
+          video_lcdc: verilator_peek('video_lcdc_internal') & 0xFF,
+          video_scy: verilator_peek('video_scy_internal') & 0xFF,
+          video_scx: verilator_peek('video_scx_internal') & 0xFF,
+          video_h_cnt: verilator_peek('video_h_cnt_internal') & 0xFF,
+          video_v_cnt: verilator_peek('video_v_cnt_internal') & 0xFF
+        }
+      end
+      public :debug_state
 
       def default_cartridge_state
         {

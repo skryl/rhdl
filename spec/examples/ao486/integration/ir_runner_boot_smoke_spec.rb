@@ -88,6 +88,22 @@ RSpec.describe RHDL::Examples::AO486::IrRunner, timeout: 240 do
     expect(runner.read_bytes(described_class::DOS_RELOCATED_BOOT_SECTOR_ADDR + 0x1FE, 2, mapped: false)).to eq([0x55, 0xAA])
   end
 
+  it 'seeds DOS INT 10h and INT 13h stubs outside the bootloader disk buffer window' do
+    skip 'IR Compiler not available' unless RHDL::Sim::Native::IR::COMPILER_AVAILABLE
+
+    runner = described_class.new(backend: :compile, headless: true)
+    runner.load_bios
+    runner.load_dos
+
+    expect(runner.read_bytes(described_class::BOOT0_ADDR + described_class::DOS_INT10_STUB_OFFSET, 8, mapped: true)).to eq(
+      runner.send(:dos_int10_bootstrap_bytes).first(8)
+    )
+    expect(runner.read_bytes(described_class::BOOT0_ADDR + described_class::DOS_INT13_STUB_OFFSET, 8, mapped: true)).to eq(
+      runner.send(:dos_int13_bootstrap_bytes).first(8)
+    )
+    expect(described_class::DOS_INT13_SCRATCH_ADDR).to be < 0x0600
+  end
+
   it 'seeds the DOS shortcut with the skipped POST BDA words and diskette parameter vector' do
     skip 'IR Compiler not available' unless RHDL::Sim::Native::IR::COMPILER_AVAILABLE
 
@@ -328,10 +344,10 @@ RSpec.describe RHDL::Examples::AO486::IrRunner, timeout: 240 do
       later_trace_eips << runner.peek('trace_wr_eip')
     end
 
-    expect(handoff_eip).to be >= 0x0540
+    expect(handoff_eip).to be >= described_class::DOS_INT13_STUB_OFFSET
     expect(later_trace_eips.max).to be >= 0x7C40
     expect(later_trace_eips.any? { |eip| eip >= 0x7C00 }).to be(true)
-    expect(runner.peek('pipeline_inst__read_inst__rd_eip')).to be >= 0x0540
+    expect(runner.peek('pipeline_inst__read_inst__rd_eip')).to be >= described_class::DOS_INT13_STUB_OFFSET
     expect(runner.peek('trace_arch_ecx')).to be > 0
   end
 

@@ -2,6 +2,7 @@
 
 require 'json'
 require 'fileutils'
+require 'rhdl/codegen/circt/tooling'
 
 module RHDL
   module CLI
@@ -28,7 +29,7 @@ module RHDL
         PKG_DIR = File.join(PROJECT_ROOT, 'web', 'assets', 'pkg')
         PKG_OUTPUT = File.join(PKG_DIR, 'apple2_arcilator.wasm')
 
-        REQUIRED_TOOLS = %w[arcilator clang wasm-ld].freeze
+        REQUIRED_TOOLS = %w[arcilator circt-opt clang wasm-ld].freeze
 
         # State buffer size — generous allocation for Apple II design.
         # Arcilator packs all registers into a flat byte array; typical Apple II
@@ -96,8 +97,21 @@ module RHDL
 
         # MLIR → LLVM IR via arcilator.
         def compile_mlir_to_llvm_ir
+          puts '  Preparing ARC MLIR...'
+          prepared = RHDL::Codegen::CIRCT::Tooling.prepare_arcilator_input_from_circt_mlir(
+            mlir_path: MLIR_FILE,
+            work_dir: File.join(BUILD_DIR, 'arc'),
+            base_name: 'apple2',
+            top: 'apple2_apple2'
+          )
+          raise "ARC preparation failed:\n#{prepared.dig(:arc, :stderr)}" unless prepared[:success]
+
           puts '  Compiling MLIR → LLVM IR (arcilator)...'
-          run_tool!('arcilator', MLIR_FILE, "--state-file=#{STATE_FILE}", '-o', LL_FILE)
+          run_tool!(*RHDL::Codegen::CIRCT::Tooling.arcilator_command(
+            mlir_path: prepared.fetch(:arcilator_input_mlir_path),
+            state_file: STATE_FILE,
+            out_path: LL_FILE
+          ))
         end
 
         # Parse arcilator state JSON to extract signal name→offset mappings.

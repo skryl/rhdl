@@ -1,0 +1,19 @@
+MS-DOS 4.00 floppy images copied on 2026-03-13 from the official Microsoft
+MS-DOS repository clone:
+
+  https://github.com/microsoft/MS-DOS
+
+Source paths:
+
+  /tmp/msdos4_official/v4.0-ozzie/bin/DRDOS1_IMD.img
+  /tmp/msdos4_official/v4.0-ozzie/bin/DRDOS2_IMD.img
+
+Local copies:
+
+  msdos4_disk1.img
+  msdos4_disk2.img
+
+SHA-256:
+
+  dfed217ca17b0003ec0cb72cdc0d68a6ec0aad6798ba0e46c38979c64dd95e73  msdos4_disk1.img
+  b9fc8b511f3713e780f6bae49119b4417d46c70ecea63803c56671998db37b31  msdos4_disk2.img

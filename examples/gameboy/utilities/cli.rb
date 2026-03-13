@@ -9,12 +9,16 @@ $LOAD_PATH.unshift(project_root) unless $LOAD_PATH.include?(project_root)
 require 'rhdl'
 require_relative 'tasks/run_task'
 require_relative 'import/system_importer'
+require_relative 'hdl_loader'
 
 module RHDL
   module Examples
     module GameBoy
-      module CLI
-        module_function
+        module CLI
+          module_function
+
+          DEFAULT_RUNTIME_TOP = 'Gameboy'
+          DEFAULT_SOURCE_DIR = RHDL::Examples::GameBoy::HdlLoader::DEFAULT_HDL_DIR
 
         def run(argv = ARGV,
                 out: $stdout,
@@ -68,6 +72,7 @@ module RHDL
             strict: true,
             help: false
           }
+          out_provided = false
 
           parser = OptionParser.new do |opts|
             opts.banner = <<~BANNER
@@ -81,6 +86,7 @@ module RHDL
             opts.on('--out DIR',
                     "Output directory for raised DSL (default: #{default_output_dir})") do |v|
               options[:output_dir] = v
+              out_provided = true
             end
             opts.on('--workspace DIR', 'Workspace directory for intermediate artifacts') { |v| options[:workspace_dir] = v }
             opts.on('--reference-root DIR', 'Override the Game Boy reference tree root') { |v| options[:reference_root] = v }
@@ -115,6 +121,13 @@ module RHDL
 
           parser.parse!(args)
           return 0 if options[:help]
+
+          unless out_provided
+            err.puts parser
+            err.puts
+            err.puts 'Error: --out is required to run import.'
+            return 1
+          end
 
           unless args.empty?
             err.puts "Unexpected arguments: #{args.join(' ')}"
@@ -154,21 +167,23 @@ module RHDL
 
         def run_emulator(args, out:, err:, run_task_class:, program_name:)
           options = {
-            speed: 100,
-            debug: false,
+            speed: 1000,
+            debug: true,
             dmg_colors: true,
             demo: false,
             pop: false,
             audio: false,
-            mode: :ruby,
+            mode: :ir,
             sim: nil,
-            hdl_dir: nil,
-            verilog_dir: nil,
-            top: nil,
-            use_staged_verilog: false,
+            source_dir: DEFAULT_SOURCE_DIR,
+            top: DEFAULT_RUNTIME_TOP,
+            use_staged_source: false,
+            use_normalized_source: false,
+            use_rhdl_source: false,
             renderer: :color,
             headless: false
           }
+          source_flag = nil
 
           parser = OptionParser.new do |opts|
             opts.banner = "Usage: #{program_name} [options] [rom.gb]"
@@ -179,30 +194,57 @@ module RHDL
             opts.separator '    import                         Import the Game Boy reference design into raised RHDL'
             opts.separator ''
 
-            opts.on('-m', '--mode TYPE', %i[ruby ir verilog],
-                    'Simulation mode: ruby (default), ir, verilog (Verilator RTL)') do |v|
+            opts.on('-m', '--mode TYPE', %i[ruby ir verilog circt],
+                    'Simulation mode: ir (default), ruby, verilog (Verilator RTL), circt (ARC)') do |v|
               options[:mode] = v
             end
 
             opts.on('--sim TYPE', %i[ruby interpret jit compile],
-                    'Simulator backend: ruby (default), interpret, jit, compile') do |v|
+                    'Simulator backend: ruby, interpret, jit, compile (default: compile)') do |v|
               options[:sim] = v
             end
 
-            opts.on('--hdl-dir DIR', 'Game Boy HDL directory override (default: examples/gameboy/hdl)') do |v|
-              options[:hdl_dir] = File.expand_path(v)
+            opts.on('--source DIR',
+                    "Source tree override for handwritten or imported Game Boy trees (default: #{DEFAULT_SOURCE_DIR})") do |v|
+              options[:source_dir] = File.expand_path(v)
             end
 
-            opts.on('--verilog-dir DIR', 'Direct imported Verilog directory/file override for --mode verilog') do |v|
-              options[:verilog_dir] = File.expand_path(v)
-            end
-
-            opts.on('--top NAME', 'Imported top component/module name override for imported HDL trees') do |v|
+            opts.on('--top NAME',
+                    "Imported top component/module override for imported HDL trees (default: #{DEFAULT_RUNTIME_TOP})") do |v|
               options[:top] = v
             end
 
-            opts.on('--use-staged-verilog', 'Use staged imported Verilog artifact when available') do
-              options[:use_staged_verilog] = true
+            opts.on('--use-staged-source', 'Force staged imported Verilog for Verilator/Arcilator imported runs') do
+              if source_flag && source_flag != :staged
+                raise OptionParser::InvalidOption,
+                      'Choose only one of --use-staged-source, --use-normalized-source, or --use-rhdl-source'
+              end
+              options[:use_staged_source] = true
+              options[:use_normalized_source] = false
+              options[:use_rhdl_source] = false
+              source_flag = :staged
+            end
+
+            opts.on('--use-normalized-source', 'Force normalized imported Verilog for Verilator/Arcilator imported runs') do
+              if source_flag && source_flag != :normalized
+                raise OptionParser::InvalidOption,
+                      'Choose only one of --use-staged-source, --use-normalized-source, or --use-rhdl-source'
+              end
+              options[:use_staged_source] = false
+              options[:use_normalized_source] = true
+              options[:use_rhdl_source] = false
+              source_flag = :normalized
+            end
+
+            opts.on('--use-rhdl-source', 'Force RHDL top export for Verilator/Arcilator runs') do
+              if source_flag && source_flag != :rhdl
+                raise OptionParser::InvalidOption,
+                      'Choose only one of --use-staged-source, --use-normalized-source, or --use-rhdl-source'
+              end
+              options[:use_staged_source] = false
+              options[:use_normalized_source] = false
+              options[:use_rhdl_source] = true
+              source_flag = :rhdl
             end
 
             opts.on('--color', 'Use color renderer (default)') do
@@ -213,12 +255,12 @@ module RHDL
               options[:renderer] = :braille
             end
 
-            opts.on('-s', '--speed CYCLES', Integer, 'Cycles per frame (default: 100)') do |v|
+            opts.on('-s', '--speed CYCLES', Integer, 'Cycles per frame (default: 1000)') do |v|
               options[:speed] = v
             end
 
-            opts.on('-d', '--debug', 'Show CPU state') do
-              options[:debug] = true
+            opts.on('-d', '--[no-]debug', 'Show CPU state (default: true)') do |v|
+              options[:debug] = v
             end
 
             opts.on('-g', '--green', 'DMG green palette (default)') do
@@ -258,17 +300,15 @@ module RHDL
           parser.parse!(args)
           return 0 if options[:help]
 
-          if options[:hdl_dir] && !Dir.exist?(options[:hdl_dir])
-            err.puts "Error: HDL directory not found: #{options[:hdl_dir]}"
+          if options[:source_dir] && !Dir.exist?(options[:source_dir])
+            err.puts "Error: Source directory not found: #{options[:source_dir]}"
             return 1
           end
 
           if options[:sim].nil?
             options[:sim] = case options[:mode]
                             when :ruby then :ruby
-                            when :ir then :compile
-                            when :verilog then :ruby
-                            else :ruby
+                            else :compile
                             end
           end
 

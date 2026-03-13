@@ -7,6 +7,7 @@ require 'tmpdir'
 require 'yaml'
 require 'json'
 require 'set'
+require 'rbconfig'
 
 module RHDL
   module Examples
@@ -33,14 +34,11 @@ module RHDL
           ].freeze
           FORCE_STUB_SOURCE_PATHS = [
             File.join(DEFAULT_REFERENCE_ROOT, 'T1-common', 'srams', 'bw_r_tlb_fpga.v'),
-            File.join(DEFAULT_REFERENCE_ROOT, 'T1-common', 'srams', 'bw_r_dcd.v'),
             File.join(DEFAULT_REFERENCE_ROOT, 'T1-common', 'srams', 'bw_r_frf.v'),
             File.join(DEFAULT_REFERENCE_ROOT, 'T1-common', 'srams', 'bw_r_icd.v'),
             File.join(DEFAULT_REFERENCE_ROOT, 'T1-common', 'srams', 'bw_r_idct.v'),
-            File.join(DEFAULT_REFERENCE_ROOT, 'T1-common', 'srams', 'bw_r_irf_register.v'),
             File.join(DEFAULT_REFERENCE_ROOT, 'T1-common', 'srams', 'bw_r_rf16x32.v'),
-            File.join(DEFAULT_REFERENCE_ROOT, 'T1-common', 'srams', 'bw_r_rf16x160.v'),
-            File.join(DEFAULT_REFERENCE_ROOT, 'T1-common', 'srams', 'bw_r_rf32x152b.v')
+            File.join(DEFAULT_REFERENCE_ROOT, 'T1-common', 'srams', 'bw_r_rf16x160.v')
           ].freeze
           INSTANCE_KEYWORDS = %w[
             module if else for case while begin end always always_ff always_comb
@@ -168,6 +166,8 @@ module RHDL
                   diagnostics: diagnostics
                 )
               end
+
+              emit_normalized_core_mlir!(report_path: report_path, diagnostics: diagnostics) if emit_normalized_core_mlir?
 
               report = read_report(report_path)
               artifacts = report.fetch('artifacts', {})
@@ -494,10 +494,19 @@ module RHDL
 	                  output empty;
 	                  output [129:0] q;
 
-	                  reg [129:0] mem[0:3];
+	                  reg [123:0] payload0;
+	                  reg [123:0] payload1;
+	                  reg [123:0] payload2;
+	                  reg [123:0] payload3;
+	                  reg [5:0] meta0;
+	                  reg [5:0] meta1;
+	                  reg [5:0] meta2;
+	                  reg [5:0] meta3;
 	                  reg [1:0] rd_ptr;
 	                  reg [1:0] wr_ptr;
 	                  reg [2:0] count;
+	                  reg [123:0] q_payload;
+	                  reg [5:0] q_meta;
 
 	                  wire read_now;
 	                  wire write_now;
@@ -505,7 +514,28 @@ module RHDL
 	                  assign read_now = rdreq && (count != 0);
 	                  assign write_now = wrreq && (read_now || (count < 4));
 	                  assign empty = (count == 0);
-	                  assign q = empty ? 130'b0 : mem[rd_ptr];
+	                  assign q = empty ? 130'b0 : {q_meta, q_payload};
+
+	                  always @(*) begin
+	                    case (rd_ptr)
+	                    2'b00: begin
+	                      q_meta = meta0;
+	                      q_payload = payload0;
+	                    end
+	                    2'b01: begin
+	                      q_meta = meta1;
+	                      q_payload = payload1;
+	                    end
+	                    2'b10: begin
+	                      q_meta = meta2;
+	                      q_payload = payload2;
+	                    end
+	                    default: begin
+	                      q_meta = meta3;
+	                      q_payload = payload3;
+	                    end
+	                    endcase
+	                  end
 
 	                  always @(posedge clock or posedge aclr) begin
 	                    if (aclr) begin
@@ -514,7 +544,24 @@ module RHDL
 	                      count <= 3'b000;
 	                    end else begin
 	                      if (write_now) begin
-	                        mem[wr_ptr] <= data;
+	                        case (wr_ptr)
+	                        2'b00: begin
+	                          meta0 <= data[129:124];
+	                          payload0 <= data[123:0];
+	                        end
+	                        2'b01: begin
+	                          meta1 <= data[129:124];
+	                          payload1 <= data[123:0];
+	                        end
+	                        2'b10: begin
+	                          meta2 <= data[129:124];
+	                          payload2 <= data[123:0];
+	                        end
+	                        default: begin
+	                          meta3 <= data[129:124];
+	                          payload3 <= data[123:0];
+	                        end
+	                        endcase
 	                        wr_ptr <= wr_ptr + 2'b01;
 	                      end
 	                      if (read_now) begin
@@ -582,47 +629,115 @@ module RHDL
 	                  input arst_l;
 	                  input rst_soft_l;
 
+	                  reg [58:0] rd_tte_tag_g;
+	                  reg [42:0] rd_tte_data_g;
+	                  reg [58:0] tte_tag_ram [0:63];
+	                  reg [42:0] tte_data_ram [0:63];
+	                  reg [30:0] va_tag_plus;
+	                  reg [29:0] vrtl_pgnum_m;
+	                  reg bypass_d;
 	                  reg [29:0] pgnum_g;
-	                  reg [3:0] cache_way_hit_g;
-	                  reg cache_hit_g;
+	                  reg [3:0] cache_set_vld_g;
+	                  reg [29:0] cache_ptag_w0_g;
+	                  reg [29:0] cache_ptag_w1_g;
+	                  reg [29:0] cache_ptag_w2_g;
+	                  reg [29:0] cache_ptag_w3_g;
+	                  reg cam_hit_any_or_bypass;
 
-	                  wire [29:0] virtual_pgnum;
 	                  wire [7:0] masked_va_39_32;
-	                  wire [3:0] next_cache_way_hit;
+	                  wire [26:0] tlb_cam_comp_key;
+	                  wire [29:3] phy_pgnum_m;
+	                  wire [29:0] pgnum_m;
+	                  wire tlb_cam_hit_raw;
 
 	                  assign masked_va_39_32 = {8{tlb_addr_mask_l}} & tlb_cam_key[32:25];
-	                  assign virtual_pgnum = {
-	                    masked_va_39_32,
-	                    tlb_cam_key[24:21],
-	                    tlb_cam_key[19:14],
-	                    tlb_cam_key[12:7],
-	                    tlb_cam_key[5:3],
-	                    tlb_bypass_va
+	                  assign tlb_cam_comp_key = tlb_demap ?
+	                    {
+	                      tlb_demap_key[32:25],
+	                      tlb_demap_key[24:21],
+	                      tlb_demap_key[19:14],
+	                      tlb_demap_key[12:7],
+	                      tlb_demap_key[5:3]
+	                    } :
+	                    {
+	                      masked_va_39_32,
+	                      tlb_cam_key[24:21],
+	                      tlb_cam_key[19:14],
+	                      tlb_cam_key[12:7],
+	                      tlb_cam_key[5:3]
+	                    };
+	                  assign phy_pgnum_m = {
+	                    rd_tte_data_g[41:30],
+	                    rd_tte_data_g[29:24],
+	                    rd_tte_data_g[22:17],
+	                    rd_tte_data_g[15:13]
 	                  };
 
-	                  assign next_cache_way_hit[0] = cache_set_vld[0] & (cache_ptag_w0 == virtual_pgnum);
-	                  assign next_cache_way_hit[1] = cache_set_vld[1] & (cache_ptag_w1 == virtual_pgnum);
-	                  assign next_cache_way_hit[2] = cache_set_vld[2] & (cache_ptag_w2 == virtual_pgnum);
-	                  assign next_cache_way_hit[3] = cache_set_vld[3] & (cache_ptag_w3 == virtual_pgnum);
+	                  assign pgnum_m[2:0] = vrtl_pgnum_m[2:0];
+	                  assign pgnum_m[5:3] = (~rd_tte_data_g[12] & ~bypass_d) ? phy_pgnum_m[5:3] : vrtl_pgnum_m[5:3];
+	                  assign pgnum_m[11:6] = (~rd_tte_data_g[16] & ~bypass_d) ? phy_pgnum_m[11:6] : vrtl_pgnum_m[11:6];
+	                  assign pgnum_m[17:12] = (~rd_tte_data_g[23] & ~bypass_d) ? phy_pgnum_m[17:12] : vrtl_pgnum_m[17:12];
+	                  assign pgnum_m[29:18] = ~bypass_d ? phy_pgnum_m[29:18] : vrtl_pgnum_m[29:18];
 
-	                  assign tlb_pgnum_crit = virtual_pgnum;
+	                  assign tlb_pgnum_crit = pgnum_m;
 	                  assign tlb_pgnum = pgnum_g;
-	                  assign tlb_rd_tte_tag = 59'b0;
-	                  assign tlb_rd_tte_data = 43'b0;
-	                  assign tlb_cam_hit = 1'b1;
-	                  assign cache_way_hit = cache_way_hit_g;
-	                  assign cache_hit = cache_hit_g;
+	                  assign tlb_rd_tte_tag = rd_tte_tag_g;
+	                  assign tlb_rd_tte_data = rd_tte_data_g;
+	                  assign tlb_cam_hit_raw = tlb_bypass | tlb_cam_vld;
+	                  assign tlb_cam_hit = tlb_cam_hit_raw;
+	                  assign cache_way_hit[0] = rst_tri_en ? 1'b0 : ((cache_ptag_w0_g == pgnum_g) & cache_set_vld_g[0] & cam_hit_any_or_bypass);
+	                  assign cache_way_hit[1] = rst_tri_en ? 1'b0 : ((cache_ptag_w1_g == pgnum_g) & cache_set_vld_g[1] & cam_hit_any_or_bypass);
+	                  assign cache_way_hit[2] = rst_tri_en ? 1'b0 : ((cache_ptag_w2_g == pgnum_g) & cache_set_vld_g[2] & cam_hit_any_or_bypass);
+	                  assign cache_way_hit[3] = rst_tri_en ? 1'b0 : ((cache_ptag_w3_g == pgnum_g) & cache_set_vld_g[3] & cam_hit_any_or_bypass);
+	                  assign cache_hit = |cache_way_hit;
 	                  assign so = si;
 
 	                  always @(posedge rclk or negedge arst_l) begin
 	                    if (!arst_l || !rst_soft_l) begin
+	                      rd_tte_tag_g <= 59'b0;
+	                      rd_tte_data_g <= 43'b0;
+	                      va_tag_plus <= 31'b0;
+	                      vrtl_pgnum_m <= 30'b0;
+	                      bypass_d <= 1'b0;
 	                      pgnum_g <= 30'b0;
-	                      cache_way_hit_g <= 4'b0;
-	                      cache_hit_g <= 1'b0;
+	                      cache_set_vld_g <= 4'b0;
+	                      cache_ptag_w0_g <= 30'b0;
+	                      cache_ptag_w1_g <= 30'b0;
+	                      cache_ptag_w2_g <= 30'b0;
+	                      cache_ptag_w3_g <= 30'b0;
+	                      cam_hit_any_or_bypass <= 1'b0;
 	                    end else if (!hold) begin
-	                      pgnum_g <= virtual_pgnum;
-	                      cache_way_hit_g <= rst_tri_en ? 4'b0 : next_cache_way_hit;
-	                      cache_hit_g <= rst_tri_en ? 1'b0 : |next_cache_way_hit;
+	                      va_tag_plus <= {tlb_cam_comp_key, tlb_bypass_va, tlb_bypass};
+	                      vrtl_pgnum_m <= va_tag_plus[30:1];
+	                      bypass_d <= va_tag_plus[0];
+	                      pgnum_g <= pgnum_m;
+	                      cache_set_vld_g <= cache_set_vld;
+	                      cache_ptag_w0_g <= cache_ptag_w0;
+	                      cache_ptag_w1_g <= cache_ptag_w1;
+	                      cache_ptag_w2_g <= cache_ptag_w2;
+	                      cache_ptag_w3_g <= cache_ptag_w3;
+	                      cam_hit_any_or_bypass <= tlb_cam_hit_raw;
+
+	                      if (tlb_wr_vld && tlb_rw_index_vld) begin
+	                        tte_tag_ram[tlb_rw_index] <= tlb_wr_tte_tag;
+	                        tte_data_ram[tlb_rw_index] <= tlb_wr_tte_data;
+	                      end
+
+	                      if (tlb_rd_tag_vld && tlb_rw_index_vld) begin
+	                        if (tlb_wr_vld) begin
+	                          rd_tte_tag_g <= tlb_wr_tte_tag;
+	                        end else begin
+	                          rd_tte_tag_g <= tte_tag_ram[tlb_rw_index];
+	                        end
+	                      end
+
+	                      if (tlb_rd_data_vld && tlb_rw_index_vld) begin
+	                        if (tlb_wr_vld) begin
+	                          rd_tte_data_g <= tlb_wr_tte_data;
+	                        end else begin
+	                          rd_tte_data_g <= tte_data_ram[tlb_rw_index];
+	                        end
+	                      end
 	                    end
 	                  end
 	                endmodule
@@ -713,7 +828,10 @@ module RHDL
               text = ensure_lsu_imiss_ack_staging(text)
             when 'lsu.v'
               text = ensure_lsu_imiss_ack_wiring(text)
+            when 'bw_r_irf.v'
+              text = preprocess_irf_source_variants(text)
             when 'bw_r_irf_register.v'
+              text = preprocess_irf_source_variants(text)
               text = ensure_verilator_public_flat_irf_registers(text)
             when 'sparc_ifu_milfsm.v'
               text.gsub!(/`CMP_CLK_PERIOD/, '1333')
@@ -732,7 +850,14 @@ module RHDL
             when 'lsu_dc_parity_gen.v'
               text.sub!(
                 /reg\s+\[NUM\s*-\s*1\s*:\s*0\]\s+parity\b.*?assign\s+parity_out\[NUM\s*-\s*1\s*:\s*0\]\s*=\s*parity\[NUM\s*-\s*1\s*:\s*0\]\s*;\s*/m,
-                "assign parity_out[15:0] = #{bytewise_parity_concat(input_signal: 'data_in', groups: 16, group_width: 8)};\n"
+                <<~VERILOG
+                  genvar parity_idx;
+                  generate
+                    for (parity_idx = 0; parity_idx < NUM; parity_idx = parity_idx + 1) begin : rhdl_parity_gen
+                      assign parity_out[parity_idx] = ^data_in[(WIDTH * (parity_idx + 1)) - 1:WIDTH * parity_idx];
+                    end
+                  endgenerate
+                VERILOG
               )
             when 'sparc_ffu_ctl_visctl.v'
               text.gsub!(/\blogic\b/, 'logic_op')
@@ -892,6 +1017,50 @@ module RHDL
             text
           end
 
+          def preprocess_irf_source_variants(text)
+            defines = {
+              'FPGA_SYN' => true,
+              'FPGA_SYN_1THREAD' => false,
+              'FPGA_SYN_SAVE_BRAM' => false,
+              'FPGA_SYN_ALTERA' => false
+            }
+            frames = []
+            output = []
+
+            text.each_line do |line|
+              stripped = line.lstrip
+              current_active = frames.all? { |frame| frame[:active] }
+
+              case stripped
+              when /\A`define\s+([A-Za-z_][A-Za-z0-9_]*)/
+                defines[Regexp.last_match(1)] = true if current_active
+              when /\A`ifdef\s+([A-Za-z_][A-Za-z0-9_]*)/
+                name = Regexp.last_match(1)
+                cond = !!defines[name]
+                frames << { parent_active: current_active, cond_true: cond, active: current_active && cond }
+              when /\A`ifndef\s+([A-Za-z_][A-Za-z0-9_]*)/
+                name = Regexp.last_match(1)
+                cond = !defines[name]
+                frames << { parent_active: current_active, cond_true: cond, active: current_active && cond }
+              when /\A`else\b/
+                raise ArgumentError, 'unexpected `else without matching `ifdef in IRF preprocessing' if frames.empty?
+
+                frame = frames.last
+                frame[:active] = frame[:parent_active] && !frame[:cond_true]
+              when /\A`endif\b/
+                raise ArgumentError, 'unexpected `endif without matching `ifdef in IRF preprocessing' if frames.empty?
+
+                frames.pop
+              else
+                output << line if current_active
+              end
+            end
+
+            raise ArgumentError, 'unbalanced preprocessor directives in IRF preprocessing' unless frames.empty?
+
+            output.join
+          end
+
           def priority_encoder_chain(width:, input_signal:, output_width:)
             expr = "#{output_width}'d0"
 
@@ -1007,6 +1176,69 @@ module RHDL
             JSON.parse(File.read(report_path))
           rescue JSON::ParserError
             {}
+          end
+
+          def emit_normalized_core_mlir!(report_path:, diagnostics:)
+            normalized_mlir_path = File.join(output_dir, '.mixed_import', "#{top}.normalized.core.mlir")
+            FileUtils.mkdir_p(File.dirname(normalized_mlir_path))
+
+            emit_progress("emit normalized core MLIR: #{normalized_mlir_path}")
+            stdout, stderr, status = Open3.capture3(
+              RbConfig.ruby,
+              '-Ilib',
+              '-I.',
+              '-e',
+              normalized_core_mlir_script,
+              output_dir,
+              top_constant_name_for_loader,
+              top,
+              normalized_mlir_path,
+              chdir: repo_root
+            )
+
+            unless status.success? && File.file?(normalized_mlir_path)
+              diagnostics << 'Unable to emit normalized SPARC64 core MLIR from raised tree'
+              diagnostics.concat(stdout.to_s.lines.map(&:strip).reject(&:empty?).map { |line| "[normalized-core stdout] #{line}" })
+              diagnostics.concat(stderr.to_s.lines.map(&:strip).reject(&:empty?).map { |line| "[normalized-core stderr] #{line}" })
+              return nil
+            end
+
+            report = read_report(report_path)
+            report['artifacts'] ||= {}
+            report['artifacts']['normalized_core_mlir_path'] = normalized_mlir_path
+            File.write(report_path, JSON.pretty_generate(report))
+            normalized_mlir_path
+          end
+
+          def emit_normalized_core_mlir?
+            top.to_s == 's1_top'
+          end
+
+          def normalized_core_mlir_script
+            @normalized_core_mlir_script ||= <<~RUBY
+              require 'rhdl/codegen'
+              require_relative #{File.expand_path('../integration/import_loader', __dir__).inspect}
+
+              import_dir = File.expand_path(ARGV.fetch(0))
+              top_constant = ARGV.fetch(1)
+              top_name = ARGV.fetch(2)
+              out_path = File.expand_path(ARGV.fetch(3))
+
+              component = RHDL::Examples::SPARC64::Integration::ImportLoader.load_component_class(
+                top: top_constant,
+                import_dir: import_dir
+              )
+              modules = component.to_flat_circt_nodes(top_name: top_name)
+              File.write(out_path, RHDL::Codegen::CIRCT::MLIR.generate(modules))
+            RUBY
+          end
+
+          def top_constant_name_for_loader
+            top.split('_').map { |segment| segment.empty? ? segment : "#{segment[0].upcase}#{segment[1..]}" }.join
+          end
+
+          def repo_root
+            @repo_root ||= File.expand_path('../../../..', __dir__)
           end
 
           def remap_output_layout(files_written:, module_source_relpaths:, diagnostics:)

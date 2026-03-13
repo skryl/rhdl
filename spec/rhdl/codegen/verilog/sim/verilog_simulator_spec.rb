@@ -46,4 +46,49 @@ RSpec.describe RHDL::Codegen::Verilog::VerilogSimulator do
       end
     end
   end
+
+  describe '#compile_verilator' do
+    it 'adds the generated wrapper directory to the Verilator CFLAGS include path' do
+      Dir.mktmpdir('rhdl_verilog_simulator') do |dir|
+        simulator = described_class.new(
+          backend: :verilator,
+          build_dir: dir,
+          library_basename: 'gameboy_sim_main',
+          top_module: 'gameboy',
+          verilator_prefix: 'Vgameboy'
+        )
+        simulator.prepare_build_dirs!
+
+        wrapper_dir = File.join(dir, 'generated_wrapper')
+        FileUtils.mkdir_p(wrapper_dir)
+        wrapper_file = File.join(wrapper_dir, 'sim_wrapper.cpp')
+        source_file = File.join(dir, 'gameboy.v')
+        log_file = File.join(dir, 'build.log')
+        File.write(wrapper_file, '// wrapper')
+        File.write(source_file, 'module gameboy; endmodule')
+
+        captured_verilate = nil
+        allow(simulator).to receive(:system) do |*args, **kwargs|
+          if args.first == 'verilator'
+            captured_verilate = args
+            true
+          else
+            true
+          end
+        end
+        allow(simulator).to receive(:ensure_verilator_library_fresh).and_return(true)
+
+        simulator.send(
+          :compile_verilator,
+          verilog_file: source_file,
+          wrapper_file: wrapper_file,
+          log_file: log_file
+        )
+
+        cflags_index = captured_verilate.index('-CFLAGS')
+        expect(cflags_index).not_to be_nil
+        expect(captured_verilate[cflags_index + 1]).to include("-I#{wrapper_dir}")
+      end
+    end
+  end
 end

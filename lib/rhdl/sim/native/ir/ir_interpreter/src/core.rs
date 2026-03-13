@@ -1427,11 +1427,14 @@ impl CoreSimulator {
                 base_val.slice(*low, *width)
             }
             ExprDef::Concat { parts, width } => {
-                let values = parts.iter()
-                    .map(|part| (self.eval_expr_runtime(part), Self::runtime_expr_width(part, &self.widths, &self.name_to_idx)))
-                    .collect::<Vec<_>>();
-                let refs = values.iter().map(|(value, part_width)| (value, *part_width)).collect::<Vec<_>>();
-                RuntimeValue::concat(&refs, *width)
+                let mut result = RuntimeValue::zero(*width);
+                for part in parts {
+                    let part_width = Self::runtime_expr_width(part, &self.widths, &self.name_to_idx);
+                    let value = self.eval_expr_runtime(part);
+                    result = result.shl(part_width, *width);
+                    result = result.bitor(&value.mask(part_width), *width);
+                }
+                result.mask(*width)
             }
             ExprDef::Resize { expr, width } => self.eval_expr_runtime(expr).resize(*width),
             ExprDef::MemRead { memory, addr, width } => {

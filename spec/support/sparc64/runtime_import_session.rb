@@ -301,6 +301,9 @@ module Sparc64UnitSupport
 
       clear_existing_generated_component_classes!(files)
 
+      class_names_by_path = files.each_with_object({}) do |path, acc|
+        acc[path] = generated_class_name_for_path(path)
+      end
       pending = files
       last_errors = {}
 
@@ -313,6 +316,7 @@ module Sparc64UnitSupport
             require path
             progressed = true
           rescue NameError => e
+            remove_component_constant(class_names_by_path[path]) if class_names_by_path[path]
             still_pending << path
             last_errors[path] = e
           end
@@ -328,6 +332,10 @@ module Sparc64UnitSupport
 
         pending = still_pending
       end
+    end
+
+    def generated_class_name_for_path(path)
+      File.read(path)[/^\s*class\s+([A-Za-z_][A-Za-z0-9_:]*)\s*</, 1]
     end
 
     def clear_existing_generated_component_classes!(files)

@@ -203,6 +203,140 @@ RSpec.describe RHDL::Examples::GameBoy::VerilogRunner do
     end
   end
 
+  describe '#load_shared_library' do
+    it 'requires the shared runner ABI from the loaded library' do
+      runner = described_class.allocate
+      allow(runner).to receive(:abi_signal_widths_by_name).and_return({ 'reset' => 1 })
+      allow(runner).to receive(:abi_signal_widths_by_idx).and_return([1])
+
+      runtime = instance_double(
+        RHDL::Sim::Native::ABI::Simulator,
+        runner_supported?: false,
+        close: true
+      )
+
+      expect(RHDL::Sim::Native::Verilog::Verilator::Runtime).to receive(:open).with(
+        lib_path: '/tmp/libgameboy_verilator.dylib',
+        signal_widths_by_name: { 'reset' => 1 },
+        signal_widths_by_idx: [1],
+        backend_label: 'Game Boy Verilator'
+      ).and_return(runtime)
+      expect(runtime).to receive(:close)
+
+      expect do
+        runner.send(:load_shared_library, '/tmp/libgameboy_verilator.dylib')
+      end.to raise_error(RuntimeError, /runner ABI/)
+    end
+
+    it 'rejects a shared library with the wrong runner kind' do
+      runner = described_class.allocate
+      allow(runner).to receive(:abi_signal_widths_by_name).and_return({ 'reset' => 1 })
+      allow(runner).to receive(:abi_signal_widths_by_idx).and_return([1])
+
+      runtime = instance_double(
+        RHDL::Sim::Native::ABI::Simulator,
+        runner_supported?: true,
+        runner_kind: :apple2,
+        raw_context: Object.new,
+        close: true
+      )
+
+      expect(RHDL::Sim::Native::Verilog::Verilator::Runtime).to receive(:open).with(
+        lib_path: '/tmp/libgameboy_verilator.dylib',
+        signal_widths_by_name: { 'reset' => 1 },
+        signal_widths_by_idx: [1],
+        backend_label: 'Game Boy Verilator'
+      ).and_return(runtime)
+      expect(runtime).to receive(:close)
+
+      expect do
+        runner.send(:load_shared_library, '/tmp/libgameboy_verilator.dylib')
+      end.to raise_error(RuntimeError, /expected :gameboy/i)
+    end
+  end
+
+  describe 'ABI signal width metadata' do
+    it 'derives runtime widths from the ABI alias tables' do
+      runner = described_class.allocate
+      runner.instance_variable_set(:@input_port_aliases, { 'reset' => 'reset', 'joystick' => 'joystick' })
+      runner.instance_variable_set(:@output_port_aliases, { 'joystick' => 'joystick', 'lcd_on' => 'lcd_on' })
+      runner.instance_variable_set(:@component_port_widths, { 'reset' => 1, 'joystick' => 8, 'lcd_on' => 1 })
+
+      expect(runner.send(:abi_signal_widths_by_name)).to eq(
+        'reset' => 1,
+        'joystick' => 8,
+        'lcd_on' => 1
+      )
+      expect(runner.send(:abi_signal_widths_by_idx)).to eq([1, 8, 1])
+    end
+  end
+
+  describe '#debug_state' do
+    it 'reports imported video scroll and lcd debug fields through the shared helper' do
+      allow(runner).to receive(:verilator_peek) do |name|
+        {
+          'video_lcd_on_internal' => 1,
+          'video_lcd_clkena_internal' => 0,
+          'video_lcd_vsync_internal' => 1,
+          'boot_rom_enabled_internal' => 1,
+          'video_lcdc_internal' => 0x91,
+          'video_scy_internal' => 99,
+          'video_scx_internal' => 0,
+          'video_h_cnt_internal' => 167,
+          'video_v_cnt_internal' => 47
+        }.fetch(name, 0)
+      end
+      runner.instance_variable_set(:@frame_count, 3)
+
+      expect(runner.debug_state).to eq(
+        lcd_on: 1,
+        lcd_clkena: 0,
+        lcd_vsync: 1,
+        frame_count: 3,
+        gb_core_boot_rom_enabled: 1,
+        gb_core_cpu_pc: 0,
+        gb_core_cpu_addr: 0,
+        gb_core_cpu_di: 0,
+        gb_core_cpu_do: 0,
+        gb_core_cpu_rd_n: 0,
+        gb_core_cpu_wr_n: 0,
+        gb_core_cpu_m1_n: 0,
+        gb_core_cpu_tstate: 0,
+        gb_core_cpu_mcycle: 0,
+        video_lcdc: 0x91,
+        video_scy: 99,
+        video_scx: 0,
+        video_h_cnt: 167,
+        video_v_cnt: 47
+      )
+    end
+  end
+
+  describe '#close' do
+    it 'destroys the native simulation context and clears retained state' do
+      destroyed = []
+      lib = Object.new
+      def lib.close; true; end
+      destroy_fn = double('destroy_fn')
+      expect(destroy_fn).to receive(:call).with(:ctx) { destroyed << :ctx }
+
+      runner.instance_variable_set(:@sim_ctx, :ctx)
+      runner.instance_variable_set(:@sim_destroy, destroy_fn)
+      runner.instance_variable_set(:@lib, lib)
+      runner.instance_variable_set(:@rom, [1, 2, 3])
+      runner.instance_variable_set(:@vram, [4, 5, 6])
+      runner.instance_variable_set(:@framebuffer, [[0]])
+      runner.instance_variable_set(:@speaker, Object.new)
+
+      expect(runner.close).to be(true)
+      expect(destroyed).to eq([:ctx])
+      expect(runner.instance_variable_get(:@sim_ctx)).to be_nil
+      expect(runner.instance_variable_get(:@lib)).to be_nil
+      expect(runner.instance_variable_get(:@rom)).to be_nil
+      expect(runner.instance_variable_get(:@framebuffer)).to be_nil
+    end
+  end
+
   describe '#resolve_direct_verilog_source_plan' do
     it 'uses normalized imported verilog and builds a generated wrapper top' do
       Dir.mktmpdir('rhdl_gb_direct_verilog') do |dir|
@@ -251,6 +385,8 @@ RSpec.describe RHDL::Examples::GameBoy::VerilogRunner do
         expect(plan[:wrapper_source]).to include(".serial_data_in(1'b1)")
         expect(plan[:wrapper_source]).to include(".increaseSSHeaderCount(1'b0)")
         expect(plan[:wrapper_source]).to include('module gameboy')
+        expect(plan[:wrapper_source]).to include('always @(posedge clk_sys) begin')
+        expect(plan[:wrapper_source]).not_to include('always @(posedge clk_sys or posedge reset) begin')
         expect(plan[:port_declarations]).to include(
           include(direction: :in, name: 'boot_rom_do', width: 8),
           include(direction: :out, name: 'lcd_vsync', width: 1)
@@ -310,6 +446,8 @@ RSpec.describe RHDL::Examples::GameBoy::VerilogRunner do
         expect(plan[:wrapper_source]).to include(".gg_reset(1'b0)")
         expect(plan[:wrapper_source]).to include(".serial_data_in(1'b1)")
         expect(plan[:wrapper_source]).to include(".increaseSSHeaderCount(1'b0)")
+        expect(plan[:wrapper_source]).to include('always @(posedge clk_sys) begin')
+        expect(plan[:wrapper_source]).not_to include('always @(posedge clk_sys or posedge reset) begin')
       end
     end
 
@@ -364,6 +502,183 @@ RSpec.describe RHDL::Examples::GameBoy::VerilogRunner do
         expect(plan[:top_module_name]).to eq('gameboy')
         expect(plan[:support_verilog_paths]).to include(speedcontrol)
         expect(plan[:wrapper_source]).to include('module gameboy')
+      end
+    end
+
+    it 'uses a raw gameboy top directly when the Verilog tree already provides it' do
+      Dir.mktmpdir('rhdl_gb_direct_raw_gameboy_top') do |dir|
+        top_file = File.join(dir, 'gameboy.v')
+        File.write(
+          top_file,
+          <<~VERILOG
+            module gameboy(
+              input wire clk_sys,
+              input wire reset,
+              input wire [7:0] joystick,
+              input wire is_gbc,
+              input wire is_sgb,
+              input wire [7:0] cart_do,
+              output wire [14:0] ext_bus_addr,
+              output wire ext_bus_a15,
+              output wire cart_rd,
+              output wire cart_wr,
+              output wire [7:0] cart_di,
+              output wire [15:0] audio_l,
+              output wire [15:0] audio_r,
+              output wire lcd_clkena,
+              output wire [14:0] lcd_data,
+              output wire [1:0] lcd_data_gb,
+              output wire [1:0] lcd_mode,
+              output wire lcd_on,
+              output wire lcd_vsync,
+              input wire [7:0] boot_rom_do,
+              output wire [7:0] boot_rom_addr
+            );
+              assign ext_bus_addr = 15'd0;
+              assign ext_bus_a15 = 1'b0;
+              assign cart_rd = 1'b0;
+              assign cart_wr = 1'b0;
+              assign cart_di = 8'd0;
+              assign audio_l = 16'd0;
+              assign audio_r = 16'd0;
+              assign lcd_clkena = 1'b0;
+              assign lcd_data = 15'd0;
+              assign lcd_data_gb = 2'd0;
+              assign lcd_mode = 2'd0;
+              assign lcd_on = 1'b0;
+              assign lcd_vsync = 1'b0;
+              assign boot_rom_addr = 8'd0;
+            endmodule
+          VERILOG
+        )
+
+        plan = runner.send(
+          :resolve_direct_verilog_source_plan,
+          verilog_dir: dir,
+          top: 'Gameboy',
+          use_staged_verilog: false
+        )
+
+        expect(plan[:source_verilog_path]).to eq(top_file)
+        expect(plan[:core_verilog_path]).to eq(top_file)
+        expect(plan[:top_module_name]).to eq('gameboy')
+        expect(plan[:wrapper_source]).to be_nil
+        expect(plan[:port_declarations]).to include(
+          include(direction: :in, name: 'boot_rom_do', width: 8),
+          include(direction: :out, name: 'lcd_vsync', width: 1)
+        )
+      end
+    end
+  end
+
+  describe 'imported hdl_dir runtime source selection' do
+    it 'uses the staged direct-Verilog artifact by default for imported hdl_dir runs' do
+      Dir.mktmpdir('rhdl_gb_imported_hdl_staged_default') do |dir|
+        staged_root = File.join(dir, '.mixed_import', 'pure_verilog', 'rtl')
+        FileUtils.mkdir_p(staged_root)
+        staged_gb = File.join(staged_root, 'gb.v')
+        staged_entry = File.join(dir, '.mixed_import', 'pure_verilog_entry.v')
+        normalized = File.join(dir, '.mixed_import', 'gb.normalized.v')
+        File.write(staged_gb, minimal_gb_module)
+        File.write(staged_entry, "`include \"#{staged_gb}\"\n")
+        File.write(normalized, minimal_gb_module)
+        File.write(
+          File.join(dir, 'import_report.json'),
+          JSON.pretty_generate(
+            'import_wrapper' => { 'class_name' => 'Gameboy', 'module_name' => 'gameboy' },
+            'mixed_import' => {
+              'pure_verilog_entry_path' => staged_entry,
+              'top_file' => staged_gb,
+              'normalized_verilog_path' => normalized
+            }
+          )
+        )
+
+        allow_any_instance_of(described_class).to receive(:check_verilator_available!)
+        allow_any_instance_of(described_class).to receive(:build_verilator_simulation)
+        allow_any_instance_of(described_class).to receive(:load_boot_rom)
+
+        direct_runner = described_class.new(hdl_dir: dir, top: 'Gameboy')
+
+        expect(direct_runner.instance_variable_get(:@direct_verilog_source_plan)).to include(
+          source_verilog_path: staged_entry,
+          core_verilog_path: staged_gb
+        )
+      end
+    end
+
+    it 'uses the normalized artifact when explicitly requested for imported hdl_dir runs' do
+      Dir.mktmpdir('rhdl_gb_imported_hdl_normalized') do |dir|
+        staged_root = File.join(dir, '.mixed_import', 'pure_verilog', 'rtl')
+        FileUtils.mkdir_p(staged_root)
+        staged_gb = File.join(staged_root, 'gb.v')
+        staged_entry = File.join(dir, '.mixed_import', 'pure_verilog_entry.v')
+        normalized = File.join(dir, '.mixed_import', 'gb.normalized.v')
+        File.write(staged_gb, minimal_gb_module)
+        File.write(staged_entry, "`include \"#{staged_gb}\"\n")
+        File.write(normalized, minimal_gb_module)
+        File.write(
+          File.join(dir, 'import_report.json'),
+          JSON.pretty_generate(
+            'import_wrapper' => { 'class_name' => 'Gameboy', 'module_name' => 'gameboy' },
+            'mixed_import' => {
+              'pure_verilog_entry_path' => staged_entry,
+              'top_file' => staged_gb,
+              'normalized_verilog_path' => normalized
+            }
+          )
+        )
+
+        allow_any_instance_of(described_class).to receive(:check_verilator_available!)
+        allow_any_instance_of(described_class).to receive(:build_verilator_simulation)
+        allow_any_instance_of(described_class).to receive(:load_boot_rom)
+
+        direct_runner = described_class.new(
+          hdl_dir: dir,
+          top: 'Gameboy',
+          use_staged_verilog: false,
+          use_normalized_verilog: true
+        )
+
+        expect(direct_runner.instance_variable_get(:@direct_verilog_source_plan)).to include(
+          source_verilog_path: normalized,
+          core_verilog_path: normalized
+        )
+      end
+    end
+
+    it 'uses the RHDL component export when explicitly requested for imported hdl_dir runs' do
+      Dir.mktmpdir('rhdl_gb_imported_hdl_rhdl') do |dir|
+        File.write(
+          File.join(dir, 'import_report.json'),
+          JSON.pretty_generate(
+            'import_wrapper' => { 'class_name' => 'Gameboy', 'module_name' => 'gameboy' },
+            'mixed_import' => { 'pure_verilog_entry_path' => File.join(dir, '.mixed_import', 'pure_verilog_entry.v') }
+          )
+        )
+
+        fake_component = Class.new do
+          def self.to_verilog; "module gameboy; endmodule\n"; end
+        end
+
+        allow_any_instance_of(described_class).to receive(:check_verilator_available!)
+        allow_any_instance_of(described_class).to receive(:build_verilator_simulation)
+        allow_any_instance_of(described_class).to receive(:load_boot_rom)
+        allow_any_instance_of(described_class).to receive(:resolve_component_class).and_return(fake_component)
+        allow_any_instance_of(described_class).to receive(:install_component_ports!)
+        allow_any_instance_of(described_class).to receive(:resolve_top_module_name).and_return('gameboy')
+        allow_any_instance_of(described_class).to receive(:build_input_port_aliases).and_return({})
+        allow_any_instance_of(described_class).to receive(:build_output_port_aliases).and_return({})
+        allow_any_instance_of(described_class).to receive(:auto_load_boot_rom?).and_return(false)
+
+        rhdl_runner = described_class.new(
+          hdl_dir: dir,
+          top: 'Gameboy',
+          use_rhdl_source: true
+        )
+
+        expect(rhdl_runner.instance_variable_get(:@direct_verilog_source_plan)).to be_nil
+        expect(rhdl_runner.instance_variable_get(:@component_class)).to eq(fake_component)
       end
     end
   end
@@ -492,7 +807,7 @@ RSpec.describe RHDL::Examples::GameBoy::VerilogRunner do
   describe '#create_cpp_wrapper' do
     it 'keeps a delayed address pipeline in the native cartridge shim' do
       Dir.mktmpdir('rhdl_gb_cpp_wrapper') do |dir|
-        header = File.join(dir, 'sim_wrapper.h')
+        header = File.join(dir, 'sim_wrapper_custom.h')
         cpp = File.join(dir, 'sim_wrapper.cpp')
 
         runner.instance_variable_set(:@verilator_prefix, 'Vgb')
@@ -506,6 +821,7 @@ RSpec.describe RHDL::Examples::GameBoy::VerilogRunner do
         runner.send(:create_cpp_wrapper, cpp, header)
 
         source = File.read(cpp)
+        expect(source).to include('#include "sim_wrapper_custom.h"')
         expect(source).to include('ctx->cart_read_pipeline[0] = ctx->cart_last_full_addr;')
         expect(source).to include('ctx->cart_read_valid[0] = ctx->cart_last_rd;')
         expect(source).to include('ctx->cart_do_latched = cart_read_byte(ctx, ctx->cart_read_pipeline[5]);')
@@ -535,7 +851,7 @@ RSpec.describe RHDL::Examples::GameBoy::VerilogRunner do
         runner.send(:create_cpp_wrapper, cpp, header)
 
         source = File.read(cpp)
-        expect(source).to include('return ctx->dut->rootp->gameboy__DOT__gb_core__DOT__vram0__DOT__altsyncram_component__DOT__mem[addr];')
+        expect(source).to include('return ctx->dut->rootp->gameboy__DOT__gb_core__DOT__vram0__DOT__altsyncram_component__DOT__mem[addr & 0x1FFFu];')
       end
     end
   end
@@ -671,7 +987,43 @@ RSpec.describe RHDL::Examples::GameBoy::VerilogRunner do
       expect(lines).to include('strcmp(name, "video_irq_internal") == 0) return ctx->dut->rootp->gameboy__DOT__gb_core__DOT__video_irq;')
       expect(lines).to include('strcmp(name, "video_vblank_irq_internal") == 0) return ctx->dut->rootp->gameboy__DOT__gb_core__DOT__vblank_irq;')
       expect(lines).to include('strcmp(name, "sel_ff50_internal") == 0) return ctx->dut->rootp->gameboy__DOT__gb_core__DOT__sel_FF50;')
+      expect(lines).to include('strcmp(name, "video_lcdc_internal") == 0) return ctx->dut->rootp->gameboy__DOT__gb_core__DOT__video__DOT__lcdc;')
+      expect(lines).to include('strcmp(name, "video_scy_internal") == 0) return ctx->dut->rootp->gameboy__DOT__gb_core__DOT__video__DOT__scy;')
+      expect(lines).to include('strcmp(name, "video_scx_internal") == 0) return ctx->dut->rootp->gameboy__DOT__gb_core__DOT__video__DOT__scx;')
+      expect(lines).to include('strcmp(name, "video_h_cnt_internal") == 0) return ctx->dut->rootp->gameboy__DOT__gb_core__DOT__video__DOT__h_cnt;')
+      expect(lines).to include('strcmp(name, "video_v_cnt_internal") == 0) return ctx->dut->rootp->gameboy__DOT__gb_core__DOT__video__DOT__v_cnt;')
       expect(lines).to include('strcmp(name, "ce_internal") == 0) return ctx->dut->rootp->gameboy__DOT__ce;')
+      expect(lines).to include('strcmp(name, "boot_upload_active_internal") == 0) return ctx->dut->rootp->gameboy__DOT__boot_upload_active;')
+    end
+
+    it 'uses wrapped gb_core internals for raw lowered gameboy tops' do
+      runner.instance_variable_set(:@top_module_name, 'gameboy')
+      runner.instance_variable_set(
+        :@direct_verilog_source_plan,
+        {
+          resolved_root: '/tmp/reexport',
+          source_verilog_path: '/tmp/reexport/gameboy.v'
+        }
+      )
+      runner.instance_variable_set(:@output_port_aliases, {})
+
+      lines = runner.send(:c_peek_dispatch_lines)
+
+      expect(lines).to include('strcmp(name, "cpu_pc_internal") == 0) return ctx->last_fetch_addr;')
+      expect(lines).to include('strcmp(name, "cpu_addr_internal") == 0) return ctx->dut->rootp->gameboy__DOT__gb_core__DOT___md_swizz_a_out;')
+      expect(lines).to include('strcmp(name, "boot_rom_enabled_internal") == 0) return ctx->dut->rootp->gameboy__DOT__gb_core__DOT__rt_tmp_22_1;')
+      expect(lines).to include('strcmp(name, "cpu_do_internal") == 0) return ctx->dut->rootp->gameboy__DOT__gb_core__DOT___cpu_DO;')
+      expect(lines).to include('strcmp(name, "cpu_wr_n_internal") == 0) return ctx->dut->rootp->gameboy__DOT__gb_core__DOT___cpu_WR_n;')
+      expect(lines).to include('strcmp(name, "savestate_reset_out_internal") == 0) return ctx->dut->rootp->gameboy__DOT__gb_core__DOT___gb_savestates_reset_out;')
+      expect(lines).to include('strcmp(name, "video_lcd_on_internal") == 0) return ctx->dut->rootp->gameboy__DOT__gb_core__DOT__video__DOT__lcd_on;')
+      expect(lines).to include('strcmp(name, "video_lcdc_internal") == 0) return ctx->dut->rootp->gameboy__DOT__gb_core__DOT__video__DOT__lcdc;')
+      expect(lines).to include('strcmp(name, "video_scy_internal") == 0) return ctx->dut->rootp->gameboy__DOT__gb_core__DOT__video__DOT__scy;')
+      expect(lines).to include('strcmp(name, "video_scx_internal") == 0) return ctx->dut->rootp->gameboy__DOT__gb_core__DOT__video__DOT__scx;')
+      expect(lines).to include('strcmp(name, "video_h_cnt_internal") == 0) return ctx->dut->rootp->gameboy__DOT__gb_core__DOT__video__DOT__h_cnt;')
+      expect(lines).to include('strcmp(name, "video_v_cnt_internal") == 0) return ctx->dut->rootp->gameboy__DOT__gb_core__DOT__video__DOT__v_cnt;')
+      expect(lines).to include('strcmp(name, "ce_internal") == 0) return ctx->dut->rootp->gameboy__DOT___speed_ctrl_ce;')
+      expect(lines).to include('strcmp(name, "ce_n_internal") == 0) return ctx->dut->rootp->gameboy__DOT___speed_ctrl_ce_n;')
+      expect(lines).to include('strcmp(name, "ce_2x_internal") == 0) return ctx->dut->rootp->gameboy__DOT___speed_ctrl_ce_2x;')
       expect(lines).to include('strcmp(name, "boot_upload_active_internal") == 0) return ctx->dut->rootp->gameboy__DOT__boot_upload_active;')
     end
 
@@ -730,6 +1082,23 @@ RSpec.describe RHDL::Examples::GameBoy::VerilogRunner do
       expect(lines).to include('write_active = (ctx->dut->rootp->gameboy__DOT__gb_core__DOT__cpu_wr_n == 0u);')
       expect(lines).to include('write_addr = ctx->dut->rootp->gameboy__DOT__gb_core__DOT__cpu_addr;')
       expect(lines).to include('write_data = ctx->dut->rootp->gameboy__DOT__gb_core__DOT__cpu_do & 0xFFu;')
+    end
+
+    it 'uses wrapped gb_core write probes for raw lowered gameboy tops' do
+      runner.instance_variable_set(:@top_module_name, 'gameboy')
+      runner.instance_variable_set(
+        :@direct_verilog_source_plan,
+        {
+          resolved_root: '/tmp/reexport',
+          source_verilog_path: '/tmp/reexport/gameboy.v'
+        }
+      )
+
+      lines = runner.send(:c_cpu_write_watch_lines, indent: '  ')
+
+      expect(lines).to include('write_active = (ctx->dut->rootp->gameboy__DOT__gb_core__DOT___cpu_WR_n == 0u);')
+      expect(lines).to include('write_addr = ctx->dut->rootp->gameboy__DOT__gb_core__DOT___md_swizz_a_out;')
+      expect(lines).to include('write_data = ctx->dut->rootp->gameboy__DOT__gb_core__DOT___cpu_DO & 0xFFu;')
     end
   end
 

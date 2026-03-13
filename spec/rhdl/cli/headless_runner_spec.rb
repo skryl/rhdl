@@ -327,7 +327,8 @@ RSpec.describe 'Headless Runners', :slow do
 
         expect(RHDL::Examples::GameBoy::ArcilatorRunner).to have_received(:new).with(
           hdl_dir: '/tmp/gameboy_import',
-          top: nil
+          top: nil,
+          jit: false
         )
         expect(runner.mode).to eq(:circt)
         expect(runner.backend).to be_nil
@@ -362,6 +363,7 @@ RSpec.describe 'Headless Runners', :slow do
           'GameBoyBackend',
           load_boot_rom: nil,
           read_framebuffer: [[1, 2], [3, 4]],
+          debug_state: { video_scy: 99, frame_count: 3 },
           frame_count: 7,
           close: true
         )
@@ -371,6 +373,7 @@ RSpec.describe 'Headless Runners', :slow do
 
         expect(runner.load_boot_rom).to be(true)
         expect(runner.read_framebuffer).to eq([[1, 2], [3, 4]])
+        expect(runner.debug_state).to eq(video_scy: 99, frame_count: 3)
         expect(runner.frame_count).to eq(7)
         expect(runner.close).to be(true)
       end

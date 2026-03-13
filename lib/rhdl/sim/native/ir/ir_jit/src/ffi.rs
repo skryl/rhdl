@@ -12,7 +12,8 @@ use std::slice;
 
 use crate::core::CoreSimulator;
 use crate::extensions::{
-    Apple2Extension, Cpu8BitExtension, GameBoyExtension, Mos6502Extension, RiscvExtension,
+    Ao486Extension, Apple2Extension, Cpu8BitExtension, GameBoyExtension, Mos6502Extension,
+    RiscvExtension, Sparc64Extension,
 };
 use crate::signal_value::{SignalValue, SignalValue128};
 use crate::vcd::{TraceMode, VcdTracer};
@@ -24,11 +25,13 @@ use crate::vcd::{TraceMode, VcdTracer};
 /// Opaque simulator context passed to all FFI functions
 pub struct JitSimContext {
     pub core: CoreSimulator,
+    pub ao486: Option<Ao486Extension>,
     pub apple2: Option<Apple2Extension>,
     pub cpu8bit: Option<Cpu8BitExtension>,
     pub gameboy: Option<GameBoyExtension>,
     pub mos6502: Option<Mos6502Extension>,
     pub riscv: Option<RiscvExtension>,
+    pub sparc64: Option<Sparc64Extension>,
     pub tracer: VcdTracer,
 }
 
@@ -68,6 +71,31 @@ impl JitSimContext {
             None
         };
 
+        let ao486 = if riscv.is_none()
+            && apple2.is_none()
+            && gameboy.is_none()
+            && cpu8bit.is_none()
+            && mos6502.is_none()
+            && Ao486Extension::is_ao486_ir(&core.name_to_idx)
+        {
+            Some(Ao486Extension::new(&core))
+        } else {
+            None
+        };
+
+        let sparc64 = if riscv.is_none()
+            && apple2.is_none()
+            && gameboy.is_none()
+            && cpu8bit.is_none()
+            && mos6502.is_none()
+            && ao486.is_none()
+            && Sparc64Extension::is_sparc64_ir(&core.name_to_idx)
+        {
+            Some(Sparc64Extension::new(&core))
+        } else {
+            None
+        };
+
         let signal_count = core.signal_count();
         let mut signal_names = vec![String::new(); signal_count];
         for (name, &idx) in core.name_to_idx.iter() {
@@ -89,11 +117,13 @@ impl JitSimContext {
 
         Ok(Self {
             core,
+            ao486,
             apple2,
             cpu8bit,
             gameboy,
             mos6502,
             riscv,
+            sparc64,
             tracer,
         })
     }
@@ -115,6 +145,10 @@ pub const RUNNER_KIND_GAMEBOY: c_int = 3;
 pub const RUNNER_KIND_CPU8BIT: c_int = 4;
 /// RISC-V CPU extension
 pub const RUNNER_KIND_RISCV: c_int = 5;
+/// SPARC64 `s1_top` extension
+pub const RUNNER_KIND_SPARC64: c_int = 6;
+/// AO486 CPU-top extension
+pub const RUNNER_KIND_AO486: c_int = 7;
 
 pub const RUNNER_MEM_OP_LOAD: c_uint = 0;
 pub const RUNNER_MEM_OP_READ: c_uint = 1;
@@ -162,6 +196,18 @@ pub const RUNNER_PROBE_LCD_PREV_CLKENA: c_uint = 14;
 pub const RUNNER_PROBE_LCD_PREV_VSYNC: c_uint = 15;
 pub const RUNNER_PROBE_LCD_FRAME_COUNT: c_uint = 16;
 pub const RUNNER_PROBE_RISCV_UART_TX_LEN: c_uint = 17;
+pub const RUNNER_PROBE_AO486_LAST_IO_READ: c_uint = 18;
+pub const RUNNER_PROBE_AO486_LAST_IO_WRITE_META: c_uint = 19;
+pub const RUNNER_PROBE_AO486_LAST_IO_WRITE_DATA: c_uint = 20;
+pub const RUNNER_PROBE_AO486_LAST_IRQ_VECTOR: c_uint = 21;
+pub const RUNNER_PROBE_AO486_DOS_INT13_STATE: c_uint = 22;
+pub const RUNNER_PROBE_AO486_DOS_INT10_STATE: c_uint = 23;
+pub const RUNNER_PROBE_AO486_DOS_INT16_STATE: c_uint = 24;
+pub const RUNNER_PROBE_AO486_DOS_INT1A_STATE: c_uint = 25;
+pub const RUNNER_PROBE_AO486_DOS_INT13_BX: c_uint = 26;
+pub const RUNNER_PROBE_AO486_DOS_INT13_CX: c_uint = 27;
+pub const RUNNER_PROBE_AO486_DOS_INT13_DX: c_uint = 28;
+pub const RUNNER_PROBE_AO486_DOS_INT13_ES: c_uint = 29;
 
 #[repr(C)]
 pub struct RunnerCaps {
@@ -224,6 +270,10 @@ unsafe fn runner_kind_impl(ctx: *const JitSimContext) -> c_int {
         RUNNER_KIND_CPU8BIT
     } else if ctx.riscv.is_some() {
         RUNNER_KIND_RISCV
+    } else if ctx.ao486.is_some() {
+        RUNNER_KIND_AO486
+    } else if ctx.sparc64.is_some() {
+        RUNNER_KIND_SPARC64
     } else {
         RUNNER_KIND_NONE
     }
@@ -293,6 +343,20 @@ unsafe fn runner_load_main_impl(
 
     if let Some(ref mut riscv) = ctx.riscv {
         return riscv.load_main(bytes, offset, is_rom);
+    }
+
+    if let Some(ref mut ao486) = ctx.ao486 {
+        if is_rom {
+            return ao486.load_rom(bytes, offset);
+        }
+        return ao486.load_memory(bytes, offset);
+    }
+
+    if let Some(ref mut sparc64) = ctx.sparc64 {
+        if is_rom {
+            return sparc64.load_rom(bytes, offset);
+        }
+        return sparc64.load_memory(bytes, offset);
     }
 
     0
@@ -373,6 +437,16 @@ unsafe fn runner_read_main_impl(
         return riscv.read_main(start, out, mapped);
     }
 
+    if let Some(ref ao486) = ctx.ao486 {
+        let out = slice::from_raw_parts_mut(out_data, len);
+        return ao486.read_memory(start, out, mapped);
+    }
+
+    if let Some(ref sparc64) = ctx.sparc64 {
+        let out = slice::from_raw_parts_mut(out_data, len);
+        return sparc64.read_memory(start, out, mapped);
+    }
+
     0
 }
 
@@ -437,6 +511,14 @@ unsafe fn runner_write_main_impl(
         return riscv.write_main(start, bytes, mapped);
     }
 
+    if let Some(ref mut ao486) = ctx.ao486 {
+        return ao486.write_memory(start, bytes, mapped);
+    }
+
+    if let Some(ref mut sparc64) = ctx.sparc64 {
+        return sparc64.write_memory(start, bytes, mapped);
+    }
+
     0
 }
 
@@ -480,6 +562,16 @@ unsafe fn runner_read_rom_impl(
     if let Some(ref riscv) = ctx.riscv {
         let out = slice::from_raw_parts_mut(out_data, len);
         return riscv.read_rom(start, out);
+    }
+
+    if let Some(ref ao486) = ctx.ao486 {
+        let out = slice::from_raw_parts_mut(out_data, len);
+        return ao486.read_rom(start, out);
+    }
+
+    if let Some(ref sparc64) = ctx.sparc64 {
+        let out = slice::from_raw_parts_mut(out_data, len);
+        return sparc64.read_rom(start, out);
     }
 
     0
@@ -672,6 +764,10 @@ unsafe fn runner_read_disk_impl(
         let out = slice::from_raw_parts_mut(out_data, len);
         return riscv.read_disk(start, out);
     }
+    if let Some(ref ao486) = ctx.ao486 {
+        let out = slice::from_raw_parts_mut(out_data, len);
+        return ao486.read_disk(start, out);
+    }
     0
 }
 
@@ -688,6 +784,10 @@ unsafe fn runner_write_disk_impl(
     if let Some(ref mut riscv) = ctx.riscv {
         let bytes = slice::from_raw_parts(data, len);
         return riscv.write_disk(start, bytes);
+    }
+    if let Some(ref mut ao486) = ctx.ao486 {
+        let bytes = slice::from_raw_parts(data, len);
+        return ao486.write_disk(start, bytes);
     }
     0
 }
@@ -834,6 +934,25 @@ unsafe fn runner_run_impl(
         return 1;
     }
 
+    if let Some(ref mut ao486) = ctx.ao486 {
+        let result = ao486.run_cycles(&mut ctx.core, cycles, key_data, key_ready);
+        write_runner_run_result(
+            result_out,
+            result.text_dirty,
+            result.key_cleared,
+            result.cycles_run,
+            0,
+            0,
+        );
+        return 1;
+    }
+
+    if let Some(ref mut sparc64) = ctx.sparc64 {
+        let cycles_run = sparc64.run_cycles(&mut ctx.core, cycles);
+        write_runner_run_result(result_out, false, false, cycles_run, 0, 0);
+        return 1;
+    }
+
     for _ in 0..cycles {
         ctx.core.tick();
     }
@@ -857,6 +976,8 @@ pub unsafe extern "C" fn runner_get_caps(
         || kind == RUNNER_KIND_GAMEBOY
         || kind == RUNNER_KIND_CPU8BIT
         || kind == RUNNER_KIND_RISCV
+        || kind == RUNNER_KIND_AO486
+        || kind == RUNNER_KIND_SPARC64
     {
         mem_spaces |= bit(RUNNER_MEM_SPACE_MAIN) | bit(RUNNER_MEM_SPACE_ROM);
     }
@@ -866,10 +987,11 @@ pub unsafe extern "C" fn runner_get_caps(
             | bit(RUNNER_MEM_SPACE_ZPRAM)
             | bit(RUNNER_MEM_SPACE_FRAMEBUFFER);
     }
+    if kind == RUNNER_KIND_RISCV || kind == RUNNER_KIND_AO486 {
+        mem_spaces |= bit(RUNNER_MEM_SPACE_DISK);
+    }
     if kind == RUNNER_KIND_RISCV {
-        mem_spaces |= bit(RUNNER_MEM_SPACE_DISK)
-            | bit(RUNNER_MEM_SPACE_UART_TX)
-            | bit(RUNNER_MEM_SPACE_UART_RX);
+        mem_spaces |= bit(RUNNER_MEM_SPACE_UART_TX) | bit(RUNNER_MEM_SPACE_UART_RX);
     }
 
     let control_ops = bit(RUNNER_CONTROL_SET_RESET_VECTOR)
@@ -897,7 +1019,19 @@ pub unsafe extern "C" fn runner_get_caps(
         | bit(RUNNER_PROBE_LCD_PREV_CLKENA)
         | bit(RUNNER_PROBE_LCD_PREV_VSYNC)
         | bit(RUNNER_PROBE_LCD_FRAME_COUNT)
-        | bit(RUNNER_PROBE_RISCV_UART_TX_LEN);
+        | bit(RUNNER_PROBE_RISCV_UART_TX_LEN)
+        | bit(RUNNER_PROBE_AO486_LAST_IO_READ)
+        | bit(RUNNER_PROBE_AO486_LAST_IO_WRITE_META)
+        | bit(RUNNER_PROBE_AO486_LAST_IO_WRITE_DATA)
+        | bit(RUNNER_PROBE_AO486_LAST_IRQ_VECTOR)
+        | bit(RUNNER_PROBE_AO486_DOS_INT13_STATE)
+        | bit(RUNNER_PROBE_AO486_DOS_INT10_STATE)
+        | bit(RUNNER_PROBE_AO486_DOS_INT16_STATE)
+        | bit(RUNNER_PROBE_AO486_DOS_INT1A_STATE)
+        | bit(RUNNER_PROBE_AO486_DOS_INT13_BX)
+        | bit(RUNNER_PROBE_AO486_DOS_INT13_CX)
+        | bit(RUNNER_PROBE_AO486_DOS_INT13_DX)
+        | bit(RUNNER_PROBE_AO486_DOS_INT13_ES);
 
     *caps_out = RunnerCaps {
         kind,
@@ -1202,6 +1336,66 @@ pub unsafe extern "C" fn runner_probe(ctx: *const JitSimContext, op: c_uint, arg
             .riscv
             .as_ref()
             .map(|ext| ext.uart_tx_len() as u64)
+            .unwrap_or(0),
+        RUNNER_PROBE_AO486_LAST_IO_READ => ctx_ref
+            .ao486
+            .as_ref()
+            .map(|ext| ext.last_io_read_probe())
+            .unwrap_or(0),
+        RUNNER_PROBE_AO486_LAST_IO_WRITE_META => ctx_ref
+            .ao486
+            .as_ref()
+            .map(|ext| ext.last_io_write_meta_probe())
+            .unwrap_or(0),
+        RUNNER_PROBE_AO486_LAST_IO_WRITE_DATA => ctx_ref
+            .ao486
+            .as_ref()
+            .map(|ext| ext.last_io_write_data_probe())
+            .unwrap_or(0),
+        RUNNER_PROBE_AO486_LAST_IRQ_VECTOR => ctx_ref
+            .ao486
+            .as_ref()
+            .map(|ext| ext.last_irq_vector_probe())
+            .unwrap_or(0),
+        RUNNER_PROBE_AO486_DOS_INT13_STATE => ctx_ref
+            .ao486
+            .as_ref()
+            .map(|ext| ext.dos_int13_state_probe())
+            .unwrap_or(0),
+        RUNNER_PROBE_AO486_DOS_INT10_STATE => ctx_ref
+            .ao486
+            .as_ref()
+            .map(|ext| ext.dos_int10_state_probe())
+            .unwrap_or(0),
+        RUNNER_PROBE_AO486_DOS_INT16_STATE => ctx_ref
+            .ao486
+            .as_ref()
+            .map(|ext| ext.dos_int16_state_probe())
+            .unwrap_or(0),
+        RUNNER_PROBE_AO486_DOS_INT1A_STATE => ctx_ref
+            .ao486
+            .as_ref()
+            .map(|ext| ext.dos_int1a_state_probe())
+            .unwrap_or(0),
+        RUNNER_PROBE_AO486_DOS_INT13_BX => ctx_ref
+            .ao486
+            .as_ref()
+            .map(|ext| ext.dos_int13_bx_probe())
+            .unwrap_or(0),
+        RUNNER_PROBE_AO486_DOS_INT13_CX => ctx_ref
+            .ao486
+            .as_ref()
+            .map(|ext| ext.dos_int13_cx_probe())
+            .unwrap_or(0),
+        RUNNER_PROBE_AO486_DOS_INT13_DX => ctx_ref
+            .ao486
+            .as_ref()
+            .map(|ext| ext.dos_int13_dx_probe())
+            .unwrap_or(0),
+        RUNNER_PROBE_AO486_DOS_INT13_ES => ctx_ref
+            .ao486
+            .as_ref()
+            .map(|ext| ext.dos_int13_es_probe())
             .unwrap_or(0),
         _ => 0,
     }
@@ -1570,6 +1764,12 @@ unsafe fn ir_sim_reset(ctx: *mut JitSimContext) {
         if let Some(ref mut riscv) = ctx.riscv {
             riscv.reset_core(&mut ctx.core);
         }
+        if let Some(ref mut ao486) = ctx.ao486 {
+            ao486.reset_core(&mut ctx.core);
+        }
+        if let Some(ref mut sparc64) = ctx.sparc64 {
+            sparc64.reset_core(&mut ctx.core);
+        }
     }
 }
 
@@ -1744,6 +1944,30 @@ unsafe fn ir_sim_trace_take_live_vcd(ctx: *mut JitSimContext) -> *mut c_char {
     CString::new(chunk).unwrap().into_raw()
 }
 
+unsafe fn ir_sim_sparc64_wishbone_trace(ctx: *const JitSimContext) -> *mut c_char {
+    if ctx.is_null() {
+        return ptr::null_mut();
+    }
+    let text = (*ctx)
+        .sparc64
+        .as_ref()
+        .map(|ext| ext.trace_json())
+        .unwrap_or_else(|| "[]".to_string());
+    CString::new(text).unwrap().into_raw()
+}
+
+unsafe fn ir_sim_sparc64_unmapped_accesses(ctx: *const JitSimContext) -> *mut c_char {
+    if ctx.is_null() {
+        return ptr::null_mut();
+    }
+    let text = (*ctx)
+        .sparc64
+        .as_ref()
+        .map(|ext| ext.unmapped_accesses_json())
+        .unwrap_or_else(|| "[]".to_string());
+    CString::new(text).unwrap().into_raw()
+}
+
 /// Save VCD output to a file
 /// Returns 0 on success, -1 on error
 unsafe fn ir_sim_trace_save_vcd(
@@ -1878,6 +2102,8 @@ pub const SIM_BLOB_OUTPUT_NAMES: c_uint = 1;
 pub const SIM_BLOB_TRACE_TO_VCD: c_uint = 2;
 pub const SIM_BLOB_TRACE_TAKE_LIVE_VCD: c_uint = 3;
 pub const SIM_BLOB_GENERATED_CODE: c_uint = 4;
+pub const SIM_BLOB_SPARC64_WISHBONE_TRACE: c_uint = 5;
+pub const SIM_BLOB_SPARC64_UNMAPPED_ACCESSES: c_uint = 6;
 
 #[inline]
 unsafe fn write_out_ulong(out: *mut c_ulong, value: c_ulong) {
@@ -2228,6 +2454,12 @@ pub unsafe extern "C" fn sim_blob(
         SIM_BLOB_TRACE_TO_VCD => take_owned_c_string(ir_sim_trace_to_vcd(ctx as *const JitSimContext)),
         SIM_BLOB_TRACE_TAKE_LIVE_VCD => take_owned_c_string(ir_sim_trace_take_live_vcd(ctx)),
         SIM_BLOB_GENERATED_CODE => None,
+        SIM_BLOB_SPARC64_WISHBONE_TRACE => {
+            take_owned_c_string(ir_sim_sparc64_wishbone_trace(ctx as *const JitSimContext))
+        }
+        SIM_BLOB_SPARC64_UNMAPPED_ACCESSES => {
+            take_owned_c_string(ir_sim_sparc64_unmapped_accesses(ctx as *const JitSimContext))
+        }
         _ => None,
     };
 

@@ -43,6 +43,7 @@ module RHDL
             @values = {}
             @sanitized_cache = {}
             @value_widths = {}
+            @literal_values = {}
             @instance_output_tokens = build_instance_output_tokens
             @clock_values = {}
             @assigns_by_target = Hash.new { |h, k| h[k] = [] }
@@ -53,6 +54,7 @@ module RHDL
             @memory_tokens = {}
             @memory_by_name = {}
             @used_memories = Set.new
+            @async_memory_names = Set.new
             @resolving = Set.new
             @expr_values = {}
             @active_exprs = Set.new
@@ -68,6 +70,7 @@ module RHDL
             emit_instances
             emit_internal_assign_drivers
             emit_memory_write_ports
+            emit_async_memory_updates
             emit_output
             @lines << '}'
             @lines.join("\n")
@@ -88,6 +91,7 @@ module RHDL
           def build_memory_map
             @memory_by_name.clear
             @used_memories.clear
+            @async_memory_names.clear
             @mod.memories.each do |memory|
               @memory_by_name[memory.name.to_s] = memory
             end
@@ -183,6 +187,13 @@ module RHDL
             @mod.memories.each do |memory|
               next unless @used_memories.include?(memory.name.to_s)
 
+              if async_memory?(memory.name)
+                if memory_write_ports(memory.name).empty?
+                  @memory_tokens[memory.name.to_s] = emit_async_memory_initial_value(memory)
+                end
+                next
+              end
+
               token = memory_token(memory.name.to_s)
               @lines << "  #{token} = seq.firmem 0, 1, undefined, port_order : <#{memory.depth} x #{memory.width}>"
             end
@@ -193,6 +204,7 @@ module RHDL
               memory_name = write_port.memory.to_s
               memory = @memory_by_name[memory_name]
               next unless memory
+              next if async_memory?(memory_name)
 
               mem_token = memory_token(memory_name)
               addr_width = memory_addr_width(memory.depth)
@@ -214,6 +226,46 @@ module RHDL
 
               @lines << "  seq.firmem.write_port #{mem_token}[#{addr_value}] = #{data_value}, " \
                         "clock #{clock_value} enable #{enable_value} : <#{memory.depth} x #{memory.width}>"
+            end
+          end
+
+          def emit_async_memory_updates
+            @mod.memories.each do |memory|
+              next unless async_memory?(memory.name)
+
+              write_ports = memory_write_ports(memory.name)
+              next if write_ports.empty?
+
+              mem_token = memory_token(memory.name.to_s)
+              array_type = hw_array_type(memory.depth, memory.width)
+              current_value = mem_token
+
+              write_ports.each do |write_port|
+                addr_width = memory_addr_width(memory.depth)
+
+                addr_raw = emit_expr(write_port.addr)
+                addr_raw_width = write_port.addr.respond_to?(:width) ? write_port.addr.width : find_value_width(addr_raw)
+                addr_value = resize_value(addr_raw, addr_raw_width, addr_width)
+
+                data_raw = emit_expr(write_port.data)
+                data_raw_width = write_port.data.respond_to?(:width) ? write_port.data.width : find_value_width(data_raw)
+                data_value = resize_value(data_raw, data_raw_width, memory.width)
+
+                injected_value = fresh_token('mem_inject')
+                @lines << "  #{injected_value} = hw.array_inject #{current_value}[#{addr_value}], #{data_value} : #{array_type}, #{iwidth(addr_width)}"
+
+                enable_raw = emit_expr(write_port.enable)
+                enable_raw_width = write_port.enable.respond_to?(:width) ? write_port.enable.width : find_value_width(enable_raw)
+                enable_value = resize_value(enable_raw, enable_raw_width, 1)
+
+                next_value = fresh_token('mem_next')
+                @lines << "  #{next_value} = comb.mux #{enable_value}, #{injected_value}, #{current_value} : #{array_type}"
+                current_value = next_value
+              end
+
+              clock_name = default_memory_clock(memory.name.to_s)
+              clock_value = resolve_clock(clock_name)
+              @lines << "  #{mem_token} = seq.firreg #{current_value} clock #{clock_value} : #{array_type}"
             end
           end
 
@@ -454,7 +506,13 @@ module RHDL
             addr_raw_width = expr.addr.respond_to?(:width) ? expr.addr.width : find_value_width(addr_raw)
             addr_value = resize_value(addr_raw, addr_raw_width, addr_width)
 
-            clock_name = default_memory_clock(memory_name)
+            if async_memory?(memory_name)
+              read_value = fresh(memory.width)
+              @lines << "  #{read_value} = hw.array_get #{mem_token}[#{addr_value}] : #{hw_array_type(memory.depth, memory.width)}, #{iwidth(addr_width)}"
+              return resize_value(read_value, memory.width, expr.width)
+            end
+
+            clock_name = preferred_memory_read_clock(memory_name, expr.addr)
             clock_value = resolve_clock(clock_name)
             read_value = fresh(memory.width)
             @lines << "  #{read_value} = seq.firmem.read_port #{mem_token}[#{addr_value}], " \
@@ -480,6 +538,7 @@ module RHDL
 
             if node.is_a?(IR::MemoryRead)
               @used_memories << node.memory.to_s
+              @async_memory_names << node.memory.to_s
               collect_memory_reads(node.addr, visited)
             end
 
@@ -491,6 +550,36 @@ module RHDL
           def memory_token(name)
             key = name.to_s
             @memory_tokens[key] ||= "%#{sanitize(key)}"
+          end
+
+          def async_memory?(name)
+            @async_memory_names.include?(name.to_s)
+          end
+
+          def memory_write_ports(name)
+            @mod.write_ports.select { |port| port.memory.to_s == name.to_s }
+          end
+
+          def hw_array_type(depth, width)
+            "!hw.array<#{depth.to_i}x#{iwidth(width)}>"
+          end
+
+          def emit_async_memory_initial_value(memory)
+            initial_data = Array(memory.initial_data).compact
+            if initial_data.empty? || initial_data.all? { |value| value.to_i.zero? }
+              total_width = [memory.depth.to_i * memory.width.to_i, 1].max
+              zero_bits = emit_const(0, total_width)
+              array_value = fresh_token('mem_init')
+              @lines << "  #{array_value} = hw.bitcast #{zero_bits} : (#{iwidth(total_width)}) -> #{hw_array_type(memory.depth, memory.width)}"
+              return array_value
+            end
+
+            values = initial_data.first(memory.depth.to_i)
+            values += Array.new(memory.depth.to_i - values.length, 0)
+            array_value = fresh_token('mem_init')
+            elements = values.map { |value| "#{normalize_const(value, memory.width)} : #{iwidth(memory.width)}" }.join(', ')
+            @lines << "  #{array_value} = hw.aggregate_constant [#{elements}] : #{hw_array_type(memory.depth, memory.width)}"
+            array_value
           end
 
           def memory_addr_width(depth)
@@ -510,6 +599,48 @@ module RHDL
             return process_clock unless process_clock.nil? || process_clock.empty?
 
             'clk'
+          end
+
+          def preferred_memory_read_clock(memory_name, addr_expr)
+            matching_clocks = @mod.write_ports.filter_map do |write_port|
+              next unless write_port.memory.to_s == memory_name.to_s
+              next unless same_memory_addr_expr?(addr_expr, write_port.addr)
+
+              write_port.clock.to_s
+            end.reject(&:empty?).uniq
+
+            return matching_clocks.first if matching_clocks.length == 1
+
+            default_memory_clock(memory_name)
+          end
+
+          def same_memory_addr_expr?(left, right)
+            return false if left.nil? || right.nil?
+            return false unless left.class == right.class
+
+            case left
+            when IR::Signal
+              left.name.to_s == right.name.to_s && left.width.to_i == right.width.to_i
+            when IR::Literal
+              left.value.to_i == right.value.to_i && left.width.to_i == right.width.to_i
+            when IR::UnaryOp
+              left.op.to_s == right.op.to_s &&
+                left.width.to_i == right.width.to_i &&
+                same_memory_addr_expr?(left.operand, right.operand)
+            when IR::BinaryOp
+              left.op.to_s == right.op.to_s &&
+                left.width.to_i == right.width.to_i &&
+                same_memory_addr_expr?(left.left, right.left) &&
+                same_memory_addr_expr?(left.right, right.right)
+            when IR::Resize
+              left.width.to_i == right.width.to_i && same_memory_addr_expr?(left.expr, right.expr)
+            when IR::Slice
+              left.width.to_i == right.width.to_i &&
+                left.range == right.range &&
+                same_memory_addr_expr?(left.base, right.base)
+            else
+              false
+            end
           end
 
           def connection_width(conn)
@@ -621,6 +752,15 @@ module RHDL
               cond_width = expr.condition.respond_to?(:width) ? expr.condition.width : find_value_width(cond_raw)
               cond = resize_value(cond_raw, cond_width, 1)
 
+              if (cond_literal = literal_value_for(cond))
+                chosen_expr = cond_literal.to_i.zero? ? expr.when_false : expr.when_true
+                chosen_raw = emit_expr(chosen_expr)
+                chosen_width = chosen_expr.respond_to?(:width) ? chosen_expr.width : find_value_width(chosen_raw)
+                emitted = resize_value(chosen_raw, chosen_width, expr.width)
+                @expr_values[expr_key] = emitted
+                return emitted
+              end
+
               tval_raw = emit_expr(expr.when_true)
               twidth = expr.when_true.respond_to?(:width) ? expr.when_true.width : find_value_width(tval_raw)
               tval = resize_value(tval_raw, twidth, expr.width)
@@ -687,10 +827,23 @@ module RHDL
             when '%', :%
               emit_comb('modu', resize_value(left, left_width, result_width), resize_value(right, right_width, result_width), result_width)
             when '&', :&
+              return emit_const(0, result_width) if literal_zero_value?(left)
+              return emit_const(0, result_width) if literal_zero_value?(right)
+              return resize_value(right, right_width, result_width) if literal_all_ones_value?(left, left_width)
+              return resize_value(left, left_width, result_width) if literal_all_ones_value?(right, right_width)
+
               emit_comb('and', resize_value(left, left_width, result_width), resize_value(right, right_width, result_width), result_width)
             when '|', :|
+              return resize_value(right, right_width, result_width) if literal_zero_value?(left)
+              return resize_value(left, left_width, result_width) if literal_zero_value?(right)
+              return emit_const(mask_for_width(result_width), result_width) if literal_all_ones_value?(left, left_width)
+              return emit_const(mask_for_width(result_width), result_width) if literal_all_ones_value?(right, right_width)
+
               emit_comb('or', resize_value(left, left_width, result_width), resize_value(right, right_width, result_width), result_width)
             when '^', :^
+              return resize_value(right, right_width, result_width) if literal_zero_value?(left)
+              return resize_value(left, left_width, result_width) if literal_zero_value?(right)
+
               emit_comb('xor', resize_value(left, left_width, result_width), resize_value(right, right_width, result_width), result_width)
             when '<<', :'<<'
               emit_comb('shl', resize_value(left, left_width, result_width), resize_value(right, right_width, result_width), result_width)
@@ -803,6 +956,7 @@ module RHDL
             normalized = normalize_const(value, width)
             out = fresh(width)
             @lines << "  #{out} = hw.constant #{normalized} : #{iwidth(width)}"
+            @literal_values[out.sub(/^%/, '')] = normalized
             out
           end
 
@@ -895,6 +1049,28 @@ module RHDL
             end
 
             @value_widths[key] = 1
+          end
+
+          def literal_value_for(value_name)
+            return nil unless value_name
+
+            @literal_values[value_name.to_s.sub(/^%/, '')]
+          end
+
+          def literal_zero_value?(value_name)
+            literal = literal_value_for(value_name)
+            !literal.nil? && literal.to_i.zero?
+          end
+
+          def literal_all_ones_value?(value_name, width)
+            literal = literal_value_for(value_name)
+            return false if literal.nil?
+
+            (literal.to_i & mask_for_width(width)) == mask_for_width(width)
+          end
+
+          def mask_for_width(width)
+            (1 << [width.to_i, 1].max) - 1
           end
 
           def find_width(signal_name)
@@ -1094,6 +1270,11 @@ module RHDL
             token = "%rt_tmp_#{@temp_idx}_#{width}"
             @value_widths[token.sub(/^%/, '')] = [width.to_i, 1].max
             token
+          end
+
+          def fresh_token(prefix = 'tmp')
+            @temp_idx += 1
+            "%rt_#{prefix}_#{@temp_idx}"
           end
 
           def iwidth(width)

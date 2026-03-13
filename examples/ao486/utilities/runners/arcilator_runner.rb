@@ -107,16 +107,12 @@ module RHDL
           )
           raise "ARC preparation failed:\n#{prepared.dig(:arc, :stderr)}" unless prepared[:success]
 
-          stdout, stderr, status = Open3.capture3(
-            'arcilator',
-            prepared.fetch(:arc_mlir_path),
-            '--observe-ports',
-            '--observe-wires',
-            '--observe-registers',
-            "--state-file=#{state_path}",
-            '-o',
-            ll_path
-          )
+          stdout, stderr, status = Open3.capture3(*RHDL::Codegen::CIRCT::Tooling.arcilator_command(
+            mlir_path: prepared.fetch(:arc_mlir_path),
+            state_file: state_path,
+            out_path: ll_path,
+            extra_args: ['--observe-ports', '--observe-wires', '--observe-registers']
+          ))
           raise "Arcilator compile failed:\n#{stdout}\n#{stderr}" unless status.success?
 
           state_info = parse_state_file!(state_path)

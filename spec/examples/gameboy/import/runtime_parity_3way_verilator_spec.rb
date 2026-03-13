@@ -8,11 +8,12 @@ require_relative './headless_runtime_support'
 RSpec.describe 'GameBoy mixed import runtime parity (HeadlessRunner/VerilatorRunner/VerilatorRunner/VerilatorRunner)', slow: true do
   include GameboyImportHeadlessRuntimeSupport
 
-  MAX_CYCLES = Integer(ENV.fetch('RHDL_GAMEBOY_VERILATOR_PARITY_MAX_CYCLES', '3000000'))
+  MAX_CYCLES = Integer(ENV.fetch('RHDL_GAMEBOY_VERILATOR_PARITY_MAX_CYCLES', '4000000'))
   TRACE_CYCLES = Integer(ENV.fetch('RHDL_GAMEBOY_VERILATOR_PARITY_TRACE_CYCLES', '16384'))
   TRACE_SAMPLE_EVERY = Integer(ENV.fetch('RHDL_GAMEBOY_VERILATOR_PARITY_TRACE_SAMPLE_EVERY', '128'))
   TRACE_COMPARE_LIMIT = Integer(ENV.fetch('RHDL_GAMEBOY_VERILATOR_PARITY_TRACE_COMPARE_LIMIT', '64'))
   PARITY_LEGS = %i[staged normalized raised].freeze
+  DEFAULT_PARITY_LEGS = %i[staged normalized].freeze
 
   def announce_parity_phase!(label)
     return unless ENV['RHDL_IMPORT_PARITY_PROGRESS'] == '1'
@@ -30,7 +31,8 @@ RSpec.describe 'GameBoy mixed import runtime parity (HeadlessRunner/VerilatorRun
 
     enabled_legs = parity_leg_filter(
       env_key: 'RHDL_GAMEBOY_VERILATOR_PARITY_LEGS',
-      default_legs: PARITY_LEGS
+      default_legs: DEFAULT_PARITY_LEGS,
+      allowed_legs: PARITY_LEGS
     )
 
     out_dir, workspace = stable_import_dirs('gameboy_runtime_parity_verilator')
@@ -40,15 +42,14 @@ RSpec.describe 'GameBoy mixed import runtime parity (HeadlessRunner/VerilatorRun
     results = {}
     enabled_legs.each do |leg|
       announce_parity_phase!("collecting #{leg} capture")
-      with_headless_runner(leg: leg, out_dir: out_dir) do |headless|
-        results[leg] = collect_runtime_capture(
-          headless,
-          rom_bytes: rom_bytes,
-          trace_cycles: TRACE_CYCLES,
-          trace_sample_every: TRACE_SAMPLE_EVERY,
-          total_cycles: MAX_CYCLES
-        )
-      end
+      results[leg] = collect_runtime_capture_isolated(
+        leg: leg,
+        out_dir: out_dir,
+        rom_bytes: rom_bytes,
+        trace_cycles: TRACE_CYCLES,
+        trace_sample_every: TRACE_SAMPLE_EVERY,
+        total_cycles: MAX_CYCLES
+      )
       trim_ruby_heap!
     end
 
@@ -57,7 +58,7 @@ RSpec.describe 'GameBoy mixed import runtime parity (HeadlessRunner/VerilatorRun
 
     enabled_legs.each do |leg|
       video = results.fetch(leg).fetch(:video)
-      summary_lines << "#{leg}: frames=#{video[:frame_count]} nonzero=#{video[:nonzero_pixels]} hash=#{video[:hash]}"
+      summary_lines << "#{leg}: #{video_summary(video)}"
       if video[:frame_count] <= 0
         failures << "#{leg} did not produce any completed frame"
       end

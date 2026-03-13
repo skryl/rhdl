@@ -44,10 +44,13 @@ module RHDL
         DOS_RELOCATED_BOOT_SECTOR_ADDR = 0x27A00
         DOS_INT19_STUB_ADDR = 0x0500
         DOS_INT19_VECTOR_ADDR = 0x19 * 4
-        DOS_INT10_STUB_ADDR = 0x05E0
+        DOS_INT10_STUB_OFFSET = 0x12A0
+        DOS_INT10_STUB_SEGMENT = 0xF000
         DOS_INT10_VECTOR_ADDR = 0x10 * 4
-        DOS_INT13_STUB_ADDR = 0x0540
-        DOS_INT13_SCRATCH_ADDR = 0x0740
+        DOS_INT13_STUB_OFFSET = 0x1200
+        DOS_INT13_STUB_SEGMENT = 0xF000
+        DOS_INT13_VECTOR_ADDR = 0x13 * 4
+        DOS_INT13_SCRATCH_ADDR = 0x0570
         DOS_INT1A_STUB_OFFSET = 0x1130
         DOS_INT1A_STUB_SEGMENT = 0xF000
         DOS_INT1A_VECTOR_ADDR = 0x1A * 4
@@ -183,6 +186,7 @@ module RHDL
           @runtime_loaded = false
           @imported_parity_mode = false
           @parity_sim_factory = nil
+          @dos_bootstrap_mode = :freedos
           @read_burst = nil
           @delivered_read_beat = false
           @previous_trace_key = nil
@@ -209,17 +213,20 @@ module RHDL
 
         def load_dos(**kwargs)
           metadata = super
-          seed_dos_boot_sector_memory!(metadata.fetch(:bytes))
-          seed_dos_bootstrap_helper_rom!
-          seed_dos_int19_stub_memory!
-          seed_dos_int10_stub_memory!
-          seed_dos_int13_stub_memory!
-          seed_dos_int1a_stub_rom!
-          seed_dos_int16_stub_rom!
-          seed_dos_post_state_memory!
-          seed_floppy_post_state_memory!
-          patch_runner_bios_dos_bootstrap!
-          @sim&.runner_load_disk(metadata.fetch(:bytes), 0)
+          if metadata[:active]
+            @dos_bootstrap_mode = dos_shortcut_enabled_for?(metadata) ? :freedos : :generic
+            seed_dos_boot_sector_memory!(metadata.fetch(:bytes))
+            seed_dos_bootstrap_helper_rom!
+            seed_dos_int19_stub_memory!
+            seed_dos_int10_stub_rom!
+            seed_dos_int13_stub_rom!
+            seed_dos_int1a_stub_rom!
+            seed_dos_int16_stub_rom!
+            seed_dos_post_state_memory!
+            seed_floppy_post_state_memory!
+            patch_runner_bios_dos_bootstrap!
+            sync_active_dos_image!(metadata)
+          end
           metadata
         end
 
@@ -269,12 +276,11 @@ module RHDL
               run_imported_parity(cycles_to_run)
             end
           end
-          return super(cycles: cycles, speed: speed, headless: headless, max_cycles: max_cycles) if !max_cycles.nil?
 
           ensure_sim!
           started_at = Process.clock_gettime(Process::CLOCK_MONOTONIC)
           start_cycles = @cycles_run
-          chunk = cycles || @requested_cycles || speed || @speed || DEFAULT_UNLIMITED_CHUNK
+          chunk = max_cycles || cycles || @requested_cycles || speed || @speed || DEFAULT_UNLIMITED_CHUNK
           remaining = chunk.to_i
           text_dirty = false
 
@@ -410,6 +416,19 @@ module RHDL
               arch: snapshot_signal('trace_arch_eip')
             },
             exception_vector: snapshot_signal('exception_inst__exc_vector'),
+            exception_eip: snapshot_signal('exception_inst__exc_eip'),
+            interrupt_done: snapshot_signal('interrupt_done'),
+            arch: {
+              eax: snapshot_signal('trace_arch_eax'),
+              ebx: snapshot_signal('trace_arch_ebx'),
+              ecx: snapshot_signal('trace_arch_ecx'),
+              edx: snapshot_signal('trace_arch_edx'),
+              esi: snapshot_signal('trace_arch_esi'),
+              edi: snapshot_signal('trace_arch_edi'),
+              esp: snapshot_signal('trace_arch_esp'),
+              ebp: snapshot_signal('trace_arch_ebp'),
+              eip: snapshot_signal('trace_arch_eip')
+            },
             active_video_page: memory_store.fetch(DisplayAdapter::VIDEO_PAGE_BDA, 0),
             dos_bridge: {
               int13: @sim.runner_ao486_dos_int13_state,
@@ -635,6 +654,7 @@ module RHDL
           sync_sparse_store!(rom_store, rom: true)
           sync_sparse_store!(memory_store, rom: false)
           sync_disk_image!
+          sync_secondary_disk_slots!
         end
 
         def sync_sparse_store!(store, rom:)
@@ -688,7 +708,44 @@ module RHDL
           return unless @sim
           return unless dos_loaded?
 
-          @sim.runner_load_disk(@floppy_image.bytes, 0)
+          sync_active_dos_image!(bytes: @floppy_image)
+        end
+
+        def sync_active_dos_image!(metadata = nil, bytes: nil)
+          return unless @sim
+
+          active_metadata = metadata || (@active_floppy_slot.nil? ? nil : @floppy_slots[@active_floppy_slot])
+          @sim.dos_shortcut_enabled = dos_shortcut_enabled_for?(active_metadata) if @sim.respond_to?(:dos_shortcut_enabled=)
+          @sim.floppy_geometry = active_metadata[:geometry] if active_metadata && @sim.respond_to?(:floppy_geometry=)
+
+          active_bytes =
+            if bytes
+              bytes.is_a?(String) ? bytes : Array(bytes).pack('C*')
+            else
+              active_metadata&.fetch(:bytes) || @floppy_image
+            end
+          return if active_bytes.nil?
+
+          if @sim.respond_to?(:runner_replace_disk)
+            @sim.runner_replace_disk(active_bytes)
+          else
+            previous_size = @mounted_disk_size.to_i
+            @sim.runner_load_disk("\x00".b * previous_size, 0) if previous_size.positive?
+            @sim.runner_load_disk(active_bytes, 0)
+          end
+          @mounted_disk_size = active_bytes.bytesize
+          sync_secondary_disk_slots!
+        end
+
+        def sync_secondary_disk_slots!
+          return unless @sim.respond_to?(:runner_load_disk_for_drive)
+
+          @floppy_slots.each do |slot_index, metadata|
+            next if slot_index.zero?
+
+            @sim.set_floppy_geometry(slot_index, metadata[:geometry]) if @sim.respond_to?(:set_floppy_geometry)
+            @sim.runner_load_disk_for_drive(metadata[:bytes], slot_index, 0)
+          end
         end
 
         def patch_runner_bios_post_init_ivt_call!
@@ -734,12 +791,18 @@ module RHDL
           sync_rom_segment(dos_bootstrap_bytes, BOOT0_ADDR + DOS_POST_BOOTSTRAP_HELPER_OFFSET)
         end
 
-        def seed_dos_int13_stub_memory!
-          load_bytes(DOS_INT13_STUB_ADDR, dos_int13_bootstrap_bytes)
+        def seed_dos_int13_stub_rom!
+          dos_int13_bootstrap_bytes.each_with_index do |byte, idx|
+            rom_store[BOOT0_ADDR + DOS_INT13_STUB_OFFSET + idx] = byte
+          end
+          sync_rom_segment(dos_int13_bootstrap_bytes, BOOT0_ADDR + DOS_INT13_STUB_OFFSET)
         end
 
-        def seed_dos_int10_stub_memory!
-          load_bytes(DOS_INT10_STUB_ADDR, dos_int10_bootstrap_bytes)
+        def seed_dos_int10_stub_rom!
+          dos_int10_bootstrap_bytes.each_with_index do |byte, idx|
+            rom_store[BOOT0_ADDR + DOS_INT10_STUB_OFFSET + idx] = byte
+          end
+          sync_rom_segment(dos_int10_bootstrap_bytes, BOOT0_ADDR + DOS_INT10_STUB_OFFSET)
         end
 
         def seed_dos_int1a_stub_rom!
@@ -778,6 +841,8 @@ module RHDL
 
 
         def dos_bootstrap_bytes
+          return generic_dos_bootstrap_bytes if @dos_bootstrap_mode == :generic
+
           [
             0xFA,             # cli
             0xFC,             # cld
@@ -789,12 +854,12 @@ module RHDL
             0x31, 0xC0,       # xor ax, ax
             0x8E, 0xD8,       # mov ds, ax
             0xBD, 0x00, 0x7C, # mov bp, 0x7c00
-            0xC7, 0x06, 0x40, 0x00, DOS_INT10_STUB_ADDR & 0xFF, (DOS_INT10_STUB_ADDR >> 8) & 0xFF, # mov word ptr [0x0040], int10 stub
-            0xC7, 0x06, 0x42, 0x00, 0x00, 0x00, # mov word ptr [0x0042], 0x0000
+            0xC7, 0x06, 0x40, 0x00, DOS_INT10_STUB_OFFSET & 0xFF, (DOS_INT10_STUB_OFFSET >> 8) & 0xFF, # mov word ptr [0x0040], int10 stub
+            0xC7, 0x06, 0x42, 0x00, DOS_INT10_STUB_SEGMENT & 0xFF, (DOS_INT10_STUB_SEGMENT >> 8) & 0xFF, # mov word ptr [0x0042], 0xf000
             0xC7, 0x06, 0x58, 0x00, DOS_INT16_STUB_OFFSET & 0xFF, (DOS_INT16_STUB_OFFSET >> 8) & 0xFF, # mov word ptr [0x0058], int16 stub
             0xC7, 0x06, 0x5A, 0x00, DOS_INT16_STUB_SEGMENT & 0xFF, (DOS_INT16_STUB_SEGMENT >> 8) & 0xFF, # mov word ptr [0x005a], 0xf000
-            0xC7, 0x06, 0x4C, 0x00, DOS_INT13_STUB_ADDR & 0xFF, (DOS_INT13_STUB_ADDR >> 8) & 0xFF, # mov word ptr [0x004c], int13 stub
-            0xC7, 0x06, 0x4E, 0x00, 0x00, 0x00, # mov word ptr [0x004e], 0x0000
+            0xC7, 0x06, 0x4C, 0x00, DOS_INT13_STUB_OFFSET & 0xFF, (DOS_INT13_STUB_OFFSET >> 8) & 0xFF, # mov word ptr [0x004c], int13 stub
+            0xC7, 0x06, 0x4E, 0x00, DOS_INT13_STUB_SEGMENT & 0xFF, (DOS_INT13_STUB_SEGMENT >> 8) & 0xFF, # mov word ptr [0x004e], 0xf000
             0xC7, 0x06, 0x68, 0x00, DOS_INT1A_STUB_OFFSET & 0xFF, (DOS_INT1A_STUB_OFFSET >> 8) & 0xFF, # mov word ptr [0x0068], int1a stub
             0xC7, 0x06, 0x6A, 0x00, DOS_INT1A_STUB_SEGMENT & 0xFF, (DOS_INT1A_STUB_SEGMENT >> 8) & 0xFF, # mov word ptr [0x006a], 0xf000
             0xC7, 0x06, BDA_EBDA_SEGMENT_ADDR & 0xFF, (BDA_EBDA_SEGMENT_ADDR >> 8) & 0xFF,
@@ -815,32 +880,67 @@ module RHDL
           ]
         end
 
-        def dos_int13_bootstrap_bytes
-          return_ip = DOS_INT13_SCRATCH_ADDR
-          return_cs = DOS_INT13_SCRATCH_ADDR + 2
-          return_flags = DOS_INT13_SCRATCH_ADDR + 4
-          result_ax = DOS_INT13_SCRATCH_ADDR + 6
-          carry_flag = DOS_INT13_SCRATCH_ADDR + 8
-          original_dx = DOS_INT13_SCRATCH_ADDR + 10
+        def generic_dos_bootstrap_bytes
+          [
+            0xFA,             # cli
+            0xFC,             # cld
+            0x9C,             # pushf
+            0x58,             # pop ax
+            0x80, 0xE4, 0xFE, # and ah, 0xfe ; clear TF
+            0x50,             # push ax
+            0x9D,             # popf
+            0x31, 0xC0,       # xor ax, ax
+            0x8E, 0xD8,       # mov ds, ax
+            0xC7, 0x06, 0x40, 0x00, DOS_INT10_STUB_OFFSET & 0xFF, (DOS_INT10_STUB_OFFSET >> 8) & 0xFF,
+            0xC7, 0x06, 0x42, 0x00, DOS_INT10_STUB_SEGMENT & 0xFF, (DOS_INT10_STUB_SEGMENT >> 8) & 0xFF,
+            0xC7, 0x06, 0x4C, 0x00, DOS_INT13_STUB_OFFSET & 0xFF, (DOS_INT13_STUB_OFFSET >> 8) & 0xFF,
+            0xC7, 0x06, 0x4E, 0x00, DOS_INT13_STUB_SEGMENT & 0xFF, (DOS_INT13_STUB_SEGMENT >> 8) & 0xFF,
+            0xC7, 0x06, 0x58, 0x00, DOS_INT16_STUB_OFFSET & 0xFF, (DOS_INT16_STUB_OFFSET >> 8) & 0xFF,
+            0xC7, 0x06, 0x5A, 0x00, DOS_INT16_STUB_SEGMENT & 0xFF, (DOS_INT16_STUB_SEGMENT >> 8) & 0xFF,
+            0xC7, 0x06, 0x68, 0x00, DOS_INT1A_STUB_OFFSET & 0xFF, (DOS_INT1A_STUB_OFFSET >> 8) & 0xFF,
+            0xC7, 0x06, 0x6A, 0x00, DOS_INT1A_STUB_SEGMENT & 0xFF, (DOS_INT1A_STUB_SEGMENT >> 8) & 0xFF,
+            0xC7, 0x06, BDA_EBDA_SEGMENT_ADDR & 0xFF, (BDA_EBDA_SEGMENT_ADDR >> 8) & 0xFF,
+            DOS_EBDA_SEGMENT & 0xFF, (DOS_EBDA_SEGMENT >> 8) & 0xFF,
+            0xC7, 0x06, BDA_EQUIPMENT_WORD_ADDR & 0xFF, (BDA_EQUIPMENT_WORD_ADDR >> 8) & 0xFF,
+            DOS_EQUIPMENT_WORD & 0xFF, (DOS_EQUIPMENT_WORD >> 8) & 0xFF,
+            0xC7, 0x06, BDA_BASE_MEMORY_WORD_ADDR & 0xFF, (BDA_BASE_MEMORY_WORD_ADDR >> 8) & 0xFF,
+            DOS_BASE_MEMORY_KIB & 0xFF, (DOS_BASE_MEMORY_KIB >> 8) & 0xFF,
+            0xC6, 0x06, BDA_HARD_DISK_COUNT_ADDR & 0xFF, (BDA_HARD_DISK_COUNT_ADDR >> 8) & 0xFF, 0x00,
+            0xC7, 0x06, DOS_DISKETTE_PARAM_VECTOR_ADDR & 0xFF, (DOS_DISKETTE_PARAM_VECTOR_ADDR >> 8) & 0xFF,
+            DOS_DISKETTE_PARAM_TABLE_OFFSET & 0xFF, (DOS_DISKETTE_PARAM_TABLE_OFFSET >> 8) & 0xFF,
+            0xC7, 0x06, (DOS_DISKETTE_PARAM_VECTOR_ADDR + 2) & 0xFF, ((DOS_DISKETTE_PARAM_VECTOR_ADDR + 2) >> 8) & 0xFF,
+            POST_INIT_IVT_DEFAULT_SEGMENT & 0xFF, (POST_INIT_IVT_DEFAULT_SEGMENT >> 8) & 0xFF,
+            0x31, 0xC0,       # xor ax, ax
+            0x8E, 0xC0,       # mov es, ax
+            0x8E, 0xD0,       # mov ss, ax
+            0xBC, 0x00, 0x7C, # mov sp, 0x7c00
+            0xB2, 0x00,       # mov dl, 0x00
+            0xEA, 0x00, 0x7C, 0x00, 0x00 # jmp 0x0000:0x7c00
+          ]
+        end
 
+        def dos_int13_bootstrap_bytes
           [
             0x80, 0xFC, 0x08,       # cmp ah, 0x08
-            0x75, 0x2C,             # jne generic
-            0x8F, 0x06, return_ip & 0xFF, (return_ip >> 8) & 0xFF, # pop word ptr [return_ip]
-            0x8F, 0x06, return_cs & 0xFF, (return_cs >> 8) & 0xFF, # pop word ptr [return_cs]
-            0x8F, 0x06, return_flags & 0xFF, (return_flags >> 8) & 0xFF, # pop word ptr [return_flags]
-            0xA1, return_flags & 0xFF, (return_flags >> 8) & 0xFF, # mov ax, [return_flags]
+            0x75, 0x1B,             # jne generic
+            0x55,                   # push bp
+            0x89, 0xE5,             # mov bp, sp
+            0x8B, 0x46, 0x06,       # mov ax, [bp+6] ; interrupt flags
             0x24, 0xFE,             # and al, 0xfe
-            0xA3, return_flags & 0xFF, (return_flags >> 8) & 0xFF, # mov [return_flags], ax
+            0x80, 0xE4, 0xFA,       # and ah, 0xfa ; clear TF/DF
+            0x89, 0x46, 0x06,       # mov [bp+6], ax
             0x31, 0xC0,             # xor ax, ax
             0xBB, 0x00, 0x04,       # mov bx, 0x0400
             0xB9, 0x12, 0x4F,       # mov cx, 0x4f12
             0xBA, 0x02, 0x01,       # mov dx, 0x0102
-            0xFF, 0x36, return_flags & 0xFF, (return_flags >> 8) & 0xFF, # push word ptr [return_flags]
-            0xFF, 0x36, return_cs & 0xFF, (return_cs >> 8) & 0xFF, # push word ptr [return_cs]
-            0xFF, 0x36, return_ip & 0xFF, (return_ip >> 8) & 0xFF, # push word ptr [return_ip]
+            0x5D,                   # pop bp
             0xCF,                   # iret
+            0x55,                   # push bp
+            0x89, 0xE5,             # mov bp, sp
+            0x53,                   # push bx
+            0x51,                   # push cx
             0x52,                   # push dx
+            0x06,                   # push es
             0xBA, 0xD0, 0x0E,       # mov dx, 0x0ed0
             0xEF,                   # out dx, ax
             0x93,                   # xchg ax, bx
@@ -854,32 +954,30 @@ module RHDL
             0x8C, 0xC0,             # mov ax, es
             0xBA, 0xD8, 0x0E,       # mov dx, 0x0ed8
             0xEF,                   # out dx, ax
-            0x58,                   # pop ax ; original DX
-            0xA3, original_dx & 0xFF, (original_dx >> 8) & 0xFF, # mov [original_dx], ax
+            0x8B, 0x46, 0xFA,       # mov ax, [bp-6] ; original DX
             0xBA, 0xD6, 0x0E,       # mov dx, 0x0ed6
             0xEF,                   # out dx, ax
-            0x8F, 0x06, return_ip & 0xFF, (return_ip >> 8) & 0xFF, # pop word ptr [return_ip]
-            0x8F, 0x06, return_cs & 0xFF, (return_cs >> 8) & 0xFF, # pop word ptr [return_cs]
-            0x8F, 0x06, return_flags & 0xFF, (return_flags >> 8) & 0xFF, # pop word ptr [return_flags]
             0xBA, 0xDA, 0x0E,       # mov dx, 0x0eda
             0x30, 0xC0,             # xor al, al
             0xEE,                   # out dx, al
             0xBA, 0xDC, 0x0E,       # mov dx, 0x0edc
             0xED,                   # in ax, dx
-            0xA3, result_ax & 0xFF, (result_ax >> 8) & 0xFF, # mov [result_ax], ax
+            0x93,                   # xchg ax, bx ; save result ax in BX
             0xBA, 0x16, 0x0F,       # mov dx, 0x0f16
             0xEC,                   # in al, dx
             0x24, 0x01,             # and al, 0x01
-            0xA2, carry_flag & 0xFF, (carry_flag >> 8) & 0xFF, # mov [carry_flag], al
-            0xA1, result_ax & 0xFF, (result_ax >> 8) & 0xFF, # mov ax, [result_ax]
-            0x8B, 0x16, return_flags & 0xFF, (return_flags >> 8) & 0xFF, # mov dx, [return_flags]
-            0x80, 0xE2, 0xFE,       # and dl, 0xfe
-            0x0A, 0x16, carry_flag & 0xFF, (carry_flag >> 8) & 0xFF, # or dl, [carry_flag]
-            0x89, 0x16, return_flags & 0xFF, (return_flags >> 8) & 0xFF, # mov [return_flags], dx
-            0xFF, 0x36, return_flags & 0xFF, (return_flags >> 8) & 0xFF, # push word ptr [return_flags]
-            0xFF, 0x36, return_cs & 0xFF, (return_cs >> 8) & 0xFF, # push word ptr [return_cs]
-            0xFF, 0x36, return_ip & 0xFF, (return_ip >> 8) & 0xFF, # push word ptr [return_ip]
-            0x8B, 0x16, original_dx & 0xFF, (original_dx >> 8) & 0xFF, # mov dx, [original_dx]
+            0x88, 0xC1,             # mov cl, al
+            0x8B, 0x46, 0x06,       # mov ax, [bp+6] ; interrupt flags
+            0x24, 0xFE,             # and al, 0xfe
+            0x80, 0xE4, 0xFA,       # and ah, 0xfa ; clear TF/DF
+            0x08, 0xC8,             # or al, cl
+            0x89, 0x46, 0x06,       # mov [bp+6], ax
+            0x93,                   # xchg ax, bx ; restore result ax
+            0x07,                   # pop es
+            0x5A,                   # pop dx
+            0x59,                   # pop cx
+            0x5B,                   # pop bx
+            0x5D,                   # pop bp
             0xCF                    # iret
           ]
         end
@@ -1043,10 +1141,42 @@ module RHDL
 
         def floppy_post_bda_image
           image = Array.new(0x58, 0)
+          profile = floppy_post_bda_profile
           image[0x00] = 0x01 # 0x043e: drive0 recalibrated, no pending interrupt
-          image[0x51] = 0x07 # 0x048f: drive0 present, multi-rate, changed-line capable
-          image[0x52] = 0x17 # 0x0490: drive0 media state established as 1.44MB
+          image[0x4D] = profile.fetch(:last_rate_byte)   # 0x048b: last selected floppy transfer/step rate
+          image[0x51] = profile.fetch(:controller_info)  # 0x048f: drive0 controller capability bits
+          image[0x52] = profile.fetch(:media_state)      # 0x0490: drive0 current media state
+          image[0x54] = profile.fetch(:starting_state)   # 0x0492: drive0 operational starting state
           image
+        end
+
+        def floppy_post_bda_profile
+          geometry = @active_floppy_geometry || geometry_from_size(@floppy_image&.bytesize.to_i)
+          drive_type = geometry.fetch(:drive_type).to_i
+
+          case drive_type
+          when 1
+            {
+              last_rate_byte: 0xA8, # 250 Kbps transfer rate, 6 ms step rate, 250 Kbps startup rate
+              controller_info: 0x04, # drive type determined, no multirate or change-line support
+              media_state: 0x93, # established 360K media in a 360K drive at 250 Kbps
+              starting_state: 0x84 # operational starting state for a determined 250 Kbps drive
+            }
+          when 4
+            {
+              last_rate_byte: 0x00, # 500 Kbps transfer rate, 3 ms step rate, 500 Kbps startup rate
+              controller_info: 0x07, # drive type determined, multirate, change-line capable
+              media_state: 0x16, # established 1.44M media in a 1.44M drive at 500 Kbps
+              starting_state: 0x07 # operational starting state for the default 1.44M path
+            }
+          else
+            {
+              last_rate_byte: 0x00,
+              controller_info: 0x07,
+              media_state: 0x16,
+              starting_state: 0x07
+            }
+          end
         end
 
         def write_interrupt_vector!(image, vector, segment, offset)

@@ -15,6 +15,7 @@ require_relative '../../hdl/apple2'
 require_relative '../output/speaker'
 require_relative '../renderers/color_renderer'
 require_relative '../input/ps2_encoder'
+require 'rhdl/sim/native/verilog/verilator/runtime'
 require 'rhdl/codegen'
 require 'fileutils'
 require 'fiddle'
@@ -43,6 +44,32 @@ module RHDL
       BUILD_DIR = File.expand_path('../../.verilator_build', __dir__)
       VERILOG_DIR = File.join(BUILD_DIR, 'verilog')
       OBJ_DIR = File.join(BUILD_DIR, 'obj_dir')
+      INPUT_SIGNAL_WIDTHS = {
+        'clk_14m' => 1,
+        'flash_clk' => 1,
+        'reset' => 1,
+        'ram_do' => 8,
+        'pd' => 8,
+        'ps2_clk' => 1,
+        'ps2_data' => 1,
+        'gameport' => 8,
+        'pause' => 1
+      }.freeze
+      OUTPUT_SIGNAL_WIDTHS = {
+        'ram_addr' => 16,
+        'ram_we' => 1,
+        'd' => 8,
+        'speaker' => 1,
+        'video' => 1,
+        'pc_debug' => 16,
+        'a_debug' => 8,
+        'x_debug' => 8,
+        'y_debug' => 8,
+        's_debug' => 8,
+        'p_debug' => 8,
+        'opcode_debug' => 8
+      }.freeze
+      SIGNAL_WIDTHS = INPUT_SIGNAL_WIDTHS.merge(OUTPUT_SIGNAL_WIDTHS).freeze
 
       # Initialize the Apple II Verilator runner
       # @param sub_cycles [Integer] Sub-cycles per CPU cycle (1-14, default: 14)
@@ -82,6 +109,10 @@ module RHDL
         true
       end
 
+      def sim
+        @sim
+      end
+
       def simulator_type
         :hdl_verilator
       end
@@ -100,11 +131,7 @@ module RHDL
         bytes.each_with_index do |byte, i|
           @rom[i] = byte if i < @rom.size
         end
-        # Bulk load into C++ side
-        if @sim_load_rom_fn && @sim_ctx
-          data_ptr = Fiddle::Pointer[bytes.pack('C*')]
-          @sim_load_rom_fn.call(@sim_ctx, data_ptr, bytes.size)
-        end
+        @sim&.runner_load_rom(bytes, base_addr)
       end
 
       def load_ram(bytes, base_addr:)
@@ -114,11 +141,7 @@ module RHDL
           addr = base_addr + i
           @ram[addr] = byte if addr < @ram.size
         end
-        # Bulk load into C++ side
-        if @sim_load_ram_fn && @sim_ctx
-          data_ptr = Fiddle::Pointer[bytes.pack('C*')]
-          @sim_load_ram_fn.call(@sim_ctx, data_ptr, base_addr, bytes.size)
-        end
+        @sim&.runner_write_memory(base_addr, bytes, mapped: false)
       end
 
       def load_disk(path_or_bytes, drive: 0)
@@ -143,9 +166,7 @@ module RHDL
           offset = addr - 0xD000
           @rom[offset] = byte if offset < @rom.size
           # Also write to C++ ROM
-          if @sim_write_rom_fn && @sim_ctx && offset < @rom.size
-            @sim_write_rom_fn.call(@sim_ctx, offset, byte)
-          end
+          @sim&.runner_load_rom([byte & 0xFF], addr)
         else
           # RAM area
           @ram[addr] = byte if addr < @ram.size
@@ -161,17 +182,12 @@ module RHDL
 
       # Main entry point for running cycles
       def run_steps(steps)
-        if @sim_run_cycles_fn
-          # Use batch execution - run all 14MHz cycles in C++
-          n_14m_cycles = steps * @sub_cycles
-          text_dirty_ptr = Fiddle::Pointer.malloc(4)  # 4 bytes for unsigned int
-          speaker_toggles = @sim_run_cycles_fn.call(@sim_ctx, n_14m_cycles, text_dirty_ptr)
-          text_dirty = text_dirty_ptr.to_s(4).unpack1('L') # unsigned int
-          @text_page_dirty ||= (text_dirty != 0)
-          speaker_toggles.times { @speaker.toggle }
-          @cycles += steps
+        if @sim
+          result = @sim.runner_run_cycles(steps)
+          @text_page_dirty ||= result[:text_dirty]
+          result[:speaker_toggles].times { @speaker.toggle }
+          @cycles += result[:cycles_run]
         else
-          # Fallback to per-cycle Ruby execution
           steps.times { run_cpu_cycle }
         end
       end
@@ -333,7 +349,7 @@ module RHDL
       def render_hires_color(chars_wide: 140, composite: false, base_addr: HIRES_PAGE1_START)
         renderer = ColorRenderer.new(chars_wide: chars_wide, composite: composite)
 
-        if @sim_read_ram_fn && @sim_ctx
+        if @sim
           page_end = base_addr + 0x2000 - 1
           hires_ram = Array.new(page_end + 1, 0)
           (base_addr..page_end).each do |addr|
@@ -486,6 +502,10 @@ module RHDL
       end
 
       def create_cpp_wrapper(cpp_file, header_file)
+        input_signal_names = INPUT_SIGNAL_WIDTHS.keys
+        output_signal_names = OUTPUT_SIGNAL_WIDTHS.keys
+        input_names_csv = input_signal_names.join(',')
+        output_names_csv = output_signal_names.join(',')
         header_content = <<~HEADER
           #ifndef SIM_WRAPPER_H
           #define SIM_WRAPPER_H
@@ -494,8 +514,22 @@ module RHDL
           extern "C" {
           #endif
 
-          void* sim_create(void);
+          void* sim_create(const char* json, unsigned long json_len, unsigned int sub_cycles, char** err_out);
           void sim_destroy(void* sim);
+          void sim_free_error(void* err);
+          void sim_free_string(void* str);
+          void* sim_wasm_alloc(unsigned int size);
+          void sim_wasm_dealloc(void* ptr, unsigned int size);
+          int sim_get_caps(const void* sim, unsigned int* caps_out);
+          int sim_signal(void* sim, unsigned int op, const char* name, unsigned int idx, unsigned long value, unsigned long* out_value);
+          int sim_exec(void* sim, unsigned int op, unsigned long arg0, unsigned long arg1, unsigned long* out_value, void* error_out);
+          int sim_trace(void* sim, unsigned int op, const char* str_arg, unsigned long* out_value);
+          unsigned long sim_blob(void* sim, unsigned int op, unsigned char* out_ptr, unsigned long out_len);
+          int runner_get_caps(const void* sim, unsigned int* caps_out);
+          unsigned long runner_mem(void* sim, unsigned int op, unsigned int space, unsigned long offset, unsigned char* data, unsigned long len, unsigned int flags);
+          int runner_run(void* sim, unsigned int cycles, unsigned char key_data, int key_ready, unsigned int mode, void* result_out);
+          int runner_control(void* sim, unsigned int op, unsigned int arg0, unsigned int arg1);
+          unsigned long long runner_probe(void* sim, unsigned int op, unsigned int arg0);
           void sim_reset(void* sim);
           void sim_eval(void* sim);
           void sim_poke(void* sim, const char* name, unsigned int value);
@@ -526,11 +560,103 @@ module RHDL
               unsigned char rom[12288];  // 12KB ROM
               unsigned char prev_speaker;
               unsigned int speaker_toggles;
+              unsigned int sub_cycles;
+              unsigned int text_dirty;
+              unsigned int cycle_count;
           };
+
+          static const char* k_input_signal_names[] = {
+              #{input_signal_names.map { |name| %("#{name}") }.join(",\n              ")}
+          };
+          static const char* k_output_signal_names[] = {
+              #{output_signal_names.map { |name| %("#{name}") }.join(",\n              ")}
+          };
+          static const char k_input_names_csv[] = "#{input_names_csv}";
+          static const char k_output_names_csv[] = "#{output_names_csv}";
+          static const unsigned int k_input_signal_count = #{input_signal_names.length}u;
+          static const unsigned int k_output_signal_count = #{output_signal_names.length}u;
+
+          static const unsigned int SIM_CAP_SIGNAL_INDEX = 1u << 0;
+          static const unsigned int SIM_CAP_RUNNER = 1u << 6;
+          static const unsigned int SIM_SIGNAL_HAS = 0u;
+          static const unsigned int SIM_SIGNAL_GET_INDEX = 1u;
+          static const unsigned int SIM_SIGNAL_PEEK = 2u;
+          static const unsigned int SIM_SIGNAL_POKE = 3u;
+          static const unsigned int SIM_SIGNAL_PEEK_INDEX = 4u;
+          static const unsigned int SIM_SIGNAL_POKE_INDEX = 5u;
+          static const unsigned int SIM_EXEC_EVALUATE = 0u;
+          static const unsigned int SIM_EXEC_TICK = 1u;
+          static const unsigned int SIM_EXEC_TICK_FORCED = 2u;
+          static const unsigned int SIM_EXEC_SET_PREV_CLOCK = 3u;
+          static const unsigned int SIM_EXEC_GET_CLOCK_LIST_IDX = 4u;
+          static const unsigned int SIM_EXEC_RESET = 5u;
+          static const unsigned int SIM_EXEC_RUN_TICKS = 6u;
+          static const unsigned int SIM_EXEC_SIGNAL_COUNT = 7u;
+          static const unsigned int SIM_EXEC_REG_COUNT = 8u;
+          static const unsigned int SIM_EXEC_COMPILE = 9u;
+          static const unsigned int SIM_EXEC_IS_COMPILED = 10u;
+          static const unsigned int SIM_TRACE_START = 0u;
+          static const unsigned int SIM_TRACE_START_STREAMING = 1u;
+          static const unsigned int SIM_TRACE_STOP = 2u;
+          static const unsigned int SIM_TRACE_ENABLED = 3u;
+          static const unsigned int SIM_BLOB_INPUT_NAMES = 0u;
+          static const unsigned int SIM_BLOB_OUTPUT_NAMES = 1u;
+          static const unsigned int RUNNER_KIND_APPLE2 = 1u;
+          static const unsigned int RUNNER_MEM_OP_LOAD = 0u;
+          static const unsigned int RUNNER_MEM_OP_READ = 1u;
+          static const unsigned int RUNNER_MEM_OP_WRITE = 2u;
+          static const unsigned int RUNNER_MEM_SPACE_MAIN = 0u;
+          static const unsigned int RUNNER_MEM_SPACE_ROM = 1u;
+          static const unsigned int RUNNER_MEM_FLAG_MAPPED = 1u;
+          static const unsigned int RUNNER_RUN_MODE_BASIC = 0u;
+          static const unsigned int RUNNER_CONTROL_SET_RESET_VECTOR = 0u;
+          static const unsigned int RUNNER_CONTROL_RESET_SPEAKER_TOGGLES = 1u;
+          static const unsigned int RUNNER_PROBE_KIND = 0u;
+          static const unsigned int RUNNER_PROBE_IS_MODE = 1u;
+          static const unsigned int RUNNER_PROBE_SPEAKER_TOGGLES = 2u;
+          static const unsigned int RUNNER_PROBE_SIGNAL = 9u;
+
+          struct RunnerRunResult {
+              int text_dirty;
+              int key_cleared;
+              unsigned int cycles_run;
+              unsigned int speaker_toggles;
+              unsigned int frames_completed;
+          };
+
+          static unsigned int total_signal_count() {
+              return k_input_signal_count + k_output_signal_count;
+          }
+
+          static const char* signal_name_from_index(unsigned int idx) {
+              if (idx < k_input_signal_count) return k_input_signal_names[idx];
+              idx -= k_input_signal_count;
+              if (idx < k_output_signal_count) return k_output_signal_names[idx];
+              return nullptr;
+          }
+
+          static int signal_index_from_name(const char* name) {
+              if (!name) return -1;
+              for (unsigned int i = 0; i < k_input_signal_count; i++) {
+                  if (std::strcmp(name, k_input_signal_names[i]) == 0) return static_cast<int>(i);
+              }
+              for (unsigned int i = 0; i < k_output_signal_count; i++) {
+                  if (std::strcmp(name, k_output_signal_names[i]) == 0) {
+                      return static_cast<int>(k_input_signal_count + i);
+                  }
+              }
+              return -1;
+          }
+
+          static void write_out_ulong(unsigned long* out, unsigned long value) {
+              if (out) *out = value;
+          }
 
           extern "C" {
 
-          void* sim_create(void) {
+          void* sim_create(const char* json, unsigned long json_len, unsigned int sub_cycles, char** err_out) {
+              (void)json;
+              (void)json_len;
               const char* empty_args[] = {""};
               Verilated::commandArgs(1, empty_args);
               SimContext* ctx = new SimContext();
@@ -539,6 +665,10 @@ module RHDL
               memset(ctx->rom, 0, sizeof(ctx->rom));
               ctx->prev_speaker = 0;
               ctx->speaker_toggles = 0;
+              ctx->sub_cycles = (sub_cycles >= 1 && sub_cycles <= 14) ? sub_cycles : 14;
+              ctx->text_dirty = 0;
+              ctx->cycle_count = 0;
+              if (err_out) *err_out = nullptr;
 
               // Initialize inputs to safe defaults
               ctx->dut->clk_14m = 0;
@@ -561,6 +691,23 @@ module RHDL
               SimContext* ctx = static_cast<SimContext*>(sim);
               delete ctx->dut;
               delete ctx;
+          }
+
+          void sim_free_error(void* err) {
+              (void)err;
+          }
+
+          void sim_free_string(void* str) {
+              (void)str;
+          }
+
+          void* sim_wasm_alloc(unsigned int size) {
+              return std::malloc(size > 0 ? size : 1);
+          }
+
+          void sim_wasm_dealloc(void* ptr, unsigned int size) {
+              (void)size;
+              std::free(ptr);
           }
 
           void sim_reset(void* sim) {
@@ -756,6 +903,241 @@ module RHDL
               }
           }
 
+          int sim_get_caps(const void* sim, unsigned int* caps_out) {
+              if (!sim || !caps_out) return 0;
+              *caps_out = SIM_CAP_SIGNAL_INDEX | SIM_CAP_RUNNER;
+              return 1;
+          }
+
+          int sim_signal(void* sim, unsigned int op, const char* name, unsigned int idx, unsigned long value, unsigned long* out_value) {
+              const int resolved_idx = name ? signal_index_from_name(name) : static_cast<int>(idx);
+              const char* resolved_name = name ? name : signal_name_from_index(idx);
+
+              switch (op) {
+              case SIM_SIGNAL_HAS:
+                  write_out_ulong(out_value, resolved_idx >= 0 ? 1UL : 0UL);
+                  return resolved_idx >= 0 ? 1 : 0;
+              case SIM_SIGNAL_GET_INDEX:
+                  if (resolved_idx < 0) return 0;
+                  write_out_ulong(out_value, static_cast<unsigned long>(resolved_idx));
+                  return 1;
+              case SIM_SIGNAL_PEEK:
+              case SIM_SIGNAL_PEEK_INDEX:
+                  if (resolved_idx < 0 || !resolved_name) return 0;
+                  write_out_ulong(out_value, sim_peek(sim, resolved_name));
+                  return 1;
+              case SIM_SIGNAL_POKE:
+              case SIM_SIGNAL_POKE_INDEX:
+                  if (resolved_idx < 0 || !resolved_name) return 0;
+                  sim_poke(sim, resolved_name, static_cast<unsigned int>(value));
+                  write_out_ulong(out_value, value);
+                  return 1;
+              default:
+                  return 0;
+              }
+          }
+
+          int sim_exec(void* sim, unsigned int op, unsigned long arg0, unsigned long arg1, unsigned long* out_value, void* error_out) {
+              (void)arg1;
+              (void)error_out;
+              switch (op) {
+              case SIM_EXEC_EVALUATE:
+                  sim_eval(sim);
+                  write_out_ulong(out_value, 1);
+                  return 1;
+              case SIM_EXEC_TICK:
+              case SIM_EXEC_TICK_FORCED:
+                  sim_run_cycles(sim, 1, nullptr);
+                  write_out_ulong(out_value, 1);
+                  return 1;
+              case SIM_EXEC_SET_PREV_CLOCK:
+                  write_out_ulong(out_value, 0);
+                  return 1;
+              case SIM_EXEC_GET_CLOCK_LIST_IDX:
+                  return 0;
+              case SIM_EXEC_RESET:
+                  sim_reset(sim);
+                  write_out_ulong(out_value, 1);
+                  return 1;
+              case SIM_EXEC_RUN_TICKS:
+                  sim_run_cycles(sim, static_cast<unsigned int>(arg0), nullptr);
+                  write_out_ulong(out_value, arg0);
+                  return 1;
+              case SIM_EXEC_SIGNAL_COUNT:
+                  write_out_ulong(out_value, total_signal_count());
+                  return 1;
+              case SIM_EXEC_REG_COUNT:
+                  write_out_ulong(out_value, 0);
+                  return 1;
+              case SIM_EXEC_COMPILE:
+              case SIM_EXEC_IS_COMPILED:
+                  return 0;
+              default:
+                  return 0;
+              }
+          }
+
+          int sim_trace(void* sim, unsigned int op, const char* str_arg, unsigned long* out_value) {
+              (void)sim;
+              (void)str_arg;
+              write_out_ulong(out_value, 0);
+              return (op == SIM_TRACE_ENABLED) ? 1 : 0;
+          }
+
+          unsigned long sim_blob(void* sim, unsigned int op, unsigned char* out_ptr, unsigned long out_len) {
+              (void)sim;
+              const char* data = nullptr;
+              unsigned long len = 0;
+              switch (op) {
+              case SIM_BLOB_INPUT_NAMES:
+                  data = k_input_names_csv;
+                  len = sizeof(k_input_names_csv) - 1;
+                  break;
+              case SIM_BLOB_OUTPUT_NAMES:
+                  data = k_output_names_csv;
+                  len = sizeof(k_output_names_csv) - 1;
+                  break;
+              default:
+                  return 0;
+              }
+              if (!out_ptr || out_len == 0) return len;
+              const unsigned long copy_len = (len < out_len) ? len : out_len;
+              std::memcpy(out_ptr, data, copy_len);
+              return copy_len;
+          }
+
+          int runner_get_caps(const void* sim, unsigned int* caps_out) {
+              if (!sim || !caps_out) return 0;
+              caps_out[0] = RUNNER_KIND_APPLE2;
+              caps_out[1] = (1u << RUNNER_MEM_SPACE_MAIN) | (1u << RUNNER_MEM_SPACE_ROM);
+              caps_out[2] = (1u << RUNNER_CONTROL_SET_RESET_VECTOR) | (1u << RUNNER_CONTROL_RESET_SPEAKER_TOGGLES);
+              caps_out[3] = (1u << RUNNER_PROBE_KIND) | (1u << RUNNER_PROBE_IS_MODE) |
+                            (1u << RUNNER_PROBE_SPEAKER_TOGGLES) | (1u << RUNNER_PROBE_SIGNAL);
+              return 1;
+          }
+
+          unsigned long runner_mem(void* sim, unsigned int op, unsigned int space, unsigned long offset, unsigned char* data, unsigned long len, unsigned int flags) {
+              SimContext* ctx = static_cast<SimContext*>(sim);
+              if (!ctx || !data) return 0;
+
+              unsigned char* mem = nullptr;
+              unsigned long mem_size = 0;
+              unsigned long mem_offset = offset;
+              switch (space) {
+              case RUNNER_MEM_SPACE_MAIN:
+                  mem = ctx->ram;
+                  mem_size = sizeof(ctx->ram);
+                  break;
+              case RUNNER_MEM_SPACE_ROM:
+                  mem = ctx->rom;
+                  mem_size = sizeof(ctx->rom);
+                  mem_offset = (offset >= 0xD000 && offset <= 0xFFFF) ? (offset - 0xD000) : offset;
+                  break;
+              default:
+                  return 0;
+              }
+
+              switch (op) {
+              case RUNNER_MEM_OP_LOAD:
+              case RUNNER_MEM_OP_WRITE: {
+                  unsigned long count = 0;
+                  for (unsigned long i = 0; i < len && (mem_offset + i) < mem_size; i++) {
+                      mem[mem_offset + i] = data[i];
+                      count++;
+                  }
+                  return count;
+              }
+              case RUNNER_MEM_OP_READ: {
+                  if (space == RUNNER_MEM_SPACE_MAIN && (flags & RUNNER_MEM_FLAG_MAPPED)) {
+                      for (unsigned long i = 0; i < len; i++) {
+                          const unsigned long addr = (offset + i) & 0xFFFFul;
+                          if (addr >= 0xD000ul) {
+                              const unsigned long rom_offset = addr - 0xD000ul;
+                              data[i] = (rom_offset < sizeof(ctx->rom)) ? ctx->rom[rom_offset] : 0;
+                          } else if (addr >= 0xC000ul) {
+                              data[i] = 0;
+                          } else {
+                              data[i] = (addr < sizeof(ctx->ram)) ? ctx->ram[addr] : 0;
+                          }
+                      }
+                      return len;
+                  }
+
+                  unsigned long count = 0;
+                  for (unsigned long i = 0; i < len && (mem_offset + i) < mem_size; i++) {
+                      data[i] = mem[mem_offset + i];
+                      count++;
+                  }
+                  return count;
+              }
+              default:
+                  return 0;
+              }
+          }
+
+          int runner_run(void* sim, unsigned int cycles, unsigned char key_data, int key_ready, unsigned int mode, void* result_out) {
+              SimContext* ctx = static_cast<SimContext*>(sim);
+              if (!ctx) return 0;
+              (void)key_data;
+              (void)key_ready;
+              (void)mode;
+
+              ctx->text_dirty = 0;
+              ctx->speaker_toggles = 0;
+              const unsigned int n_14m_cycles = cycles * ctx->sub_cycles;
+              sim_run_cycles(sim, n_14m_cycles, &ctx->text_dirty);
+              ctx->cycle_count += cycles;
+
+              RunnerRunResult* result = static_cast<RunnerRunResult*>(result_out);
+              if (result) {
+                  result->text_dirty = ctx->text_dirty ? 1 : 0;
+                  result->key_cleared = 0;
+                  result->cycles_run = cycles;
+                  result->speaker_toggles = ctx->speaker_toggles;
+                  result->frames_completed = 0;
+              }
+              return 1;
+          }
+
+          int runner_control(void* sim, unsigned int op, unsigned int arg0, unsigned int arg1) {
+              SimContext* ctx = static_cast<SimContext*>(sim);
+              if (!ctx) return 0;
+              (void)arg1;
+              switch (op) {
+              case RUNNER_CONTROL_SET_RESET_VECTOR:
+                  if (0x2FFD < sizeof(ctx->rom)) {
+                      ctx->rom[0x2FFC] = arg0 & 0xFFu;
+                      ctx->rom[0x2FFD] = (arg0 >> 8) & 0xFFu;
+                  }
+                  return 1;
+              case RUNNER_CONTROL_RESET_SPEAKER_TOGGLES:
+                  ctx->speaker_toggles = 0;
+                  ctx->prev_speaker = static_cast<unsigned char>(ctx->dut->speaker) & 0x1u;
+                  return 1;
+              default:
+                  return 0;
+              }
+          }
+
+          unsigned long long runner_probe(void* sim, unsigned int op, unsigned int arg0) {
+              SimContext* ctx = static_cast<SimContext*>(sim);
+              if (!ctx) return 0;
+              switch (op) {
+              case RUNNER_PROBE_KIND:
+                  return RUNNER_KIND_APPLE2;
+              case RUNNER_PROBE_IS_MODE:
+                  return 0;
+              case RUNNER_PROBE_SPEAKER_TOGGLES:
+                  return ctx->speaker_toggles;
+              case RUNNER_PROBE_SIGNAL: {
+                  const char* signal_name = signal_name_from_index(arg0);
+                  return signal_name ? sim_peek(sim, signal_name) : 0;
+              }
+              default:
+                  return 0;
+              }
+          }
+
           } // extern "C"
         CPP
 
@@ -780,119 +1162,67 @@ module RHDL
       end
 
       def load_shared_library(lib_path)
-        @lib = verilog_simulator.load_library!(lib_path)
-
-        # Bind FFI functions
-        @sim_create = Fiddle::Function.new(
-          @lib['sim_create'],
-          [],
-          Fiddle::TYPE_VOIDP
+        @sim = RHDL::Sim::Native::Verilog::Verilator::Runtime.open(
+          lib_path: lib_path,
+          config: { sub_cycles: @sub_cycles },
+          sub_cycles: @sub_cycles,
+          signal_widths_by_name: SIGNAL_WIDTHS,
+          signal_widths_by_idx: SIGNAL_WIDTHS.values,
+          backend_label: 'Apple2 Verilator'
         )
-
-        @sim_destroy = Fiddle::Function.new(
-          @lib['sim_destroy'],
-          [Fiddle::TYPE_VOIDP],
-          Fiddle::TYPE_VOID
-        )
-
-        @sim_reset = Fiddle::Function.new(
-          @lib['sim_reset'],
-          [Fiddle::TYPE_VOIDP],
-          Fiddle::TYPE_VOID
-        )
-
-        @sim_eval = Fiddle::Function.new(
-          @lib['sim_eval'],
-          [Fiddle::TYPE_VOIDP],
-          Fiddle::TYPE_VOID
-        )
-
-        @sim_poke = Fiddle::Function.new(
-          @lib['sim_poke'],
-          [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP, Fiddle::TYPE_INT],
-          Fiddle::TYPE_VOID
-        )
-
-        @sim_peek = Fiddle::Function.new(
-          @lib['sim_peek'],
-          [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP],
-          Fiddle::TYPE_INT
-        )
-
-        @sim_write_ram_fn = Fiddle::Function.new(
-          @lib['sim_write_ram'],
-          [Fiddle::TYPE_VOIDP, Fiddle::TYPE_INT, Fiddle::TYPE_CHAR],
-          Fiddle::TYPE_VOID
-        )
-
-        @sim_read_ram_fn = Fiddle::Function.new(
-          @lib['sim_read_ram'],
-          [Fiddle::TYPE_VOIDP, Fiddle::TYPE_INT],
-          Fiddle::TYPE_CHAR
-        )
-
-        @sim_write_rom_fn = Fiddle::Function.new(
-          @lib['sim_write_rom'],
-          [Fiddle::TYPE_VOIDP, Fiddle::TYPE_INT, Fiddle::TYPE_CHAR],
-          Fiddle::TYPE_VOID
-        )
-
-        @sim_run_cycles_fn = Fiddle::Function.new(
-          @lib['sim_run_cycles'],
-          [Fiddle::TYPE_VOIDP, Fiddle::TYPE_INT, Fiddle::TYPE_VOIDP],
-          Fiddle::TYPE_INT
-        )
-
-        @sim_load_ram_fn = Fiddle::Function.new(
-          @lib['sim_load_ram'],
-          [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP, Fiddle::TYPE_INT, Fiddle::TYPE_INT],
-          Fiddle::TYPE_VOID
-        )
-
-        @sim_load_rom_fn = Fiddle::Function.new(
-          @lib['sim_load_rom'],
-          [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP, Fiddle::TYPE_INT],
-          Fiddle::TYPE_VOID
-        )
-
-        # Create simulation context
-        @sim_ctx = @sim_create.call
+        ensure_runner_abi!(@sim, expected_kind: :apple2, backend_label: 'Apple2 Verilator')
       end
 
       def reset_simulation
-        @sim_reset&.call(@sim_ctx) if @sim_ctx
+        @sim&.reset
       end
 
       def verilator_poke(name, value)
-        return unless @sim_ctx
-        @sim_poke.call(@sim_ctx, name, value.to_i)
+        return unless @sim
+
+        @sim.poke(name, value.to_i)
       end
 
       def verilator_peek(name)
-        return 0 unless @sim_ctx
-        @sim_peek.call(@sim_ctx, name)
+        return 0 unless @sim
+
+        @sim.peek(name)
       end
 
       def verilator_eval
-        return unless @sim_ctx
-        @sim_eval.call(@sim_ctx)
+        @sim&.evaluate
+      end
+
+      def ensure_runner_abi!(sim, expected_kind:, backend_label:)
+        unless sim.runner_supported?
+          sim.close
+          raise RuntimeError, "#{backend_label} shared library does not expose runner ABI"
+        end
+
+        actual_kind = sim.runner_kind
+        return if actual_kind == expected_kind
+
+        sim.close
+        raise RuntimeError, "#{backend_label} shared library exposes runner kind #{actual_kind.inspect}, expected #{expected_kind.inspect}"
       end
 
       def verilator_write_ram(addr, value)
-        return unless @sim_ctx
-        @sim_write_ram_fn.call(@sim_ctx, addr, value)
+        return unless @sim
+
+        @sim.runner_write_memory(addr, [value.to_i & 0xFF], mapped: false)
       end
 
       def verilator_read_ram(addr)
-        return 0 unless @sim_ctx
-        @sim_read_ram_fn.call(@sim_ctx, addr) & 0xFF
+        return 0 unless @sim
+
+        @sim.runner_read_memory(addr, 1, mapped: false).fetch(0, 0).to_i & 0xFF
       end
 
       def read_ram_byte(addr)
         addr &= 0xFFFF
         return 0 unless addr < @ram.size
 
-        if @sim_read_ram_fn && @sim_ctx
+        if @sim
           return verilator_read_ram(addr)
         end
 

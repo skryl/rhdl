@@ -8,7 +8,7 @@ In Progress - 2026-03-11
 
 AO486 currently injects three different families of behavior after the Verilog import boundary:
 
-1. trace-port instrumentation in `CpuTracePackage`
+1. trace-port instrumentation currently carried by `CpuTracePackage`
 2. parity-specific fetch/prefetch rewrites in `CpuParityPackage`
 3. DOS-runner fetch/prefetch/memory rewrites in `CpuRunnerPackage`
 
@@ -23,7 +23,7 @@ The importer already has opt-in `patches_dir:` staging support. The missing piec
 
 ## Goals
 
-1. Add named AO486 patch profiles under `examples/ao486/patches`.
+1. Add named AO486 patch profiles under `examples/ao486/patches`, with parity also carrying the trace surface.
 2. Let `SystemImporter` and `CpuImporter` resolve one or more named profiles into deterministic staged patch application before `circt-verilog`.
 3. Move AO486 trace/parity/runner RTL modifications out of Ruby package rewrites and into Verilog patch series.
 4. Retarget AO486 runners and specs to patched imported artifacts only.
@@ -55,41 +55,24 @@ Exit Criteria:
 1. Importers can stage one or more named AO486 profiles without custom absolute paths.
 2. Focused importer specs are green.
 
-### Phase 2: Trace Profile Migration
+### Phase 2: Parity Profile Migration
 
 Red:
 
-1. Replace `CpuTracePackage` specs with failing import-time trace-profile coverage.
-2. Confirm top/pipeline/write trace ports are absent without the trace profile and present with it.
+1. Replace `CpuTracePackage` specs with failing import-time parity-profile coverage for the trace surface.
+2. Confirm top/pipeline/write trace ports are absent without the parity profile and present with it.
 
 Green:
 
-1. Add a checked-in trace patch series under `examples/ao486/patches/trace`.
-2. Switch trace-oriented runner/spec helpers to import with the trace profile instead of Ruby package rewriting.
+1. Add a checked-in parity patch series under `examples/ao486/patches/parity`.
+2. Switch trace-oriented and parity-oriented runner/spec helpers to import with the parity profile instead of Ruby package rewriting.
 
 Exit Criteria:
 
-1. Trace outputs come from patched Verilog import only.
+1. Trace outputs and parity behavior come from the parity patch profile only.
 2. `CpuTracePackage` is deleted or reduced to a no-op compatibility shell with no structural rewrites.
 
-### Phase 3: Parity Profile Migration
-
-Red:
-
-1. Replace `CpuParityPackage` coverage with failing parity-profile import/runtime coverage.
-2. Capture baseline parity runner failures when the parity profile is not applied.
-
-Green:
-
-1. Add parity patch series under `examples/ao486/patches/parity`.
-2. Switch IR/Verilator/Arcilator parity runners and specs to import patched parity artifacts directly.
-
-Exit Criteria:
-
-1. Parity behavior is supplied entirely by the parity patch profile.
-2. `CpuParityPackage` no longer performs structural rewrites.
-
-### Phase 4: Runner Profile Migration And DOS Continuation
+### Phase 3: Runner Profile Migration And DOS Continuation
 
 Red:
 
@@ -110,7 +93,7 @@ Exit Criteria:
 
 ## Acceptance Criteria
 
-1. `examples/ao486/patches/trace`, `examples/ao486/patches/parity`, and `examples/ao486/patches/runner` exist and are used by importer profiles.
+1. `examples/ao486/patches/parity` exists and is used for both the trace surface and parity behavior, and `examples/ao486/patches/runner` remains only if DOS runner validation proves it is still needed.
 2. AO486 importer/runners can request named profiles without custom patch directory paths.
 3. `CpuTracePackage`, `CpuParityPackage`, and `CpuRunnerPackage` no longer mutate imported modules/packages structurally.
 4. AO486 parity and DOS runner tests consume patched imported artifacts directly.
@@ -129,10 +112,26 @@ Exit Criteria:
 
 ## Implementation Checklist
 
-- [ ] Add named AO486 patch-profile plumbing to importers.
-- [ ] Add focused importer specs for profile resolution and ordering.
-- [ ] Add trace patch profile and cut over trace coverage.
-- [ ] Add parity patch profile and cut over parity runners/specs.
-- [ ] Add runner patch profile and cut over DOS/headless runners.
-- [ ] Remove AO486 post-Verilog structural rewrites.
+- [x] Add named AO486 patch-profile plumbing to importers.
+- [x] Add focused importer specs for profile resolution and ordering.
+- [x] Add parity patch profile and cut over trace/parity runners/specs.
+- [x] Add runner patch profile and cut over DOS/headless runners.
+- [x] Remove AO486 post-Verilog structural rewrites.
 - [ ] Resume Verilator DOS boot debugging on the patched runner flow.
+
+## Update 2026-03-11
+
+1. `SystemImporter` and `CpuImporter` now resolve named `patch_profile:` / `patch_profiles:` values from `examples/ao486/patches`.
+2. The old Ruby-side rewrite modules were deleted:
+   - `examples/ao486/utilities/import/cpu_trace_package.rb`
+   - `examples/ao486/utilities/import/cpu_parity_package.rb`
+   - `examples/ao486/utilities/import/cpu_runner_package.rb`
+3. Targeted patched-import regression gates are green:
+   - `bundle exec rspec spec/examples/ao486/import/trace_patch_profile_spec.rb --format documentation`
+   - `bundle exec rspec spec/examples/ao486/import/cpu_parity_runtime_spec.rb --format documentation`
+   - `bundle exec rspec spec/examples/ao486/import/cpu_parity_verilator_runtime_spec.rb -e 'matches the selected IR backend, Verilator, and Arcilator on the final memory image for the compact benchmark set' --format documentation`
+4. On the patched `runner` profile, the clean Verilator DOS boot no longer dies in early BIOS POST with the former `#UD` around `0xE0AB`.
+5. Current Verilator DOS state on the patched runner profile:
+   - by `100_000` cycles it reaches the visible `FreeDOS_` banner with `last_irq = 0x08`
+   - by `200_000` cycles it is still parked at `FreeDOS_`
+   - the live DOS bridge state remains centered on `INT 13h AH=0x02`, `CX=0x000D`, `DX=0x0100`, `ES:BX=0x01C0:0x0000`

@@ -63,15 +63,21 @@ bundle exec ruby examples/gameboy/bin/gb import \
   --keep-workspace
 bundle exec ruby examples/gameboy/bin/gb \
   --mode verilog \
-  --verilog-dir examples/gameboy/import \
+  --source examples/gameboy/import \
   --top Gameboy \
   --pop
 
 bundle exec ruby examples/gameboy/bin/gb \
   --mode verilog \
-  --verilog-dir examples/gameboy/import \
+  --source examples/gameboy/import \
   --top Gameboy \
-  --use-staged-verilog \
+  --use-normalized-source \
+  --pop
+
+bundle exec ruby examples/gameboy/bin/gb \
+  --mode verilog \
+  --source examples/gameboy/import \
+  --use-rhdl-source \
   --pop
 ```
 

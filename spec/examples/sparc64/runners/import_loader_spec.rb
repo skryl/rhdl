@@ -11,6 +11,8 @@ RSpec.describe RHDL::Examples::SPARC64::Integration::ImportLoader do
   end
 
   it 'loads the committed SPARC64 import tree and resolves S1Top' do
+    skip 'SPARC64 committed import tree not available' unless Dir.exist?(described_class::DEFAULT_IMPORT_DIR)
+
     klass = described_class.load_component_class(top: 'S1Top')
     expect(klass.name).to eq('S1Top')
     expect(klass).to respond_to(:verilog_module_name)
@@ -72,9 +74,110 @@ RSpec.describe RHDL::Examples::SPARC64::Integration::ImportLoader do
       expect(fake_importer_class.last_kwargs.fetch(:patches_dir)).to eq(
         RHDL::Examples::SPARC64::Integration::ImportPatchSet::FAST_BOOT_PATCH_DIR
       )
-      expect(fake_importer_class.last_kwargs.fetch(:emit_runtime_json)).to eq(false)
+      expect(fake_importer_class.last_kwargs.fetch(:emit_runtime_json)).to eq(true)
     ensure
       FileUtils.rm_rf(build_root)
+    end
+  end
+
+  it 'invalidates the fast-boot build digest when the shared import pipeline changes' do
+    shared_import_path = File.expand_path('../../../../lib/rhdl/codegen/circt/import.rb', __dir__)
+    digests = Hash.new('same-digest')
+    allow(Digest::SHA256).to receive(:file) do |path|
+      instance_double('DigestFile', hexdigest: digests[path])
+    end
+
+    digest_before = described_class.send(
+      :build_digest,
+      reference_root: described_class::DEFAULT_REFERENCE_ROOT,
+      import_top: 's1_top',
+      import_top_file: described_class::DEFAULT_IMPORT_TOP_FILE,
+      patches_dir: RHDL::Examples::SPARC64::Integration::ImportPatchSet::FAST_BOOT_PATCH_DIR,
+      patch_files: []
+    )
+
+    digests[shared_import_path] = 'changed-shared-import'
+
+    digest_after = described_class.send(
+      :build_digest,
+      reference_root: described_class::DEFAULT_REFERENCE_ROOT,
+      import_top: 's1_top',
+      import_top_file: described_class::DEFAULT_IMPORT_TOP_FILE,
+      patches_dir: RHDL::Examples::SPARC64::Integration::ImportPatchSet::FAST_BOOT_PATCH_DIR,
+      patch_files: []
+    )
+
+    expect(digest_after).not_to eq(digest_before)
+  end
+
+  it 'removes partially loaded generated classes before retrying dependent files' do
+    import_root = Dir.mktmpdir('sparc64_import_loader_retry')
+
+    begin
+      File.write(
+        File.join(import_root, 'a_retry_early_child.rb'),
+        <<~RUBY
+          class RetryEarlyChild < RHDL::Sim::Component
+            input :a
+            output :y
+
+            behavior do
+              y <= a
+            end
+          end
+        RUBY
+      )
+      File.write(
+        File.join(import_root, 'b_retry_top.rb'),
+        <<~RUBY
+          class RetryTop < RHDL::Sim::Component
+            input :a
+            output :y
+            wire :early_y
+            wire :late_y
+
+            instance :early, RetryEarlyChild
+            instance :late, RetryLateChild
+
+            port :a => [:early, :a]
+            port :a => [:late, :a]
+            port [:early, :y] => :early_y
+            port [:late, :y] => :late_y
+
+            behavior do
+              y <= early_y | late_y
+            end
+          end
+        RUBY
+      )
+      File.write(
+        File.join(import_root, 'c_retry_late_child.rb'),
+        <<~RUBY
+          class RetryLateChild < RHDL::Sim::Component
+            input :a
+            output :y
+
+            behavior do
+              y <= a
+            end
+          end
+        RUBY
+      )
+
+      described_class.load_tree!(import_dir: import_root)
+
+      aggregate_failures do
+        expect(RetryTop._instance_defs.count { |entry| entry[:name] == :early }).to eq(1)
+        expect(RetryTop._instance_defs.count { |entry| entry[:name] == :late }).to eq(1)
+        expect(RetryTop._connection_defs.count { |entry| entry[:dest] == [:early, :a] }).to eq(1)
+        expect(RetryTop._connection_defs.count { |entry| entry[:dest] == [:late, :a] }).to eq(1)
+      end
+    ensure
+      described_class.instance_variable_set(:@loaded_from, nil)
+      %i[RetryTop RetryEarlyChild RetryLateChild].each do |const_name|
+        Object.send(:remove_const, const_name) if Object.const_defined?(const_name, false)
+      end
+      FileUtils.rm_rf(import_root)
     end
   end
 end

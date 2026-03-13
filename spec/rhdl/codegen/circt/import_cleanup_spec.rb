@@ -359,6 +359,173 @@ RSpec.describe RHDL::Codegen::CIRCT::ImportCleanup do
     expect(process_targets).to include(assigned_signal_for(imported, 'q'))
   end
 
+  it 'cleans one-shot resultful LLHD array init processes even with unrelated llhd.drv lines in front' do
+    mlir = <<~MLIR
+      hw.module @resultful_array_init(in %clk : i1, in %rd : i1, out y : i8) {
+        %t0 = llhd.constant_time <0ns, 1d, 0e>
+        %c0_i32 = hw.constant 0 : i32
+        %c1_i32 = hw.constant 1 : i32
+        %c2_i32 = hw.constant 2 : i32
+        %c0_i8 = hw.constant 0 : i8
+        %true = hw.constant true
+        %false = hw.constant false
+        %zero_arr = hw.aggregate_constant [0 : i8, 0 : i8] : !hw.array<2xi8>
+        %q_sig = llhd.sig %c0_i8 : i8
+        %mem = llhd.sig %zero_arr : !hw.array<2xi8>
+        %proc:2 = llhd.process -> i32, !hw.array<2xi8>, i1 {
+          cf.br ^bb1(%c0_i32, %zero_arr, %false : i32, !hw.array<2xi8>, i1)
+        ^bb1(%i: i32, %acc: !hw.array<2xi8>, %done: i1):
+          %lt = comb.icmp slt %i, %c2_i32 : i32
+          cf.cond_br %lt, ^bb2, ^bb3
+        ^bb2:
+          %idx = comb.extract %i from 0 : (i32) -> i1
+          %next = hw.array_inject %acc[%idx], %c0_i8 : !hw.array<2xi8>, i1
+          %i_next = comb.add %i, %c1_i32 : i32
+          cf.br ^bb1(%i_next, %next, %true : i32, !hw.array<2xi8>, i1)
+        ^bb3:
+          llhd.halt %i, %acc, %done : i32, !hw.array<2xi8>, i1
+        }
+        llhd.drv %q_sig, %c0_i8 after %t0 : i8
+        llhd.drv %mem, %proc#1 after %t0 if %proc#2 : !hw.array<2xi8>
+        %read = hw.array_get %mem[%rd] : !hw.array<2xi8>, i1
+        %next_arr = hw.array_inject %mem[%rd], %c0_i8 : !hw.array<2xi8>, i1
+        %clock = seq.to_clock %clk
+        %mem_next = seq.firreg %next_arr clock %clock : !hw.array<2xi8>
+        llhd.drv %mem, %mem_next after %t0 : !hw.array<2xi8>
+        hw.output %read : i8
+      }
+    MLIR
+
+    result = described_class.cleanup_imported_core_mlir(mlir, strict: true, top: 'resultful_array_init')
+
+    expect(result).to be_success
+    expect(result.cleaned_text).not_to include('llhd.')
+    expect(result.cleaned_text).to include('hw.output')
+  end
+
+  it 'cleans resultful LLHD array-copy loops through arg-less helper blocks without zeroing yielded state' do
+    mlir = <<~MLIR
+      hw.module @shadow_loop(in %clk : i1, in %din : i8, out y : i8) {
+        %t0 = llhd.constant_time <0ns, 0d, 1e>
+        %c0_i32 = hw.constant 0 : i32
+        %c1_i32 = hw.constant 1 : i32
+        %c2_i32 = hw.constant 2 : i32
+        %c0_i8 = hw.constant 0 : i8
+        %true = hw.constant true
+        %false = hw.constant false
+        %zero_arr = hw.aggregate_constant [0 : i8, 0 : i8] : !hw.array<2xi8>
+        %state = llhd.sig %c0_i8 : i8
+        %arr = llhd.sig %zero_arr : !hw.array<2xi8>
+        %probe_arr = llhd.prb %arr : !hw.array<2xi8>
+        %proc:4 = llhd.process -> i8, i1, !hw.array<2xi8>, i1 {
+          cf.br ^bb1(%clk, %c0_i8, %false, %zero_arr, %false : i1, i8, i1, !hw.array<2xi8>, i1)
+        ^bb1(%prev_clk: i1, %data: i8, %en: i1, %acc: !hw.array<2xi8>, %done: i1):
+          llhd.wait yield (%data, %en, %acc, %done : i8, i1, !hw.array<2xi8>, i1), (%clk : i1), ^bb2(%prev_clk : i1)
+        ^bb2(%seen_clk: i1):
+          %edge = comb.xor bin %seen_clk, %true : i1
+          %posedge = comb.and bin %edge, %clk : i1
+          cf.cond_br %posedge, ^bb3(%c0_i32, %probe_arr, %false : i32, !hw.array<2xi8>, i1), ^bb1(%clk, %c0_i8, %false, %probe_arr, %false : i1, i8, i1, !hw.array<2xi8>, i1)
+        ^bb3(%i: i32, %loop_acc: !hw.array<2xi8>, %loop_done: i1):
+          %lt = comb.icmp slt %i, %c2_i32 : i32
+          cf.cond_br %lt, ^bb4, ^bb1(%clk, %din, %true, %loop_acc, %loop_done : i1, i8, i1, !hw.array<2xi8>, i1)
+        ^bb4:
+          %bit = comb.extract %i from 0 : (i32) -> i1
+          %next_arr = hw.array_inject %loop_acc[%bit], %din : !hw.array<2xi8>, i1
+          %next_idx = comb.add %i, %c1_i32 : i32
+          cf.br ^bb3(%next_idx, %next_arr, %true : i32, !hw.array<2xi8>, i1)
+        }
+        llhd.drv %state, %proc#0 after %t0 if %proc#1 : i8
+        llhd.drv %arr, %proc#2 after %t0 if %proc#3 : !hw.array<2xi8>
+        %read = hw.array_get %arr[%false] : !hw.array<2xi8>, i1
+        hw.output %read : i8
+      }
+    MLIR
+
+    result = described_class.cleanup_imported_core_mlir(mlir, strict: true, top: 'shadow_loop')
+
+    expect(result).to be_success
+    expect(result.cleaned_text).not_to include('llhd.')
+
+    imported = imported_module_for(result.cleaned_text, top: 'shadow_loop')
+    process_targets = process_targets_for(imported)
+    expect(process_targets.length).to eq(2)
+
+    seq_assigns = []
+    walker = lambda do |statements|
+      Array(statements).each do |statement|
+        case statement
+        when RHDL::Codegen::CIRCT::IR::SeqAssign
+          seq_assigns << statement
+        when RHDL::Codegen::CIRCT::IR::If
+          walker.call(statement.then_statements)
+          walker.call(statement.else_statements)
+        end
+      end
+    end
+    imported.processes.each { |process| walker.call(process.statements) }
+
+    expect(seq_assigns.length).to eq(2)
+    expect(seq_assigns.map { |statement| statement.expr.inspect }.join("\n")).to include('din')
+
+    firtool_result = firtool_accepts?(result.cleaned_text)
+    expect(firtool_result).not_to eq(false)
+  end
+
+  it 'preserves dual-port memories as seq.firmem through imported cleanup' do
+    skip 'circt-verilog not available' unless HdlToolchain.which('circt-verilog')
+
+    Dir.mktmpdir('dual_port_import_cleanup') do |dir|
+      verilog_path = File.join(dir, 'simple_dpram.v')
+      mlir_path = File.join(dir, 'simple_dpram.mlir')
+      File.write(verilog_path, <<~VERILOG)
+        module simple_dpram(
+          input clock0,
+          input clock1,
+          input clocken0,
+          input clocken1,
+          input [4:0] address_a,
+          input [4:0] address_b,
+          input [7:0] data_a,
+          input [7:0] data_b,
+          input wren_a,
+          input wren_b,
+          output reg [7:0] q_a,
+          output reg [7:0] q_b
+        );
+          reg [7:0] mem [0:31];
+          always @(posedge clock0) begin
+            if (clocken0) begin
+              if (wren_a) mem[address_a] <= data_a;
+              q_a <= mem[address_a];
+            end
+          end
+          always @(posedge clock1) begin
+            if (clocken1) begin
+              if (wren_b) mem[address_b] <= data_b;
+              q_b <= mem[address_b];
+            end
+          end
+        endmodule
+      VERILOG
+
+      system('circt-verilog', '--detect-memories', '--ir-hw', '--top=simple_dpram', verilog_path, out: mlir_path, err: File::NULL)
+      mlir = File.read(mlir_path)
+
+      result = described_class.cleanup_imported_core_mlir(mlir, strict: true, top: 'simple_dpram')
+
+      expect(result).to be_success
+      expect(result.cleaned_text).to include('seq.firmem 0, 1, undefined, port_order : <32 x 8>')
+      expect(result.cleaned_text.scan('seq.firmem.write_port %mem[').length).to eq(2)
+      read_clock_tokens = result.cleaned_text.scan(/seq\.firmem\.read_port %mem\[[^\]]+\], clock (%[A-Za-z0-9_]+)/).flatten
+      expect(read_clock_tokens.length).to eq(2)
+      expect(read_clock_tokens.uniq.length).to eq(2)
+      expect(result.cleaned_text).not_to include('seq.compreg %rt_tmp_1_256')
+      expect(result.cleaned_text).not_to include('seq.compreg %rt_tmp_3_256')
+      firtool_result = firtool_accepts?(result.cleaned_text)
+      expect(firtool_result).not_to eq(false)
+    end
+  end
+
   it 'leaves aggregate-only core modules untouched when no LLHD overlay is present' do
     mlir = <<~MLIR
       hw.module @codes_like(in %idx : i2, out y : i8) {

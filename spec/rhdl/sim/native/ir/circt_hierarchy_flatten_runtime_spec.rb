@@ -3,6 +3,46 @@
 require 'spec_helper'
 
 RSpec.describe 'CIRCT hierarchical runtime flattening' do
+  class HierarchicalSequentialChild < RHDL::HDL::SequentialComponent
+    include RHDL::DSL::Behavior
+    include RHDL::DSL::Sequential
+
+    input :clk
+    input :rst
+    input :din
+    output :y, width: 30
+    wire :y_reg, width: 30
+
+    sequential clock: :clk, reset: :rst, reset_values: { y_reg: 0 } do
+      y_reg <= mux(din, lit(64, width: 30), lit(0, width: 30))
+    end
+
+    behavior do
+      y <= y_reg
+    end
+  end
+
+  class HierarchicalSequentialTop < RHDL::HDL::SequentialComponent
+    include RHDL::DSL::Behavior
+
+    input :clk
+    input :rst
+    input :din
+    output :y, width: 30
+    wire :child_y, width: 30
+
+    instance :u, HierarchicalSequentialChild
+
+    port :clk => [:u, :clk]
+    port :rst => [:u, :rst]
+    port :din => [:u, :din]
+    port [:u, :y] => :child_y
+
+    behavior do
+      y <= child_y
+    end
+  end
+
   let(:ir) { RHDL::Codegen::CIRCT::IR }
 
   def build_hierarchical_package
@@ -108,5 +148,40 @@ RSpec.describe 'CIRCT hierarchical runtime flattening' do
     sim.evaluate
     expect(sim.peek('y')).to eq(0)
     expect(sim.peek('u__y')).to eq(0)
+  end
+
+  {
+    interpret: [:INTERPRETER_AVAILABLE, 'IR interpreter'],
+    jit: [:JIT_AVAILABLE, 'IR JIT'],
+    compile: [:COMPILER_AVAILABLE, 'IR compiler']
+  }.each do |backend, (availability_const, label)|
+    it "does not duplicate hierarchical sequential output bridges for #{label}" do
+      skip "#{label} unavailable" unless RHDL::Sim::Native::IR.const_get(availability_const)
+
+      flat = HierarchicalSequentialTop.to_flat_circt_nodes(top_name: "hierarchical_seq_top_#{backend}")
+      bridge_targets = flat.assigns.map { |assign| assign.target.to_s }
+
+      expect(bridge_targets.count('child_y')).to eq(1)
+      expect(bridge_targets.count('u__y')).to eq(1)
+
+      sim = RHDL::Sim::Native::IR::Simulator.new(
+        RHDL::Sim::Native::IR.sim_json(flat, backend: backend),
+        backend: backend
+      )
+
+      sim.reset
+      sim.poke('rst', 0)
+      sim.poke('din', 1)
+      sim.poke('clk', 0)
+      sim.evaluate
+      sim.poke('clk', 1)
+      sim.tick
+      sim.poke('clk', 0)
+      sim.evaluate
+
+      expect(sim.peek('u__y')).to eq(64)
+      expect(sim.peek('child_y')).to eq(64)
+      expect(sim.peek('y')).to eq(64)
+    end
   end
 end

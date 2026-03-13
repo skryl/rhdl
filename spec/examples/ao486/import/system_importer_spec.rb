@@ -64,6 +64,24 @@ RSpec.describe RHDL::Examples::AO486::Import::SystemImporter do
     end.to raise_error(ArgumentError, /output_dir is required/)
   end
 
+  it 'sanitizes git patch commands from user/global git config dependencies' do
+    importer = described_class.new(output_dir: '/tmp/rhdl_ao486_out')
+    status = instance_double(Process::Status, success?: true, exitstatus: 0)
+    captured_env = nil
+
+    allow(Open3).to receive(:capture3) do |*args, **kwargs|
+      captured_env = args.first
+      ['', '', status]
+    end
+
+    importer.send(:run_command, ['git', 'apply', 'series.patch'], chdir: '/tmp')
+
+    expect(captured_env).to include(
+      'GIT_CONFIG_GLOBAL' => '/dev/null',
+      'GIT_CONFIG_NOSYSTEM' => '1'
+    )
+  end
+
   it 'always includes the selected top in the circt-verilog import command' do
     importer = described_class.new(output_dir: '/tmp/rhdl_ao486_out', top: 'custom_top')
 
@@ -156,21 +174,21 @@ RSpec.describe RHDL::Examples::AO486::Import::SystemImporter do
       File.write(source_path, "module system;\nendmodule\n")
 
       patches_root = File.join(root, 'patch_profiles')
-      trace_dir = File.join(patches_root, 'trace')
+      parity_dir = File.join(patches_root, 'parity')
       runner_dir = File.join(patches_root, 'runner')
-      FileUtils.mkdir_p(trace_dir)
+      FileUtils.mkdir_p(parity_dir)
       FileUtils.mkdir_p(runner_dir)
       write_unified_patch(
-        File.join(trace_dir, '0001-trace.patch'),
+        File.join(parity_dir, '0001-parity.patch'),
         relpath: 'system.v',
         removal: 'module system;',
-        addition: 'module system; wire trace_patch;'
+        addition: 'module system; wire parity_patch;'
       )
       write_unified_patch(
         File.join(runner_dir, '0001-runner.patch'),
         relpath: 'system.v',
-        removal: 'module system; wire trace_patch;',
-        addition: 'module system; wire trace_patch; wire runner_patch;'
+        removal: 'module system; wire parity_patch;',
+        addition: 'module system; wire parity_patch; wire runner_patch;'
       )
 
       workspace = File.join(root, 'workspace')
@@ -179,7 +197,7 @@ RSpec.describe RHDL::Examples::AO486::Import::SystemImporter do
         output_dir: File.join(root, 'out'),
         workspace_dir: workspace,
         keep_workspace: true,
-        patch_profiles: %i[trace runner]
+        patch_profiles: %i[parity runner]
       )
       allow(importer).to receive(:ao486_patches_root).and_return(patches_root)
 
@@ -190,11 +208,11 @@ RSpec.describe RHDL::Examples::AO486::Import::SystemImporter do
 
       prepared = importer.send(:prepare_workspace, workspace, strategy: :stubbed)
       staged_text = File.read(prepared[:staged_system_path])
-      expect(staged_text).to include('trace_patch')
+      expect(staged_text).to include('parity_patch')
       expect(staged_text).to include('runner_patch')
-      expect(command_log.grep(/0001-trace\.patch/).length).to eq(2)
+      expect(command_log.grep(/0001-parity\.patch/).length).to eq(2)
       expect(command_log.grep(/0001-runner\.patch/).length).to eq(2)
-      expect(command_log.index { |cmd| cmd.include?('0001-trace.patch') }).to be < command_log.index { |cmd| cmd.include?('0001-runner.patch') }
+      expect(command_log.index { |cmd| cmd.include?('0001-parity.patch') }).to be < command_log.index { |cmd| cmd.include?('0001-runner.patch') }
     end
   end
 

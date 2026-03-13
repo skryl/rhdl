@@ -86,6 +86,10 @@ impl RuntimeValue {
             return Self::zero(width);
         }
 
+        if let Ok(value) = digits.parse::<SignalValue>() {
+            return Self::from_u128(value, width);
+        }
+
         let ten = Self::from_u128(10, width);
         digits.chars().fold(Self::zero(width), |acc, ch| {
             let digit = ch
@@ -97,6 +101,9 @@ impl RuntimeValue {
 
     pub fn from_signed_text(text: &str, width: usize) -> Self {
         let trimmed = text.trim();
+        if let Ok(value) = trimmed.parse::<SignedSignalValue>() {
+            return Self::from_signed_i128(value, width);
+        }
         if let Some(stripped) = trimmed.strip_prefix('-') {
             let magnitude = Self::from_unsigned_text(stripped, width);
             Self::zero(width).sub(&magnitude, width)
@@ -740,4 +747,19 @@ fn low_limbs(value: SignalValue, count: usize) -> Vec<u64> {
 
 fn uses_wide256(width: usize) -> bool {
     width > 128 && width <= WIDE256_MAX_BITS
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_small_unsigned_text_via_fast_path() {
+        assert_eq!(RuntimeValue::from_unsigned_text("123", 16).low_u128(), 123);
+    }
+
+    #[test]
+    fn parses_small_signed_text_via_fast_path() {
+        assert_eq!(RuntimeValue::from_signed_text("-5", 8).low_u128(), 0xFB);
+    }
 }

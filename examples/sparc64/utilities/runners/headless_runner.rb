@@ -2,25 +2,32 @@
 
 require_relative 'ir_runner'
 require_relative 'verilator_runner'
+require_relative 'arcilator_runner'
 require_relative '../integration/image_builder'
 require_relative '../integration/programs'
+require 'rhdl/sim/native/headless_trace'
 
 module RHDL
   module Examples
     module SPARC64
       class HeadlessRunner
+        include RHDL::Sim::Native::HeadlessTrace
         attr_reader :runner, :mode, :sim_backend, :builder, :fast_boot, :compile_mode
 
         def initialize(mode: :ir, sim: nil, runner: nil, ir_runner_class: IrRunner,
-                       verilator_runner_class: VerilogRunner, builder: nil,
+                       verilator_runner_class: VerilogRunner, arcilator_runner_class: ArcilatorRunner, builder: nil,
                        builder_class: Integration::ProgramImageBuilder, fast_boot: true,
-                       compile_mode: :auto)
+                       compile_mode: :rustc)
           @mode = (mode || :ir).to_sym
           @sim_backend = (sim || default_backend(@mode)).to_sym
           @builder = builder || builder_class.new
           @fast_boot = !!fast_boot
-          @compile_mode = (compile_mode || :auto).to_sym
-          @runner = runner || build_runner(ir_runner_class: ir_runner_class, verilator_runner_class: verilator_runner_class)
+          @compile_mode = normalize_compile_mode(compile_mode)
+          @runner = runner || build_runner(
+            ir_runner_class: ir_runner_class,
+            verilator_runner_class: verilator_runner_class,
+            arcilator_runner_class: arcilator_runner_class
+          )
         end
 
         def native?
@@ -89,7 +96,7 @@ module RHDL
 
         private
 
-        def build_runner(ir_runner_class:, verilator_runner_class:)
+        def build_runner(ir_runner_class:, verilator_runner_class:, arcilator_runner_class:)
           case @mode
           when :ir
             ir_runner_class.new(
@@ -99,17 +106,27 @@ module RHDL
             )
           when :verilog
             verilator_runner_class.new(fast_boot: fast_boot)
+          when :circt, :arcilator
+            arcilator_runner_class.new(
+              fast_boot: fast_boot,
+              jit: arcilator_jit_mode?(@sim_backend),
+              compile_now: false
+            )
           else
-            raise ArgumentError, "Unsupported SPARC64 mode #{@mode.inspect}. Use :ir or :verilog."
+            raise ArgumentError, "Unsupported SPARC64 mode #{@mode.inspect}. Use :ir, :verilog, or :arcilator."
           end
         end
 
         def normalize_ir_backend(backend)
           case backend
+          when :interpret, :interpreter
+            :interpret
+          when :jit
+            :jit
           when :compile, :compiler
             :compile
           else
-            raise ArgumentError, "Unsupported SPARC64 IR backend #{backend.inspect}. Use :compile."
+            raise ArgumentError, "Unsupported SPARC64 IR backend #{backend.inspect}. Use :interpret, :jit, or :compile."
           end
         end
 
@@ -119,9 +136,31 @@ module RHDL
             :compile
           when :verilog
             :verilator
+          when :circt, :arcilator
+            :compile
           else
-            raise ArgumentError, "Unsupported SPARC64 mode #{mode.inspect}. Use :ir or :verilog."
+            raise ArgumentError, "Unsupported SPARC64 mode #{mode.inspect}. Use :ir, :verilog, or :arcilator."
           end
+        end
+
+        def arcilator_jit_mode?(backend)
+          case backend
+          when :compile
+            false
+          when :jit
+            true
+          else
+            raise ArgumentError, "Unsupported SPARC64 Arcilator backend #{backend.inspect}. Use :compile or :jit."
+          end
+        end
+
+        def normalize_compile_mode(value)
+          mode = (value || :rustc).to_sym
+          return mode unless @mode == :ir && @sim_backend == :compile
+          return :rustc if mode == :rustc
+
+          raise ArgumentError,
+                "Unsupported SPARC64 compiler mode #{value.inspect}. The compiler backend is rustc-only; use :jit for fallback."
         end
       end
     end

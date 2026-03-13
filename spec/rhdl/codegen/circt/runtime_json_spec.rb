@@ -167,6 +167,96 @@ RSpec.describe RHDL::Codegen::CIRCT::RuntimeJSON do
     )
   end
 
+  def build_wide_runtime_bridge_module
+    pkt = ir::Signal.new(name: :pkt, width: 145)
+    en = ir::Signal.new(name: :en, width: 1)
+    bridge_out = ir::Signal.new(name: :bridge_out, width: 145)
+    q_reg = ir::Signal.new(name: :q_reg, width: 145)
+
+    select_code = ir::Concat.new(
+      parts: [
+        ir::Signal.new(name: :'bridge__sel3_l', width: 1),
+        ir::Signal.new(name: :'bridge__sel2_l', width: 1),
+        ir::Signal.new(name: :'bridge__sel1_l', width: 1),
+        ir::Signal.new(name: :'bridge__sel0_l', width: 1)
+      ],
+      width: 4
+    )
+
+    bridge_mux = ir::Mux.new(
+      condition: ir::BinaryOp.new(
+        op: :==,
+        left: select_code,
+        right: ir::Literal.new(value: 7, width: 4),
+        width: 1
+      ),
+      when_true: ir::Signal.new(name: :'bridge__in3', width: 145),
+      when_false: ir::Literal.new(value: 0, width: 145),
+      width: 145
+    )
+
+    ir::ModuleOp.new(
+      name: 'runtime_wide_bridge',
+      ports: [
+        ir::Port.new(name: :clk, direction: :in, width: 1),
+        ir::Port.new(name: :en, direction: :in, width: 1),
+        ir::Port.new(name: :pkt, direction: :in, width: 145),
+        ir::Port.new(name: :sel0_l, direction: :in, width: 1),
+        ir::Port.new(name: :sel1_l, direction: :in, width: 1),
+        ir::Port.new(name: :sel2_l, direction: :in, width: 1),
+        ir::Port.new(name: :sel3_l, direction: :in, width: 1),
+        ir::Port.new(name: :q, direction: :out, width: 145),
+        ir::Port.new(name: :vld, direction: :out, width: 1)
+      ],
+      nets: [
+        ir::Net.new(name: :bridge_out, width: 145),
+        ir::Net.new(name: :'bridge__dout', width: 145),
+        ir::Net.new(name: :'bridge__in3', width: 145),
+        ir::Net.new(name: :'bridge__sel0_l', width: 1),
+        ir::Net.new(name: :'bridge__sel1_l', width: 1),
+        ir::Net.new(name: :'bridge__sel2_l', width: 1),
+        ir::Net.new(name: :'bridge__sel3_l', width: 1)
+      ],
+      regs: [
+        ir::Reg.new(name: :q_reg, width: 145, reset_value: 0)
+      ],
+      assigns: [
+        ir::Assign.new(target: :'bridge__in3', expr: pkt),
+        ir::Assign.new(target: :'bridge__sel0_l', expr: ir::Signal.new(name: :sel0_l, width: 1)),
+        ir::Assign.new(target: :'bridge__sel1_l', expr: ir::Signal.new(name: :sel1_l, width: 1)),
+        ir::Assign.new(target: :'bridge__sel2_l', expr: ir::Signal.new(name: :sel2_l, width: 1)),
+        ir::Assign.new(target: :'bridge__sel3_l', expr: ir::Signal.new(name: :sel3_l, width: 1)),
+        ir::Assign.new(target: :'bridge__dout', expr: bridge_mux),
+        ir::Assign.new(target: :bridge_out, expr: ir::Signal.new(name: :'bridge__dout', width: 145)),
+        ir::Assign.new(target: :q, expr: q_reg),
+        ir::Assign.new(target: :vld, expr: ir::Slice.new(base: q_reg, range: 144..144, width: 1))
+      ],
+      processes: [
+        ir::Process.new(
+          name: 'capture',
+          clocked: true,
+          clock: 'clk',
+          statements: [
+            ir::SeqAssign.new(
+              target: :q_reg,
+              expr: ir::Mux.new(
+                condition: en,
+                when_true: bridge_out,
+                when_false: q_reg,
+                width: 145
+              )
+            )
+          ]
+        )
+      ],
+      instances: [],
+      memories: [],
+      write_ports: [],
+      sync_read_ports: [],
+      parameters: {}
+    )
+  end
+
   def build_dead_wide_assign_runtime_module(dead_assign_count:)
     a = ir::Signal.new(name: :a, width: 64)
     choose = ir::Signal.new(name: :choose, width: 1)
@@ -587,6 +677,21 @@ RSpec.describe RHDL::Codegen::CIRCT::RuntimeJSON do
     expect(runtime_mod.nets.map { |net| net.name.to_s }).to include('u__probe')
     expect(probe_assign).not_to be_nil
     expect(expr_signal_names(probe_assign.expr)).not_to include('bus_mux')
+  end
+
+  it 'keeps wide bridge assigns live when a >128-bit sequential path still consumes the raw bridge net' do
+    runtime_mod = described_class.normalize_modules_for_runtime([build_wide_runtime_bridge_module]).first
+    assign_targets = runtime_mod.assigns.map { |assign| assign.target.to_s }
+    net_names = runtime_mod.nets.map { |net| net.name.to_s }
+
+    expect(assign_targets).to include('bridge_out', 'bridge__dout', 'bridge__in3')
+    expect(net_names).to include('bridge_out', 'bridge__dout', 'bridge__in3')
+
+    q_process = runtime_mod.processes.find { |process| process.name == 'capture' }
+    q_assign = Array(q_process&.statements).grep(ir::SeqAssign).find { |stmt| stmt.target.to_s == 'q_reg' }
+
+    expect(q_assign).not_to be_nil
+    expect(expr_signal_names(q_assign.expr)).to include('bridge_out')
   end
 
   it 'serializes wide literal and reset values beyond serde_json integer range as decimal strings' do

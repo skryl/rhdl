@@ -133,6 +133,7 @@ RSpec.describe RHDL::Examples::SPARC64::Import::SystemImporter do
           report = JSON.parse(File.read(result.report_path))
           expect(Array(report['import_diagnostics'])).to eq([])
           expect(Array(report['raise_diagnostics'])).to eq([])
+          expect(report.dig('artifacts', 'normalized_core_mlir_path')).to be_nil
         end
       end
     end
@@ -207,14 +208,104 @@ RSpec.describe RHDL::Examples::SPARC64::Import::SystemImporter do
             expect(support_stubs_source).to include('module bw_r_tlb_fpga(')
             expect(support_stubs_source).to include('output [39:10] tlb_pgnum_crit;')
             expect(support_stubs_source).to include('output [39:10] tlb_pgnum;')
-            expect(support_stubs_source).to include('wire [29:0] virtual_pgnum;')
-            expect(support_stubs_source).to include('assign virtual_pgnum = {')
-            expect(support_stubs_source).to include('assign tlb_cam_hit = 1\'b1;')
-            expect(support_stubs_source).to include('assign next_cache_way_hit[0] = cache_set_vld[0] & (cache_ptag_w0 == virtual_pgnum);')
+            expect(support_stubs_source).to include('reg [30:0] va_tag_plus;')
+            expect(support_stubs_source).to include('reg [29:0] vrtl_pgnum_m;')
+            expect(support_stubs_source).to include('wire [26:0] tlb_cam_comp_key;')
+            expect(support_stubs_source).to include('assign tlb_pgnum_crit = pgnum_m;')
+            expect(support_stubs_source).to include('assign pgnum_m[29:18] = ~bypass_d ? phy_pgnum_m[29:18] : vrtl_pgnum_m[29:18];')
+            expect(support_stubs_source).not_to include('assign tlb_pgnum_crit = virtual_pgnum;')
           end
         end
       end
     end
+
+    it 'stages bw_r_irf_register as a real source instead of a hierarchy stub' do
+      require_reference_tree!
+
+      Dir.mktmpdir('sparc64_import_bundle_out') do |out_dir|
+        Dir.mktmpdir('sparc64_import_bundle_ws') do |workspace|
+          importer = new_importer(
+            output_dir: out_dir,
+            workspace_dir: workspace,
+            top: 's1_top',
+            top_file: File.join(described_class::DEFAULT_REFERENCE_ROOT, 'os2wb', 's1_top.v'),
+            patches_dir: File.expand_path('../../../../examples/sparc64/patches/fast_boot', __dir__)
+          )
+          resolved = importer.resolve_sources(workspace: workspace)
+          bundle = importer.write_import_source_bundle(workspace: workspace, resolved: resolved)
+          support_stubs_path = bundle.fetch(:tool_args).grep(/__rhdl_sparc64_hierarchy_stubs\.v\z/).fetch(0)
+          support_stubs_source = File.read(support_stubs_path)
+          staged_irf_register = File.join(bundle.fetch(:staged_root), 'T1-common', 'srams', 'bw_r_irf_register.v')
+
+          aggregate_failures do
+            expect(File.exist?(staged_irf_register)).to be(true)
+            expect(bundle.fetch(:tool_args)).to include(staged_irf_register)
+            expect(support_stubs_source).not_to include('module bw_r_irf_register(')
+            expect(File.read(staged_irf_register)).to include('module bw_r_irf_register')
+            expect(File.read(staged_irf_register)).to match(/output\s+\[71:0\]\s+rd_data;/)
+          end
+        end
+      end
+    end
+
+    it 'stages bw_r_rf32x152b as a real source instead of a hierarchy stub' do
+      require_reference_tree!
+
+      Dir.mktmpdir('sparc64_import_bundle_out') do |out_dir|
+        Dir.mktmpdir('sparc64_import_bundle_ws') do |workspace|
+          importer = new_importer(
+            output_dir: out_dir,
+            workspace_dir: workspace,
+            top: 's1_top',
+            top_file: File.join(described_class::DEFAULT_REFERENCE_ROOT, 'os2wb', 's1_top.v'),
+            patches_dir: File.expand_path('../../../../examples/sparc64/patches/fast_boot', __dir__)
+          )
+          resolved = importer.resolve_sources(workspace: workspace)
+          bundle = importer.write_import_source_bundle(workspace: workspace, resolved: resolved)
+          support_stubs_path = bundle.fetch(:tool_args).grep(/__rhdl_sparc64_hierarchy_stubs\.v\z/).fetch(0)
+          support_stubs_source = File.read(support_stubs_path)
+          staged_dfq = File.join(bundle.fetch(:staged_root), 'T1-common', 'srams', 'bw_r_rf32x152b.v')
+
+          aggregate_failures do
+            expect(File.exist?(staged_dfq)).to be(true)
+            expect(bundle.fetch(:tool_args)).to include(staged_dfq)
+            expect(support_stubs_source).not_to include('module bw_r_rf32x152b(')
+            expect(File.read(staged_dfq)).to include('module bw_r_rf32x152b')
+            expect(File.read(staged_dfq)).to match(/output\s+\[151:0\]\s+dout\s*;/)
+          end
+        end
+      end
+    end
+
+    it 'stages bw_r_dcd as a real source instead of a hierarchy stub' do
+      require_reference_tree!
+
+      Dir.mktmpdir('sparc64_import_bundle_out') do |out_dir|
+        Dir.mktmpdir('sparc64_import_bundle_ws') do |workspace|
+          importer = new_importer(
+            output_dir: out_dir,
+            workspace_dir: workspace,
+            top: 's1_top',
+            top_file: File.join(described_class::DEFAULT_REFERENCE_ROOT, 'os2wb', 's1_top.v'),
+            patches_dir: File.expand_path('../../../../examples/sparc64/patches/fast_boot', __dir__)
+          )
+          resolved = importer.resolve_sources(workspace: workspace)
+          bundle = importer.write_import_source_bundle(workspace: workspace, resolved: resolved)
+          support_stubs_path = bundle.fetch(:tool_args).grep(/__rhdl_sparc64_hierarchy_stubs\.v\z/).fetch(0)
+          support_stubs_source = File.read(support_stubs_path)
+          staged_dcd = File.join(bundle.fetch(:staged_root), 'T1-common', 'srams', 'bw_r_dcd.v')
+
+          aggregate_failures do
+            expect(File.exist?(staged_dcd)).to be(true)
+            expect(bundle.fetch(:tool_args)).to include(staged_dcd)
+            expect(support_stubs_source).not_to include('module bw_r_dcd(')
+            expect(File.read(staged_dcd)).to include('module bw_r_dcd')
+            expect(File.read(staged_dcd)).to match(/output\s+\[63:0\]\s+dcache_rdata_wb\s*;/)
+          end
+        end
+      end
+    end
+
   end
 
   describe 'patch directory support' do
@@ -542,8 +633,9 @@ RSpec.describe RHDL::Examples::SPARC64::Import::SystemImporter do
       )
 
       aggregate_failures do
-        expect(normalized).to include('assign parity_out[15:0] = {(^data_in[127:120]), (^data_in[119:112])')
-        expect(normalized).to include('(^data_in[7:0])};')
+        expect(normalized).to include('genvar parity_idx;')
+        expect(normalized).to include('for (parity_idx = 0; parity_idx < NUM; parity_idx = parity_idx + 1) begin : rhdl_parity_gen')
+        expect(normalized).to include('assign parity_out[parity_idx] = ^data_in[(WIDTH * (parity_idx + 1)) - 1:WIDTH * parity_idx];')
         expect(normalized).not_to include('always @(data_in)')
         expect(normalized).not_to include('parity[i] = parity[i] ^ data_in[j];')
       end
@@ -589,6 +681,42 @@ RSpec.describe RHDL::Examples::SPARC64::Import::SystemImporter do
         expect(normalized).to include('reg	[71:0]	reg_th1 /* verilator public_flat_rw */;')
         expect(normalized).to include('reg	[71:0]	reg_th2 /* verilator public_flat_rw */;')
         expect(normalized).to include('reg	[71:0]	reg_th3 /* verilator public_flat_rw */;')
+      end
+    end
+
+    it 'strips inactive IRF preprocessor branches from bw_r_irf.v before import' do
+      importer = new_importer(output_dir: Dir.pwd, workspace_dir: Dir.pwd)
+      original = File.read(File.join(described_class::DEFAULT_REFERENCE_ROOT, 'T1-common', 'srams', 'bw_r_irf.v'))
+
+      normalized = importer.send(
+        :normalize_verilog_for_import,
+        original,
+        source_path: File.join(described_class::DEFAULT_REFERENCE_ROOT, 'T1-common', 'srams', 'bw_r_irf.v')
+      )
+
+      aggregate_failures do
+        expect(normalized).not_to include('`ifdef FPGA_SYN_IRF')
+        expect(normalized).not_to include('`ifdef FPGA_SYN_1THREAD')
+        expect(normalized.scan(/^module\s+bw_r_irf\b/).length).to eq(1)
+        expect(normalized.scan(/^module\s+bw_r_irf_core\b/).length).to eq(1)
+      end
+    end
+
+    it 'strips inactive IRF preprocessor branches from bw_r_irf_register.v before import' do
+      importer = new_importer(output_dir: Dir.pwd, workspace_dir: Dir.pwd)
+      original = File.read(File.join(described_class::DEFAULT_REFERENCE_ROOT, 'T1-common', 'srams', 'bw_r_irf_register.v'))
+
+      normalized = importer.send(
+        :normalize_verilog_for_import,
+        original,
+        source_path: File.join(described_class::DEFAULT_REFERENCE_ROOT, 'T1-common', 'srams', 'bw_r_irf_register.v')
+      )
+
+      aggregate_failures do
+        expect(normalized).not_to include('`ifdef FPGA_SYN_1THREAD')
+        expect(normalized.scan(/^module\s+bw_r_irf_register\b/).length).to eq(1)
+        expect(normalized).to include('input	[3:0]	wrens;')
+        expect(normalized).to include('output	[71:0]	rd_data;')
       end
     end
   end

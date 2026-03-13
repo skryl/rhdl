@@ -783,20 +783,140 @@ RSpec.describe RHDL::CLI::Tasks::ImportTask do
     expect(rewritten).to include(".cs_b(1'b1)")
   end
 
-  it 'builds a byte-addressed runtime overlay for generated dpram_dif modules' do
+  it 'builds a primitive-backed runtime overlay for generated dpram_dif modules' do
     task = described_class.new(mode: :mixed, out: tmp_dir)
     rewritten = task.send(:runtime_dpram_dif_module_block, 'dpram_dif__vhdl_test')
 
+    expect(rewritten).to include('module dpram_dif__vhdl_test__byte_mem')
     expect(rewritten).to include('module dpram_dif__vhdl_test')
     expect(rewritten).to include('wire enable_a_active = (enable_a !== 1\'b0);')
     expect(rewritten).to include('wire cs_b_active = (cs_b !== 1\'b0);')
     expect(rewritten).to include('wire wren_b_active = (wren_b === 1\'b1);')
+    expect(rewritten).to include('reg [7:0] mem[2047:0];')
     expect(rewritten).to include('wire [10:0] word_addr_a = address_a[11:1];')
-    expect(rewritten).to include('wire [7:0]  read_byte_a = byte_sel_a ? word_data_a[15:8] : word_data_a[7:0];')
-    expect(rewritten).to include('if (wren_b_active & cs_b_active)')
+    expect(rewritten).to include('wire        write_port_b_active = enable_b_active & cs_b_active & wren_b_active;')
+    expect(rewritten).to include('assign q_a = mem[address_a];')
+    expect(rewritten).to include('wire [7:0]  read_byte_a_passthrough =')
+    expect(rewritten).to include('wire [15:0] read_word_b_passthrough = write_port_b_active ? data_b : read_word_b;')
+    expect(rewritten).to include('dpram_dif__vhdl_test__byte_mem mem_lo')
+    expect(rewritten).to include('dpram_dif__vhdl_test__byte_mem mem_hi')
   end
 
-  it 'overlays staged generated dpram_dif modules with the byte-addressed runtime model after import' do
+  it 'builds a clocked runtime overlay for generated dpram modules' do
+    task = described_class.new(mode: :mixed, out: tmp_dir)
+    source = <<~VERILOG
+      module dpram__vhdl_test(
+        input clock_a,
+        input clken_a,
+        input [12:0] address_a,
+        input [7:0] data_a,
+        input wren_a,
+        input clock_b,
+        input clken_b,
+        input [12:0] address_b,
+        input [7:0] data_b,
+        input wren_b,
+        output [7:0] q_a,
+        output [7:0] q_b
+      );
+        assign q_a = 8'h00;
+        assign q_b = 8'h00;
+      endmodule
+    VERILOG
+
+    rewritten = task.send(:runtime_dpram_module_block, 'dpram__vhdl_test', source_text: source)
+
+    expect(rewritten).to include('module dpram__vhdl_test')
+    expect(rewritten).to include("reg [7:0] mem[8191:0];")
+    expect(rewritten).to include("reg [7:0] q_a_reg;")
+    expect(rewritten).to include("reg [7:0] q_b_reg;")
+    expect(rewritten).to include("wire clken_a_active = (clken_a !== 1'b0);")
+    expect(rewritten).to include("wire wren_b_active = (wren_b === 1'b1);")
+    expect(rewritten).to include('assign q_a = q_a_reg;')
+    expect(rewritten).to include('assign q_b = q_b_reg;')
+    expect(rewritten).to include("q_a_reg = 8'd0;")
+    expect(rewritten).to include("q_b_reg = 8'd0;")
+    expect(rewritten).to include('always @(posedge clock_a) begin')
+    expect(rewritten).to include('q_a_reg <= wren_a_active ? data_a : mem[address_a];')
+    expect(rewritten).to include('if (wren_a_active)')
+    expect(rewritten).to include('mem[address_a] <= data_a;')
+    expect(rewritten).to include('always @(posedge clock_b) begin')
+    expect(rewritten).to include('q_b_reg <= wren_b_active ? data_b : mem[address_b];')
+    expect(rewritten).to include('if (wren_b_active)')
+    expect(rewritten).to include('mem[address_b] <= data_b;')
+  end
+
+  it 'leaves generated dpram modules untouched through the staged overlay path' do
+    task = described_class.new(mode: :mixed, out: tmp_dir)
+    pure_root = File.join(tmp_dir, '.mixed_import', 'pure_verilog')
+    generated_dir = File.join(pure_root, 'generated_vhdl')
+    FileUtils.mkdir_p(generated_dir)
+    out_path = File.join(generated_dir, 'dpram__vhdl_deadbeef.v')
+    File.write(out_path, <<~VERILOG)
+      module dpram__vhdl_deadbeef(
+        input clock_a,
+        input clken_a,
+        input [14:0] address_a,
+        input [7:0] data_a,
+        input wren_a,
+        input clock_b,
+        input clken_b,
+        input [14:0] address_b,
+        input [7:0] data_b,
+        input wren_b,
+        output [7:0] q_a,
+        output [7:0] q_b
+      );
+        assign q_a = 8'hAA;
+        assign q_b = 8'h55;
+      endmodule
+    VERILOG
+
+    replaced = task.send(:overlay_runtime_generated_vhdl_modules!, pure_verilog_root: pure_root)
+    text = File.read(out_path)
+
+    expect(replaced).not_to include('dpram__vhdl_deadbeef')
+    expect(text).to include("assign q_a = 8'hAA;")
+    expect(text).to include("assign q_b = 8'h55;")
+  end
+
+  it 'does not treat dpram_dif helper modules as runtime overlay roots' do
+    task = described_class.new(mode: :mixed, out: tmp_dir)
+
+    expect(
+      task.send(
+        :runtime_generated_vhdl_module_block,
+        entity_name: 'dpram_dif__vhdl_test__byte_mem',
+        module_name: 'dpram_dif__vhdl_test__byte_mem'
+      )
+    ).to be_nil
+  end
+
+  it 'builds a behavioral runtime overlay for generated speedcontrol modules' do
+    task = described_class.new(mode: :mixed, out: tmp_dir)
+    rewritten = task.send(:runtime_speedcontrol_module_block, 'speedcontrol')
+
+    expect(rewritten).to include('module speedcontrol')
+    expect(rewritten).to include('output reg ce')
+    expect(rewritten).to include('localparam FASTFORWARD = 3\'d3;')
+    expect(rewritten).to include('always @(negedge clk_sys)')
+    expect(rewritten).to include('ce_2x <= 1\'b1;')
+    expect(rewritten).to include('state <= RAMACCESS;')
+  end
+
+  it 'builds a minimal runtime stub for generated gb_savestates modules' do
+    task = described_class.new(mode: :mixed, out: tmp_dir)
+    rewritten = task.send(:runtime_gb_savestates_module_block, 'gb_savestates')
+
+    expect(rewritten).to include('module gb_savestates')
+    expect(rewritten).to include('assign reset_out = reset_in;')
+    expect(rewritten).to include('assign BUS_rst = reset_in;')
+    expect(rewritten).to include('assign savestate_busy = 1\'b0;')
+    expect(rewritten).to include('assign Save_RAMWrEn = 5\'d0;')
+    expect(rewritten).to include('assign bus_out_be = 8\'d0;')
+  end
+
+  it 'overlays staged generated dpram_dif modules with the primitive-backed runtime model after import' do
     task = described_class.new(mode: :mixed, out: tmp_dir)
     pure_root = File.join(tmp_dir, '.mixed_import', 'pure_verilog')
     generated_dir = File.join(pure_root, 'generated_vhdl')
@@ -819,11 +939,90 @@ RSpec.describe RHDL::CLI::Tasks::ImportTask do
     text = File.read(out_path)
 
     expect(replaced).to eq(['dpram_dif__vhdl_deadbeef'])
+    expect(text).to include('module dpram_dif__vhdl_deadbeef__byte_mem')
     expect(text).to include('module dpram_dif__vhdl_deadbeef')
     expect(text).to include('wire enable_b_active = (enable_b !== 1\'b0);')
+    expect(text).to include('reg [7:0] mem[2047:0];')
     expect(text).to include('wire [10:0] word_addr_a = address_a[11:1];')
-    expect(text).to include('wire [7:0]  read_byte_a = byte_sel_a ? word_data_a[15:8] : word_data_a[7:0];')
+    expect(text).to include('wire [15:0] read_word_b_passthrough = write_port_b_active ? data_b : read_word_b;')
+    expect(text).to include('dpram_dif__vhdl_deadbeef__byte_mem mem_hi')
     expect(text).not_to include('altsyncram_hash')
+  end
+
+  it 'does not duplicate dpram_dif helper modules when patching normalized Verilog' do
+    task = described_class.new(mode: :mixed, out: tmp_dir)
+    pure_root = File.join(tmp_dir, '.mixed_import', 'pure_verilog')
+    generated_dir = File.join(pure_root, 'generated_vhdl')
+    FileUtils.mkdir_p(generated_dir)
+
+    generated_text = task.send(:runtime_dpram_dif_module_block, 'dpram_dif__vhdl_deadbeef')
+    File.write(File.join(generated_dir, 'dpram_dif__vhdl_deadbeef.v'), generated_text)
+
+    normalized_path = File.join(tmp_dir, '.mixed_import', 'gb.normalized.v')
+    FileUtils.mkdir_p(File.dirname(normalized_path))
+    File.write(normalized_path, <<~VERILOG)
+      #{generated_text}
+
+      module unrelated(input wire a, output wire y);
+        assign y = a;
+      endmodule
+    VERILOG
+
+    replaced = task.send(
+      :overlay_generated_memory_modules!,
+      normalized_verilog_path: normalized_path,
+      pure_verilog_root: pure_root
+    )
+    text = File.read(normalized_path)
+
+    expect(replaced).to include('dpram_dif__vhdl_deadbeef__byte_mem', 'dpram_dif__vhdl_deadbeef')
+    expect(text.scan(/module dpram_dif__vhdl_deadbeef__byte_mem\b/).size).to eq(1)
+    expect(text.scan(/module dpram_dif__vhdl_deadbeef\b/).size).to eq(1)
+  end
+
+  it 'overlays staged generated speedcontrol with the behavioral runtime model before circt-verilog import' do
+    task = described_class.new(mode: :mixed, out: tmp_dir)
+    pure_root = File.join(tmp_dir, '.mixed_import', 'pure_verilog')
+    generated_dir = File.join(pure_root, 'generated_vhdl')
+    FileUtils.mkdir_p(generated_dir)
+    out_path = File.join(generated_dir, 'speedcontrol.v')
+    File.write(out_path, <<~VERILOG)
+      module speedcontrol(input clk_sys, output ce);
+        assign ce = 1'b0;
+      endmodule
+    VERILOG
+
+    replaced = task.send(:overlay_runtime_generated_vhdl_modules!, pure_verilog_root: pure_root)
+    text = File.read(out_path)
+
+    expect(replaced).to eq(['speedcontrol'])
+    expect(text).to include('module speedcontrol')
+    expect(text).to include('output reg ce')
+    expect(text).to include('always @(negedge clk_sys)')
+    expect(text).not_to include('assign ce = 1\'b0;')
+  end
+
+  it 'overlays staged generated gb_savestates with the minimal runtime stub before circt-verilog import' do
+    task = described_class.new(mode: :mixed, out: tmp_dir)
+    pure_root = File.join(tmp_dir, '.mixed_import', 'pure_verilog')
+    generated_dir = File.join(pure_root, 'generated_vhdl')
+    FileUtils.mkdir_p(generated_dir)
+    out_path = File.join(generated_dir, 'gb_savestates.v')
+    File.write(out_path, <<~VERILOG)
+      module gb_savestates(input clk, output reset_out);
+        assign reset_out = 1'b0;
+      endmodule
+    VERILOG
+
+    replaced = task.send(:overlay_runtime_generated_vhdl_modules!, pure_verilog_root: pure_root)
+    text = File.read(out_path)
+
+    expect(replaced).to eq(%w[gb_savestates])
+    expect(text).to include('module gb_savestates')
+    expect(text).to include('assign reset_out = reset_in;')
+    expect(text).to include('assign BUS_rst = reset_in;')
+    expect(text).to include('assign savestate_busy = 1\'b0;')
+    expect(text).not_to include('assign reset_out = 1\'b0;')
   end
 
   describe 'mixed mode' do

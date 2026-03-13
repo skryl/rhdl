@@ -104,6 +104,13 @@ module RHDL
           )
           ensure_verilog_import_top!(tool_args, mode: :mixed)
 
+          staged_runtime_overlays = overlay_runtime_generated_vhdl_modules!(
+            pure_verilog_root: staging.fetch(:pure_verilog_root)
+          )
+          staging[:provenance] = staging.fetch(:provenance).merge(
+            staged_runtime_overlay_modules: staged_runtime_overlays
+          )
+
           result = with_timed_step("Verilog -> CIRCT MLIR (#{tool})") do
             RHDL::Codegen::CIRCT::Tooling.verilog_to_circt_mlir(
               verilog_path: staged_verilog_path,
@@ -124,13 +131,6 @@ module RHDL
           cleanup_imported_core_mlir!(
             mlir_out: mlir_out,
             top_name: resolved_top_name
-          )
-
-          staged_runtime_overlays = overlay_runtime_generated_vhdl_modules!(
-            pure_verilog_root: staging.fetch(:pure_verilog_root)
-          )
-          staging[:provenance] = staging.fetch(:provenance).merge(
-            staged_runtime_overlay_modules: staged_runtime_overlays
           )
 
           return unless raise_to_dsl?
@@ -1125,12 +1125,13 @@ module RHDL
           Dir.glob(File.join(generated_dir, '**', '*.v')).sort.each do |path|
             source_text = File.read(path)
             verilog_module_blocks(source_text).each do |name, block|
-              overlay_modules[name] =
-                if name.start_with?('dpram_dif__vhdl_')
-                  runtime_dpram_dif_module_block(name)
-                else
-                  block
+              if primary_runtime_dpram_dif_module_name?(name)
+                verilog_module_blocks(runtime_dpram_dif_module_block(name)).each do |replacement_name, replacement_block|
+                  overlay_modules[replacement_name] = replacement_block
                 end
+              else
+                overlay_modules[name] = block
+              end
             end
           end
 
@@ -1163,6 +1164,16 @@ module RHDL
           replaced
         end
 
+        def primary_runtime_dpram_dif_module_name?(name)
+          module_name = name.to_s.strip
+          module_name.start_with?('dpram_dif__vhdl_') && !module_name.include?('__byte_mem')
+        end
+
+        def primary_runtime_dpram_module_name?(name)
+          module_name = name.to_s.strip
+          module_name.start_with?('dpram__vhdl_')
+        end
+
         def verilog_module_blocks(text)
           verilog_module_spans(text).each_with_object({}) do |span, acc|
             acc[span.fetch(:name)] = text[span.fetch(:start)...span.fetch(:end)]
@@ -1190,7 +1201,31 @@ module RHDL
         end
 
         def runtime_dpram_dif_module_block(module_name)
+          helper_module_name = "#{module_name}__byte_mem"
           <<~VERILOG
+            module #{helper_module_name}
+              (input  clock,
+               input  [10:0] address_a,
+               input  [7:0]  data_a,
+               input  wren_a,
+               output [7:0]  q_a,
+               input  [10:0] address_b,
+               input  [7:0]  data_b,
+               input  wren_b,
+               output [7:0]  q_b);
+              reg [7:0] mem[2047:0];
+
+              assign q_a = mem[address_a];
+              assign q_b = mem[address_b];
+
+              always @(posedge clock) begin
+                if (wren_a)
+                  mem[address_a] <= data_a;
+                if (wren_b)
+                  mem[address_b] <= data_b;
+              end
+            endmodule
+
             module #{module_name}
               (input  clock,
                input  [11:0] address_a,
@@ -1207,8 +1242,10 @@ module RHDL
                output [15:0] q_b);
               reg [7:0] q_a_reg;
               reg [15:0] q_b_reg;
-              reg [15:0] mem[2047:0];
-              integer i;
+              wire [7:0] mem_lo_q_a;
+              wire [7:0] mem_hi_q_a;
+              wire [7:0] mem_lo_q_b;
+              wire [7:0] mem_hi_q_b;
 
               // Unconnected VHDL helper ports arrive as z/x in the synthesized Verilog.
               // Treat enable/cs as default-active to preserve the original entity defaults,
@@ -1222,9 +1259,15 @@ module RHDL
 
               wire [10:0] word_addr_a = address_a[11:1];
               wire        byte_sel_a = address_a[0];
-              wire [15:0] word_data_a = mem[word_addr_a];
-              wire [7:0]  read_byte_a = byte_sel_a ? word_data_a[15:8] : word_data_a[7:0];
-              wire [15:0] write_word_a = byte_sel_a ? {data_a, word_data_a[7:0]} : {word_data_a[15:8], data_a};
+              wire        write_port_a_active = enable_a_active & cs_a_active & wren_a_active;
+              wire        write_port_b_active = enable_b_active & cs_b_active & wren_b_active;
+              wire        write_lo_a = write_port_a_active & ~byte_sel_a;
+              wire        write_hi_a = write_port_a_active & byte_sel_a;
+              wire [7:0]  read_byte_a = byte_sel_a ? mem_hi_q_a : mem_lo_q_a;
+              wire [7:0]  read_byte_a_passthrough =
+                byte_sel_a ? (write_hi_a ? data_a : mem_hi_q_a) : (write_lo_a ? data_a : mem_lo_q_a);
+              wire [15:0] read_word_b = {mem_hi_q_b, mem_lo_q_b};
+              wire [15:0] read_word_b_passthrough = write_port_b_active ? data_b : read_word_b;
 
               assign q_a = q_a_reg;
               assign q_b = q_b_reg;
@@ -1232,28 +1275,138 @@ module RHDL
               initial begin
                 q_a_reg = 8'h00;
                 q_b_reg = 16'h0000;
-                for (i = 0; i < 2048; i = i + 1) begin
-                  mem[i] = 16'h0000;
-                end
               end
+
+              #{helper_module_name} mem_lo (
+                .clock(clock),
+                .address_a(word_addr_a),
+                .data_a(data_a),
+                .wren_a(write_lo_a),
+                .q_a(mem_lo_q_a),
+                .address_b(address_b),
+                .data_b(data_b[7:0]),
+                .wren_b(write_port_b_active),
+                .q_b(mem_lo_q_b));
+
+              #{helper_module_name} mem_hi (
+                .clock(clock),
+                .address_a(word_addr_a),
+                .data_a(data_a),
+                .wren_a(write_hi_a),
+                .q_a(mem_hi_q_a),
+                .address_b(address_b),
+                .data_b(data_b[15:8]),
+                .wren_b(write_port_b_active),
+                .q_b(mem_hi_q_b));
 
               always @(posedge clock) begin
                 if (enable_a_active) begin
-                  q_a_reg <= cs_a_active ? read_byte_a : 8'hFF;
-                  if (wren_a_active & cs_a_active) begin
-                    mem[word_addr_a] <= write_word_a;
-                  end
+                  q_a_reg <= cs_a_active ? read_byte_a_passthrough : 8'hFF;
                 end
 
                 if (enable_b_active) begin
-                  q_b_reg <= cs_b_active ? mem[address_b] : 16'hFFFF;
-                  if (wren_b_active & cs_b_active) begin
-                    mem[address_b] <= data_b;
-                  end
+                  q_b_reg <= cs_b_active ? read_word_b_passthrough : 16'hFFFF;
                 end
               end
             endmodule
           VERILOG
+        end
+
+        def runtime_dpram_module_block(module_name, source_text:)
+          signature = generated_dpram_signature(source_text, module_name: module_name)
+          return nil unless signature
+
+          addr_width = signature.fetch(:address_width)
+          data_width = signature.fetch(:data_width)
+          depth = 1 << addr_width
+
+          <<~VERILOG
+            module #{module_name}
+              (input  clock_a,
+               input  clken_a,
+               input  [#{addr_width - 1}:0] address_a,
+               input  [#{data_width - 1}:0] data_a,
+               input  wren_a,
+               input  clock_b,
+               input  clken_b,
+               input  [#{addr_width - 1}:0] address_b,
+               input  [#{data_width - 1}:0] data_b,
+               input  wren_b,
+               output [#{data_width - 1}:0] q_a,
+               output [#{data_width - 1}:0] q_b);
+              reg [#{data_width - 1}:0] mem[#{depth - 1}:0];
+              reg [#{data_width - 1}:0] q_a_reg;
+              reg [#{data_width - 1}:0] q_b_reg;
+              integer i;
+
+              wire clken_a_active = (clken_a !== 1'b0);
+              wire clken_b_active = (clken_b !== 1'b0);
+              wire wren_a_active = (wren_a === 1'b1);
+              wire wren_b_active = (wren_b === 1'b1);
+
+              assign q_a = q_a_reg;
+              assign q_b = q_b_reg;
+
+              initial begin
+                for (i = 0; i < #{depth}; i = i + 1) begin
+                  mem[i] = #{data_width}'d0;
+                end
+                q_a_reg = #{data_width}'d0;
+                q_b_reg = #{data_width}'d0;
+              end
+
+              always @(posedge clock_a) begin
+                if (clken_a_active) begin
+                  q_a_reg <= wren_a_active ? data_a : mem[address_a];
+                  if (wren_a_active)
+                    mem[address_a] <= data_a;
+                end
+              end
+
+              always @(posedge clock_b) begin
+                if (clken_b_active) begin
+                  q_b_reg <= wren_b_active ? data_b : mem[address_b];
+                  if (wren_b_active)
+                    mem[address_b] <= data_b;
+                end
+              end
+            endmodule
+          VERILOG
+        end
+
+        def generated_dpram_signature(source_text, module_name:)
+          address_a_width = verilog_port_width(source_text, 'address_a')
+          address_b_width = verilog_port_width(source_text, 'address_b')
+          data_a_width = verilog_port_width(source_text, 'data_a')
+          data_b_width = verilog_port_width(source_text, 'data_b')
+          q_a_width = verilog_port_width(source_text, 'q_a')
+          q_b_width = verilog_port_width(source_text, 'q_b')
+
+          return nil unless [address_a_width, address_b_width, data_a_width, data_b_width, q_a_width, q_b_width].all?
+          return nil unless address_a_width == address_b_width
+          return nil unless data_a_width == data_b_width && data_a_width == q_a_width && data_a_width == q_b_width
+
+          {
+            module_name: module_name,
+            address_width: address_a_width,
+            data_width: data_a_width
+          }
+        end
+
+        def verilog_port_width(source_text, port_name)
+          match = source_text.match(/\b(?:input|output)\b\s*(?:wire|reg)?\s*(\[[^\]]+\])?\s*#{Regexp.escape(port_name)}\b/m)
+          return nil unless match
+
+          verilog_range_width(match[1])
+        end
+
+        def verilog_range_width(range_text)
+          return 1 if range_text.nil?
+
+          match = range_text.match(/\[\s*(\d+)\s*:\s*(\d+)\s*\]/)
+          return nil unless match
+
+          (match[1].to_i - match[2].to_i).abs + 1
         end
 
         def normalize_llhd_mlir_if_needed!(mlir_out:)
@@ -1367,13 +1520,17 @@ module RHDL
           restore_generated_t80_di_reg_alias!(out_path: out_path) if %w[t80 gbse].include?(name.downcase)
         end
 
-        def runtime_generated_vhdl_module_block(entity_name:, module_name:)
+        def runtime_generated_vhdl_module_block(entity_name:, module_name:, source_text: nil)
           entity = entity_name.to_s.strip.downcase
           generated_module_name = module_name.to_s.strip
           generated_module_name = entity_name.to_s.strip if generated_module_name.empty?
 
           return runtime_dpram_dif_module_block(generated_module_name) if entity == 'dpram_dif'
-          return runtime_dpram_dif_module_block(generated_module_name) if generated_module_name.start_with?('dpram_dif__vhdl_')
+          return runtime_dpram_dif_module_block(generated_module_name) if primary_runtime_dpram_dif_module_name?(generated_module_name)
+          return runtime_gb_savestates_module_block(generated_module_name) if entity == 'gb_savestates'
+          return runtime_gb_savestates_module_block(generated_module_name) if generated_module_name.start_with?('gb_savestates')
+          return runtime_speedcontrol_module_block(generated_module_name) if entity == 'speedcontrol'
+          return runtime_speedcontrol_module_block(generated_module_name) if generated_module_name.start_with?('speedcontrol')
 
           nil
         end
@@ -1385,9 +1542,11 @@ module RHDL
           replaced = []
           Dir.glob(File.join(generated_dir, '**', '*.v')).sort.each do |path|
             module_name = File.basename(path, '.v')
+            source_text = File.read(path)
             replacement = runtime_generated_vhdl_module_block(
               entity_name: module_name,
-              module_name: module_name
+              module_name: module_name,
+              source_text: source_text
             )
             next unless replacement
 
@@ -1471,6 +1630,205 @@ module RHDL
           return if updated == source
 
           File.write(out_path, updated)
+        end
+
+        def runtime_speedcontrol_module_block(module_name)
+          <<~VERILOG
+            module #{module_name}(
+              input wire clk_sys,
+              input wire pause,
+              input wire speedup,
+              input wire cart_act,
+              input wire DMA_on,
+              output reg ce,
+              output reg ce_n,
+              output reg ce_2x,
+              output reg refresh,
+              output reg ff_on
+            );
+              localparam NORMAL = 3'd0;
+              localparam PAUSED = 3'd1;
+              localparam FASTFORWARDSTART = 3'd2;
+              localparam FASTFORWARD = 3'd3;
+              localparam FASTFORWARDEND = 3'd4;
+              localparam RAMACCESS = 3'd5;
+
+              reg [2:0] clkdiv;
+              reg cart_act_1;
+              reg [3:0] unpause_cnt;
+              reg [3:0] fastforward_cnt;
+              reg [6:0] refreshcnt;
+              reg sdram_busy;
+              reg [2:0] state;
+
+              initial begin
+                ce = 1'b0;
+                ce_n = 1'b0;
+                ce_2x = 1'b0;
+                refresh = 1'b0;
+                ff_on = 1'b0;
+                clkdiv = 3'b000;
+                cart_act_1 = 1'b0;
+                unpause_cnt = 4'd0;
+                fastforward_cnt = 4'd0;
+                refreshcnt = 7'd0;
+                sdram_busy = 1'b0;
+                state = NORMAL;
+              end
+
+              always @(negedge clk_sys) begin
+                ce <= 1'b0;
+                ce_n <= 1'b0;
+                ce_2x <= 1'b0;
+                refresh <= 1'b0;
+
+                cart_act_1 <= cart_act;
+
+                if (refreshcnt > 0)
+                  refreshcnt <= refreshcnt - 7'd1;
+
+                case (state)
+                  NORMAL: begin
+                    if (pause && (clkdiv == 3'b111) && !cart_act) begin
+                      state <= PAUSED;
+                      unpause_cnt <= 4'd0;
+                    end else if (speedup && !pause && !DMA_on && (clkdiv == 3'b000)) begin
+                      state <= FASTFORWARDSTART;
+                      fastforward_cnt <= 4'd0;
+                    end else begin
+                      clkdiv <= clkdiv + 3'b001;
+                      if (clkdiv == 3'b000)
+                        ce <= 1'b1;
+                      if (clkdiv == 3'b100)
+                        ce_n <= 1'b1;
+                      if (clkdiv[1:0] == 2'b00)
+                        ce_2x <= 1'b1;
+                    end
+                  end
+                  PAUSED: begin
+                    if (unpause_cnt == 4'd0)
+                      refresh <= 1'b1;
+
+                    if (!pause) begin
+                      if (unpause_cnt == 4'd15)
+                        state <= NORMAL;
+                      else
+                        unpause_cnt <= unpause_cnt + 4'd1;
+                    end
+                  end
+                  FASTFORWARDSTART: begin
+                    if (fastforward_cnt == 4'd15) begin
+                      state <= FASTFORWARD;
+                      ff_on <= 1'b1;
+                    end else begin
+                      fastforward_cnt <= fastforward_cnt + 4'd1;
+                    end
+                  end
+                  FASTFORWARD: begin
+                    if (pause || !speedup || DMA_on) begin
+                      state <= FASTFORWARDEND;
+                      fastforward_cnt <= 4'd0;
+                      if (clkdiv[0])
+                        clkdiv <= 3'b100;
+                    end else if (cart_act && !cart_act_1) begin
+                      state <= RAMACCESS;
+                      sdram_busy <= 1'b1;
+                    end else if (!cart_act && (refreshcnt == 7'd0)) begin
+                      refreshcnt <= 7'd127;
+                      refresh <= 1'b1;
+                      state <= RAMACCESS;
+                      sdram_busy <= 1'b1;
+                    end else begin
+                      clkdiv[0] <= ~clkdiv[0];
+                      if (!clkdiv[0])
+                        ce <= 1'b1;
+                      else
+                        ce_n <= 1'b1;
+                      ce_2x <= 1'b1;
+                    end
+                  end
+                  FASTFORWARDEND: begin
+                    if (fastforward_cnt == 4'd15) begin
+                      state <= NORMAL;
+                      ff_on <= 1'b0;
+                    end else begin
+                      fastforward_cnt <= fastforward_cnt + 4'd1;
+                    end
+                  end
+                  RAMACCESS: begin
+                    if (sdram_busy)
+                      sdram_busy <= 1'b0;
+                    else
+                      state <= FASTFORWARD;
+                  end
+                  default: begin
+                    state <= NORMAL;
+                  end
+                endcase
+              end
+            endmodule
+          VERILOG
+        end
+
+        def runtime_gb_savestates_module_block(module_name)
+          <<~VERILOG
+            module #{module_name}(
+              input wire clk,
+              input wire reset_in,
+              input wire increaseSSHeaderCount,
+              input wire save,
+              input wire load,
+              input wire [31:0] savestate_address,
+              input wire [7:0] cart_ram_size,
+              input wire lcd_vsync,
+              input wire [63:0] BUS_Dout,
+              input wire clock_ena_in,
+              input wire [7:0] Save_RAMReadData_WRAM,
+              input wire [7:0] Save_RAMReadData_VRAM,
+              input wire [7:0] Save_RAMReadData_ORAM,
+              input wire [7:0] Save_RAMReadData_ZRAM,
+              input wire [7:0] Save_RAMReadData_CRAM,
+              input wire [63:0] bus_out_Dout,
+              input wire bus_out_done,
+              output wire reset_out,
+              output wire load_done,
+              output wire savestate_busy,
+              output wire [63:0] BUS_Din,
+              output wire [9:0] BUS_Adr,
+              output wire BUS_wren,
+              output wire BUS_rst,
+              output wire loading_savestate,
+              output wire saving_savestate,
+              output wire sleep_savestate,
+              output wire [19:0] Save_RAMAddr,
+              output wire [4:0] Save_RAMWrEn,
+              output wire [7:0] Save_RAMWriteData,
+              output wire [63:0] bus_out_Din,
+              output wire [25:0] bus_out_Adr,
+              output wire bus_out_rnw,
+              output wire bus_out_ena,
+              output wire [7:0] bus_out_be
+            );
+  assign reset_out = reset_in;
+  assign load_done = 1'b0;
+  assign savestate_busy = 1'b0;
+  assign BUS_Din = 64'd0;
+  assign BUS_Adr = 10'd0;
+  assign BUS_wren = 1'b0;
+  assign BUS_rst = reset_in;
+  assign loading_savestate = 1'b0;
+  assign saving_savestate = 1'b0;
+  assign sleep_savestate = 1'b0;
+              assign Save_RAMAddr = 20'd0;
+              assign Save_RAMWrEn = 5'd0;
+              assign Save_RAMWriteData = 8'd0;
+              assign bus_out_Din = 64'd0;
+              assign bus_out_Adr = 26'd0;
+              assign bus_out_rnw = 1'b0;
+              assign bus_out_ena = 1'b0;
+              assign bus_out_be = 8'd0;
+            endmodule
+          VERILOG
         end
 
         def expand_vhdl_synth_targets_for_specializations(synth_targets:, verilog_files:, vhdl_files:)

@@ -7,6 +7,7 @@ require 'rhdl/codegen'
 
 require_relative '../integration/constants'
 require_relative '../integration/staged_verilog_bundle'
+require_relative 'shared_runtime_support'
 
 module RHDL
   module Examples
@@ -15,6 +16,8 @@ module RHDL
         include Integration
 
         class DefaultAdapter
+          include SharedRuntimeSupport::AdapterMethods
+
           VERILATOR_WARNING_FLAGS = %w[
             --no-timing
             -Wno-fatal
@@ -33,7 +36,7 @@ module RHDL
           ].freeze
           TRACE_WORDS = 6
           FAULT_WORDS = 4
-          DEBUG_WORDS = 287
+          DEBUG_WORDS = 352
 
           attr_reader :top_module
 
@@ -54,95 +57,8 @@ module RHDL
             :hdl_verilator
           end
 
-          def reset!
-            @sim_reset.call(@sim_ctx)
-            self
-          end
-
           def run_cycles(n)
             @sim_run_cycles_fn.call(@sim_ctx, n.to_i).to_i
-          end
-
-          def load_images(boot_image:, program_image:)
-            @sim_clear_memory_fn.call(@sim_ctx)
-            load_flash(boot_image, base_addr: Integration::FLASH_BOOT_BASE)
-            # The low-address fast-boot alias models the uncached boot-prom
-            # path, so it must serve the boot shim rather than the DRAM
-            # resident benchmark image. The shim is linked at 0x8000, so we
-            # mirror it there as well for any startup path that resolves the
-            # PROM window back into low DRAM instead of the flash aperture.
-            load_memory(boot_image, base_addr: 0)
-            load_memory(boot_image, base_addr: Integration::BOOT_PROM_ALIAS_BASE)
-            load_memory(program_image, base_addr: Integration::PROGRAM_BASE)
-            reset!
-            self
-          end
-
-          def load_flash(bytes, base_addr:)
-            payload = pack_bytes(bytes)
-            @sim_load_flash_fn.call(@sim_ctx, Fiddle::Pointer[payload], base_addr.to_i, payload.bytesize)
-          end
-
-          def load_memory(bytes, base_addr:)
-            payload = pack_bytes(bytes)
-            @sim_load_memory_fn.call(@sim_ctx, Fiddle::Pointer[payload], base_addr.to_i, payload.bytesize)
-          end
-
-          def read_memory(addr, length)
-            len = length.to_i
-            return [] if len <= 0
-
-            buffer = Fiddle::Pointer.malloc(len)
-            copied = @sim_read_memory_fn.call(@sim_ctx, addr.to_i, buffer, len).to_i
-            buffer.to_s(copied).bytes
-          end
-
-          def write_memory(addr, bytes)
-            payload = pack_bytes(bytes)
-            @sim_write_memory_fn.call(@sim_ctx, addr.to_i, Fiddle::Pointer[payload], payload.bytesize).to_i
-          end
-
-          def mailbox_status
-            decode_u64_be(read_memory(Integration::MAILBOX_STATUS, 8))
-          end
-
-          def mailbox_value
-            decode_u64_be(read_memory(Integration::MAILBOX_VALUE, 8))
-          end
-
-          def wishbone_trace
-            count = @sim_wishbone_trace_count_fn.call(@sim_ctx).to_i
-            return [] if count <= 0
-
-            buffer = Fiddle::Pointer.malloc(count * TRACE_WORDS * 8)
-            copied = @sim_copy_wishbone_trace_fn.call(@sim_ctx, buffer, count).to_i
-            unpack_u64_words(buffer, copied * TRACE_WORDS).each_slice(TRACE_WORDS).map do |cycle, op, addr, sel, write_data, read_data|
-              write = !op.zero?
-              {
-                cycle: cycle,
-                op: write ? :write : :read,
-                addr: addr,
-                sel: sel,
-                write_data: write ? write_data : nil,
-                read_data: write ? nil : read_data
-              }
-            end
-          end
-
-          def unmapped_accesses
-            count = @sim_unmapped_access_count_fn.call(@sim_ctx).to_i
-            return [] if count <= 0
-
-            buffer = Fiddle::Pointer.malloc(count * FAULT_WORDS * 8)
-            copied = @sim_copy_unmapped_accesses_fn.call(@sim_ctx, buffer, count).to_i
-            unpack_u64_words(buffer, copied * FAULT_WORDS).each_slice(FAULT_WORDS).map do |cycle, op, addr, sel|
-              {
-                cycle: cycle,
-                op: op.zero? ? :read : :write,
-                addr: addr,
-                sel: sel
-              }
-            end
           end
 
           def debug_snapshot
@@ -179,6 +95,11 @@ module RHDL
               core0_fcl: decode_fcl_debug(words, 231),
               core0_tlu: decode_tlu_debug(words, 243),
               core0_lsu_ingress: decode_lsu_ingress_debug(words, 252),
+              core0_dfq: decode_dfq_debug(words, 344),
+              bridge_fifo: decode_bridge_fifo_debug(words, 287),
+              bridge_producer: decode_bridge_producer_debug(words, 296),
+              core0_qdp1_packet: decode_qdp1_packet_debug(words, 301),
+              core0_exu_rs1_path: decode_exu_rs1_path_debug(words, 331),
               core1: decode_core_debug(words, 26, 70)
             }
           end
@@ -234,35 +155,7 @@ module RHDL
           end
 
           def create_cpp_wrapper(cpp_file, header_file)
-            header = <<~HEADER
-              #ifndef SPARC64_SIM_WRAPPER_H
-              #define SPARC64_SIM_WRAPPER_H
-
-              #ifdef __cplusplus
-              extern "C" {
-              #endif
-
-              void* sim_create(void);
-              void sim_destroy(void* sim);
-              void sim_clear_memory(void* sim);
-              void sim_reset(void* sim);
-              void sim_load_flash(void* sim, const unsigned char* data, unsigned long long base_addr, unsigned int len);
-              void sim_load_memory(void* sim, const unsigned char* data, unsigned long long base_addr, unsigned int len);
-              unsigned int sim_read_memory(void* sim, unsigned long long addr, unsigned char* out, unsigned int len);
-              unsigned int sim_write_memory(void* sim, unsigned long long addr, const unsigned char* data, unsigned int len);
-              unsigned int sim_run_cycles(void* sim, unsigned int n_cycles);
-              unsigned int sim_wishbone_trace_count(void* sim);
-              unsigned int sim_copy_wishbone_trace(void* sim, unsigned long long* out_words, unsigned int max_records);
-              unsigned int sim_unmapped_access_count(void* sim);
-              unsigned int sim_copy_unmapped_accesses(void* sim, unsigned long long* out_words, unsigned int max_records);
-              unsigned int sim_copy_debug_snapshot(void* sim, unsigned long long* out_words, unsigned int max_words);
-
-              #ifdef __cplusplus
-              }
-              #endif
-
-              #endif
-            HEADER
+            header = SharedRuntimeSupport.wrapper_header(include_debug_snapshot: true)
 
             cpp = <<~CPP
               #include "#{@verilator_prefix}.h"
@@ -820,6 +713,85 @@ module RHDL
                 if (count > 284) out_words[284] = root->s1_top__DOT__sparc_0__DOT__lsu__DOT__qctl2__DOT__st_rd_advance;
                 if (count > 285) out_words[285] = root->s1_top__DOT__sparc_0__DOT__lsu__DOT__qctl2__DOT__dfq_int_type;
                 if (count > 286) out_words[286] = root->s1_top__DOT__sparc_0__DOT__lsu__DOT__qctl2__DOT__dfq_evict_type;
+                if (count > 287) out_words[287] = root->s1_top__DOT__os2wb_inst__DOT__pcx_fifo_inst__DOT__rd_ptr;
+                if (count > 288) out_words[288] = root->s1_top__DOT__os2wb_inst__DOT__pcx_fifo_inst__DOT__wr_ptr;
+                if (count > 289) out_words[289] = root->s1_top__DOT__os2wb_inst__DOT__pcx_fifo_inst__DOT__count;
+                if (count > 290) out_words[290] = (static_cast<QData>(root->s1_top__DOT__os2wb_inst__DOT__pcx_fifo_inst__DOT__q[3U] & 0xffU) << 32U) |
+                                                   static_cast<QData>(root->s1_top__DOT__os2wb_inst__DOT__pcx_fifo_inst__DOT__q[2U]);
+                if (count > 291) out_words[291] = (static_cast<QData>(root->s1_top__DOT__os2wb_inst__DOT__pcx_fifo_inst__DOT__payload0[3U] & 0xffU) << 32U) |
+                                                   static_cast<QData>(root->s1_top__DOT__os2wb_inst__DOT__pcx_fifo_inst__DOT__payload0[2U]);
+                if (count > 292) out_words[292] = (static_cast<QData>(root->s1_top__DOT__os2wb_inst__DOT__pcx_fifo_inst__DOT__payload1[3U] & 0xffU) << 32U) |
+                                                   static_cast<QData>(root->s1_top__DOT__os2wb_inst__DOT__pcx_fifo_inst__DOT__payload1[2U]);
+                if (count > 293) out_words[293] = (static_cast<QData>(root->s1_top__DOT__os2wb_inst__DOT__pcx_fifo_inst__DOT__payload2[3U] & 0xffU) << 32U) |
+                                                   static_cast<QData>(root->s1_top__DOT__os2wb_inst__DOT__pcx_fifo_inst__DOT__payload2[2U]);
+                if (count > 294) out_words[294] = (static_cast<QData>(root->s1_top__DOT__os2wb_inst__DOT__pcx_fifo_inst__DOT__payload3[3U] & 0xffU) << 32U) |
+                                                   static_cast<QData>(root->s1_top__DOT__os2wb_inst__DOT__pcx_fifo_inst__DOT__payload3[2U]);
+                if (count > 295) out_words[295] = root->s1_top__DOT__os2wb_inst__DOT__pcx_fifo_inst__DOT__q_meta;
+                if (count > 296) out_words[296] = root->s1_top__DOT__sparc_0__DOT__spc_pcx_req_pq;
+                if (count > 297) out_words[297] = root->s1_top__DOT__sparc_0__DOT__lsu__DOT__qctl1__DOT__rq_stgpq__DOT__q;
+                if (count > 298) out_words[298] = root->s1_top__DOT__sparc_0__DOT__lsu__DOT__qctl1__DOT__ff_spc_pcx_atom_pq__DOT__q;
+                if (count > 299) out_words[299] = (static_cast<QData>(root->s1_top__DOT__sparc_0__DOT__spc_pcx_data_pa[3U] & 0xffU) << 32U) |
+                                                   static_cast<QData>(root->s1_top__DOT__sparc_0__DOT__spc_pcx_data_pa[2U]);
+                if (count > 300) out_words[300] = (static_cast<QData>(root->s1_top__DOT__sparc_0__DOT__lsu__DOT__qdp1__DOT__pcx_xmit_ff__DOT__q[3U] & 0xffU) << 32U) |
+                                                   static_cast<QData>(root->s1_top__DOT__sparc_0__DOT__lsu__DOT__qdp1__DOT__pcx_xmit_ff__DOT__q[2U]);
+                if (count > 301) out_words[301] = root->s1_top__DOT__sparc_0__DOT__lsu__DOT__qdp1__DOT__lmq1_pcx_pkt_addr;
+                if (count > 302) out_words[302] = root->s1_top__DOT__sparc_0__DOT__lsu__DOT__qctl1__DOT__lsu_bld_rq_addr;
+                if (count > 303) out_words[303] = root->s1_top__DOT__sparc_0__DOT__lsu__DOT__qctl1__DOT__ld_pcx_thrd;
+                if (count > 304) out_words[304] = root->s1_top__DOT__sparc_0__DOT__lsu__DOT__qctl1__DOT__lsu_pcx_rq_sz_b3;
+                if (count > 305) out_words[305] = root->s1_top__DOT__sparc_0__DOT__lsu__DOT__qdp1__DOT__ld_byp_cas_mx__DOT__dout;
+                if (count > 306) out_words[306] = (static_cast<QData>(root->s1_top__DOT__sparc_0__DOT__lsu__DOT__qdp1__DOT__lmq_pthrd_sel__DOT__dout[1U]) << 32U) |
+                                                   static_cast<QData>(root->s1_top__DOT__sparc_0__DOT__lsu__DOT__qdp1__DOT__lmq_pthrd_sel__DOT__dout[0U]);
+                if (count > 307) out_words[307] = root->s1_top__DOT__sparc_0__DOT__lsu__DOT__qdp1__DOT__lmq_pthrd_sel__DOT__dout[2U] & 0x1U;
+                if (count > 308) out_words[308] = root->s1_top__DOT__sparc_0__DOT__lsu__DOT__qctl1__DOT__lsu_ld_pcx_rq_mxsel;
+                if (count > 309) out_words[309] = root->s1_top__DOT__sparc_0__DOT__lsu__DOT__qctl1__DOT__pcx_pkt_src_sel;
+                if (count > 310) out_words[310] = root->s1_top__DOT__sparc_0__DOT__lsu__DOT__qctl1__DOT__pcx_pkt_src_sel_tmp;
+                if (count > 311) out_words[311] = root->s1_top__DOT__sparc_0__DOT__lsu__DOT__qdp1__DOT__pcx_pkt_src_sel;
+                if (count > 312) out_words[312] = root->s1_top__DOT__sparc_0__DOT__lsu__DOT__qctl1__DOT__imiss_pcx_mx_sel;
+                if (count > 313) out_words[313] = root->s1_top__DOT__sparc_0__DOT__lsu__DOT__qdp1__DOT__imiss_pcx_mx_sel;
+                if (count > 314) out_words[314] = root->s1_top__DOT__sparc_0__DOT__lsu__DOT__qdp1__DOT__ifu_pcx_pkt;
+                if (count > 315) out_words[315] = (static_cast<QData>(root->s1_top__DOT__sparc_0__DOT__lsu__DOT__qdp1__DOT__ff_spu_lsu_ldst_pckt_d1__DOT__q[3U] & 0xffU) << 32U) |
+                                                   static_cast<QData>(root->s1_top__DOT__sparc_0__DOT__lsu__DOT__qdp1__DOT__ff_spu_lsu_ldst_pckt_d1__DOT__q[2U]);
+                if (count > 316) out_words[316] = (static_cast<QData>(root->s1_top__DOT__sparc_0__DOT__lsu__DOT__qdp1__DOT__pcx_pkt_src__DOT__in2[3U] & 0xffU) << 32U) |
+                                                   static_cast<QData>(root->s1_top__DOT__sparc_0__DOT__lsu__DOT__qdp1__DOT__pcx_pkt_src__DOT__in2[2U]);
+                if (count > 317) out_words[317] = (static_cast<QData>(root->s1_top__DOT__sparc_0__DOT__lsu__DOT__qdp1__DOT__pcx_pkt_src__DOT__dout[3U] & 0xffU) << 32U) |
+                                                   static_cast<QData>(root->s1_top__DOT__sparc_0__DOT__lsu__DOT__qdp1__DOT__pcx_pkt_src__DOT__dout[2U]);
+                if (count > 318) out_words[318] = (static_cast<QData>(root->s1_top__DOT__sparc_0__DOT__lsu__DOT__qdp1__DOT__pcx_xmit_ff__DOT__din[3U] & 0xffU) << 32U) |
+                                                   static_cast<QData>(root->s1_top__DOT__sparc_0__DOT__lsu__DOT__qdp1__DOT__pcx_xmit_ff__DOT__din[2U]);
+                if (count > 319) out_words[319] = (static_cast<QData>(root->s1_top__DOT__sparc_0__DOT__lsu__DOT__qdp1__DOT__pcx_pkt_src__DOT__in1[3U] & 0xffU) << 32U) |
+                                                   static_cast<QData>(root->s1_top__DOT__sparc_0__DOT__lsu__DOT__qdp1__DOT__pcx_pkt_src__DOT__in1[2U]);
+                if (count > 320) out_words[320] = root->s1_top__DOT__sparc_0__DOT__lsu__DOT__qdp1__DOT__stb_rdata_ramc;
+                if (count > 321) out_words[321] = root->s1_top__DOT__sparc_0__DOT__lsu__DOT__qdp1__DOT__stb_rdata_ramd[2U] & 0xfU;
+                if (count > 322) out_words[322] = root->s1_top__DOT__sparc_0__DOT__lsu__DOT__stb_cam__DOT__stb_cam_hit_ptr;
+                if (count > 323) out_words[323] = root->s1_top__DOT__sparc_0__DOT__lsu__DOT__stb_rwctl__DOT__stb_data_rd_ptr;
+                if (count > 324) out_words[324] = root->s1_top__DOT__sparc_0__DOT__lsu__DOT__stb_cam__DOT__stb_cam_rw_ptr;
+                if (count > 325) out_words[325] = root->s1_top__DOT__sparc_0__DOT__lsu__DOT__stb_cam__DOT__stb_addr;
+                if (count > 326) out_words[326] = root->s1_top__DOT__sparc_0__DOT__lsu__DOT__stb_cam__DOT__wdata_ramc;
+                if (count > 327) out_words[327] = root->s1_top__DOT__sparc_0__DOT__lsu__DOT__stb_cam__DOT__wr_data;
+                if (count > 328) out_words[328] = root->s1_top__DOT__sparc_0__DOT__lsu__DOT__stb_rwctl__DOT__stb_wdata_ramd_b75_b64;
+                if (count > 329) out_words[329] = root->s1_top__DOT__sparc_0__DOT__lsu__DOT__tlb_pgnum_crit;
+                if (count > 330) out_words[330] = root->s1_top__DOT__sparc_0__DOT__lsu__DOT__stb_data__DOT__wr_adr;
+                if (count > 331) out_words[331] = root->s1_top__DOT__sparc_0__DOT__exu__DOT__bypass__DOT__byp_alu_rs1_data_d;
+                if (count > 332) out_words[332] = root->s1_top__DOT__sparc_0__DOT__exu__DOT__bypass__DOT__rs1_data_btwn_mux;
+                if (count > 333) out_words[333] = (static_cast<QData>(root->s1_top__DOT__sparc_0__DOT__exu__DOT__irf__DOT__irf_byp_rs1_data_d[1U]) << 32U) |
+                                                   static_cast<QData>(root->s1_top__DOT__sparc_0__DOT__exu__DOT__irf__DOT__irf_byp_rs1_data_d[0U]);
+                if (count > 334) out_words[334] = root->s1_top__DOT__sparc_0__DOT__exu__DOT__bypass__DOT__ifu_exu_pc_d;
+                if (count > 335) out_words[335] = root->s1_top__DOT__sparc_0__DOT__exu__DOT__ifu_exu_dbrinst_d;
+                if (count > 336) out_words[336] = root->s1_top__DOT__sparc_0__DOT__exu__DOT__ecl__DOT__ecl_byp_rs1_mux1_sel_m;
+                if (count > 337) out_words[337] = root->s1_top__DOT__sparc_0__DOT__exu__DOT__ecl__DOT__ecl_byp_rs1_mux1_sel_w;
+                if (count > 338) out_words[338] = root->s1_top__DOT__sparc_0__DOT__exu__DOT__ecl__DOT__ecl_byp_rs1_mux1_sel_w2;
+                if (count > 339) out_words[339] = root->s1_top__DOT__sparc_0__DOT__exu__DOT__ecl__DOT__ecl_byp_rs1_mux1_sel_other;
+                if (count > 340) out_words[340] = root->s1_top__DOT__sparc_0__DOT__exu__DOT__ecl__DOT__ecl_byp_rs1_mux2_sel_e;
+                if (count > 341) out_words[341] = root->s1_top__DOT__sparc_0__DOT__exu__DOT__ecl__DOT__ecl_byp_rs1_mux2_sel_rf;
+                if (count > 342) out_words[342] = root->s1_top__DOT__sparc_0__DOT__exu__DOT__ecl__DOT__ecl_byp_rs1_mux2_sel_ld;
+                if (count > 343) out_words[343] = root->s1_top__DOT__sparc_0__DOT__exu__DOT__ecl__DOT__ecl_byp_rs1_mux2_sel_usemux1;
+                if (count > 344) out_words[344] = root->s1_top__DOT__sparc_0__DOT__lsu__DOT__qctl2__DOT__dfq_vld__DOT__q;
+                if (count > 345) out_words[345] = root->s1_top__DOT__sparc_0__DOT__lsu__DOT__qctl2__DOT__dfq_wptr_ff__DOT__q;
+                if (count > 346) out_words[346] = root->s1_top__DOT__sparc_0__DOT__lsu__DOT__qctl2__DOT__dfq_rptr_ff__DOT__q;
+                if (count > 347) out_words[347] = root->s1_top__DOT__sparc_0__DOT__lsu__DOT__qctl2__DOT__rvld_stgd1__DOT__q;
+                if (count > 348) out_words[348] = root->s1_top__DOT__sparc_0__DOT__lsu__DOT__qctl2__DOT__rvld_stgd1_new__DOT__q;
+                if (count > 349) out_words[349] = root->s1_top__DOT__sparc_0__DOT__lsu__DOT__qctl2__DOT__ifill_pkt_fwd_done_ff__DOT__q;
+                if (count > 350) out_words[350] = root->s1_top__DOT__sparc_0__DOT__lsu__DOT__qctl2__DOT__dfq_inv__DOT__q;
+                if (count > 351) out_words[351] = root->s1_top__DOT__sparc_0__DOT__lsu__DOT__qdp2__DOT__dfq_data_stg__DOT__q[4U];
 
                 return count;
               }
@@ -985,62 +957,7 @@ module RHDL
           end
 
           def load_shared_library(lib_path)
-            @lib = verilog_simulator.load_library!(lib_path)
-            @sim_create = Fiddle::Function.new(@lib['sim_create'], [], Fiddle::TYPE_VOIDP)
-            @sim_destroy = Fiddle::Function.new(@lib['sim_destroy'], [Fiddle::TYPE_VOIDP], Fiddle::TYPE_VOID)
-            @sim_clear_memory_fn = Fiddle::Function.new(@lib['sim_clear_memory'], [Fiddle::TYPE_VOIDP], Fiddle::TYPE_VOID)
-            @sim_reset = Fiddle::Function.new(@lib['sim_reset'], [Fiddle::TYPE_VOIDP], Fiddle::TYPE_VOID)
-            @sim_load_flash_fn = Fiddle::Function.new(
-              @lib['sim_load_flash'],
-              [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP, Fiddle::TYPE_LONG_LONG, Fiddle::TYPE_UINT],
-              Fiddle::TYPE_VOID
-            )
-            @sim_load_memory_fn = Fiddle::Function.new(
-              @lib['sim_load_memory'],
-              [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP, Fiddle::TYPE_LONG_LONG, Fiddle::TYPE_UINT],
-              Fiddle::TYPE_VOID
-            )
-            @sim_read_memory_fn = Fiddle::Function.new(
-              @lib['sim_read_memory'],
-              [Fiddle::TYPE_VOIDP, Fiddle::TYPE_LONG_LONG, Fiddle::TYPE_VOIDP, Fiddle::TYPE_UINT],
-              Fiddle::TYPE_UINT
-            )
-            @sim_write_memory_fn = Fiddle::Function.new(
-              @lib['sim_write_memory'],
-              [Fiddle::TYPE_VOIDP, Fiddle::TYPE_LONG_LONG, Fiddle::TYPE_VOIDP, Fiddle::TYPE_UINT],
-              Fiddle::TYPE_UINT
-            )
-            @sim_run_cycles_fn = Fiddle::Function.new(
-              @lib['sim_run_cycles'],
-              [Fiddle::TYPE_VOIDP, Fiddle::TYPE_UINT],
-              Fiddle::TYPE_UINT
-            )
-            @sim_wishbone_trace_count_fn = Fiddle::Function.new(
-              @lib['sim_wishbone_trace_count'],
-              [Fiddle::TYPE_VOIDP],
-              Fiddle::TYPE_UINT
-            )
-            @sim_copy_wishbone_trace_fn = Fiddle::Function.new(
-              @lib['sim_copy_wishbone_trace'],
-              [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP, Fiddle::TYPE_UINT],
-              Fiddle::TYPE_UINT
-            )
-            @sim_unmapped_access_count_fn = Fiddle::Function.new(
-              @lib['sim_unmapped_access_count'],
-              [Fiddle::TYPE_VOIDP],
-              Fiddle::TYPE_UINT
-            )
-            @sim_copy_unmapped_accesses_fn = Fiddle::Function.new(
-              @lib['sim_copy_unmapped_accesses'],
-              [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP, Fiddle::TYPE_UINT],
-              Fiddle::TYPE_UINT
-            )
-            @sim_copy_debug_snapshot_fn = Fiddle::Function.new(
-              @lib['sim_copy_debug_snapshot'],
-              [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP, Fiddle::TYPE_UINT],
-              Fiddle::TYPE_UINT
-            )
-            @sim_ctx = @sim_create.call
+            bind_runtime_library(verilog_simulator.load_library!(lib_path), include_debug_snapshot: true)
           end
 
 	          def decode_core_debug(words, base, extra_base)
@@ -1324,26 +1241,103 @@ module RHDL
             }
           end
 
-          def decode_u64_be(bytes)
-            Array(bytes).first(8).reduce(0) { |acc, byte| (acc << 8) | (byte.to_i & 0xFF) }
+          def decode_dfq_debug(words, base)
+            raw = words[base]
+            {
+              dfq_vld_raw: raw,
+              dfq_wptr_ff: words[base + 1],
+              dfq_rptr_ff: words[base + 2],
+              rvld_stgd1: !words[base + 3].zero?,
+              rvld_stgd1_new: !words[base + 4].zero?,
+              ifill_pkt_fwd_done_ff: !words[base + 5].zero?,
+              dfq_inv_raw: words[base + 6],
+              dfq_data_stg_top: words[base + 7],
+              dfq_local_pkt: ((raw >> 9) & 0x1) == 1,
+              dfq_byp_full: ((raw >> 6) & 0x1) == 1,
+              dfq_ld_vld: ((raw >> 5) & 0x1) == 1,
+              dfq_inv_vld: ((raw >> 4) & 0x1) == 1,
+              dfq_st_vld: ((raw >> 3) & 0x1) == 1,
+              dfq_local_inv: ((raw >> 2) & 0x1) == 1
+            }
           end
 
-          def pack_bytes(bytes)
-            if bytes.is_a?(String)
-              bytes.b
-            elsif bytes.respond_to?(:pack)
-              Array(bytes).pack('C*')
-            else
-              Array(bytes).pack('C*')
-            end
+          def decode_bridge_fifo_debug(words, base)
+            {
+              rd_ptr: words[base],
+              wr_ptr: words[base + 1],
+              count: words[base + 2],
+              q_addr: words[base + 3],
+              slot0_addr: words[base + 4],
+              slot1_addr: words[base + 5],
+              slot2_addr: words[base + 6],
+              slot3_addr: words[base + 7],
+              q_meta: words[base + 8]
+            }
           end
 
-          def unpack_u64_words(pointer, count)
-            pointer.to_s(count * 8).unpack('Q<*')
+          def decode_bridge_producer_debug(words, base)
+            {
+              spc_pcx_req_pq: words[base],
+              qctl1_rq_stgpq_q: words[base + 1],
+              qctl1_atom_q: !words[base + 2].zero?,
+              spc_pcx_data_pa_addr: words[base + 3],
+              qdp1_pcx_xmit_ff_addr: words[base + 4]
+            }
           end
 
-          def sanitize_identifier(value)
-            value.to_s.gsub(/[^A-Za-z0-9_]/, '_')
+          def decode_qdp1_packet_debug(words, base)
+            {
+              lmq1_pcx_pkt_addr: words[base],
+              qctl1_lsu_bld_rq_addr: words[base + 1],
+              qctl1_ld_pcx_thrd: words[base + 2],
+              qctl1_lsu_pcx_rq_sz_b3: !words[base + 3].zero?,
+              ld_byp_cas_mx_dout: words[base + 4],
+              lmq_pthrd_sel_lo: words[base + 5],
+              lmq_pthrd_sel_hi: words[base + 6],
+              lmq_pthrd_sel_addr: words[base + 5] & ((1 << 42) - 1),
+              qctl1_lsu_ld_pcx_rq_mxsel: words[base + 7],
+              qctl1_pcx_pkt_src_sel: words[base + 8],
+              qctl1_pcx_pkt_src_sel_tmp: words[base + 9],
+              qdp1_pcx_pkt_src_sel: words[base + 10],
+              qctl1_imiss_pcx_mx_sel: !words[base + 11].zero?,
+              qdp1_imiss_pcx_mx_sel: !words[base + 12].zero?,
+              qdp1_ifu_pcx_pkt: words[base + 13],
+              qdp1_ifu_pcx_pkt_addr: words[base + 13] & ((1 << 40) - 1),
+              qdp1_ff_spu_lsu_ldst_pckt_d1_addr: words[base + 14],
+              qdp1_pcx_pkt_src_in2_addr: words[base + 15],
+              qdp1_pcx_pkt_src_dout_addr: words[base + 16],
+              qdp1_pcx_xmit_ff_din_addr: words[base + 17],
+              qdp1_pcx_pkt_src_in1_addr: words[base + 18],
+              qdp1_stb_rdata_ramc: words[base + 19],
+              qdp1_stb_rdata_ramd_addr_nibble: words[base + 20],
+              stb_cam_hit_ptr: words[base + 21],
+              stb_data_rd_ptr: words[base + 22],
+              stb_cam_rw_ptr: words[base + 23],
+              stb_cam_stb_addr: words[base + 24],
+              stb_cam_wdata_ramc: words[base + 25],
+              stb_cam_wr_data: words[base + 26],
+              stb_rwctl_stb_wdata_ramd_b75_b64: words[base + 27],
+              lsu_tlb_pgnum_crit: words[base + 28],
+              stb_data_wr_adr: words[base + 29]
+            }
+          end
+
+          def decode_exu_rs1_path_debug(words, base)
+            {
+              byp_alu_rs1_data_d: words[base],
+              rs1_data_btwn_mux: words[base + 1],
+              irf_byp_rs1_data_d: words[base + 2],
+              ifu_exu_pc_d: words[base + 3],
+              ifu_exu_dbrinst_d: !words[base + 4].zero?,
+              mux1_sel_m: !words[base + 5].zero?,
+              mux1_sel_w: !words[base + 6].zero?,
+              mux1_sel_w2: !words[base + 7].zero?,
+              mux1_sel_other: !words[base + 8].zero?,
+              mux2_sel_e: !words[base + 9].zero?,
+              mux2_sel_rf: !words[base + 10].zero?,
+              mux2_sel_ld: !words[base + 11].zero?,
+              mux2_sel_usemux1: !words[base + 12].zero?
+            }
           end
 
           def write_file_if_changed(path, content)

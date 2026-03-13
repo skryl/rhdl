@@ -11,7 +11,7 @@ RSpec.describe 'SPARC64 integration startup smoke', slow: true do
     skip_unless_ir_compiler!
     skip_unless_program_toolchain!
 
-    runner = build_headless_runner(mode: :ir, sim: :compile, compile_mode: :auto)
+    runner = build_headless_runner(mode: :ir, sim: :compile, compile_mode: :rustc)
     pending_unless_runner_contract!(runner)
     pending('SPARC64 benchmark loader not implemented yet') unless runner.respond_to?(:load_benchmark)
 

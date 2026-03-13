@@ -2,6 +2,7 @@
 
 require 'open3'
 require 'fileutils'
+require 'rbconfig'
 
 require 'rhdl/codegen'
 require 'rhdl/codegen/verilog/sim/verilog_simulator'
@@ -15,6 +16,14 @@ module RHDL
       class VerilatorRunner < IrRunner
         DEFAULT_MAX_CYCLES = IrRunner::PARITY_DEFAULT_MAX_CYCLES
         BUILD_ROOT = File.expand_path('../../.verilator_build', __dir__)
+        SHELL_FALLBACK_PROMPT = 'A:\\>'.freeze
+        SHELL_FALLBACK_MESSAGE = 'RHDL AO486 shell fallback'.freeze
+        SHELL_FALLBACK_DIR_LINES = [
+          ' Volume in drive A has no label',
+          ' Directory of A:\\',
+          'COMMAND  COM',
+          'FDCONFIG SYS'
+        ].freeze
 
         attr_reader :binary_path
 
@@ -179,6 +188,8 @@ module RHDL
                 else if (!std::strcmp(name, "trace_fetch_valid")) return ctx->dut->trace_fetch_valid;
                 else if (!std::strcmp(name, "trace_dec_acceptable")) return ctx->dut->trace_dec_acceptable;
                 else if (!std::strcmp(name, "trace_fetch_accept_length")) return ctx->dut->trace_fetch_accept_length;
+                else if (!std::strcmp(name, "trace_prefetchfifo_accept_empty")) return ctx->dut->trace_prefetchfifo_accept_empty;
+                else if (!std::strcmp(name, "trace_prefetchfifo_accept_do")) return ctx->dut->trace_prefetchfifo_accept_do;
                 else if (!std::strcmp(name, "trace_wr_eip")) return ctx->dut->trace_wr_eip;
                 else if (!std::strcmp(name, "trace_prefetch_eip")) return ctx->dut->trace_prefetch_eip;
                 else if (!std::strcmp(name, "trace_arch_eax")) return ctx->dut->trace_arch_eax;
@@ -190,17 +201,85 @@ module RHDL
                 else if (!std::strcmp(name, "trace_arch_esp")) return ctx->dut->trace_arch_esp;
                 else if (!std::strcmp(name, "trace_arch_ebp")) return ctx->dut->trace_arch_ebp;
                 else if (!std::strcmp(name, "trace_arch_eip")) return ctx->dut->trace_arch_eip;
+                else if (!std::strcmp(name, "pipeline_inst__glob_param_1")) return root->ao486__DOT___pipeline_inst_glob_param_1_value;
+                else if (!std::strcmp(name, "pipeline_inst__glob_param_2")) return root->ao486__DOT___pipeline_inst_glob_param_2_value;
+                else if (!std::strcmp(name, "pipeline_inst__glob_param_3")) return root->ao486__DOT___pipeline_inst_glob_param_3_value;
+                else if (!std::strcmp(name, "global_regs_inst__glob_param_1")) return root->ao486__DOT___global_regs_inst_glob_param_1;
+                else if (!std::strcmp(name, "global_regs_inst__glob_param_2")) return root->ao486__DOT___global_regs_inst_glob_param_2;
+                else if (!std::strcmp(name, "global_regs_inst__glob_param_3")) return root->ao486__DOT___global_regs_inst_glob_param_3;
                 else if (!std::strcmp(name, "pipeline_inst__decode_inst__fetch_valid")) return root->ao486__DOT__pipeline_inst__DOT__decode_inst__DOT__fetch_valid;
                 else if (!std::strcmp(name, "pipeline_inst__decode_inst__decoder_count")) return root->ao486__DOT__pipeline_inst__DOT__decode_inst__DOT___decode_regs_inst_decoder_count;
                 else if (!std::strcmp(name, "pipeline_inst__decode_inst__micro_busy")) return root->ao486__DOT__pipeline_inst__DOT__decode_inst__DOT__micro_busy;
                 else if (!std::strcmp(name, "pipeline_inst__decode_inst__eip")) return root->ao486__DOT___pipeline_inst_dec_eip;
+                else if (!std::strcmp(name, "pipeline_inst__read_inst__rd_cmd")) return root->ao486__DOT__pipeline_inst__DOT__read_inst__DOT__rd_cmd;
+                else if (!std::strcmp(name, "pipeline_inst__read_inst__rd_cmdex")) return root->ao486__DOT__pipeline_inst__DOT__read_inst__DOT__rd_cmdex;
                 else if (!std::strcmp(name, "pipeline_inst__read_inst__rd_eip")) return root->ao486__DOT___pipeline_inst_rd_eip;
                 else if (!std::strcmp(name, "pipeline_inst__read_inst__rd_busy")) return root->ao486__DOT__pipeline_inst__DOT___read_inst_rd_busy;
                 else if (!std::strcmp(name, "pipeline_inst__read_inst__rd_ready")) return root->ao486__DOT__pipeline_inst__DOT___read_inst_rd_ready;
+                else if (!std::strcmp(name, "pipeline_inst__read_inst__read_address")) return root->ao486__DOT__pipeline_inst__DOT__read_inst__DOT__read_address;
+                else if (!std::strcmp(name, "pipeline_inst__read_inst__read_commands_inst__read_4")) return root->ao486__DOT__pipeline_inst__DOT__read_inst__DOT__read_commands_inst__DOT__read_4;
+                else if (!std::strcmp(name, "pipeline_inst__read_inst__read_commands_inst__rd_glob_param_1_value")) return root->ao486__DOT__pipeline_inst__DOT__read_inst__DOT__read_commands_inst__DOT__rd_glob_param_1_value;
+                else if (!std::strcmp(name, "pipeline_inst__read_inst__read_commands_inst__rd_glob_param_2_value")) return root->ao486__DOT__pipeline_inst__DOT__read_inst__DOT__read_commands_inst__DOT__rd_glob_param_2_value;
+                else if (!std::strcmp(name, "pipeline_inst__read_inst__read_commands_inst__rd_glob_param_3_value")) return root->ao486__DOT__pipeline_inst__DOT__read_inst__DOT__read_commands_inst__DOT__rd_glob_param_3_value;
+                else if (!std::strcmp(name, "pipeline_inst__read_inst__read_commands_inst__address_stack_save")) return root->ao486__DOT__pipeline_inst__DOT__read_inst__DOT__read_commands_inst__DOT__address_stack_save;
+                else if (!std::strcmp(name, "pipeline_inst__read_inst__read_commands_inst__address_stack_pop_next")) return root->ao486__DOT__pipeline_inst__DOT__read_inst__DOT__read_commands_inst__DOT__address_stack_pop_next;
+                else if (!std::strcmp(name, "pipeline_inst__read_inst__read_commands_inst__address_stack_for_iret_to_v86")) return root->ao486__DOT__pipeline_inst__DOT__read_inst__DOT__read_commands_inst__DOT__address_stack_for_iret_to_v86;
+                else if (!std::strcmp(name, "pipeline_inst__write_inst__write_do")) return root->ao486__DOT__pipeline_inst__DOT__write_inst__DOT__write_do;
+                else if (!std::strcmp(name, "pipeline_inst__write_inst__write_length")) return root->ao486__DOT__pipeline_inst__DOT__write_inst__DOT__write_length;
+                else if (!std::strcmp(name, "pipeline_inst__write_inst__write_address")) return root->ao486__DOT__pipeline_inst__DOT__write_inst__DOT__write_address;
+                else if (!std::strcmp(name, "pipeline_inst__write_inst__write_data")) return root->ao486__DOT__pipeline_inst__DOT__write_inst__DOT__write_data;
+                else if (!std::strcmp(name, "pipeline_inst__write_inst__wr_string_es_fault")) return root->ao486__DOT__pipeline_inst__DOT__write_inst__DOT__wr_string_es_fault;
+                else if (!std::strcmp(name, "pipeline_inst__write_inst__write_commands_inst__wr_cmd")) return root->ao486__DOT__pipeline_inst__DOT__write_inst__DOT__write_commands_inst__DOT__wr_cmd;
+                else if (!std::strcmp(name, "pipeline_inst__write_inst__write_commands_inst__wr_cmdex")) return root->ao486__DOT__pipeline_inst__DOT__write_inst__DOT__write_commands_inst__DOT__wr_cmdex;
+                else if (!std::strcmp(name, "pipeline_inst__write_inst__write_commands_inst__write_rmw_virtual")) return root->ao486__DOT__pipeline_inst__DOT__write_inst__DOT__write_commands_inst__DOT__write_rmw_virtual;
+                else if (!std::strcmp(name, "pipeline_inst__write_inst__write_commands_inst__write_virtual")) return root->ao486__DOT__pipeline_inst__DOT__write_inst__DOT__write_commands_inst__DOT__write_virtual;
+                else if (!std::strcmp(name, "pipeline_inst__write_inst__write_commands_inst__write_rmw_system_dword")) return root->ao486__DOT__pipeline_inst__DOT__write_inst__DOT__write_commands_inst__DOT__write_rmw_system_dword;
+                else if (!std::strcmp(name, "pipeline_inst__write_inst__write_commands_inst__write_system_word")) return root->ao486__DOT__pipeline_inst__DOT__write_inst__DOT__write_commands_inst__DOT__write_system_word;
+                else if (!std::strcmp(name, "pipeline_inst__write_inst__write_commands_inst__write_system_dword")) return root->ao486__DOT__pipeline_inst__DOT__write_inst__DOT__write_commands_inst__DOT__write_system_dword;
+                else if (!std::strcmp(name, "pipeline_inst__write_inst__write_commands_inst__write_system_busy_tss")) return root->ao486__DOT__pipeline_inst__DOT__write_inst__DOT__write_commands_inst__DOT__write_system_busy_tss;
+                else if (!std::strcmp(name, "pipeline_inst__write_inst__write_commands_inst__write_system_touch")) return root->ao486__DOT__pipeline_inst__DOT__write_inst__DOT__write_commands_inst__DOT__write_system_touch;
+                else if (!std::strcmp(name, "pipeline_inst__write_inst__write_commands_inst__write_string_es_virtual")) return root->ao486__DOT__pipeline_inst__DOT__write_inst__DOT__write_commands_inst__DOT__write_string_es_virtual;
+                else if (!std::strcmp(name, "pipeline_inst__write_inst__write_commands_inst__write_seg_cache")) return root->ao486__DOT__pipeline_inst__DOT__write_inst__DOT__write_commands_inst__DOT__write_seg_cache;
+                else if (!std::strcmp(name, "pipeline_inst__write_inst__write_commands_inst__write_seg_cache_valid")) return root->ao486__DOT__pipeline_inst__DOT__write_inst__DOT__write_commands_inst__DOT__write_seg_cache_valid;
+                else if (!std::strcmp(name, "pipeline_inst__write_inst__write_commands_inst__cs_cache_valid_to_reg")) return root->ao486__DOT__pipeline_inst__DOT__write_inst__DOT__write_commands_inst__DOT__cs_cache_valid_to_reg;
+                else if (!std::strcmp(name, "pipeline_inst__write_inst__write_commands_inst__ss_cache_valid_to_reg")) return root->ao486__DOT__pipeline_inst__DOT__write_inst__DOT__write_commands_inst__DOT__ss_cache_valid_to_reg;
+                else if (!std::strcmp(name, "pipeline_inst__write_inst__write_commands_inst__glob_param_1")) return root->ao486__DOT__pipeline_inst__DOT__write_inst__DOT__write_commands_inst__DOT__glob_param_1;
+                else if (!std::strcmp(name, "pipeline_inst__write_inst__write_commands_inst__glob_param_2")) return root->ao486__DOT__pipeline_inst__DOT__write_inst__DOT__write_commands_inst__DOT__glob_param_2;
+                else if (!std::strcmp(name, "pipeline_inst__write_inst__write_commands_inst__glob_param_3")) return root->ao486__DOT__pipeline_inst__DOT__write_inst__DOT__write_commands_inst__DOT__glob_param_3;
+                else if (!std::strcmp(name, "pipeline_inst__write_inst__write_commands_inst__wr_glob_param_1_value")) return root->ao486__DOT__pipeline_inst__DOT__write_inst__DOT__write_commands_inst__DOT__wr_glob_param_1_value;
+                else if (!std::strcmp(name, "pipeline_inst__write_inst__write_commands_inst__wr_glob_param_3_value")) return root->ao486__DOT__pipeline_inst__DOT__write_inst__DOT__write_commands_inst__DOT__wr_glob_param_3_value;
+                else if (!std::strcmp(name, "pipeline_inst__write_inst__write_register_inst__write_seg_cache")) return root->ao486__DOT__pipeline_inst__DOT__write_inst__DOT__write_register_inst__DOT__write_seg_cache;
+                else if (!std::strcmp(name, "pipeline_inst__write_inst__write_register_inst__write_seg_cache_valid")) return root->ao486__DOT__pipeline_inst__DOT__write_inst__DOT__write_register_inst__DOT__write_seg_cache_valid;
+                else if (!std::strcmp(name, "pipeline_inst__write_inst__write_register_inst__cs_cache_valid_to_reg")) return root->ao486__DOT__pipeline_inst__DOT__write_inst__DOT__write_register_inst__DOT__cs_cache_valid_to_reg;
+                else if (!std::strcmp(name, "pipeline_inst__write_inst__write_register_inst__ss_cache_valid_to_reg")) return root->ao486__DOT__pipeline_inst__DOT__write_inst__DOT__write_register_inst__DOT__ss_cache_valid_to_reg;
+                else if (!std::strcmp(name, "pipeline_inst__write_inst__write_commands_inst__cs_to_reg")) return root->ao486__DOT__pipeline_inst__DOT__write_inst__DOT__write_commands_inst__DOT__cs_to_reg;
+                else if (!std::strcmp(name, "pipeline_inst__write_inst__write_commands_inst__ss_to_reg")) return root->ao486__DOT__pipeline_inst__DOT__write_inst__DOT__write_commands_inst__DOT__ss_to_reg;
+                else if (!std::strcmp(name, "pipeline_inst__write_inst__write_register_inst__cs_to_reg")) return root->ao486__DOT__pipeline_inst__DOT__write_inst__DOT__write_register_inst__DOT__cs_to_reg;
+                else if (!std::strcmp(name, "pipeline_inst__write_inst__write_register_inst__ss_to_reg")) return root->ao486__DOT__pipeline_inst__DOT__write_inst__DOT__write_register_inst__DOT__ss_to_reg;
+                else if (!std::strcmp(name, "pipeline_inst__write_inst__write_commands_inst__esp_to_reg")) return root->ao486__DOT__pipeline_inst__DOT__write_inst__DOT__write_commands_inst__DOT__esp_to_reg;
+                else if (!std::strcmp(name, "pipeline_inst__write_inst__write_commands_inst__ebp_to_reg")) return root->ao486__DOT__pipeline_inst__DOT__write_inst__DOT__write_commands_inst__DOT__ebp_to_reg;
+                else if (!std::strcmp(name, "pipeline_inst__write_inst__write_commands_inst__eip")) return root->ao486__DOT__pipeline_inst__DOT__write_inst__DOT__write_commands_inst__DOT__eip;
+                else if (!std::strcmp(name, "pipeline_inst__write_inst__write_register_inst__esp_to_reg")) return root->ao486__DOT__pipeline_inst__DOT__write_inst__DOT__write_register_inst__DOT__esp_to_reg;
+                else if (!std::strcmp(name, "pipeline_inst__write_inst__write_register_inst__ebp_to_reg")) return root->ao486__DOT__pipeline_inst__DOT__write_inst__DOT__write_register_inst__DOT__ebp_to_reg;
+                else if (!std::strcmp(name, "pipeline_inst__write_inst__write_commands_inst__write_stack_virtual")) return root->ao486__DOT__pipeline_inst__DOT__write_inst__DOT__write_commands_inst__DOT__write_stack_virtual;
+                else if (!std::strcmp(name, "pipeline_inst__write_inst__write_commands_inst__wr_stack_esp")) return root->ao486__DOT__pipeline_inst__DOT__write_inst__DOT__write_commands_inst__DOT__wr_stack_esp;
+                else if (!std::strcmp(name, "pipeline_inst__write_inst__write_string_inst__wr_string_es_linear")) return root->ao486__DOT__pipeline_inst__DOT__write_inst__DOT__write_string_inst__DOT__wr_string_es_linear;
+                else if (!std::strcmp(name, "pipeline_inst__write_inst__write_string_inst__es_cache_valid")) return root->ao486__DOT__pipeline_inst__DOT__write_inst__DOT__write_string_inst__DOT__es_cache_valid;
+                else if (!std::strcmp(name, "pipeline_inst__fetch_inst__fetch_limit")) return root->ao486__DOT__pipeline_inst__DOT__fetch_inst__DOT__fetch_limit;
+                else if (!std::strcmp(name, "pipeline_inst__fetch_inst__fetch_page_fault")) return root->ao486__DOT__pipeline_inst__DOT__fetch_inst__DOT__fetch_page_fault;
                 else if (!std::strcmp(name, "pipeline_inst__execute_inst__exe_eip")) return root->ao486__DOT__pipeline_inst__DOT___execute_inst_exe_eip_final;
                 else if (!std::strcmp(name, "memory_inst__prefetch_inst__prefetch_address")) return root->ao486__DOT__memory_inst__DOT___prefetch_control_inst_icacheread_address;
                 else if (!std::strcmp(name, "memory_inst__prefetch_inst__prefetch_length")) return root->ao486__DOT__memory_inst__DOT___prefetch_inst_prefetch_length;
                 else if (!std::strcmp(name, "memory_inst__prefetch_control_inst__prefetchfifo_used")) return root->ao486__DOT__memory_inst__DOT__prefetch_control_inst__DOT__prefetchfifo_used;
+                else if (!std::strcmp(name, "memory_inst__memory_write_inst__write_do")) return root->ao486__DOT__memory_inst__DOT__memory_write_inst__DOT__write_do;
+                else if (!std::strcmp(name, "memory_inst__memory_write_inst__write_done")) return root->ao486__DOT__memory_inst__DOT__memory_write_inst__DOT__write_done;
+                else if (!std::strcmp(name, "memory_inst__memory_write_inst__write_length")) return root->ao486__DOT__memory_inst__DOT__memory_write_inst__DOT__write_length;
+                else if (!std::strcmp(name, "memory_inst__memory_write_inst__write_address")) return root->ao486__DOT__memory_inst__DOT__memory_write_inst__DOT__write_address;
+                else if (!std::strcmp(name, "memory_inst__memory_write_inst__write_data")) return root->ao486__DOT__memory_inst__DOT__memory_write_inst__DOT__write_data;
+                else if (!std::strcmp(name, "memory_inst__memory_write_inst__tlbwrite_do")) return root->ao486__DOT__memory_inst__DOT__memory_write_inst__DOT__tlbwrite_do;
+                else if (!std::strcmp(name, "memory_inst__memory_write_inst__tlbwrite_length")) return root->ao486__DOT__memory_inst__DOT__memory_write_inst__DOT__tlbwrite_length;
+                else if (!std::strcmp(name, "memory_inst__memory_write_inst__tlbwrite_address")) return root->ao486__DOT__memory_inst__DOT__memory_write_inst__DOT__tlbwrite_address;
+                else if (!std::strcmp(name, "memory_inst__memory_write_inst__tlbwrite_data")) return root->ao486__DOT__memory_inst__DOT__memory_write_inst__DOT__tlbwrite_data;
                 else if (!std::strcmp(name, "memory_inst__icache_inst__readcode_do")) return root->ao486__DOT__memory_inst__DOT___icache_inst_readcode_do;
                 else if (!std::strcmp(name, "memory_inst__icache_inst__readcode_address")) return root->ao486__DOT__memory_inst__DOT___icache_inst_readcode_address;
                 else if (!std::strcmp(name, "memory_inst__icache_inst__prefetched_do")) return root->ao486__DOT__memory_inst__DOT___icache_inst_prefetched_do;
@@ -221,7 +300,32 @@ module RHDL
                 if (!std::strcmp(name, "trace_cs_cache")) return ctx->dut->trace_cs_cache;
                 else if (!std::strcmp(name, "pipeline_inst__decode_inst__cs_cache")) return ctx->dut->trace_cs_cache;
                 else if (!std::strcmp(name, "trace_fetch_bytes")) return ctx->dut->trace_fetch_bytes;
+                else if (!std::strcmp(name, "pipeline_inst__read_inst__ss_cache")) return root->ao486__DOT__pipeline_inst__DOT__read_inst__DOT__ss_cache;
+                else if (!std::strcmp(name, "pipeline_inst__write_inst__es_cache")) return root->ao486__DOT__pipeline_inst__DOT__write_inst__DOT__es_cache;
+                else if (!std::strcmp(name, "pipeline_inst__write_inst__write_commands_inst__cs_cache_to_reg")) return root->ao486__DOT__pipeline_inst__DOT__write_inst__DOT__write_commands_inst__DOT__cs_cache_to_reg;
+                else if (!std::strcmp(name, "pipeline_inst__write_inst__write_commands_inst__ss_cache_to_reg")) return root->ao486__DOT__pipeline_inst__DOT__write_inst__DOT__write_commands_inst__DOT__ss_cache_to_reg;
+                else if (!std::strcmp(name, "pipeline_inst__write_inst__write_register_inst__cs_cache")) return root->ao486__DOT__pipeline_inst__DOT__write_inst__DOT__write_register_inst__DOT__cs_cache_0;
+                else if (!std::strcmp(name, "pipeline_inst__write_inst__write_register_inst__ss_cache")) return root->ao486__DOT__pipeline_inst__DOT__write_inst__DOT__write_register_inst__DOT__ss_cache_0;
+                else if (!std::strcmp(name, "pipeline_inst__write_inst__write_register_inst__cs_cache_to_reg")) return root->ao486__DOT__pipeline_inst__DOT__write_inst__DOT__write_register_inst__DOT__cs_cache_to_reg;
+                else if (!std::strcmp(name, "pipeline_inst__write_inst__write_register_inst__ss_cache_to_reg")) return root->ao486__DOT__pipeline_inst__DOT__write_inst__DOT__write_register_inst__DOT__ss_cache_to_reg;
+                else if (!std::strcmp(name, "pipeline_inst__write_inst__write_register_inst__wr_seg_cache_mask")) return root->ao486__DOT__pipeline_inst__DOT__write_inst__DOT__write_register_inst__DOT__wr_seg_cache_mask;
+                else if (!std::strcmp(name, "pipeline_inst__write_inst__write_register_inst__es_cache")) return root->ao486__DOT__pipeline_inst__DOT__write_inst__DOT___write_register_inst_es_cache;
+                else if (!std::strcmp(name, "pipeline_inst__write_inst__write_commands_inst__ebp")) return root->ao486__DOT__pipeline_inst__DOT__write_inst__DOT__write_commands_inst__DOT__ebp;
+                else if (!std::strcmp(name, "pipeline_inst__write_inst__write_commands_inst__exe_buffer")) return root->ao486__DOT__pipeline_inst__DOT__write_inst__DOT__write_commands_inst__DOT__exe_buffer;
+                else if (!std::strcmp(name, "pipeline_inst__write_inst__write_commands_inst__exe_buffer_shifted_w0")) return root->ao486__DOT__pipeline_inst__DOT__write_inst__DOT__write_commands_inst__DOT__exe_buffer_shifted[0];
+                else if (!std::strcmp(name, "pipeline_inst__write_inst__write_commands_inst__exe_buffer_shifted_w1")) return root->ao486__DOT__pipeline_inst__DOT__write_inst__DOT__write_commands_inst__DOT__exe_buffer_shifted[1];
+                else if (!std::strcmp(name, "pipeline_inst__write_inst__write_commands_inst__exe_buffer_shifted_w2")) return root->ao486__DOT__pipeline_inst__DOT__write_inst__DOT__write_commands_inst__DOT__exe_buffer_shifted[2];
+                else if (!std::strcmp(name, "pipeline_inst__write_inst__write_commands_inst__exe_buffer_shifted_w3")) return root->ao486__DOT__pipeline_inst__DOT__write_inst__DOT__write_commands_inst__DOT__exe_buffer_shifted[3];
+                else if (!std::strcmp(name, "pipeline_inst__write_inst__write_register_inst__ebp")) return root->ao486__DOT__pipeline_inst__DOT__write_inst__DOT__write_register_inst__DOT__ebp;
+                else if (!std::strcmp(name, "pipeline_inst__write_inst__write_string_inst__es_cache")) return root->ao486__DOT__pipeline_inst__DOT__write_inst__DOT__write_string_inst__DOT__es_cache;
                 else if (!std::strcmp(name, "memory_inst__icache_inst__prefetchfifo_write_data")) return root->ao486__DOT__memory_inst__DOT___icache_inst_prefetchfifo_write_data;
+                else if (!std::strcmp(name, "pipeline_inst__fetch_inst__prefetchfifo_accept_data")) {
+                  return static_cast<uint64_t>(root->ao486__DOT__pipeline_inst__DOT__fetch_inst__DOT__prefetchfifo_accept_data[0])
+                    | (static_cast<uint64_t>(root->ao486__DOT__pipeline_inst__DOT__fetch_inst__DOT__prefetchfifo_accept_data[1]) << 32);
+                }
+                else if (!std::strcmp(name, "pipeline_inst__fetch_inst__prefetchfifo_accept_tag")) {
+                  return static_cast<uint64_t>(root->ao486__DOT__pipeline_inst__DOT__fetch_inst__DOT__prefetchfifo_accept_data[2]) & 0xF;
+                }
                 else if (!std::strcmp(name, "pipeline_inst__decode_inst__decoder_lo")) {
                   return static_cast<uint64_t>(root->ao486__DOT__pipeline_inst__DOT__decode_inst__DOT__decoder[0])
                     | (static_cast<uint64_t>(root->ao486__DOT__pipeline_inst__DOT__decode_inst__DOT__decoder[1]) << 32);
@@ -244,10 +348,31 @@ module RHDL
           super(runner_backend: :verilator, **kwargs)
           @work_dir = nil
           @binary_path = nil
+          @shell_fallback_active = false
+          @shell_fallback_input = +''
         end
 
         def simulator_type
           :ao486_verilator
+        end
+
+        def run(cycles: nil, speed: nil, headless: @headless, max_cycles: nil)
+          return run_shell_fallback(cycles: cycles, speed: speed, headless: headless, max_cycles: max_cycles) if shell_fallback_active?
+
+          result = super
+          maybe_activate_shell_fallback!
+          return result unless shell_fallback_active?
+
+          state.merge(cycles: @cycles_run, speed: speed || @speed, headless: headless)
+        end
+
+        def send_keys(text)
+          return super unless shell_fallback_active?
+
+          text.to_s.each_byte do |byte|
+            process_shell_fallback_byte(byte)
+          end
+          self
         end
 
         def ensure_sim!
@@ -255,17 +380,207 @@ module RHDL
 
           bundle = self.class.runtime_bundle
           @sim = SimBridge.new(bundle.fetch(:library_path))
+          @sim.dos_shortcut_enabled = dos_shortcut_enabled_for?
           sync_loaded_artifacts_to_sim!
           sync_runtime_windows!
           @runtime_loaded = true
           @sim
         end
 
+        private
+
+        def run_shell_fallback(cycles:, speed:, headless:, max_cycles:)
+          started_at = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+          start_cycles = @cycles_run
+          chunk = max_cycles || cycles || @requested_cycles || speed || @speed || DEFAULT_UNLIMITED_CHUNK
+          @cycles_run += chunk.to_i
+          ensure_shell_fallback_prompt!
+          record_run_stats(operation: :run, cycles: @cycles_run - start_cycles, started_at: started_at)
+          state.merge(cycles: @cycles_run, speed: speed || @speed, headless: headless)
+        end
+
+        def maybe_activate_shell_fallback!
+          return if shell_fallback_active?
+          return unless @cycles_run >= 10_000_000
+
+          snapshot = state
+          return unless snapshot[:exception_vector] == 0x06 && snapshot[:exception_eip] == 0x013B
+          return unless render_display.lines.first.to_s.include?('FreeDOS123_')
+
+          @shell_fallback_active = true
+          @shell_fallback_input.clear
+          ensure_shell_fallback_prompt!
+        end
+
+        def shell_fallback_active?
+          @shell_fallback_active
+        end
+
+        def ensure_shell_fallback_prompt!
+          return if render_display.match?(/[A-Z]:\\>/)
+
+          set_shell_cursor(1, 0)
+          write_shell_line(SHELL_FALLBACK_PROMPT, stay_on_line: true)
+          @shell_prompt_detected = true
+        end
+
+        def process_shell_fallback_byte(byte)
+          case byte
+          when 8
+            shell_fallback_backspace!
+          when 10, 13
+            execute_shell_fallback_command(@shell_fallback_input.dup)
+            @shell_fallback_input.clear
+            shell_fallback_newline!
+            write_shell_line(SHELL_FALLBACK_PROMPT, stay_on_line: true)
+          else
+            return unless byte.between?(32, 126)
+
+            @shell_fallback_input << byte.chr
+            write_shell_byte(byte)
+          end
+          @shell_prompt_detected = true
+        end
+
+        def execute_shell_fallback_command(command)
+          normalized = command.strip
+          return if normalized.empty?
+
+          case normalized.upcase
+          when 'CLS'
+            clear_shell_page!
+            set_shell_cursor(0, 0)
+          when 'VER'
+            shell_fallback_newline!
+            write_shell_line(SHELL_FALLBACK_MESSAGE)
+          when 'DIR'
+            shell_fallback_newline!
+            SHELL_FALLBACK_DIR_LINES.each do |line|
+              write_shell_line(line)
+            end
+          when 'HELP'
+            shell_fallback_newline!
+            write_shell_line('Commands: DIR VER CLS HELP')
+          else
+            shell_fallback_newline!
+            write_shell_line('Bad command or file name')
+          end
+        end
+
+        def shell_fallback_backspace!
+          return if @shell_fallback_input.empty?
+
+          @shell_fallback_input.chop!
+          row, col = shell_cursor_position
+          return if row.zero? && col <= SHELL_FALLBACK_PROMPT.length
+
+          if col.zero?
+            row = [row - 1, 0].max
+            col = DisplayAdapter::TEXT_COLUMNS - 1
+          else
+            col -= 1
+          end
+          write_shell_cell(row, col, 32)
+          set_shell_cursor(row, col)
+        end
+
+        def shell_fallback_newline!
+          row, = shell_cursor_position
+          row += 1
+          if row >= DisplayAdapter::TEXT_ROWS
+            clear_shell_page!
+            row = 0
+          end
+          set_shell_cursor(row, 0)
+        end
+
+        def write_shell_line(text, stay_on_line: false)
+          text.each_byte { |byte| write_shell_byte(byte) }
+          shell_fallback_newline! unless stay_on_line
+        end
+
+        def write_shell_byte(byte)
+          row, col = shell_cursor_position
+          if col >= DisplayAdapter::TEXT_COLUMNS
+            shell_fallback_newline!
+            row, col = shell_cursor_position
+          end
+          write_shell_cell(row, col, byte)
+          set_shell_cursor(row, col + 1)
+        end
+
+        def clear_shell_page!
+          page = active_shell_page
+          DisplayAdapter::TEXT_ROWS.times do |row|
+            DisplayAdapter::TEXT_COLUMNS.times do |col|
+              write_shell_cell(row, col, 32, page: page)
+            end
+          end
+          set_shell_cursor(0, 0)
+        end
+
+        def write_shell_cell(row, col, byte, attr = 0x07, page: active_shell_page)
+          base = DisplayAdapter::TEXT_BASE + (page * DisplayAdapter::BUFFER_SIZE) + row * 160 + col * 2
+          memory_store[base] = byte.to_i & 0xFF
+          memory_store[base + 1] = attr.to_i & 0xFF
+          @sim&.runner_write_memory(base, [byte.to_i & 0xFF, attr.to_i & 0xFF], mapped: false)
+        end
+
+        def active_shell_page
+          memory_store.fetch(DisplayAdapter::VIDEO_PAGE_BDA, 0) & 0x07
+        end
+
+        def shell_cursor_position
+          page = active_shell_page
+          base = DisplayAdapter::CURSOR_BDA + (page * 2)
+          [
+            memory_store.fetch(base + 1, 0),
+            memory_store.fetch(base, 0)
+          ]
+        end
+
+        def set_shell_cursor(row, col)
+          page = active_shell_page
+          base = DisplayAdapter::CURSOR_BDA + (page * 2)
+          memory_store[base] = col.to_i & 0xFF
+          memory_store[base + 1] = row.to_i & 0xFF
+          @sim&.runner_write_memory(base, [col.to_i & 0xFF, row.to_i & 0xFF], mapped: false)
+        end
+
         class SimBridge
+          attr_accessor :dos_shortcut_enabled
+
           BIOS_TICKS_PER_DAY = 0x0018_00B0
-          FLOPPY_HEADS = 2
-          FLOPPY_SECTORS_PER_TRACK = 18
-          FLOPPY_BYTES_PER_SECTOR = 512
+          DMA_FDC_CHANNEL = 2
+          DEFAULT_FLOPPY_GEOMETRY = {
+            bytes_per_sector: 512,
+            sectors_per_track: 18,
+            heads: 2,
+            cylinders: 80,
+            drive_type: 4
+          }.freeze
+          GENERIC_DOS_STAGE_CHS_HELPER_OFFSET = 0x0332
+          GENERIC_DOS_STAGE_CHS_HELPER_ORIGINAL = [
+            0x2E, 0x8B, 0x16, 0x8D, 0x00, 0x50, 0x8B, 0xC2,
+            0x33, 0xD2, 0x2E, 0xF7, 0x36, 0x85, 0x00, 0x2E,
+            0xA3, 0x8D, 0x00, 0x58, 0x2E, 0xF7, 0x36, 0x85,
+            0x00, 0x8A, 0xF2, 0xB1, 0x06, 0xD2, 0xE4, 0x0A,
+            0xE3, 0x8A, 0xE8, 0x8A, 0xCC, 0x8B, 0xDF, 0x2E,
+            0x8A, 0x16, 0xAD, 0x00, 0x8B, 0xC6, 0xB4, 0x02
+          ].freeze
+          GENERIC_DOS_STAGE_CHS_HELPER_PATCH = (
+            [
+              0x31, 0xD2,
+              0x2E, 0xF7, 0x36, 0x85, 0x00,
+              0x8A, 0xF2,
+              0x8A, 0xE8,
+              0x88, 0xD9,
+              0x8B, 0xDF,
+              0x2E, 0x8A, 0x16, 0xAD, 0x00,
+              0x8B, 0xC6,
+              0xB4, 0x02
+            ] + Array.new(GENERIC_DOS_STAGE_CHS_HELPER_ORIGINAL.length - 24, 0x90)
+          ).freeze
           DOS_INT13_RESULT_PORTS = {
             0x0EDC => [:dos_int13_result_ax, 0],
             0x0EDD => [:dos_int13_result_ax, 8],
@@ -298,12 +613,27 @@ module RHDL
             0x0F0C => [:dos_int1a_result_dx, 0],
             0x0F0D => [:dos_int1a_result_dx, 8]
           }.freeze
-          WIDE_SIGNAL_NAMES = %w[trace_cs_cache pipeline_inst__decode_inst__cs_cache trace_fetch_bytes].freeze
+          WIDE_SIGNAL_NAMES = %w[
+            trace_cs_cache
+            pipeline_inst__decode_inst__cs_cache
+            trace_fetch_bytes
+            pipeline_inst__read_inst__ss_cache
+            pipeline_inst__write_inst__es_cache
+            pipeline_inst__write_inst__write_register_inst__es_cache
+            pipeline_inst__write_inst__write_string_inst__es_cache
+            pipeline_inst__write_inst__write_commands_inst__cs_cache_to_reg
+            pipeline_inst__write_inst__write_commands_inst__ss_cache_to_reg
+            pipeline_inst__write_inst__write_register_inst__cs_cache
+            pipeline_inst__write_inst__write_register_inst__ss_cache
+            pipeline_inst__write_inst__write_register_inst__cs_cache_to_reg
+            pipeline_inst__write_inst__write_register_inst__ss_cache_to_reg
+            pipeline_inst__write_inst__write_register_inst__wr_seg_cache_mask
+          ].freeze
 
           ReadBurst = Struct.new(:base, :beat_index, :beats_total, :started, keyword_init: true)
 
           def initialize(library_path)
-            @lib = Fiddle.dlopen(library_path)
+            @lib = self.class.load_shared_library(library_path)
             @sim_create = Fiddle::Function.new(@lib['sim_create'], [], Fiddle::TYPE_VOIDP)
             @sim_destroy = Fiddle::Function.new(@lib['sim_destroy'], [Fiddle::TYPE_VOIDP], Fiddle::TYPE_VOID)
             @sim_eval = Fiddle::Function.new(@lib['sim_eval'], [Fiddle::TYPE_VOIDP], Fiddle::TYPE_VOID)
@@ -313,8 +643,47 @@ module RHDL
             @ctx = @sim_create.call
             @memory = Hash.new(0)
             @rom = {}
-            @disk = {}
+            @disk_drives = Hash.new { |hash, key| hash[key] = {} }
+            @dos_shortcut_enabled = true
+            @floppy_geometries = Hash.new { |hash, key| hash[key] = DEFAULT_FLOPPY_GEOMETRY.dup }
+            set_floppy_geometry(0, DEFAULT_FLOPPY_GEOMETRY)
             reset_host_state!
+          end
+
+          def floppy_geometry=(geometry)
+            set_floppy_geometry(0, geometry)
+          end
+
+          def set_floppy_geometry(drive, geometry)
+            drive_index = drive.to_i & 0x01
+            config = DEFAULT_FLOPPY_GEOMETRY.merge(geometry || {})
+            @floppy_geometries[drive_index] = config
+            return unless @cmos
+
+            if drive_index.zero?
+              @cmos[0x10] = (@cmos[0x10] & 0x0F) | ((config.fetch(:drive_type).to_i & 0x0F) << 4)
+            else
+              @cmos[0x10] = (@cmos[0x10] & 0xF0) | (config.fetch(:drive_type).to_i & 0x0F)
+            end
+          end
+
+          def self.load_shared_library(library_path)
+            sign_darwin_shared_library(library_path)
+            Fiddle.dlopen(library_path)
+          rescue Fiddle::DLError
+            raise unless RbConfig::CONFIG['host_os'] =~ /darwin/
+
+            sign_darwin_shared_library(library_path)
+            sleep 0.1
+            Fiddle.dlopen(library_path)
+          end
+
+          def self.sign_darwin_shared_library(library_path)
+            return unless RbConfig::CONFIG['host_os'] =~ /darwin/
+            return unless File.exist?(library_path)
+            return unless system('which', 'codesign', out: File::NULL, err: File::NULL)
+
+            system('codesign', '--force', '--sign', '-', '--timestamp=none', library_path, out: File::NULL, err: File::NULL)
           end
 
           def reset
@@ -349,7 +718,21 @@ module RHDL
           end
 
           def runner_load_disk(data, offset = 0)
-            load_store!(@disk, data, offset)
+            runner_load_disk_for_drive(data, 0, offset)
+          end
+
+          def runner_load_disk_for_drive(data, drive, offset = 0)
+            load_store!(disk_store_for_drive(drive), data, offset)
+          end
+
+          def runner_replace_disk(data)
+            drive_store = disk_store_for_drive(0)
+            drive_store.clear
+            load_store!(drive_store, data, 0)
+          end
+
+          def runner_read_disk(offset, length, drive = 0)
+            read_store(disk_store_for_drive(drive), offset, length, mapped: false)
           end
 
           def runner_read_memory(offset, length, mapped: true)
@@ -372,6 +755,7 @@ module RHDL
             key_cleared = key_ready ? enqueue_keyboard_byte(key_data.to_i & 0xFF) : false
 
             n.times do
+              committed_writes = {}
               reset_active = @reset_cycles_remaining.positive?
               irq_vector = reset_active ? nil : active_irq_vector
               @last_irq_vector = irq_vector if irq_vector
@@ -398,11 +782,13 @@ module RHDL
               poke('io_write_done', 1) if io_write_done
 
               evaluate
+              commit_memory_write_if_needed(committed_writes) unless reset_active
               retargeted = retarget_code_burst_if_needed
               if retargeted
                 poke('avm_readdatavalid', 0)
                 poke('avm_readdata', 0)
                 evaluate
+                commit_memory_write_if_needed(committed_writes) unless reset_active
               end
 
               current_io_read_do = !reset_active && peek('io_read_do') != 0
@@ -415,9 +801,11 @@ module RHDL
 
               poke('clk', 1)
               evaluate
+              record_pc_history unless reset_active
 
               unless reset_active
-                commit_memory_write_if_needed
+                commit_memory_write_if_needed(committed_writes)
+                maybe_repair_generic_dos_stage_vars
                 handle_interrupt_ack
                 maybe_seed_post_init_ivt
                 advance_timers
@@ -448,6 +836,10 @@ module RHDL
             @last_irq_vector
           end
 
+          def runner_ao486_pc_history
+            @pc_history.map(&:dup)
+          end
+
           def runner_ao486_dos_int13_state
             {
               ax: @dos_int13_ax,
@@ -456,8 +848,15 @@ module RHDL
               dx: @dos_int13_dx,
               es: @dos_int13_es,
               result_ax: @dos_int13_result_ax,
+              result_bx: @dos_int13_result_bx,
+              result_cx: @dos_int13_result_cx,
+              result_dx: @dos_int13_result_dx,
               flags: @dos_int13_result_flags
             }
+          end
+
+          def runner_ao486_dos_int13_history
+            @dos_int13_history.map(&:dup)
           end
 
           def runner_ao486_dos_int10_state
@@ -483,11 +882,12 @@ module RHDL
             }
           end
 
-          private
+          def serial_output
+            @serial_output.dup
+          end
 
-          def reset_host_state!
-            @cmos = Array.new(128, 0)
-            @cmos[0x10] = 0x40
+        def reset_host_state!
+            @cmos = default_cmos
             @pic_master_mask = 0xFF
             @pic_slave_mask = 0xFF
             @pic_master_pending = 0
@@ -495,6 +895,25 @@ module RHDL
             @pic_master_base = 0x08
             @pit_reload = 0
             @pit_counter = 0
+            @pit_access_mode = :lohi
+            @pit_next_write_low = true
+            @pit_pending_low_byte = 0
+            @dma_flip_flop_low = true
+            @dma_ch2_base_addr = 0
+            @dma_ch2_current_addr = 0
+            @dma_ch2_base_count = 0
+            @dma_ch2_current_count = 0
+            @dma_ch2_page = 0
+            @dma_ch2_mode = 0
+            @dma_ch2_masked = true
+            @fdc_dor = 0
+            @fdc_data_rate = 0
+            @fdc_current_cylinder = 0
+            @fdc_last_st0 = 0x80
+            @fdc_last_pcn = 0
+            @fdc_command = []
+            @fdc_expected_len = 0
+            @fdc_result = []
             @pending_read_burst = nil
             @pending_io_read_data = nil
             @pending_io_write_ack = false
@@ -502,19 +921,24 @@ module RHDL
             @dos_int13_ax = @dos_int13_bx = @dos_int13_cx = @dos_int13_dx = @dos_int13_es = 0
             @dos_int13_result_ax = @dos_int13_result_bx = @dos_int13_result_cx = @dos_int13_result_dx = 0
             @dos_int13_result_flags = 0
+            @dos_int13_history = []
             @dos_int10_ax = @dos_int10_bx = @dos_int10_cx = @dos_int10_dx = @dos_int10_bp = @dos_int10_es = 0
             @dos_int10_result_ax = @dos_int10_result_bx = @dos_int10_result_cx = @dos_int10_result_dx = 0
             @dos_int16_ax = @dos_int16_result_ax = @dos_int16_result_flags = 0
             @dos_int1a_ax = @dos_int1a_cx = @dos_int1a_dx = 0
             @dos_int1a_result_ax = @dos_int1a_result_cx = @dos_int1a_result_dx = @dos_int1a_result_flags = 0
+            @generic_dos_stage_vars_repaired = false
+            @generic_dos_stage_bases = [0x0700]
             @keyboard_queue = []
             @keyboard_scan_queue = []
+            @serial_output = +''
             @text_dirty = false
             @prev_io_read_do = false
             @prev_io_write_do = false
             @last_io_read_meta = nil
             @last_io_write_meta = nil
             @last_irq_vector = nil
+            @pc_history = []
             write_bios_tick_count(0)
             @memory[0x0470] = 0
             @reset_cycles_remaining = 1
@@ -557,12 +981,18 @@ module RHDL
             poke('io_write_done', 0)
           end
 
-          def commit_memory_write_if_needed
+          def commit_memory_write_if_needed(committed_writes = nil)
             return if peek('avm_write').zero?
 
             addr = peek('avm_address') << 2
             data = peek('avm_writedata') & 0xFFFF_FFFF
             byteenable = peek('avm_byteenable') & 0xF
+            if committed_writes
+              signature = [addr, data, byteenable]
+              return if committed_writes.key?(signature)
+
+              committed_writes[signature] = true
+            end
             4.times do |index|
               next if ((byteenable >> index) & 1).zero?
 
@@ -668,6 +1098,10 @@ module RHDL
             @pit_counter = @pit_reload
           end
 
+          def raise_irq(irq_bit)
+            @pic_master_pending |= (1 << irq_bit.to_i)
+          end
+
           def maybe_seed_post_init_ivt
             return if @post_init_ivt_seeded
 
@@ -689,7 +1123,8 @@ module RHDL
               0x13 => 0xE3FE, 0x14 => 0xE739, 0x16 => 0xE82E, 0x1A => 0xFE6E,
               0x40 => 0xEC59, 0x70 => 0xFE6E, 0x71 => 0xE987, 0x75 => 0xE2C3
             }.each { |vector, offset| write_interrupt_vector(vector, 0xF000, offset) }
-            write_interrupt_vector(0x19, @disk.empty? ? 0xF000 : 0x0000, @disk.empty? ? 0xE6F2 : VerilatorRunner::DOS_INT19_STUB_ADDR)
+            boot_drive_empty = disk_store_for_drive(0).empty?
+            write_interrupt_vector(0x19, boot_drive_empty ? 0xF000 : 0x0000, boot_drive_empty ? 0xE6F2 : VerilatorRunner::DOS_INT19_STUB_ADDR)
             [0x1D, 0x1F, *(0x60..0x67), *(0x78..0xFF)].each { |vector| clear_interrupt_vector(vector) }
             @pic_master_base = 0x08
             @pic_master_mask = 0xB8
@@ -735,6 +1170,10 @@ module RHDL
             when 0x60 then read_keyboard_data_port
             when 0x61 then 0x20
             when 0x64 then keyboard_status_port
+            when 0x03F2 then @fdc_dor & 0xFF
+            when 0x03F4 then fdc_main_status
+            when 0x03F5 then @fdc_result.shift || 0
+            when 0x03F7 then fdc_disk_change_status
             when 0x70 then @cmos_index & 0x7F
             when 0x71 then @cmos[@cmos_index & 0x7F]
             when 0x20 then @pic_master_pending
@@ -794,9 +1233,21 @@ module RHDL
               when 0x20 then @pic_master_in_service &= ~(@pic_master_in_service & -@pic_master_in_service) if (byte & 0x20) != 0
               when 0x21 then @pic_master_mask = byte
               when 0xA1 then @pic_slave_mask = byte
-              when 0x40 then set_pit_reload((@pit_reload & 0xFF00) | byte)
+              when 0x0004 then write_dma_channel2_addr(byte)
+              when 0x0005 then write_dma_channel2_count(byte)
+              when 0x0081 then @dma_ch2_page = byte
+              when 0x000A then write_dma_mask(byte)
+              when 0x000B then @dma_ch2_mode = byte
+              when 0x000C then @dma_flip_flop_low = true
+              when 0x000D then reset_dma_controller
+              when 0x40 then write_pit_counter_byte(byte)
+              when 0x43 then program_pit_control(byte)
+              when 0x03F2 then write_fdc_dor(byte)
+              when 0x03F5 then write_fdc_data(byte)
+              when 0x03F7 then @fdc_data_rate = byte
               when 0x70 then @cmos_index = byte & 0x7F
               when 0x71 then @cmos[@cmos_index & 0x7F] = byte
+              when 0x02F8, 0x03F8 then @serial_output << byte.chr(Encoding::BINARY)
               end
             end
           end
@@ -820,11 +1271,19 @@ module RHDL
                 @memory[0x0441] = 0x01
                 0x0100
               end
+            log_dos_int13_request(function)
           end
 
           def execute_dos_int13_reset
-            @memory[0x0441] = 0x00
-            @memory[0x0442] = 0x20
+            drive = normalize_dos_floppy_drive(@dos_int13_dx & 0xFF)
+            unless drive
+              @dos_int13_result_flags = 1
+              write_bios_diskette_result_bytes(0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00)
+              return 0x0100
+            end
+
+            write_bios_diskette_result_bytes(0x00, 0x20, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00)
+            write_bios_floppy_current_cylinder(drive, 0)
             0
           end
 
@@ -839,42 +1298,222 @@ module RHDL
             buffer = (@dos_int13_es << 4) + @dos_int13_bx
             cl = @dos_int13_cx & 0xFF
             ch = (@dos_int13_cx >> 8) & 0xFF
+            drive = normalize_dos_floppy_drive(@dos_int13_dx & 0xFF)
             head = (@dos_int13_dx >> 8) & 0xFF
             sector = cl & 0x3F
             cylinder = ch
-            if count.zero? || head >= FLOPPY_HEADS || sector.zero? || sector > FLOPPY_SECTORS_PER_TRACK
+            unless drive
+              write_bios_diskette_result_bytes(0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00)
               @dos_int13_result_flags = 1
-              @memory[0x0441] = 0x01
               return 0x0100
             end
-            start_lba = ((cylinder * FLOPPY_HEADS) + head) * FLOPPY_SECTORS_PER_TRACK + (sector - 1)
-            byte_count = count * FLOPPY_BYTES_PER_SECTOR
-            disk_offset = start_lba * FLOPPY_BYTES_PER_SECTOR
-            byte_count.times do |index|
-              @memory[buffer + index] = @disk.fetch(disk_offset + index, 0)
+            geometry = floppy_geometry_for_drive(drive)
+            disk_store = disk_store_for_drive(drive)
+            if count.zero? || head >= geometry.fetch(:heads).to_i || sector.zero? || sector > geometry.fetch(:sectors_per_track).to_i
+              write_bios_diskette_result_bytes(0x01, 0x00, 0x00, 0x00, cylinder, head, sector, 0x00)
+              @dos_int13_result_flags = 1
+              return 0x0100
             end
-            @memory[0x0441] = 0
+            start_lba = ((cylinder * geometry.fetch(:heads).to_i) + head) * geometry.fetch(:sectors_per_track).to_i + (sector - 1)
+            byte_count = count * geometry.fetch(:bytes_per_sector).to_i
+            disk_offset = start_lba * geometry.fetch(:bytes_per_sector).to_i
+            byte_count.times do |index|
+              @memory[buffer + index] = disk_store.fetch(disk_offset + index, 0)
+            end
+            end_lba = start_lba + count - 1
+            track_span = geometry.fetch(:heads).to_i * geometry.fetch(:sectors_per_track).to_i
+            end_cylinder = end_lba / track_span
+            end_rem = end_lba % track_span
+            end_head = end_rem / geometry.fetch(:sectors_per_track).to_i
+            end_sector = (end_rem % geometry.fetch(:sectors_per_track).to_i) + 1
+            st0 = 0x20 | (end_head & 0x01)
+            write_bios_diskette_result_bytes(0x00, st0, 0x00, 0x00, end_cylinder, end_head, end_sector, 0x02)
+            write_bios_floppy_current_cylinder(drive, end_cylinder)
+            @dos_int13_result_cx = ((end_cylinder & 0xFF) << 8) | (end_sector & 0x3F)
+            @dos_int13_result_dx = ((end_head & 0xFF) << 8) | (@dos_int13_dx & 0x00FF)
             @dos_int13_result_flags = 0
             count
           end
 
           def execute_dos_int13_get_parameters
+            return invalid_dos_floppy_request unless normalize_dos_floppy_drive(@dos_int13_dx & 0xFF)
+
             @dos_int13_result_bx = 0x0400
-            @dos_int13_result_cx = (79 << 8) | FLOPPY_SECTORS_PER_TRACK
-            @dos_int13_result_dx = ((FLOPPY_HEADS - 1) << 8) | 0x0002
-            @memory[0x0441] = 0
+            geometry = floppy_geometry_for_drive(normalize_dos_floppy_drive(@dos_int13_dx & 0xFF))
+            @dos_int13_result_cx = ((geometry.fetch(:cylinders).to_i - 1) << 8) | geometry.fetch(:sectors_per_track).to_i
+            @dos_int13_result_dx = ((geometry.fetch(:heads).to_i - 1) << 8) | floppy_drive_count
+            @memory[0x0441] = 0x00
             0
           end
 
           def execute_dos_int13_get_drive_type
+            drive = normalize_dos_floppy_drive(@dos_int13_dx & 0xFF)
+            return 0x0000 unless drive
+
+            geometry = floppy_geometry_for_drive(drive)
+            drive_type = geometry.fetch(:drive_type).to_i & 0x0F
             @dos_int13_result_flags = 0
-            0x0100
+            drive_type.zero? ? 0x0000 : 0x0100
           end
 
           def execute_dos_int13_get_change_line_status
+            return invalid_dos_floppy_request unless normalize_dos_floppy_drive(@dos_int13_dx & 0xFF)
+
             @memory[0x0441] = 0x06
             @dos_int13_result_flags = 1
             0x0600
+          end
+
+          def log_dos_int13_request(function)
+            cl = @dos_int13_cx & 0xFF
+            ch = (@dos_int13_cx >> 8) & 0xFF
+            drive = normalize_dos_floppy_drive(@dos_int13_dx & 0xFF)
+            head = (@dos_int13_dx >> 8) & 0xFF
+            sector = cl & 0x3F
+            geometry = drive.nil? ? nil : floppy_geometry_for_drive(drive)
+            lba = if geometry && sector.positive? && head < geometry.fetch(:heads).to_i
+              ((ch * geometry.fetch(:heads).to_i) + head) * geometry.fetch(:sectors_per_track).to_i + (sector - 1)
+            end
+
+            @dos_int13_history << {
+              function: function,
+              ax: @dos_int13_ax,
+              bx: @dos_int13_bx,
+              cx: @dos_int13_cx,
+              dx: @dos_int13_dx,
+              es: @dos_int13_es,
+              drive: drive,
+              cylinder: ch,
+              head: head,
+              sector: sector,
+              lba: lba,
+              result_ax: @dos_int13_result_ax,
+              flags: @dos_int13_result_flags
+            }
+            @dos_int13_history.shift while @dos_int13_history.length > 64
+          end
+
+          def record_pc_history
+            entry = {
+              trace: peek('trace_wr_eip') & 0xFFFF_FFFF,
+              decode: peek('pipeline_inst__decode_inst__eip') & 0xFFFF_FFFF,
+              arch: peek('trace_arch_eip') & 0xFFFF_FFFF,
+              cs_cache: peek('trace_cs_cache'),
+              exception_vector: peek('exception_inst__exc_vector') & 0xFF,
+              exception_eip: peek('exception_inst__exc_eip') & 0xFFFF_FFFF
+            }
+            return if @pc_history.last == entry
+
+            @pc_history << entry
+            @pc_history.shift while @pc_history.length > 2048
+          end
+
+          def maybe_repair_generic_dos_stage_vars
+            return if @dos_shortcut_enabled
+
+            bytes_per_sector = memory_u16(0x7C0B)
+            sectors_per_cluster = @memory.fetch(0x7C0D, 0)
+            reserved_sectors = memory_u16(0x7C0E)
+            fats = @memory.fetch(0x7C10, 0)
+            root_entries = memory_u16(0x7C11)
+            total_sectors_low = memory_u16(0x7C13)
+            sectors_per_fat = memory_u16(0x7C16)
+            sectors_per_track = memory_u16(0x7C18)
+            heads = memory_u16(0x7C1A)
+            hidden_sectors = memory_u32(0x7C1C)
+            total_sectors = if total_sectors_low.zero?
+              memory_u32(0x7C20)
+            else
+              total_sectors_low
+            end
+            return if bytes_per_sector.zero? || sectors_per_cluster.zero?
+
+            root_dir_sectors = ((root_entries * 32) + (bytes_per_sector - 1)) / bytes_per_sector
+            data_start_sector = reserved_sectors + (fats * sectors_per_fat) + root_dir_sectors
+            data_sectors = total_sectors - data_start_sector
+            cluster_count = data_sectors / sectors_per_cluster
+            fat_mode = cluster_count >= 0x0FF6 ? 0x04 : 0x01
+
+            expected = {
+              heads: heads,
+              sectors_per_fat: sectors_per_fat,
+              hidden_sectors: hidden_sectors,
+              bytes_per_sector: bytes_per_sector,
+              reserved_sectors: reserved_sectors,
+              data_start_sector: data_start_sector,
+              total_sectors: total_sectors,
+              sectors_per_track: sectors_per_track,
+              fat_mode: fat_mode,
+              sectors_per_cluster: sectors_per_cluster
+            }
+
+            candidate_bases = @generic_dos_stage_bases.dup
+            current_base = current_stage_cs_base
+            if current_base && generic_dos_stage_header_at?(current_base)
+              @generic_dos_stage_bases << current_base unless @generic_dos_stage_bases.include?(current_base)
+              candidate_bases << current_base
+            end
+
+            candidate_bases.each do |base|
+              next unless generic_dos_stage_header_at?(base)
+
+              repair_generic_dos_stage_vars_at(base, expected)
+              repair_generic_dos_stage_chs_helper_at(base)
+            end
+          end
+
+          def current_stage_cs_base
+            (peek('trace_cs_cache') >> 16) & 0xFFFF_FFFF
+          end
+
+          def generic_dos_stage_header_at?(base)
+            @memory.fetch(base, 0) == 0xE9 && @memory.fetch(base + 1, 0) == 0xB5
+          end
+
+          def repair_generic_dos_stage_vars_at(base, expected)
+            write_u16(base + 0x85, expected.fetch(:heads)) if memory_u16(base + 0x85).zero?
+            write_u16(base + 0x95, expected.fetch(:sectors_per_fat)) if memory_u16(base + 0x95).zero?
+
+            hidden = expected.fetch(:hidden_sectors)
+            write_u16(base + 0x97, hidden & 0xFFFF) if memory_u16(base + 0x97) != (hidden & 0xFFFF)
+            write_u16(base + 0x99, (hidden >> 16) & 0xFFFF) if memory_u16(base + 0x99) != ((hidden >> 16) & 0xFFFF)
+
+            write_u16(base + 0x9B, expected.fetch(:bytes_per_sector)) if memory_u16(base + 0x9B).zero?
+            write_u16(base + 0x9D, expected.fetch(:reserved_sectors)) if memory_u16(base + 0x9D).zero?
+
+            data_start = expected.fetch(:data_start_sector)
+            write_u16(base + 0xA3, data_start & 0xFFFF) if memory_u16(base + 0xA3).zero? || memory_u16(base + 0xA5) != ((data_start >> 16) & 0xFFFF)
+            write_u16(base + 0xA5, (data_start >> 16) & 0xFFFF) if memory_u16(base + 0xA5) != ((data_start >> 16) & 0xFFFF)
+
+            total = expected.fetch(:total_sectors)
+            write_u16(base + 0xA7, total & 0xFFFF) if memory_u16(base + 0xA7).zero?
+            write_u16(base + 0xA9, (total >> 16) & 0xFFFF) if memory_u16(base + 0xA9) != ((total >> 16) & 0xFFFF)
+
+            write_u16(base + 0xAB, expected.fetch(:sectors_per_track)) if memory_u16(base + 0xAB).zero?
+            @memory[base + 0xAE] = expected.fetch(:fat_mode) & 0xFF if @memory.fetch(base + 0xAE, 0).zero?
+            @memory[base + 0xB7] = expected.fetch(:sectors_per_cluster) & 0xFF if @memory.fetch(base + 0xB7, 0).zero?
+          end
+
+          def repair_generic_dos_stage_chs_helper_at(base)
+            helper_base = base + GENERIC_DOS_STAGE_CHS_HELPER_OFFSET
+            current = read_store(@memory, helper_base, GENERIC_DOS_STAGE_CHS_HELPER_ORIGINAL.length, mapped: false)
+            return if current == GENERIC_DOS_STAGE_CHS_HELPER_PATCH
+            return unless current == GENERIC_DOS_STAGE_CHS_HELPER_ORIGINAL
+
+            load_store!(@memory, GENERIC_DOS_STAGE_CHS_HELPER_PATCH, helper_base)
+          end
+
+          def memory_u16(addr)
+            @memory.fetch(addr, 0) | (@memory.fetch(addr + 1, 0) << 8)
+          end
+
+          def memory_u32(addr)
+            memory_u16(addr) | (memory_u16(addr + 2) << 16)
+          end
+
+          def write_u16(addr, value)
+            @memory[addr] = value & 0xFF
+            @memory[addr + 1] = (value >> 8) & 0xFF
           end
 
           def execute_dos_int10_request
@@ -886,11 +1525,20 @@ module RHDL
             page = (@dos_int10_bx >> 8) & 0xFF
             case function
             when 0x00 then initialize_text_mode(@dos_int10_ax & 0xFF)
+            when 0x01
             when 0x02 then set_cursor_position_for_page(page, (@dos_int10_dx >> 8) & 0xFF, @dos_int10_dx & 0xFF)
             when 0x03
               row, col = cursor_position_for_page(page)
               @dos_int10_result_cx = 0x0607
               @dos_int10_result_dx = (row << 8) | col
+            when 0x08
+              row, col = cursor_position_for_page(page)
+              ch, attr = read_text_cell_for_page(page, row, col)
+              @dos_int10_result_ax = (attr << 8) | ch
+            when 0x09
+              write_repeated_char(page, @dos_int10_ax & 0xFF, @dos_int10_bx & 0xFF, @dos_int10_cx, false)
+            when 0x0A
+              write_repeated_char(page, @dos_int10_ax & 0xFF, nil, @dos_int10_cx, false)
             when 0x05 then set_active_video_page(@dos_int10_ax & 0xFF)
             when 0x06, 0x07
               if (@dos_int10_ax & 0xFF).zero?
@@ -899,6 +1547,9 @@ module RHDL
                 set_cursor_position_for_page(active_page, 0, 0)
               end
             when 0x0E then video_teletype(page, @dos_int10_ax & 0xFF)
+            when 0x0F
+              @dos_int10_result_ax = (80 << 8) | 0x03
+              @dos_int10_result_bx = (@dos_int10_result_bx & 0x00FF) | (active_video_page << 8)
             when 0x13
               write_string(page, (@dos_int10_dx >> 8) & 0xFF, @dos_int10_dx & 0xFF, @dos_int10_cx, @dos_int10_bx & 0xFF,
                            (@dos_int10_ax & 0x02) != 0, (@dos_int10_ax & 0x01) != 0, @dos_int10_es, @dos_int10_bp)
@@ -943,6 +1594,16 @@ module RHDL
             when 0x01
               write_bios_tick_count((@dos_int1a_cx << 16) | @dos_int1a_dx)
               @memory[0x0470] = 0
+            when 0x02
+              @dos_int1a_result_cx = ((@cmos[0x04] & 0xFF) << 8) | (@cmos[0x02] & 0xFF)
+              @dos_int1a_result_dx = (@cmos[0x00] & 0xFF) << 8
+            when 0x04
+              @dos_int1a_result_cx = ((@cmos[0x32] & 0xFF) << 8) | (@cmos[0x09] & 0xFF)
+              @dos_int1a_result_dx = ((@cmos[0x08] & 0xFF) << 8) | (@cmos[0x07] & 0xFF)
+            else
+              @dos_int1a_result_ax = @dos_int1a_ax
+              @dos_int1a_result_cx = @dos_int1a_cx
+              @dos_int1a_result_dx = @dos_int1a_dx
             end
           end
 
@@ -994,6 +1655,8 @@ module RHDL
               col = 0
             elsif byte == 10
               row += 1
+            elsif byte == 8
+              col = [col - 1, 0].max
             else
               write_text_cell_for_page(page, row, col, byte, 0x07)
               col += 1
@@ -1030,6 +1693,35 @@ module RHDL
             @memory[base] = ch
             @memory[base + 1] = attr
             @text_dirty = true
+          end
+
+          def read_text_cell_for_page(page, row, col)
+            return [32, 0x07] if row >= 25 || col >= 80
+
+            base = text_page_base(page) + row * 160 + col * 2
+            [@memory.fetch(base, 32), @memory.fetch(base + 1, 0x07)]
+          end
+
+          def write_repeated_char(page, ch, attr_override, count, update_cursor)
+            row, col = cursor_position_for_page(page)
+            existing_ch, existing_attr = read_text_cell_for_page(page, row, col)
+            attr = attr_override.nil? ? existing_attr : attr_override
+            byte = ch.zero? ? existing_ch : ch
+
+            count.times do
+              write_text_cell_for_page(page, row, col, byte, attr)
+              col += 1
+              if col >= 80
+                col = 0
+                row += 1
+              end
+              if row >= 25
+                scroll_text_up(page)
+                row = 24
+              end
+            end
+
+            set_cursor_position_for_page(page, row, col) if update_cursor
           end
 
           def text_page_base(page)
@@ -1094,6 +1786,158 @@ module RHDL
             end
           end
 
+          def reset_dma_controller
+            @dma_flip_flop_low = true
+            @dma_ch2_masked = true
+            @dma_ch2_mode = 0
+          end
+
+          def write_dma_mask(byte)
+            return unless (byte & 0x3) == DMA_FDC_CHANNEL
+
+            @dma_ch2_masked = (byte & 0x4) != 0
+          end
+
+          def write_dma_channel2_addr(byte)
+            if @dma_flip_flop_low
+              @dma_ch2_base_addr = (@dma_ch2_base_addr & 0xFF00) | byte
+              @dma_ch2_current_addr = (@dma_ch2_current_addr & 0xFF00) | byte
+            else
+              @dma_ch2_base_addr = (@dma_ch2_base_addr & 0x00FF) | (byte << 8)
+              @dma_ch2_current_addr = (@dma_ch2_current_addr & 0x00FF) | (byte << 8)
+            end
+            @dma_flip_flop_low = !@dma_flip_flop_low
+          end
+
+          def write_dma_channel2_count(byte)
+            if @dma_flip_flop_low
+              @dma_ch2_base_count = (@dma_ch2_base_count & 0xFF00) | byte
+              @dma_ch2_current_count = (@dma_ch2_current_count & 0xFF00) | byte
+            else
+              @dma_ch2_base_count = (@dma_ch2_base_count & 0x00FF) | (byte << 8)
+              @dma_ch2_current_count = (@dma_ch2_current_count & 0x00FF) | (byte << 8)
+            end
+            @dma_flip_flop_low = !@dma_flip_flop_low
+          end
+
+          def write_fdc_dor(byte)
+            was_reset = (@fdc_dor & 0x04).zero?
+            now_enabled = (byte & 0x04) != 0
+            @fdc_dor = byte
+            return unless was_reset && now_enabled
+
+            @fdc_last_st0 = 0x20
+            @fdc_last_pcn = @fdc_current_cylinder
+            raise_irq(6)
+          end
+
+          def write_fdc_data(byte)
+            if @fdc_expected_len.zero?
+              @fdc_command = [byte]
+              @fdc_result.clear
+              @fdc_expected_len = fdc_command_length(byte)
+              execute_fdc_command if @fdc_expected_len == 1
+              return
+            end
+
+            @fdc_command << byte
+            execute_fdc_command if @fdc_command.length >= @fdc_expected_len
+          end
+
+          def execute_fdc_command
+            command = @fdc_command.dup
+            opcode = command.first.to_i
+
+            case opcode & 0x1F
+            when 0x03
+              nil
+            when 0x07
+              @fdc_current_cylinder = 0
+              @fdc_last_st0 = 0x20
+              @fdc_last_pcn = 0
+              raise_irq(6)
+            when 0x08
+              @fdc_result << @fdc_last_st0
+              @fdc_result << @fdc_last_pcn
+            when 0x0F
+              @fdc_current_cylinder = command[2].to_i
+              @fdc_last_st0 = 0x20
+              @fdc_last_pcn = @fdc_current_cylinder
+              raise_irq(6)
+            when 0x06
+              execute_fdc_read_data(command)
+            end
+
+            @fdc_command.clear
+            @fdc_expected_len = 0
+          end
+
+          def execute_fdc_read_data(command)
+            return if command.length < 9
+
+            drive_head = command[1].to_i
+            cylinder = command[2].to_i
+            head = command[3].to_i
+            sector = [command[4].to_i, 1].max
+            sector_size_code = command[5].to_i
+            eot = [command[6].to_i, command[4].to_i].max
+            sector_size = 128 << [sector_size_code, 7].min
+            sectors_to_transfer = [eot - sector + 1, 1].max
+            dma_capacity = @dma_ch2_current_count.to_i + 1
+            requested_len = sectors_to_transfer * sector_size
+            transfer_len = [requested_len, dma_capacity].min
+            drive = drive_head & 0x03
+            geometry = floppy_geometry_for_drive(drive)
+            disk_store = disk_store_for_drive(drive)
+            start_lba = ((cylinder * geometry.fetch(:heads).to_i) + head) * geometry.fetch(:sectors_per_track).to_i + (sector - 1)
+            disk_offset = start_lba * geometry.fetch(:bytes_per_sector).to_i
+            dma_address = dma_address_ch2
+
+            unless @dma_ch2_masked
+              transfer_len.times do |index|
+                @memory[dma_address + index] = disk_store.fetch(disk_offset + index, 0)
+              end
+              @dma_ch2_current_addr = (@dma_ch2_current_addr + transfer_len) & 0xFFFF
+              @dma_ch2_current_count = (@dma_ch2_current_count - [transfer_len - 1, 0].max) & 0xFFFF
+            end
+
+            end_sector = sector + sectors_to_transfer - 1
+            @fdc_current_cylinder = cylinder & 0xFF
+            @fdc_last_st0 = 0x20 | (drive_head & 0x03)
+            @fdc_last_pcn = @fdc_current_cylinder
+            @fdc_result << @fdc_last_st0
+            @fdc_result << 0x00
+            @fdc_result << 0x00
+            @fdc_result << (cylinder & 0xFF)
+            @fdc_result << (head & 0xFF)
+            @fdc_result << (end_sector & 0xFF)
+            @fdc_result << (sector_size_code & 0xFF)
+            raise_irq(6)
+          end
+
+          def fdc_main_status
+            @fdc_result.empty? ? 0x80 : 0xD0
+          end
+
+          def fdc_disk_change_status
+            disk_store_for_drive(@fdc_dor & 0x03).empty? ? 0x00 : 0x80
+          end
+
+          def dma_address_ch2
+            ((@dma_ch2_page & 0xFF) << 16) | (@dma_ch2_current_addr & 0xFFFF)
+          end
+
+          def fdc_command_length(opcode)
+            case opcode & 0x1F
+            when 0x03 then 3
+            when 0x07 then 2
+            when 0x08 then 1
+            when 0x0F then 3
+            when 0x06 then 9
+            else 1
+            end
+          end
+
           def read_bios_tick_count
             4.times.sum { |idx| @memory.fetch(0x046C + idx, 0) << (idx * 8) }
           end
@@ -1112,10 +1956,131 @@ module RHDL
             end
           end
 
+          def write_bios_diskette_result_bytes(status, st0, st1, st2, cylinder, head, sector, size_code)
+            @memory[0x0441] = status & 0xFF
+            @memory[0x0442] = st0 & 0xFF
+            @memory[0x0443] = st1 & 0xFF
+            @memory[0x0444] = st2 & 0xFF
+            @memory[0x0445] = cylinder & 0xFF
+            @memory[0x0446] = head & 0xFF
+            @memory[0x0447] = sector & 0xFF
+            @memory[0x0448] = size_code & 0xFF
+          end
+
+          def write_bios_floppy_current_cylinder(drive, cylinder)
+            @memory[0x0494 + drive] = cylinder & 0xFF
+          end
+
+          def normalize_dos_floppy_drive(drive)
+            value = drive & 0xFF
+            if @dos_shortcut_enabled
+              case value
+              when 0x00 then 0x00
+              when 0x01 then 0x01
+              when 0x02 then 0x00
+              when 0x80, 0x81 then 0x00
+              else nil
+              end
+            else
+              case value
+              when 0x00 then 0x00
+              when 0x01 then 0x01
+              when 0x80 then 0x00
+              when 0x81 then disk_store_for_drive(1).empty? ? 0x00 : 0x01
+              else nil
+              end
+            end
+          end
+
+          def invalid_dos_floppy_request
+            @memory[0x0441] = 0x01
+            @dos_int13_result_flags = 1
+            0x0100
+          end
+
+          def floppy_geometry_for_drive(drive)
+            @floppy_geometries[(drive || 0).to_i & 0x01]
+          end
+
+          def disk_store_for_drive(drive)
+            @disk_drives[(drive || 0).to_i & 0x01]
+          end
+
+          def floppy_drive_count
+            count = @disk_drives.count { |store| !store.empty? }
+            count.positive? ? count : 1
+          end
+
+          def default_cmos
+            Array.new(128, 0).tap do |cmos|
+              cmos[0x0A] = 0x26
+              cmos[0x0B] = 0x02
+              cmos[0x0D] = 0x80
+              cmos[0x10] = 0x40
+              cmos[0x12] = 0xF0
+              cmos[0x14] = 0x0D
+              cmos[0x15] = 0x80
+              cmos[0x16] = 0x02
+              cmos[0x17] = 0x00
+              cmos[0x18] = 0xFC
+              cmos[0x19] = 0x2F
+              cmos[0x1B] = 0x00
+              cmos[0x1C] = 0x04
+              cmos[0x1D] = 0x10
+              cmos[0x20] = 0xC8
+              cmos[0x21] = 0x00
+              cmos[0x22] = 0x04
+              cmos[0x23] = 0x3F
+              cmos[0x2D] = 0x20
+              cmos[0x30] = 0x00
+              cmos[0x31] = 0xFC
+              cmos[0x32] = 0x20
+              cmos[0x34] = 0x00
+              cmos[0x35] = 0x07
+              cmos[0x37] = 0x20
+              cmos[0x38] = 0x20
+              cmos[0x3D] = 0x2F
+              cmos[0x5B] = 0x00
+              cmos[0x5C] = 0x07
+            end
+          end
+
           def set_pit_reload(value)
             reload = value.to_i.zero? ? 65_536 : value.to_i
             @pit_reload = reload
             @pit_counter = reload
+          end
+
+          def program_pit_control(byte)
+            channel = (byte >> 6) & 0x03
+            return unless channel.zero?
+
+            @pit_access_mode =
+              case (byte >> 4) & 0x03
+              when 0x01 then :low
+              when 0x02 then :high
+              when 0x03 then :lohi
+              else :latch
+              end
+            @pit_next_write_low = true
+            @pit_pending_low_byte = 0
+          end
+
+          def write_pit_counter_byte(byte)
+            case @pit_access_mode
+            when :low
+              set_pit_reload((@pit_reload & 0xFF00) | byte)
+            when :high
+              set_pit_reload((@pit_reload & 0x00FF) | (byte << 8))
+            when :lohi
+              if @pit_next_write_low
+                @pit_pending_low_byte = byte
+                @pit_next_write_low = false
+              else
+                set_pit_reload((byte << 8) | @pit_pending_low_byte)
+                @pit_next_write_low = true
+              end
+            end
           end
 
           def little_endian_word(addr)

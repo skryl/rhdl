@@ -31,13 +31,28 @@ RSpec.describe RHDL::Examples::GameBoy::CLI do
 
       expect(status).to eq(0)
       expect(stderr.string).to eq('')
-      expect(stdout.string).to include('--hdl-dir DIR')
-      expect(stdout.string).to include('--verilog-dir DIR')
+      expect(stdout.string).to include('--source DIR')
+      expect(stdout.string).to include(RHDL::Examples::GameBoy::CLI::DEFAULT_SOURCE_DIR)
       expect(stdout.string).to include('--top NAME')
-      expect(stdout.string).to include('--use-staged-verilog')
+      expect(stdout.string).to include('--use-staged-source')
+      expect(stdout.string).to include('--use-normalized-source')
+      expect(stdout.string).to include('--use-rhdl-source')
+      expect(stdout.string).to include('--[no-]debug')
+      expect(stdout.string).to include('Cycles per frame (default: 1000)')
+      expect(stdout.string).not_to include('--jit')
+      expect(stdout.string).to include('Simulation mode: ir (default), ruby, verilog (Verilator RTL), circt (ARC)')
+      expect(stdout.string).to include('Simulator backend: ruby, interpret, jit, compile (default: compile)')
+      expect(stdout.string).not_to include('circt/arcilator')
     end
 
-    it 'runs import with the canonical output dir by default' do
+    it 'rejects the removed arcilator CLI mode alias' do
+      status = described_class.run(%w[--mode arcilator --demo --headless --cycles 1], out: stdout, err: stderr)
+
+      expect(status).to eq(1)
+      expect(stderr.string).to include('invalid argument: --mode arcilator')
+    end
+
+    it 'shows help and requires --out before invoking the importer' do
       result_class = Struct.new(:success, :diagnostics, :output_dir, :files_written, :report_path, keyword_init: true) do
         def success?
           !!success
@@ -67,20 +82,11 @@ RSpec.describe RHDL::Examples::GameBoy::CLI do
 
       status = described_class.run(['import'], out: stdout, err: stderr, importer_class: fake_importer_class)
 
-      expect(status).to eq(0)
-      expect(stderr.string).to eq('')
-      expect(fake_importer_class.last_kwargs[:output_dir]).to eq(
-        RHDL::Examples::GameBoy::Import::SystemImporter::DEFAULT_OUTPUT_DIR
-      )
-      expect(fake_importer_class.last_kwargs[:clean_output]).to eq(true)
-      expect(fake_importer_class.last_kwargs[:keep_workspace]).to eq(false)
-      expect(fake_importer_class.last_kwargs[:maintain_directory_structure]).to eq(true)
-      expect(fake_importer_class.last_kwargs[:strict]).to eq(true)
-      expect(fake_importer_class.last_kwargs[:import_strategy]).to eq(
-        RHDL::Examples::GameBoy::Import::SystemImporter::DEFAULT_IMPORT_STRATEGY
-      )
-      expect(stdout.string).to include('Imported Game Boy reference design')
-      expect(stdout.string).to include('/tmp/gameboy_import')
+      expect(status).to eq(1)
+      expect(stdout.string).to eq('')
+      expect(stderr.string).to include('Usage: bin/gb import [options]')
+      expect(stderr.string).to include('Error: --out is required to run import.')
+      expect(fake_importer_class.last_kwargs).to be_nil
     end
 
     it 'passes import options through to the importer' do
@@ -177,7 +183,7 @@ RSpec.describe RHDL::Examples::GameBoy::CLI do
       fake_importer_class.const_set(:RESULT_CLASS, result_class)
 
       status = described_class.run(
-        %w[import --no-auto-stub-modules],
+        %w[import --out tmp/gameboy_import --no-auto-stub-modules],
         out: stdout,
         err: stderr,
         importer_class: fake_importer_class
@@ -232,16 +238,225 @@ RSpec.describe RHDL::Examples::GameBoy::CLI do
       end
 
       status = described_class.run(
-        %w[--mode verilog --verilog-dir examples/gameboy/import --top Gameboy --use-staged-verilog --pop --headless --cycles 7],
+        %w[--mode verilog --source examples/gameboy/import --top Gameboy --use-staged-source --pop --headless --cycles 7],
         out: stdout,
         err: stderr,
         run_task_class: fake_run_task_class
       )
 
       expect(status).to eq(0)
-      expect(fake_run_task_class.last_options[:verilog_dir]).to eq(File.expand_path('examples/gameboy/import', Dir.pwd))
+      expect(fake_run_task_class.last_options[:source_dir]).to eq(File.expand_path('examples/gameboy/import', Dir.pwd))
       expect(fake_run_task_class.last_options[:top]).to eq('Gameboy')
-      expect(fake_run_task_class.last_options[:use_staged_verilog]).to eq(true)
+      expect(fake_run_task_class.last_options[:use_staged_source]).to eq(true)
+    end
+
+    it 'defaults emulator runs to the Gameboy wrapper top' do
+      fake_run_task_class = Class.new do
+        class << self
+          attr_accessor :last_options
+        end
+
+        def initialize(options)
+          self.class.last_options = options
+        end
+
+        def run
+          { pc: 0x1234, a: 0x56, cycles: 7 }
+        end
+      end
+
+      status = described_class.run(
+        %w[--mode circt --sim jit --source examples/gameboy/import --pop --headless --cycles 7],
+        out: stdout,
+        err: stderr,
+        run_task_class: fake_run_task_class
+      )
+
+      expect(status).to eq(0)
+      expect(fake_run_task_class.last_options[:top]).to eq('Gameboy')
+      expect(fake_run_task_class.last_options[:sim]).to eq(:jit)
+      expect(fake_run_task_class.last_options[:use_staged_source]).to eq(true)
+      expect(fake_run_task_class.last_options[:use_normalized_source]).to eq(false)
+      expect(fake_run_task_class.last_options[:use_rhdl_source]).to eq(false)
+    end
+
+    it 'passes normalized imported-source selection through for runtime backends' do
+      fake_run_task_class = Class.new do
+        class << self
+          attr_accessor :last_options
+        end
+
+        def initialize(options)
+          self.class.last_options = options
+        end
+
+        def run
+          { pc: 0x1234, a: 0x56, cycles: 7 }
+        end
+      end
+
+      status = described_class.run(
+        %w[--mode circt --sim jit --source examples/gameboy/import --use-normalized-source --pop --headless --cycles 7],
+        out: stdout,
+        err: stderr,
+        run_task_class: fake_run_task_class
+      )
+
+      expect(status).to eq(0)
+      expect(fake_run_task_class.last_options[:use_staged_source]).to eq(false)
+      expect(fake_run_task_class.last_options[:use_normalized_source]).to eq(true)
+      expect(fake_run_task_class.last_options[:use_rhdl_source]).to eq(false)
+    end
+
+    it 'passes rhdl source selection through for runtime backends' do
+      fake_run_task_class = Class.new do
+        class << self
+          attr_accessor :last_options
+        end
+
+        def initialize(options)
+          self.class.last_options = options
+        end
+
+        def run
+          { pc: 0x1234, a: 0x56, cycles: 7 }
+        end
+      end
+
+      status = described_class.run(
+        %w[--mode circt --sim jit --source examples/gameboy/import --use-rhdl-source --pop --headless --cycles 7],
+        out: stdout,
+        err: stderr,
+        run_task_class: fake_run_task_class
+      )
+
+      expect(status).to eq(0)
+      expect(fake_run_task_class.last_options[:use_staged_source]).to eq(false)
+      expect(fake_run_task_class.last_options[:use_normalized_source]).to eq(false)
+      expect(fake_run_task_class.last_options[:use_rhdl_source]).to eq(true)
+    end
+
+    it 'defaults debug on and allows --no-debug' do
+      fake_run_task_class = Class.new do
+        class << self
+          attr_accessor :last_options
+        end
+
+        def initialize(options)
+          self.class.last_options = options
+        end
+
+        def run
+          { pc: 0x1234, a: 0x56, cycles: 7 }
+        end
+      end
+
+      status = described_class.run(
+        %w[--mode verilog --source examples/gameboy/import --pop --headless --cycles 7],
+        out: stdout,
+        err: stderr,
+        run_task_class: fake_run_task_class
+      )
+
+      expect(status).to eq(0)
+      expect(fake_run_task_class.last_options[:debug]).to eq(true)
+
+      status = described_class.run(
+        %w[--mode verilog --source examples/gameboy/import --no-debug --pop --headless --cycles 7],
+        out: stdout,
+        err: stderr,
+        run_task_class: fake_run_task_class
+      )
+
+      expect(status).to eq(0)
+      expect(fake_run_task_class.last_options[:debug]).to eq(false)
+    end
+
+    it 'defaults emulator runs to ir/compile when mode and sim are omitted' do
+      fake_run_task_class = Class.new do
+        class << self
+          attr_accessor :last_options
+        end
+
+        def initialize(options)
+          self.class.last_options = options
+        end
+
+        def run
+          { pc: 0x1234, a: 0x56, cycles: 7 }
+        end
+      end
+
+      status = described_class.run(
+        %w[--demo --headless --cycles 7],
+        out: stdout,
+        err: stderr,
+        run_task_class: fake_run_task_class
+      )
+
+      expect(status).to eq(0)
+      expect(fake_run_task_class.last_options[:mode]).to eq(:ir)
+      expect(fake_run_task_class.last_options[:sim]).to eq(:compile)
+      expect(fake_run_task_class.last_options[:speed]).to eq(1000)
+      expect(fake_run_task_class.last_options[:source_dir]).to eq(RHDL::Examples::GameBoy::CLI::DEFAULT_SOURCE_DIR)
+    end
+
+    it 'fails when imported-artifact-dependent options are used without .mixed_import' do
+      Dir.mktmpdir('rhdl_gameboy_source_dir_missing_mixed') do |dir|
+        File.write(File.join(dir, 'import_report.json'), '{}')
+
+        status = described_class.run(
+          ['--mode', 'verilog', '--source', dir, '--use-staged-source', '--demo', '--headless', '--cycles', '1'],
+          out: stdout,
+          err: stderr
+        )
+
+        expect(status).to eq(1)
+        expect(stderr.string).to include('.mixed_import')
+      end
+    end
+
+    it 'fails verilog mode by default against the handwritten source tree' do
+      status = described_class.run(
+        %w[--mode verilog --demo --headless --cycles 1],
+        out: stdout,
+        err: stderr
+      )
+
+      expect(status).to eq(1)
+      expect(stderr.string).to include('.mixed_import')
+      expect(stderr.string).to include(RHDL::Examples::GameBoy::CLI::DEFAULT_SOURCE_DIR)
+    end
+
+    it 'does not require imported artifacts for the default ir run path' do
+      fake_run_task_class = Class.new do
+        class << self
+          attr_accessor :last_options
+        end
+
+        def initialize(options)
+          self.class.last_options = options
+        end
+
+        def run
+          { pc: 0x1234, a: 0x56, cycles: 1 }
+        end
+      end
+
+      status = described_class.run(
+        %w[--pop --headless --cycles 1],
+        out: stdout,
+        err: stderr,
+        run_task_class: fake_run_task_class
+      )
+
+      expect(status).to eq(0)
+      expect(stderr.string).to eq('')
+      expect(fake_run_task_class.last_options[:mode]).to eq(:ir)
+      expect(fake_run_task_class.last_options[:source_dir]).to eq(RHDL::Examples::GameBoy::CLI::DEFAULT_SOURCE_DIR)
+      expect(fake_run_task_class.last_options[:use_staged_source]).to eq(false)
+      expect(fake_run_task_class.last_options[:use_normalized_source]).to eq(false)
+      expect(fake_run_task_class.last_options[:use_rhdl_source]).to eq(false)
     end
   end
 end

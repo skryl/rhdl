@@ -118,7 +118,7 @@ diff --git a/ao486/memory/prefetch_fifo.v b/ao486/memory/prefetch_fifo.v
 +  reg  [4:0]  rt_tmp_1_5;
 +  wire        _GEN = rt_tmp_1_5 == 5'h0;	// /var/folders/fx/2jqq5cks33g297zlybsqw6c40000gn/T/ao486_patch_profile_ws20260311-55795-e9mvr1/runner.mlir:2195:18, :2196:18, :2224:17
 +  wire        _GEN_0 =
-+    prefetchfifo_write_do & (~rt_tmp_2_1 | rt_tmp_5_36 != prefetchfifo_write_data);	// /var/folders/fx/2jqq5cks33g297zlybsqw6c40000gn/T/ao486_patch_profile_ws20260311-55795-e9mvr1/runner.mlir:2199:18, :2200:18, :2201:18, :2202:18, :2225:17, :2228:18
++    prefetchfifo_write_do & (|prefetchfifo_write_data[35:32]);	// Zero-tag writes are invalid on the runner path, but identical adjacent fetch words must still be preserved.
 +  reg         rt_tmp_3_1;
 +  reg         rt_tmp_4_1;
 +  reg  [35:0] rt_tmp_6_36;
@@ -191,4 +191,3 @@ diff --git a/ao486/memory/prefetch_fifo.v b/ao486/memory/prefetch_fifo.v
 +      : {rt_tmp_6_36[35:32], 32'h0, rt_tmp_6_36[31:0]};	// /var/folders/fx/2jqq5cks33g297zlybsqw6c40000gn/T/ao486_patch_profile_ws20260311-55795-e9mvr1/runner.mlir:2235:19, :2244:18, :2294:19, :2295:19, :2296:20, :2297:20, :2298:19, :2299:20, :2300:20, :2301:20, :2304:3
 +  assign prefetchfifo_accept_empty = _GEN & ~_GEN_7;	// /var/folders/fx/2jqq5cks33g297zlybsqw6c40000gn/T/ao486_patch_profile_ws20260311-55795-e9mvr1/runner.mlir:2196:18, :2294:19, :2302:19, :2303:19, :2304:3
  endmodule
-

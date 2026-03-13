@@ -47,6 +47,8 @@ RSpec.describe 'rhdl examples ao486 command' do
     expect(stdout).to include('--sim interpret|jit|compile')
     expect(stdout).to include('--bios')
     expect(stdout).to include('--dos')
+    expect(stdout).to include('--dos-disk1 FILE')
+    expect(stdout).to include('--dos-disk2 FILE')
     expect(stdout).to include('--headless')
     expect(stdout).to include('--cycles N')
     expect(stdout).to include('-s, --speed CYCLES')
@@ -73,6 +75,8 @@ RSpec.describe 'rhdl examples ao486 command' do
     expect(stdout).to include('Run the AO486 CPU-top environment.')
     expect(stdout).to include('--bios')
     expect(stdout).to include('--dos')
+    expect(stdout).to include('--dos-disk1 FILE')
+    expect(stdout).to include('--dos-disk2 FILE')
     expect(stdout).to include('-s, --speed CYCLES')
     expect(stdout).to include('-d, --debug')
   end

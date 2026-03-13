@@ -341,9 +341,9 @@ RSpec.describe 'Game Boy CLI' do
 
   describe 'CLI Option Defaults' do
     # These tests verify the expected defaults match the requirements
-    it 'defaults mode to :ruby' do
-      # The default mode should be :ruby
-      expect(:ruby).to eq(:ruby)
+    it 'defaults mode to :ir' do
+      # The default mode should be :ir
+      expect(:ir).to eq(:ir)
     end
 
     it 'defaults sim backend to :compile' do

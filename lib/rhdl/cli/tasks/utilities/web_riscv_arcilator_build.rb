@@ -2,6 +2,7 @@
 
 require 'json'
 require 'fileutils'
+require 'rhdl/codegen/circt/tooling'
 
 module RHDL
   module CLI
@@ -30,7 +31,7 @@ module RHDL
         PKG_DIR = File.join(PROJECT_ROOT, 'web', 'assets', 'pkg')
         PKG_OUTPUT = File.join(PKG_DIR, 'riscv_arcilator.wasm')
 
-        REQUIRED_TOOLS = %w[arcilator clang wasm-ld].freeze
+        REQUIRED_TOOLS = %w[arcilator circt-opt clang wasm-ld].freeze
         DEFAULT_MEM_SIZE = 128 * 1024 * 1024
         # Arcilator wrapper uses a fixed bump heap for malloc/calloc.
         # Keep enough room for inst+data memories, disk image buffer, and runtime state.
@@ -101,8 +102,22 @@ module RHDL
         end
 
         def compile_mlir_to_llvm_ir
+          puts '  Preparing ARC MLIR...'
+          prepared = RHDL::Codegen::CIRCT::Tooling.prepare_arcilator_input_from_circt_mlir(
+            mlir_path: MLIR_FILE,
+            work_dir: File.join(BUILD_DIR, 'arc'),
+            base_name: 'riscv_cpu',
+            top: 'riscv_cpu'
+          )
+          raise "ARC preparation failed:\n#{prepared.dig(:arc, :stderr)}" unless prepared[:success]
+
           puts '  Compiling MLIR -> LLVM IR (arcilator)...'
-          run_tool!('arcilator', MLIR_FILE, '--observe-registers', "--state-file=#{STATE_FILE}", '-o', LL_FILE)
+          run_tool!(*RHDL::Codegen::CIRCT::Tooling.arcilator_command(
+            mlir_path: prepared.fetch(:arcilator_input_mlir_path),
+            state_file: STATE_FILE,
+            out_path: LL_FILE,
+            extra_args: ['--observe-registers']
+          ))
         end
 
         def parse_state_json

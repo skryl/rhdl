@@ -214,10 +214,6 @@ impl Sparc64Extension {
     }
 
     pub fn run_cycles(&mut self, core: &mut CoreSimulator, n: usize) -> usize {
-        if !core.compiled {
-            return 0;
-        }
-
         for _ in 0..n {
             let reset_active = self.reset_cycles_remaining > 0;
             let acked_response = if reset_active {
@@ -227,7 +223,7 @@ impl Sparc64Extension {
             };
 
             self.apply_inputs(core, reset_active, acked_response);
-            core.evaluate();
+            core.tick_forced();
 
             if let Some(response) = acked_response {
                 self.record_acknowledged_response(response);
@@ -259,7 +255,7 @@ impl Sparc64Extension {
             };
 
             self.set_signal(core, self.clk_idx, 1);
-            core.tick();
+            core.tick_forced();
 
             self.deferred_request = if next_response.is_none() && !reset_active {
                 // A legitimately new transaction can first become visible only
@@ -471,12 +467,12 @@ impl Sparc64Extension {
     }
 
     fn signal(&self, core: &CoreSimulator, idx: usize) -> u128 {
-        core.signals.get(idx).copied().unwrap_or(0)
+        core.signals.get(idx).copied().unwrap_or(0).into()
     }
 
     fn set_signal(&self, core: &mut CoreSimulator, idx: usize, value: u128) {
         if idx < core.signals.len() {
-            core.signals[idx] = value;
+            core.signals[idx] = value as _;
         }
     }
 }

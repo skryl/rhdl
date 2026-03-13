@@ -1725,6 +1725,8 @@ module RHDL
             assigned_expr = assign_map[target.to_s]
             next unless assigned_expr
 
+            target_width = signal_widths[target.to_s].to_i
+            raw_refs = signal_refs_from_expr(assigned_expr, cache: raw_signal_refs_cache)
             refs = runtime_simplified_signal_refs(
               assigned_expr,
               assign_map: assign_map,
@@ -1734,10 +1736,14 @@ module RHDL
               raw_cache: raw_signal_refs_cache,
               runtime_sensitive_names: runtime_sensitive_names
             )
-            raw_refs = signal_refs_from_expr(assigned_expr, cache: raw_signal_refs_cache)
-            refs = refs | raw_refs.select do |ref|
-              hierarchical_runtime_signal_name?(ref) || signal_widths[ref].to_i <= MAX_RUNTIME_SIGNAL_WIDTH
-            end
+            refs =
+              if target_width > MAX_RUNTIME_SIGNAL_WIDTH
+                raw_refs
+              else
+                refs | raw_refs.select do |ref|
+                  hierarchical_runtime_signal_name?(ref) || signal_widths[ref].to_i <= MAX_RUNTIME_SIGNAL_WIDTH
+                end
+              end
             refs.each do |ref|
               next if live_assign_targets.include?(ref)
 

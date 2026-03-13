@@ -1051,10 +1051,14 @@ module RHDL
           end
 
           def run_command(cmd, chdir: nil)
+            env = git_command?(cmd) ? {
+              'GIT_CONFIG_GLOBAL' => '/dev/null',
+              'GIT_CONFIG_NOSYSTEM' => '1'
+            } : {}
             stdout, stderr, status = if chdir
-              Open3.capture3(*cmd, chdir: chdir)
+              Open3.capture3(env, *cmd, chdir: chdir)
             else
-              Open3.capture3(*cmd)
+              Open3.capture3(env, *cmd)
             end
             {
               success: status.success?,
@@ -1063,6 +1067,10 @@ module RHDL
               status: status.exitstatus,
               command: cmd.map { |arg| Shellwords.escape(arg.to_s) }.join(' ')
             }
+          end
+
+          def git_command?(cmd)
+            Array(cmd).first.to_s == 'git'
           end
 
           def tool_available?(cmd)

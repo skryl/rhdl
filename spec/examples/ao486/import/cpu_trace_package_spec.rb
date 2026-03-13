@@ -8,7 +8,7 @@ require_relative '../../../../examples/ao486/utilities/import/cpu_importer'
 require_relative '../../../../examples/ao486/utilities/import/cpu_parity_programs'
 require_relative '../../../../examples/ao486/utilities/runners/ir_runner'
 
-RSpec.describe 'AO486 trace patch profile' do
+RSpec.describe 'AO486 parity patch profile trace surface' do
   include AO486SpecSupport::HeadlessImportRunnerHelper
 
   def require_import_tool!
@@ -21,7 +21,7 @@ RSpec.describe 'AO486 trace patch profile' do
     skip 'llvm-objcopy not available' unless HdlToolchain.which('llvm-objcopy')
   end
 
-  def run_importer(out_dir:, workspace:, patch_profile: :trace)
+  def run_importer(out_dir:, workspace:, patch_profile: :parity)
     RHDL::Examples::AO486::Import::CpuImporter.new(
       output_dir: out_dir,
       workspace_dir: workspace,

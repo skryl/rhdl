@@ -48,6 +48,8 @@ module RHDL
                 --sim interpret|jit|compile
                 --bios
                 --dos
+                --dos-disk1 FILE
+                --dos-disk2 FILE
                 --headless
                 --cycles N
                 -s, --speed CYCLES
@@ -149,6 +151,8 @@ module RHDL
             sim: :compile,
             bios: false,
             dos: false,
+            dos_disk1: nil,
+            dos_disk2: nil,
             debug: false,
             headless: false,
             cycles: nil,
@@ -178,6 +182,14 @@ module RHDL
             end
             opts.on('--dos', 'Load DOS floppy image from examples/ao486/software/bin') do
               options[:dos] = true
+            end
+            opts.on('--dos-disk1 FILE', String,
+                    'Load FILE as the primary DOS floppy image in slot 0') do |v|
+              options[:dos_disk1] = v
+            end
+            opts.on('--dos-disk2 FILE', String,
+                    'Preload FILE as the secondary DOS floppy image in slot 1 for hot swapping') do |v|
+              options[:dos_disk2] = v
             end
             opts.on('--headless', 'Run once without the interactive terminal loop') do
               options[:headless] = true

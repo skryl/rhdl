@@ -30,6 +30,7 @@ RSpec.describe RHDL::Examples::SPARC64::Integration::StagedVerilogBundle do
     exu_rml_file = File.join(result.staged_root, 'T1-CPU', 'exu', 'sparc_exu_rml.v')
     irf_register_file = File.join(result.build_dir, 'patched_reference', 'T1-common', 'srams', 'bw_r_irf_register.v')
     staged_irf_register_file = File.join(result.staged_root, 'T1-common', 'srams', 'bw_r_irf_register.v')
+    staged_dcd_file = File.join(result.staged_root, 'T1-common', 'srams', 'bw_r_dcd.v')
     lsu_file = File.join(result.staged_root, 'T1-CPU', 'lsu', 'lsu.v')
     lsu_qctl1_file = File.join(result.staged_root, 'T1-CPU', 'lsu', 'lsu_qctl1.v')
     lsu_qctl2_file = File.join(result.staged_root, 'T1-CPU', 'lsu', 'lsu_qctl2.v')
@@ -47,6 +48,7 @@ RSpec.describe RHDL::Examples::SPARC64::Integration::StagedVerilogBundle do
     expect(File).to exist(exu_rml_file)
     expect(File).to exist(irf_register_file)
     expect(File).to exist(staged_irf_register_file)
+    expect(File).to exist(staged_dcd_file)
     expect(File).to exist(lsu_file)
     expect(File).to exist(lsu_qctl1_file)
     expect(File).to exist(lsu_qctl2_file)
@@ -58,8 +60,11 @@ RSpec.describe RHDL::Examples::SPARC64::Integration::StagedVerilogBundle do
     staged_irf_register_source = File.read(staged_irf_register_file)
     expect(staged_irf_register_source).to include('reg	[71:0]	reg_th0 /* verilator public_flat_rw */;')
     expect(staged_irf_register_source).to include('reg	[71:0]	reg_th3 /* verilator public_flat_rw */;')
+    expect(File.read(staged_dcd_file)).to include('module bw_r_dcd')
+    expect(File.read(staged_dcd_file)).to match(/output\s+\[63:0\]\s+dcache_rdata_wb\s*;/)
 
     expect(result.source_files).to include(staged_irf_register_file)
+    expect(result.source_files).to include(staged_dcd_file)
 
     os2wb_source = File.read(os2wb_file)
     expect(os2wb_source).to include('`define TEST_DRAM        0')
@@ -226,8 +231,15 @@ RSpec.describe RHDL::Examples::SPARC64::Integration::StagedVerilogBundle do
     expect(support_stubs_source).to include('module pcx_fifo(aclr, clock, data, rdreq, wrreq, empty, q);')
     expect(support_stubs_source).to include('output empty;')
     expect(support_stubs_source).to include('output [129:0] q;')
-    expect(support_stubs_source).to include('reg [129:0] mem[0:3];')
+    expect(support_stubs_source).to include('reg [123:0] payload0;')
+    expect(support_stubs_source).to include('reg [5:0] meta3;')
+    expect(support_stubs_source).to include('reg [123:0] q_payload;')
+    expect(support_stubs_source).to include('assign q = empty ? 130\'b0 : {q_meta, q_payload};')
+    expect(support_stubs_source).to include('case (rd_ptr)')
+    expect(support_stubs_source).to include('case (wr_ptr)')
     expect(support_stubs_source).not_to include('module bw_r_irf_register(')
+    expect(support_stubs_source).not_to include('module bw_r_rf32x152b(')
+    expect(support_stubs_source).not_to include('module bw_r_dcd(')
   end
 
   it 'reuses the cached staged bundle for identical inputs', timeout: 120 do

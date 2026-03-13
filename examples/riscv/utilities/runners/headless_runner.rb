@@ -3,6 +3,7 @@
 require_relative 'ruby_runner'
 require_relative 'ir_runner'
 require_relative '../assembler'
+require 'rhdl/sim/native/headless_trace'
 
 module RHDL
   module Examples
@@ -10,6 +11,7 @@ module RHDL
       # Headless runner factory for RISC-V simulation.
       # Provides the same core lifecycle APIs as interactive tasks but without terminal UI.
       class HeadlessRunner
+        include RHDL::Sim::Native::HeadlessTrace
         XV6_RESET_PC = 0x8000_0000
         LINUX_KERNEL_LOAD_ADDR = 0x8040_0000
         LINUX_INITRAMFS_LOAD_ADDR = 0x8400_0000
@@ -62,6 +64,12 @@ module RHDL
 
         def native?
           @cpu.native?
+        end
+
+        def sim
+          return nil unless @cpu.respond_to?(:sim)
+
+          @cpu.sim
         end
 
         def simulator_type

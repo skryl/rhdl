@@ -30,7 +30,8 @@ module RHDL
         LLHD_VALUE_TOKEN_PATTERN = '%[A-Za-z0-9_$.\\-]+(?:#\\d+)?'
         ARRAY_TYPE_PATTERN = /!hw\.array<(?<len>\d+)xi(?<width>\d+)>/
         LLHD_ARRAY_TYPE_PATTERN = /<\s*!hw\.array<(?<len>\d+)xi(?<width>\d+)>\s*>/
-        FIRMEM_TYPE_PATTERN = /<\s*(?<depth>\d+)\s*x\s*(?<width>\d+)\s*>/
+        FIRMEM_TYPE_TEXT_PATTERN = '<\s*\d+\s*x\s*\d+(?:\s*,\s*mask\s+\d+)?\s*>'
+        FIRMEM_TYPE_PATTERN = /<\s*(?<depth>\d+)\s*x\s*(?<width>\d+)(?:\s*,\s*mask\s+(?<mask>\d+))?\s*>/
 
         ArrayValue = Struct.new(:elements, :length, :element_width, keyword_init: true) do
           def width
@@ -53,6 +54,8 @@ module RHDL
           :length,
           :element_width,
           :enable_expr,
+          :hold_token,
+          :hold_name,
           keyword_init: true
         ) do
           def width
@@ -81,6 +84,7 @@ module RHDL
           previous_simplify_expr_cache = Thread.current[:rhdl_circt_import_simplify_expr_cache]
           previous_simplify_expr_active = Thread.current[:rhdl_circt_import_simplify_expr_active]
           previous_expr_equivalent_cache = Thread.current[:rhdl_circt_import_expr_equivalent_cache]
+          previous_llhd_block_state_tokens = Thread.current[:rhdl_circt_import_llhd_block_state_tokens]
           previous_forward_refs_seen = Thread.current[:rhdl_circt_import_forward_refs_seen]
           Thread.current[:rhdl_circt_import_array_elements_cache] = {}
           Thread.current[:rhdl_circt_import_literal_cache] = {}
@@ -90,6 +94,7 @@ module RHDL
           Thread.current[:rhdl_circt_import_simplify_expr_cache] = {}
           Thread.current[:rhdl_circt_import_simplify_expr_active] = {}
           Thread.current[:rhdl_circt_import_expr_equivalent_cache] = {}
+          Thread.current[:rhdl_circt_import_llhd_block_state_tokens] = {}
           Thread.current[:rhdl_circt_import_forward_refs_seen] = false
 
           diagnostics = []
@@ -477,6 +482,7 @@ module RHDL
           Thread.current[:rhdl_circt_import_simplify_expr_cache] = previous_simplify_expr_cache
           Thread.current[:rhdl_circt_import_simplify_expr_active] = previous_simplify_expr_active
           Thread.current[:rhdl_circt_import_expr_equivalent_cache] = previous_expr_equivalent_cache
+          Thread.current[:rhdl_circt_import_llhd_block_state_tokens] = previous_llhd_block_state_tokens
           Thread.current[:rhdl_circt_import_forward_refs_seen] = previous_forward_refs_seen
         end
 
@@ -923,6 +929,12 @@ module RHDL
           check_block = blocks[wait_term[:target]]
           return false unless check_block
 
+          seeded_stop_env_map = apply_llhd_block_args(
+            value_map: value_map.dup,
+            target_block: check_block,
+            branch_args: wait_term[:target_args]
+          )
+
           edge_term = parse_cf_cond_br(check_block[:terminator])
           clock_name =
             if edge_term && edge_term[:false_target] == entry_target && edge_term[:true_target] != entry_target
@@ -940,7 +952,7 @@ module RHDL
             current_label: wait_term[:target],
             stop_label: entry_target,
             stop_block: wait_block,
-            value_map: value_map.dup,
+            value_map: seeded_stop_env_map,
             array_meta: array_meta,
             array_element_refs: array_element_refs,
             diagnostics: diagnostics,
@@ -1113,7 +1125,31 @@ module RHDL
           return {} if terminator == 'llhd.yield' || parse_llhd_halt(terminator)
 
           if (cond_br = parse_cf_cond_br(terminator))
-            cond_expr = lookup_value(local_map, cond_br[:cond_token], width: 1)
+            cond_expr = simplify_expr(lookup_value(local_map, cond_br[:cond_token], width: 1))
+            if cond_expr.is_a?(IR::Literal)
+              target_label, branch_args =
+                if cond_expr.value.to_i.zero?
+                  [cond_br[:false_target], cond_br[:false_args]]
+                else
+                  [cond_br[:true_target], cond_br[:true_args]]
+                end
+
+              return resolve_llhd_branch_stop_env(
+                blocks: blocks,
+                target_label: target_label,
+                branch_args: branch_args,
+                stop_label: stop_label,
+                stop_block: stop_block,
+                local_map: local_map,
+                array_meta: array_meta,
+                array_element_refs: array_element_refs,
+                diagnostics: diagnostics,
+                line_no: line_no,
+                strict: strict,
+                stack: next_stack
+              )
+            end
+
             true_env = resolve_llhd_branch_stop_env(
               blocks: blocks,
               target_label: cond_br[:true_target],
@@ -1256,7 +1292,9 @@ module RHDL
               new_element: when_true.new_element,
               length: when_true.length,
               element_width: when_true.element_width,
-              enable_expr: merge_array_enable(condition, when_true.enable_expr)
+              enable_expr: merge_array_enable(condition, when_true.enable_expr),
+              hold_token: when_true.hold_token,
+              hold_name: when_true.hold_name
             )
           end
 
@@ -1275,7 +1313,9 @@ module RHDL
               new_element: when_false.new_element,
               length: when_false.length,
               element_width: when_false.element_width,
-              enable_expr: merge_array_enable(invert_boolean_expr(condition), when_false.enable_expr)
+              enable_expr: merge_array_enable(invert_boolean_expr(condition), when_false.enable_expr),
+              hold_token: when_false.hold_token,
+              hold_name: when_false.hold_name
             )
           end
 
@@ -1880,13 +1920,70 @@ module RHDL
           return nil unless m
 
           args = if m[2]
-                   split_top_level_csv(m[2]).map do |entry|
+                   raw_args = strip_trailing_branch_arg_types(m[2])
+                   split_top_level_csv(raw_args).map do |entry|
                      normalize_value_token(entry.to_s.split(':', 2).first.to_s)
                    end
                  else
                    []
                  end
           { label: m[1], args: args }
+        end
+
+        def strip_trailing_branch_arg_types(raw_args)
+          text = raw_args.to_s
+          angle_depth = 0
+          paren_depth = 0
+          bracket_depth = 0
+          brace_depth = 0
+          in_quote = false
+          escaped = false
+          idx = 0
+
+          while idx < text.length
+            ch = text[idx]
+
+            if in_quote
+              if escaped
+                escaped = false
+              elsif ch == '\\'
+                escaped = true
+              elsif ch == '"'
+                in_quote = false
+              end
+              idx += 1
+              next
+            end
+
+            case ch
+            when '"'
+              in_quote = true
+            when '<'
+              angle_depth += 1
+            when '>'
+              angle_depth -= 1 if angle_depth.positive?
+            when '('
+              paren_depth += 1
+            when ')'
+              paren_depth -= 1 if paren_depth.positive?
+            when '['
+              bracket_depth += 1
+            when ']'
+              bracket_depth -= 1 if bracket_depth.positive?
+            when '{'
+              brace_depth += 1
+            when '}'
+              brace_depth -= 1 if brace_depth.positive?
+            when ':'
+              if angle_depth.zero? && paren_depth.zero? && bracket_depth.zero? && brace_depth.zero?
+                return text[0...idx].strip
+              end
+            end
+
+            idx += 1
+          end
+
+          text.strip
         end
 
         def apply_llhd_block_args(value_map:, target_block:, branch_args:)
@@ -1913,10 +2010,44 @@ module RHDL
         end
 
         def llhd_block_state_key(current_label:, block:, value_map:)
-          arg_state = Array(block[:args]).map do |arg_spec|
-            [arg_spec[:name], expr_signature(value_map[arg_spec[:name]])]
+          arg_names = Array(block[:args]).map { |arg_spec| arg_spec[:name] }
+          external_names = llhd_block_external_state_tokens(block).reject { |token| arg_names.include?(token) }
+          state_names = (arg_names + external_names).uniq
+
+          arg_state = state_names.filter_map do |name|
+            next unless value_map.key?(name)
+
+            [name, expr_signature(value_map[name])]
           end
           [current_label, arg_state]
+        end
+
+        def llhd_block_external_state_tokens(block)
+          cache = Thread.current[:rhdl_circt_import_llhd_block_state_tokens] ||= {}
+          cache_key = [block.object_id, block[:terminator].to_s, Array(block[:instructions]).hash]
+          return cache[cache_key] if cache.key?(cache_key)
+
+          defined = Set.new(Array(block[:args]).map { |arg_spec| arg_spec[:name] })
+          referenced = []
+
+          Array(block[:instructions]).each do |instruction|
+            lhs_match = instruction.to_s.strip.match(/\A((?:#{SSA_TOKEN_PATTERN}(?:#\d+)?(?::\d+)?)(?:\s*,\s*#{SSA_TOKEN_PATTERN}(?:#\d+)?(?::\d+)?)*)\s*=/)
+            if lhs_match
+              lhs_match[1].split(',').each do |entry|
+                defined << normalize_value_token(entry.to_s.sub(/:\d+\z/, ''))
+              end
+            end
+
+            instruction.to_s.scan(/#{LLHD_VALUE_TOKEN_PATTERN}/) do |token|
+              referenced << normalize_value_token(token)
+            end
+          end
+
+          block[:terminator].to_s.scan(/#{LLHD_VALUE_TOKEN_PATTERN}/) do |token|
+            referenced << normalize_value_token(token)
+          end
+
+          cache[cache_key] = referenced.reject { |token| defined.include?(token) }.uniq
         end
 
         def one_shot_llhd_init_process?(process_lines)
@@ -2023,6 +2154,38 @@ module RHDL
               ]
             when IR::MemoryRead
               [:memory_read, expr.memory.to_s, expr_signature(expr.addr), expr.width.to_i]
+            when ArrayForwardRef
+              [:array_forward_ref, expr.token.to_s, expr.name.to_s, expr.length.to_i, expr.element_width.to_i]
+            when DeferredArrayRead
+              [
+                :deferred_array_read,
+                expr.base_token.to_s,
+                expr.base_name.to_s,
+                expr_signature(expr.addr),
+                expr.length.to_i,
+                expr.element_width.to_i
+              ]
+            when ArrayValue
+              [
+                :array_value,
+                expr.length.to_i,
+                expr.element_width.to_i,
+                Array(expr.elements).map { |element| expr_signature(element) }
+              ]
+            when ArrayWriteCandidate
+              [
+                :array_write_candidate,
+                expr_signature(expr.base_value),
+                expr.base_token.to_s,
+                expr.base_name.to_s,
+                expr_signature(expr.index_expr),
+                expr_signature(expr.new_element),
+                expr.length.to_i,
+                expr.element_width.to_i,
+                expr.enable_expr ? expr_signature(expr.enable_expr) : nil,
+                expr.hold_token.to_s,
+                expr.hold_name.to_s
+              ]
             else
               [:unknown, expr.class.name, expr.to_s]
             end
@@ -2310,6 +2473,33 @@ module RHDL
             statements << IR::SeqAssign.new(target: array_name, expr: assign_expr)
           elsif assigns
             assigns << IR::Assign.new(target: array_name, expr: assign_expr)
+          end
+        end
+
+        def rename_seqassign_target_statements(statements, old_name:, new_name:)
+          Array(statements).map do |statement|
+            case statement
+            when IR::SeqAssign
+              next statement unless statement.target.to_s == old_name
+
+              IR::SeqAssign.new(target: new_name, expr: statement.expr)
+            when IR::If
+              IR::If.new(
+                condition: statement.condition,
+                then_statements: rename_seqassign_target_statements(
+                  statement.then_statements,
+                  old_name: old_name,
+                  new_name: new_name
+                ),
+                else_statements: rename_seqassign_target_statements(
+                  statement.else_statements,
+                  old_name: old_name,
+                  new_name: new_name
+                )
+              )
+            else
+              statement
+            end
           end
         end
 
@@ -2816,7 +3006,9 @@ module RHDL
                                   new_element: ensure_expr_with_width(new_element, width: array_type[:element_width]),
                                   length: array_type[:len],
                                   element_width: array_type[:element_width],
-                                  enable_expr: nil
+                                  enable_expr: nil,
+                                  hold_token: nil,
+                                  hold_name: nil
                                 )
                               else
                                 old_elements = array_elements_from_value(
@@ -3001,6 +3193,7 @@ module RHDL
             target_expr = lookup_value(value_map, m[1], width: width)
             target_name = target_expr.is_a?(IR::Signal) ? target_expr.name.to_s : m[1].sub('%', '')
             expr = lookup_expr_value(value_map, m[2].strip, width: width)
+            return if expr.is_a?(IR::Signal) && expr.name.to_s == target_name
             assigns << IR::Assign.new(target: target_name, expr: expr)
             return
           end
@@ -3161,7 +3354,35 @@ module RHDL
                     new_element: when_true.new_element,
                     length: when_true.length,
                     element_width: when_true.element_width,
-                    enable_expr: condition
+                    enable_expr: condition,
+                    hold_token: when_true.hold_token,
+                    hold_name: when_true.hold_name
+                  )
+                elsif when_true.is_a?(ArrayWriteCandidate) && when_false.is_a?(ArrayForwardRef)
+                  ArrayWriteCandidate.new(
+                    base_value: when_true.base_value,
+                    base_token: when_true.base_token,
+                    base_name: when_true.base_name,
+                    index_expr: when_true.index_expr,
+                    new_element: when_true.new_element,
+                    length: when_true.length,
+                    element_width: when_true.element_width,
+                    enable_expr: condition,
+                    hold_token: when_false.token,
+                    hold_name: when_false.name
+                  )
+                elsif when_false.is_a?(ArrayWriteCandidate) && when_true.is_a?(ArrayForwardRef)
+                  ArrayWriteCandidate.new(
+                    base_value: when_false.base_value,
+                    base_token: when_false.base_token,
+                    base_name: when_false.base_name,
+                    index_expr: when_false.index_expr,
+                    new_element: when_false.new_element,
+                    length: when_false.length,
+                    element_width: when_false.element_width,
+                    enable_expr: invert_boolean_expr(condition),
+                    hold_token: when_true.token,
+                    hold_name: when_true.name
                   )
                 end
 
@@ -3688,6 +3909,18 @@ module RHDL
           stripped[0...open_idx].rstrip
         end
 
+        def trailing_attr_string(text, key)
+          stripped = text.to_s.rstrip
+          return nil unless stripped.end_with?('}')
+
+          close_idx = stripped.length - 1
+          open_idx = matching_open_brace_index(stripped, close_idx)
+          return nil unless open_idx
+
+          attr_text = stripped[(open_idx + 1)...close_idx].to_s
+          attr_text[/\b#{Regexp.escape(key.to_s)}\s*=\s*"([^"]+)"/, 1]
+        end
+
         def strip_attr_dict_before_type(text)
           stripped = text.rstrip
           colon_idx = stripped.rindex(':')
@@ -4131,7 +4364,7 @@ module RHDL
         end
 
         def parse_seq_firmem_line(body, value_map:, memories:)
-          m = body.match(/\A(#{SSA_TOKEN_PATTERN})\s*=\s*seq\.firmem\s+.+\s*:\s*(<\s*\d+\s*x\s*\d+\s*>)\z/)
+          m = body.match(/\A(#{SSA_TOKEN_PATTERN})\s*=\s*seq\.firmem\s+.+\s*:\s*(#{FIRMEM_TYPE_TEXT_PATTERN})\z/)
           return false unless m
 
           mem_type = parse_firmem_type(m[2])
@@ -4155,7 +4388,7 @@ module RHDL
 
         def parse_seq_firmem_read_port_line(body, value_map:)
           m = body.match(
-            /\A(#{SSA_TOKEN_PATTERN})\s*=\s*seq\.firmem\.read_port\s+(#{SSA_TOKEN_PATTERN})\[(#{SSA_TOKEN_PATTERN})\],\s*clock\s+(#{SSA_TOKEN_PATTERN})(?:\s+enable\s+(#{SSA_TOKEN_PATTERN}))?\s*:\s*(<\s*\d+\s*x\s*\d+\s*>)\z/
+            /\A(#{SSA_TOKEN_PATTERN})\s*=\s*seq\.firmem\.read_port\s+(#{SSA_TOKEN_PATTERN})\[(#{SSA_TOKEN_PATTERN})\],\s*clock\s+(#{SSA_TOKEN_PATTERN})(?:\s+enable\s+(#{SSA_TOKEN_PATTERN}))?\s*:\s*(#{FIRMEM_TYPE_TEXT_PATTERN})\z/
           )
           return false unless m
 
@@ -4182,7 +4415,7 @@ module RHDL
 
         def parse_seq_firmem_write_port_line(body, value_map:, memories:, write_ports:)
           m = body.match(
-            /\Aseq\.firmem\.write_port\s+(#{SSA_TOKEN_PATTERN})\[(#{SSA_TOKEN_PATTERN})\]\s*=\s*(#{SSA_TOKEN_PATTERN}),\s*clock\s+(#{SSA_TOKEN_PATTERN})\s+enable\s+(#{SSA_TOKEN_PATTERN})\s*:\s*(<\s*\d+\s*x\s*\d+\s*>)\z/
+            /\Aseq\.firmem\.write_port\s+(#{SSA_TOKEN_PATTERN})\[(#{SSA_TOKEN_PATTERN})\]\s*=\s*(#{SSA_TOKEN_PATTERN}),\s*clock\s+(#{SSA_TOKEN_PATTERN})\s+enable\s+(#{SSA_TOKEN_PATTERN})\s*:\s*(#{FIRMEM_TYPE_TEXT_PATTERN})\z/
           )
           return false unless m
 
@@ -4212,7 +4445,8 @@ module RHDL
           return false unless m
 
           out_token = m[1]
-          args = strip_trailing_attr_dict(m[2].strip)
+          raw_args = m[2].strip
+          args = strip_trailing_attr_dict(raw_args)
           type = m[3].strip
           array_type = array_type_from_string(type)
           width = mlir_type_width(type)
@@ -4235,20 +4469,29 @@ module RHDL
                    end
           return false unless parsed
 
-          reg_name = out_token.sub('%', '')
+          reg_name = trailing_attr_string(raw_args, 'name') || out_token.sub('%', '')
           if array_type
             return false if parsed[:reset]
 
             array_value = lookup_array_value(value_map, parsed[:data], array_type)
-            if array_value.is_a?(ArrayWriteCandidate) && array_value.base_name.to_s == reg_name
+            if array_value.is_a?(ArrayWriteCandidate) &&
+               (array_value.base_name.to_s == reg_name ||
+                array_value.hold_token.to_s == out_token.to_s ||
+                array_value.hold_name.to_s == reg_name)
+              memory_name =
+                if array_value.hold_token.to_s == out_token.to_s && !array_value.base_name.to_s.empty?
+                  array_value.base_name.to_s
+                else
+                  reg_name
+                end
               memories << IR::Memory.new(
-                name: reg_name,
+                name: memory_name,
                 depth: array_type[:len],
                 width: array_type[:element_width],
                 initial_data: []
-              )
+              ) unless Array(memories).any? { |memory| memory.name.to_s == memory_name }
               write_ports << IR::MemoryWritePort.new(
-                memory: reg_name,
+                memory: memory_name,
                 clock: clock_name_for_token(value_map, parsed[:clock]),
                 addr: ensure_expr_with_width(
                   array_value.index_expr,
@@ -4259,7 +4502,7 @@ module RHDL
               )
               value_map[out_token] = ArrayForwardRef.new(
                 token: out_token,
-                name: reg_name,
+                name: memory_name,
                 length: array_type[:len],
                 element_width: array_type[:element_width]
               )
@@ -5055,7 +5298,9 @@ module RHDL
                 signal_memo: signal_memo,
                 expr_memo: expr_memo,
                 visiting: visiting
-              )
+              ),
+              hold_token: expr.hold_token,
+              hold_name: expr.hold_name
             )
           when ArrayValue
             resolved = ArrayValue.new(
@@ -5284,7 +5529,7 @@ module RHDL
 
           Array(mod.processes).each do |process|
             collect_seqassign_statements(process.statements).each do |stmt|
-              seqassigns_by_target[stmt.target.to_s] << stmt
+              seqassigns_by_target[stmt.target.to_s] << { process: process, stmt: stmt }
             end
           end
 
@@ -5293,19 +5538,39 @@ module RHDL
             target = reg.name.to_s
             next unless reg.width.to_i > 128
 
-            seqassigns = seqassigns_by_target[target]
-            next unless seqassigns.length == 1
-            next unless self_hold_seqassign_statement?(seqassigns.first)
+            seqassign_entries = seqassigns_by_target[target]
+            next unless seqassign_entries.length == 1
+
+            entry = seqassign_entries.first
+            process = entry[:process]
+            stmt = entry[:stmt]
 
             matching_memories = Array(memory_by_total_width[reg.width.to_i])
             next unless matching_memories.length == 1
 
             memory = matching_memories.first
-            aliases[target] = {
+            alias_info = {
+              memory: memory.name.to_s,
+              depth: memory.depth.to_i,
+              element_width: memory.width.to_i,
+              clock: process.clock.to_s
+            }
+
+            if self_hold_seqassign_statement?(stmt)
+              aliases[target] = alias_info.merge(definition: :self_hold)
+              next
+            end
+
+            next unless snapshot_shadow_seqassign_statement?(
+              stmt,
+              target_name: target,
+              clock_name: process.clock.to_s,
               memory: memory.name.to_s,
               depth: memory.depth.to_i,
               element_width: memory.width.to_i
-            }
+            )
+
+            aliases[target] = alias_info.merge(definition: :snapshot_copy)
           end
 
           aliases.select! do |target, info|
@@ -5374,6 +5639,157 @@ module RHDL
           simplified.is_a?(IR::Signal) && simplified.name.to_s == stmt.target.to_s
         end
 
+        def shadow_alias_definition_statement?(stmt, aliases)
+          return false unless stmt.is_a?(IR::SeqAssign)
+
+          info = aliases[stmt.target.to_s]
+          return false unless info
+
+          case info[:definition]
+          when :self_hold
+            self_hold_seqassign_statement?(stmt)
+          when :snapshot_copy
+            snapshot_shadow_seqassign_statement?(
+              stmt,
+              target_name: stmt.target.to_s,
+              clock_name: info[:clock].to_s,
+              memory: info[:memory].to_s,
+              depth: info[:depth].to_i,
+              element_width: info[:element_width].to_i
+            )
+          else
+            false
+          end
+        end
+
+        def snapshot_shadow_seqassign_statement?(stmt, target_name:, clock_name:, memory:, depth:, element_width:)
+          return false unless stmt.is_a?(IR::SeqAssign)
+          return false unless stmt.target.to_s == target_name.to_s
+
+          snapshot = extract_snapshot_shadow_alias(
+            target_name: target_name,
+            expr: simplify_expr(stmt.expr),
+            clock_name: clock_name
+          )
+          return false unless snapshot
+
+          snapshot[:memory].to_s == memory.to_s &&
+            snapshot[:depth].to_i == depth.to_i &&
+            snapshot[:element_width].to_i == element_width.to_i
+        end
+
+        def extract_snapshot_shadow_alias(target_name:, expr:, clock_name:)
+          expr = simplify_expr(expr)
+          return nil unless expr.is_a?(IR::Mux)
+
+          update_expr = nil
+
+          if signal_ref_to_target?(expr.when_false, target_name)
+            update_expr = expr.when_true
+          elsif signal_ref_to_target?(expr.when_true, target_name)
+            update_expr = expr.when_false
+          else
+            return nil
+          end
+
+          return nil unless clock_guard_expr?(expr.condition, clock_name)
+
+          parts = Array(simplify_expr(update_expr).parts) if simplify_expr(update_expr).is_a?(IR::Concat)
+          return nil if parts.nil? || parts.empty?
+
+          element_width = parts.first.width.to_i
+          return nil unless element_width.positive? && parts.all? { |part| part.width.to_i == element_width }
+
+          memory = nil
+          parts.each_with_index do |part, part_index|
+            slot_index = parts.length - 1 - part_index
+            part_memory = extract_snapshot_shadow_memory_part(
+              part,
+              slot_index: slot_index,
+              element_width: element_width,
+              clock_name: clock_name
+            )
+            return nil unless part_memory
+
+            memory ||= part_memory
+            return nil unless memory == part_memory
+          end
+
+          {
+            memory: memory,
+            depth: parts.length,
+            element_width: element_width
+          }
+        end
+
+        def extract_snapshot_shadow_memory_part(part, slot_index:, element_width:, clock_name:)
+          part = simplify_expr(part)
+
+          case part
+          when IR::MemoryRead
+            return nil unless part.width.to_i == element_width.to_i
+            return nil unless part.addr.is_a?(IR::Literal)
+            return nil unless part.addr.value.to_i == slot_index.to_i
+
+            part.memory.to_s
+          when IR::Mux
+            return nil unless clock_guard_expr?(part.condition, clock_name)
+
+            if literal_zero_expr?(part.when_false, width: element_width)
+              extract_snapshot_shadow_memory_part(
+                part.when_true,
+                slot_index: slot_index,
+                element_width: element_width,
+                clock_name: clock_name
+              )
+            elsif literal_zero_expr?(part.when_true, width: element_width)
+              extract_snapshot_shadow_memory_part(
+                part.when_false,
+                slot_index: slot_index,
+                element_width: element_width,
+                clock_name: clock_name
+              )
+            end
+          end
+        end
+
+        def clock_guard_expr?(expr, clock_name)
+          expr = simplify_expr(expr)
+
+          case expr
+          when IR::Signal
+            expr.name.to_s == clock_name.to_s && expr.width.to_i == 1
+          when IR::BinaryOp
+            case expr.op.to_sym
+            when :&
+              (literal_one_expr?(expr.left) && clock_guard_expr?(expr.right, clock_name)) ||
+                (literal_one_expr?(expr.right) && clock_guard_expr?(expr.left, clock_name))
+            else
+              false
+            end
+          when IR::Mux
+            if literal_one_expr?(expr.when_true) && literal_zero_expr?(expr.when_false, width: 1)
+              clock_guard_expr?(expr.condition, clock_name)
+            elsif literal_zero_expr?(expr.when_true, width: 1) && literal_one_expr?(expr.when_false)
+              false
+            else
+              false
+            end
+          else
+            false
+          end
+        end
+
+        def literal_zero_expr?(expr, width:)
+          expr = simplify_expr(expr)
+          expr.is_a?(IR::Literal) && expr.value.to_i.zero? && expr.width.to_i == width.to_i
+        end
+
+        def literal_one_expr?(expr)
+          expr = simplify_expr(expr)
+          expr.is_a?(IR::Literal) && expr.value.to_i == 1 && expr.width.to_i == 1
+        end
+
         def shadow_alias_safe_module_uses?(mod, aliases:)
           Array(mod.assigns).all? { |assign| shadow_alias_safe_expr?(assign.expr, aliases) } &&
             Array(mod.processes).all? { |process| shadow_alias_safe_statements?(process.statements, aliases) } &&
@@ -5397,7 +5813,7 @@ module RHDL
           Array(statements).all? do |stmt|
             case stmt
             when IR::SeqAssign
-              if aliases.key?(stmt.target.to_s) && self_hold_seqassign_statement?(stmt)
+              if aliases.key?(stmt.target.to_s) && shadow_alias_definition_statement?(stmt, aliases)
                 true
               else
                 shadow_alias_safe_expr?(stmt.expr, aliases)
@@ -5460,25 +5876,35 @@ module RHDL
           info = aliases[expr.base.name.to_s]
           return nil unless info
 
-          low = expr.range.begin.to_i
-          high = expr.range.end.to_i
+          range_begin = expr.range.begin.to_i
+          range_end = expr.range.end.to_i
+          range_end -= 1 if expr.range.exclude_end?
+          low, high = [range_begin, range_end].minmax
           width = expr.width.to_i
           element_width = info[:element_width].to_i
-          return nil unless width == element_width
-          return nil unless low % element_width == 0
-          return nil unless high == low + element_width - 1
-
           slot = low / element_width
           return nil unless slot >= 0 && slot < info[:depth].to_i
+          return nil unless high / element_width == slot
 
-          info.merge(slot: slot)
+          slot_low = low % element_width
+          slot_high = high % element_width
+          return nil unless width == (slot_high - slot_low + 1)
+
+          info.merge(
+            slot: slot,
+            slot_begin: range_begin % element_width,
+            slot_end: range_end % element_width,
+            slot_low: slot_low,
+            slot_high: slot_high,
+            full_slot: slot_low.zero? && slot_high == element_width - 1
+          )
         end
 
         def rewrite_shadow_alias_statements(statements, aliases)
           Array(statements).filter_map do |stmt|
             case stmt
             when IR::SeqAssign
-              next if aliases.key?(stmt.target.to_s) && self_hold_seqassign_statement?(stmt)
+              next if aliases.key?(stmt.target.to_s) && shadow_alias_definition_statement?(stmt, aliases)
 
               IR::SeqAssign.new(
                 target: stmt.target,
@@ -5505,10 +5931,17 @@ module RHDL
 
           if (info = shadow_alias_slice_info(expr, aliases))
             addr_width = [Math.log2(info[:depth].to_i).ceil, 1].max
-            return IR::MemoryRead.new(
+            memory_read = IR::MemoryRead.new(
               memory: info[:memory],
               addr: IR::Literal.new(value: info[:slot], width: addr_width),
               width: info[:element_width]
+            )
+            return memory_read if info[:full_slot]
+
+            return IR::Slice.new(
+              base: memory_read,
+              range: info[:slot_begin]..info[:slot_end],
+              width: expr.width.to_i
             )
           end
 
@@ -5677,9 +6110,10 @@ module RHDL
         def recover_memory_candidate_from_statement(stmt)
           case stmt
           when IR::SeqAssign
-            simplified_expr = simplify_expr(stmt.expr)
-            candidate = extract_packed_vector_memory_write(stmt.target.to_s, simplified_expr)
-            candidate ||= extract_packed_vector_memory_copy(stmt.target.to_s, simplified_expr)
+            expr = stmt.expr
+            expr = simplify_expr(expr) if expr.width.to_i <= 4096
+            candidate = extract_packed_vector_memory_write(stmt.target.to_s, expr)
+            candidate ||= extract_packed_vector_memory_copy(stmt.target.to_s, expr)
             return nil unless candidate
 
             { target: stmt.target.to_s, candidate: candidate }
@@ -5722,8 +6156,8 @@ module RHDL
 
             addr_expr ||= current[:addr]
             data_expr ||= current[:data]
-            return nil unless expr_equivalent?(addr_expr, current[:addr])
-            return nil unless expr_equivalent?(data_expr, current[:data])
+            return nil unless fast_memory_expr_match?(addr_expr, current[:addr])
+            return nil unless fast_memory_expr_match?(data_expr, current[:data])
           end
 
           {
@@ -5798,7 +6232,7 @@ module RHDL
               end
 
             if true_update && false_update
-              return nil unless expr_equivalent?(true_update[0], false_update[0])
+              return nil unless fast_memory_expr_match?(true_update[0], false_update[0])
 
               return [
                 true_update[0],
@@ -5809,6 +6243,32 @@ module RHDL
             true_update || false_update
           when IR::Concat
             [expr, ensure_expr_with_width(enable_expr, width: 1)]
+          end
+        end
+
+        def fast_memory_expr_match?(lhs, rhs)
+          return true if lhs.equal?(rhs)
+          return false if lhs.nil? || rhs.nil?
+          return false unless lhs.class == rhs.class
+
+          case lhs
+          when IR::Signal
+            lhs.name.to_s == rhs.name.to_s && lhs.width.to_i == rhs.width.to_i
+          when IR::Literal
+            lhs.value.to_i == rhs.value.to_i && lhs.width.to_i == rhs.width.to_i
+          when IR::Slice
+            lhs.range == rhs.range &&
+              lhs.width.to_i == rhs.width.to_i &&
+              fast_memory_expr_match?(lhs.base, rhs.base)
+          when IR::Resize
+            lhs.width.to_i == rhs.width.to_i &&
+              fast_memory_expr_match?(lhs.expr, rhs.expr)
+          when IR::MemoryRead
+            lhs.memory.to_s == rhs.memory.to_s &&
+              lhs.width.to_i == rhs.width.to_i &&
+              fast_memory_expr_match?(lhs.addr, rhs.addr)
+          else
+            expr_equivalent?(lhs, rhs)
           end
         end
 
@@ -5904,8 +6364,10 @@ module RHDL
           return false unless expr.is_a?(IR::Slice)
           return false unless signal_ref_to_target?(expr.base, target_name)
 
-          low = expr.range.begin.to_i
-          high = expr.range.end.to_i
+          range_begin = expr.range.begin.to_i
+          range_end = expr.range.end.to_i
+          range_end -= 1 if expr.range.exclude_end?
+          low, high = [range_begin, range_end].minmax
           low == slot_index.to_i * element_width.to_i &&
             high == low + element_width.to_i - 1 &&
             expr.width.to_i == element_width.to_i
@@ -5944,11 +6406,13 @@ module RHDL
           return expr if expr.nil?
 
           if expr.is_a?(IR::Slice) && (info = recovered[expr.base.name.to_s] if expr.base.is_a?(IR::Signal))
-            if slice_matches_packed_memory_slot?(expr, expr.base.name.to_s, expr.range.begin.to_i / info[:element_width].to_i, info[:element_width].to_i)
+            low = [expr.range.begin.to_i, (expr.range.exclude_end? ? expr.range.end.to_i - 1 : expr.range.end.to_i)].min
+            slot_index = low / info[:element_width].to_i
+            if slice_matches_packed_memory_slot?(expr, expr.base.name.to_s, slot_index, info[:element_width].to_i)
               return IR::MemoryRead.new(
                 memory: expr.base.name.to_s,
                 addr: IR::Literal.new(
-                  value: expr.range.begin.to_i / info[:element_width].to_i,
+                  value: slot_index,
                   width: [Math.log2(info[:depth]).ceil, 1].max
                 ),
                 width: info[:element_width].to_i
@@ -6053,7 +6517,9 @@ module RHDL
             when IR::Slice
               base = simplify_expr(expr.base)
               if base.is_a?(IR::Literal)
-                low = expr.range.begin.to_i
+                range_end = expr.range.end.to_i
+                range_end -= 1 if expr.range.exclude_end?
+                low = [expr.range.begin.to_i, range_end].min
                 mask = (1 << expr.width.to_i) - 1
                 IR::Literal.new(value: ((base.value.to_i >> low) & mask), width: expr.width.to_i)
               else
@@ -6067,6 +6533,12 @@ module RHDL
                 selector: simplify_expr(expr.selector),
                 cases: expr.cases.transform_values { |value| simplify_expr(value) },
                 default: simplify_expr(expr.default),
+                width: expr.width.to_i
+              )
+            when IR::MemoryRead
+              IR::MemoryRead.new(
+                memory: expr.memory,
+                addr: simplify_expr(expr.addr),
                 width: expr.width.to_i
               )
             else
@@ -6091,7 +6563,9 @@ module RHDL
               new_element: simplify_expr(value.new_element),
               length: value.length,
               element_width: value.element_width,
-              enable_expr: value.enable_expr ? simplify_expr(value.enable_expr) : nil
+              enable_expr: value.enable_expr ? simplify_expr(value.enable_expr) : nil,
+              hold_token: value.hold_token,
+              hold_name: value.hold_name
             )
           when ArrayValue
             ArrayValue.new(

@@ -5,14 +5,14 @@ require 'tmpdir'
 
 require_relative './headless_runtime_support'
 
-RSpec.describe 'GameBoy mixed import runtime parity (HeadlessRunner/VerilatorRunner/VerilatorRunner/IrRunner)', slow: true do
+RSpec.describe 'GameBoy mixed import runtime parity (HeadlessRunner/VerilatorRunner/VerilatorRunner/ArcilatorRunner)', slow: true do
   include GameboyImportHeadlessRuntimeSupport
 
-  MAX_CYCLES = Integer(ENV.fetch('RHDL_GAMEBOY_RUNTIME_PARITY_MAX_CYCLES', '250000'))
+  MAX_CYCLES = Integer(ENV.fetch('RHDL_GAMEBOY_RUNTIME_PARITY_MAX_CYCLES', '4000000'))
   TRACE_CYCLES = Integer(ENV.fetch('RHDL_GAMEBOY_RUNTIME_PARITY_TRACE_CYCLES', '16384'))
   TRACE_SAMPLE_EVERY = Integer(ENV.fetch('RHDL_GAMEBOY_RUNTIME_PARITY_TRACE_SAMPLE_EVERY', '128'))
   TRACE_COMPARE_LIMIT = Integer(ENV.fetch('RHDL_GAMEBOY_RUNTIME_PARITY_TRACE_COMPARE_LIMIT', '64'))
-  PARITY_LEGS = %i[staged normalized ir].freeze
+  PARITY_LEGS = %i[staged normalized arcilator].freeze
 
   def require_non_verilator_parity_enabled!
     return if ENV['RHDL_ENABLE_NON_VERILATOR_GAMEBOY_PARITY'] == '1'
@@ -26,7 +26,7 @@ RSpec.describe 'GameBoy mixed import runtime parity (HeadlessRunner/VerilatorRun
     warn("[gameboy/import/runtime_parity_3way] #{label}")
   end
 
-  it 'matches standard headless traces and video snapshots across staged Verilator, normalized Verilator, and IR compiler', timeout: 3600 do
+  it 'matches standard headless traces and video snapshots across staged Verilator, normalized Verilator, and Arcilator AOT', timeout: 3600 do
     require_non_verilator_parity_enabled!
     require_reference_tree!
     require_tool!('ghdl')
@@ -34,7 +34,7 @@ RSpec.describe 'GameBoy mixed import runtime parity (HeadlessRunner/VerilatorRun
     require_tool!('verilator')
     require_pop_rom!
     require_boot_rom!
-    require_ir_compiler!
+    require_arcilator_aot_toolchain!
 
     out_dir, workspace = stable_import_dirs('gameboy_runtime_parity')
     rom_bytes = File.binread(require_pop_rom!)
@@ -60,7 +60,7 @@ RSpec.describe 'GameBoy mixed import runtime parity (HeadlessRunner/VerilatorRun
 
     PARITY_LEGS.each do |leg|
       video = results.fetch(leg).fetch(:video)
-      summary_lines << "#{leg}: frames=#{video[:frame_count]} nonzero=#{video[:nonzero_pixels]} hash=#{video[:hash]}"
+      summary_lines << "#{leg}: #{video_summary(video)}"
     end
 
     PARITY_LEGS.combination(2) do |lhs, rhs|

@@ -139,6 +139,8 @@ module RHDL
           lib_path = shared_library_path
           lib_name = File.basename(lib_path)
           makefile_name = "#{verilator_prefix}.mk"
+          wrapper_include_dir = File.dirname(File.expand_path(wrapper_file))
+          verilator_cflags = [cflags, "-I#{wrapper_include_dir}"].join(' ')
           clean_verilator_obj_dir!
 
           verilate_cmd = [
@@ -150,7 +152,7 @@ module RHDL
             '--x-initial', x_initial,
             '--noassert',
             *DEFAULT_WARNING_FLAGS,
-            '-CFLAGS', cflags,
+            '-CFLAGS', verilator_cflags,
             '-LDFLAGS', '-shared',
             '--Mdir', obj_dir,
             '--prefix', verilator_prefix,

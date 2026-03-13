@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require 'digest'
 require 'spec_helper'
 require 'rhdl/codegen/circt/runtime_json'
 
@@ -578,7 +579,7 @@ RSpec.describe RHDL::Examples::SPARC64::IrRunner do
     end
   end
 
-  it 'can force the compiler backend down the runtime-only path when requested' do
+  it 'rejects removed auto/runtime-only compiler modes for SPARC64' do
     component_class = Class.new do
       define_singleton_method(:to_flat_circt_nodes) do
         RHDL::Codegen::CIRCT::IR::ModuleOp.new(
@@ -589,12 +590,7 @@ RSpec.describe RHDL::Examples::SPARC64::IrRunner do
           ],
           nets: [],
           regs: [],
-          assigns: [
-            RHDL::Codegen::CIRCT::IR::Assign.new(
-              target: 'out',
-              expr: RHDL::Codegen::CIRCT::IR::Literal.new(value: 1, width: 1)
-            )
-          ],
+          assigns: [],
           processes: [],
           instances: [],
           memories: [],
@@ -605,50 +601,26 @@ RSpec.describe RHDL::Examples::SPARC64::IrRunner do
       end
     end
 
-    simulator = instance_double(
-      RHDL::Sim::Native::IR::Simulator,
-      native?: true,
-      simulator_type: :ir_compile,
-      runner_kind: :sparc64
-    )
-    previous = ENV['RHDL_IR_COMPILER_FORCE_RUSTC']
-    previous_runtime_only = ENV['RHDL_IR_COMPILER_FORCE_RUNTIME_ONLY']
-    ENV.delete('RHDL_IR_COMPILER_FORCE_RUSTC')
-    ENV.delete('RHDL_IR_COMPILER_FORCE_RUNTIME_ONLY')
+    expect do
+      described_class.new(
+        component_class: component_class,
+        backend: :compile,
+        strict_runner_kind: false,
+        compiler_mode: :auto
+      )
+    end.to raise_error(ArgumentError, /rustc-only/)
 
-    expect(RHDL::Sim::Native::IR).to receive(:sim_json).and_return('{"circt_json_version":1,"modules":[{"name":"tiny_top"}]}')
-    expect(RHDL::Sim::Native::IR::Simulator).to receive(:new) do |json, backend:|
-      expect(json).to eq('{"circt_json_version":1,"modules":[{"name":"tiny_top"}]}')
-      expect(backend).to eq(:compile)
-      expect(ENV['RHDL_IR_COMPILER_FORCE_RUSTC']).to be_nil
-      expect(ENV['RHDL_IR_COMPILER_FORCE_RUNTIME_ONLY']).to eq('1')
-      simulator
-    end
-
-    runner = described_class.new(
-      component_class: component_class,
-      backend: :compile,
-      strict_runner_kind: false,
-      compiler_mode: :runtime_only
-    )
-
-    expect(runner.sim).to eq(simulator)
-    expect(ENV['RHDL_IR_COMPILER_FORCE_RUSTC']).to eq(previous)
-    expect(ENV['RHDL_IR_COMPILER_FORCE_RUNTIME_ONLY']).to eq(previous_runtime_only)
-  ensure
-    if previous.nil?
-      ENV.delete('RHDL_IR_COMPILER_FORCE_RUSTC')
-    else
-      ENV['RHDL_IR_COMPILER_FORCE_RUSTC'] = previous
-    end
-    if previous_runtime_only.nil?
-      ENV.delete('RHDL_IR_COMPILER_FORCE_RUNTIME_ONLY')
-    else
-      ENV['RHDL_IR_COMPILER_FORCE_RUNTIME_ONLY'] = previous_runtime_only
-    end
+    expect do
+      described_class.new(
+        component_class: component_class,
+        backend: :compile,
+        strict_runner_kind: false,
+        compiler_mode: :runtime_only
+      )
+    end.to raise_error(ArgumentError, /rustc-only/)
   end
 
-  it 'can force the compiler backend down the full rustc path when requested' do
+  it 'always forces the compiler backend down the rustc path' do
     component_class = Class.new do
       define_singleton_method(:to_flat_circt_nodes) do
         RHDL::Codegen::CIRCT::IR::ModuleOp.new(
@@ -706,6 +678,143 @@ RSpec.describe RHDL::Examples::SPARC64::IrRunner do
       ENV.delete('RHDL_IR_COMPILER_FORCE_RUSTC')
     else
       ENV['RHDL_IR_COMPILER_FORCE_RUSTC'] = previous
+    end
+  end
+
+  it 'uses a cached runtime JSON artifact from the import report when available' do
+    simulator = instance_double(
+      RHDL::Sim::Native::IR::Simulator,
+      native?: true,
+      simulator_type: :ir_compile,
+      runner_kind: :sparc64
+    )
+    component_class = Class.new do
+      define_singleton_method(:verilog_module_name) { 's1_top' }
+    end
+    signature = Digest::SHA256.hexdigest([
+      Digest::SHA256.file(File.expand_path('../../../../lib/rhdl/codegen/circt/runtime_json.rb', __dir__)).hexdigest,
+      'compact_exprs=true'
+    ].join("\n"))
+
+    Dir.mktmpdir('sparc64_ir_runner_cache') do |dir|
+      runtime_json_path = File.join(dir, '.mixed_import', 's1_top.runtime.json')
+      FileUtils.mkdir_p(File.dirname(runtime_json_path))
+      File.write(runtime_json_path, '{"circt_json_version":1,"modules":[{"name":"s1_top"}]}')
+      File.write(
+        File.join(dir, 'import_report.json'),
+        JSON.pretty_generate(
+          'artifacts' => {
+            'runtime_json_path' => runtime_json_path,
+            'runtime_json_export_signature' => signature
+          }
+        )
+      )
+
+      expect(RHDL::Sim::Native::IR).not_to receive(:sim_json)
+      expect(RHDL::Sim::Native::IR::Simulator).to receive(:new)
+        .with('{"circt_json_version":1,"modules":[{"name":"s1_top"}]}', backend: :compile)
+        .and_return(simulator)
+
+      runner = described_class.new(
+        component_class: component_class,
+        import_dir: dir,
+        backend: :compile,
+        strict_runner_kind: false
+      )
+
+      expect(runner.sim).to eq(simulator)
+      expect(runner.import_dir).to eq(File.expand_path(dir))
+    end
+  end
+
+  it 'uses importer-produced runtime JSON artifacts even when the report has no serializer signature' do
+    simulator = instance_double(
+      RHDL::Sim::Native::IR::Simulator,
+      native?: true,
+      simulator_type: :ir_compile,
+      runner_kind: :sparc64
+    )
+    component_class = Class.new do
+      define_singleton_method(:verilog_module_name) { 's1_top' }
+    end
+
+    Dir.mktmpdir('sparc64_ir_runner_import_runtime') do |dir|
+      runtime_json_path = File.join(dir, 's1_top.runtime.json')
+      File.write(runtime_json_path, '{"circt_json_version":1,"modules":[{"name":"imported"}]}')
+      File.write(
+        File.join(dir, 'import_report.json'),
+        JSON.pretty_generate(
+          'artifacts' => {
+            'runtime_json_path' => runtime_json_path
+          }
+        )
+      )
+
+      expect(RHDL::Codegen::CIRCT::RuntimeJSON).not_to receive(:dump_to_io)
+      expect(RHDL::Sim::Native::IR::Simulator).to receive(:new)
+        .with('{"circt_json_version":1,"modules":[{"name":"imported"}]}', backend: :compile)
+        .and_return(simulator)
+
+      runner = described_class.new(
+        component_class: component_class,
+        import_dir: dir,
+        backend: :compile,
+        strict_runner_kind: false
+      )
+
+      expect(runner.sim).to eq(simulator)
+    end
+  end
+
+  it 'regenerates cached runtime JSON when the import report lacks the current export signature' do
+    simulator = instance_double(
+      RHDL::Sim::Native::IR::Simulator,
+      native?: true,
+      simulator_type: :ir_compile,
+      runner_kind: :sparc64
+    )
+    runtime_nodes = instance_double(RHDL::Codegen::CIRCT::IR::ModuleOp)
+    component_class = Class.new do
+      define_singleton_method(:verilog_module_name) { 's1_top' }
+    end
+    component_class.define_singleton_method(:to_flat_circt_nodes) { runtime_nodes }
+
+    Dir.mktmpdir('sparc64_ir_runner_cache_stale') do |dir|
+      runtime_json_path = File.join(dir, '.mixed_import', 's1_top.runtime.json')
+      FileUtils.mkdir_p(File.dirname(runtime_json_path))
+      File.write(runtime_json_path, '{"circt_json_version":1,"modules":[{"name":"stale"}]}')
+      report_path = File.join(dir, 'import_report.json')
+      File.write(
+        report_path,
+        JSON.pretty_generate(
+          'artifacts' => {
+            'runtime_json_path' => runtime_json_path,
+            'runtime_json_export_signature' => 'stale-signature'
+          }
+        )
+      )
+
+      expect(RHDL::Codegen::CIRCT::RuntimeJSON).to receive(:dump_to_io)
+        .with(runtime_nodes, instance_of(File), compact_exprs: true) do |_nodes, io, compact_exprs:|
+          expect(compact_exprs).to eq(true)
+          io.write('{"circt_json_version":1,"modules":[{"name":"fresh"}]}')
+        end
+      expect(RHDL::Sim::Native::IR::Simulator).to receive(:new)
+        .with('{"circt_json_version":1,"modules":[{"name":"fresh"}]}', backend: :compile)
+        .and_return(simulator)
+
+      runner = described_class.new(
+        component_class: component_class,
+        import_dir: dir,
+        backend: :compile,
+        strict_runner_kind: false
+      )
+
+      expect(runner.sim).to eq(simulator)
+      report = JSON.parse(File.read(report_path))
+      expect(report.dig('artifacts', 'runtime_json_path')).to eq(runtime_json_path)
+      expect(report.dig('artifacts', 'runtime_json_export_signature')).to be_a(String)
+      expect(File.read(runtime_json_path)).to eq('{"circt_json_version":1,"modules":[{"name":"fresh"}]}')
     end
   end
 end

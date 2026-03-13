@@ -139,6 +139,94 @@ RSpec.describe RHDL::Codegen::CIRCT::MLIR do
       expect(mlir).to include('hw.output')
     end
 
+    it 'emits async memory reads as array state instead of seq.firmem read ports' do
+      mod = ir::ModuleOp.new(
+        name: 'async_mem_demo',
+        ports: [
+          ir::Port.new(name: :clk, direction: :in, width: 1),
+          ir::Port.new(name: :rd, direction: :in, width: 2),
+          ir::Port.new(name: :wr, direction: :in, width: 2),
+          ir::Port.new(name: :we, direction: :in, width: 1),
+          ir::Port.new(name: :din, direction: :in, width: 8),
+          ir::Port.new(name: :y, direction: :out, width: 8)
+        ],
+        nets: [],
+        regs: [],
+        assigns: [
+          ir::Assign.new(
+            target: :y,
+            expr: ir::MemoryRead.new(
+              memory: :mem,
+              addr: ir::Signal.new(name: :rd, width: 2),
+              width: 8
+            )
+          )
+        ],
+        processes: [],
+        instances: [],
+        memories: [
+          ir::Memory.new(name: :mem, depth: 4, width: 8)
+        ],
+        write_ports: [
+          ir::MemoryWritePort.new(
+            memory: :mem,
+            clock: :clk,
+            addr: ir::Signal.new(name: :wr, width: 2),
+            data: ir::Signal.new(name: :din, width: 8),
+            enable: ir::Signal.new(name: :we, width: 1)
+          )
+        ],
+        sync_read_ports: [],
+        parameters: {}
+      )
+
+      mlir = described_class.generate(mod)
+      expect(mlir).to include('hw.array_get')
+      expect(mlir).to include('hw.array_inject')
+      expect(mlir).to include('seq.firreg')
+      expect(mlir).not_to include('seq.firmem.read_port')
+
+      imported = RHDL::Codegen.import_circt_mlir(mlir, strict: true, top: 'async_mem_demo')
+      expect(imported).to be_success
+    end
+
+    it 'short-circuits mux emission when the condition resolves to a constant' do
+      mod = ir::ModuleOp.new(
+        name: 'const_mux_short_circuit',
+        ports: [
+          ir::Port.new(name: :y, direction: :out, width: 32)
+        ],
+        nets: [
+          ir::Net.new(name: :cond, width: 1),
+          ir::Net.new(name: :rec, width: 32)
+        ],
+        regs: [],
+        assigns: [
+          ir::Assign.new(target: :cond, expr: ir::Literal.new(value: 0, width: 1)),
+          ir::Assign.new(target: :rec, expr: ir::Signal.new(name: :y, width: 32)),
+          ir::Assign.new(
+            target: :y,
+            expr: ir::Mux.new(
+              condition: ir::Signal.new(name: :cond, width: 1),
+              when_true: ir::Signal.new(name: :rec, width: 32),
+              when_false: ir::Literal.new(value: 42, width: 32),
+              width: 32
+            )
+          )
+        ],
+        processes: [],
+        instances: [],
+        memories: [],
+        write_ports: [],
+        sync_read_ports: [],
+        parameters: {}
+      )
+
+      mlir = described_class.generate(mod)
+      expect(mlir).not_to include('comb.mux')
+      expect(mlir).to include('hw.constant 42')
+    end
+
     it 'emits multiple modules when given a package' do
       pkg = ir::Package.new(
         modules: [

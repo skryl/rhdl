@@ -157,6 +157,23 @@ RSpec.describe RHDL::Examples::GameBoy::Import::SystemImporter do
     end
   end
 
+  describe '#write_altera_mf_altsyncram_entity' do
+    it 'models UNREGISTERED outputs as combinational reads in the generated stub' do
+      Dir.mktmpdir('gameboy_import_altsyncram_stub') do |out_dir|
+        importer = new_importer(output_dir: out_dir)
+        path = importer.send(:write_altera_mf_altsyncram_entity, out_dir)
+        text = File.read(path)
+
+        expect(text).to include('signal q_a_comb')
+        expect(text).to include('signal q_b_comb')
+        expect(text).to include('q_a <= q_a_comb when outdata_reg_a = "UNREGISTERED" else q_a_reg;')
+        expect(text).to include('q_b <= q_b_comb when outdata_reg_b = "UNREGISTERED" else q_b_reg;')
+        expect(text).to include('if wren_a = \'1\' and read_during_write_mode_port_a = "NEW_DATA_NO_NBE_READ" then')
+        expect(text).to include('if wren_b = \'1\' and read_during_write_mode_port_b = "NEW_DATA_NO_NBE_READ" then')
+      end
+    end
+  end
+
   describe '#normalize_verilog_for_import' do
     it 'relaxes gb boot rom disable to trigger on any FF50 write' do
       require_reference_tree!
@@ -472,6 +489,49 @@ RSpec.describe RHDL::Examples::GameBoy::Import::SystemImporter do
           expect(File.file?(File.join(out_dir, 'gb.rb'))).to be(true)
           expect(File.file?(File.join(out_dir, 'video.rb'))).to be(true)
         end
+      end
+    end
+
+    it 'ignores runtime helper modules when building the component manifest' do
+      Dir.mktmpdir('gameboy_import_helper_manifest') do |out_dir|
+        importer = new_importer(output_dir: out_dir)
+
+        helper_rb = File.join(out_dir, 'dpram_dif__vhdl_deadbeef__byte_mem.rb')
+        gb_rb = File.join(out_dir, 'gb.rb')
+        File.write(helper_rb, "# helper\n")
+        File.write(gb_rb, "# gb\n")
+
+        report = {
+          'mixed_import' => {
+            'pure_verilog_files' => []
+          },
+          'modules' => [
+            {
+              'name' => 'dpram_dif__vhdl_deadbeef__byte_mem',
+              'ruby_class_name' => 'DpramDifHelper',
+              'raised_rhdl_path' => helper_rb
+            },
+            {
+              'name' => 'gb',
+              'ruby_class_name' => 'Gb',
+              'raised_rhdl_path' => gb_rb,
+              'staged_verilog_path' => File.join(out_dir, '.mixed_import', 'pure_verilog', 'generated_vhdl', 'gb.v'),
+              'staged_verilog_module_name' => 'gb',
+              'origin_kind' => 'source_verilog',
+              'original_source_path' => File.join(described_class::DEFAULT_REFERENCE_ROOT, 'rtl', 'gb.v')
+            }
+          ]
+        }
+
+        manifest = importer.send(
+          :build_component_manifest,
+          report: report,
+          files_written: [helper_rb, gb_rb],
+          module_source_relpaths: { 'gb' => 'rtl/gb.v' }
+        )
+
+        expect(manifest.length).to eq(1)
+        expect(manifest.first.fetch('module_name')).to eq('gb')
       end
     end
 

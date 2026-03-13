@@ -27,7 +27,33 @@ module RHDL
           end
         end
 
+        def self.cargo_cdylib_name(crate_name)
+          case RbConfig::CONFIG['host_os']
+          when /darwin/ then "lib#{crate_name}.dylib"
+          when /mswin|mingw/ then "#{crate_name}.dll"
+          else "lib#{crate_name}.so"
+          end
+        end
+
+        def self.backend_lib_candidates(ext_dir, staged_lib_name, crate_name:)
+          crate_root = File.dirname(ext_dir)
+          cargo_name = cargo_cdylib_name(crate_name)
+
+          [
+            File.join(crate_root, 'target', 'release', cargo_name),
+            File.join(crate_root, 'target', 'release', 'deps', cargo_name),
+            File.join(ext_dir, staged_lib_name)
+          ]
+        end
+
+        def self.resolve_backend_lib_path(ext_dir, staged_lib_name, crate_name:)
+          backend_lib_candidates(ext_dir, staged_lib_name, crate_name: crate_name).find do |path|
+            File.exist?(path)
+          end || File.join(ext_dir, staged_lib_name)
+        end
+
         def self.sim_backend_available?(lib_path)
+          return false if lib_path.nil?
           return false unless File.exist?(lib_path)
           return true unless ENV['RHDL_NATIVE_EAGER_PROBE'] == '1'
 
@@ -42,15 +68,18 @@ module RHDL
 
       IR_INTERPRETER_EXT_DIR = File.expand_path('ir_interpreter/lib', __dir__)
       IR_INTERPRETER_LIB_NAME = sim_lib_name('ir_interpreter')
-      IR_INTERPRETER_LIB_PATH = File.join(IR_INTERPRETER_EXT_DIR, IR_INTERPRETER_LIB_NAME)
+      IR_INTERPRETER_LIB_PATH =
+        resolve_backend_lib_path(IR_INTERPRETER_EXT_DIR, IR_INTERPRETER_LIB_NAME, crate_name: 'ir_interpreter')
 
       JIT_EXT_DIR = File.expand_path('ir_jit/lib', __dir__)
       JIT_LIB_NAME = sim_lib_name('ir_jit')
-      JIT_LIB_PATH = File.join(JIT_EXT_DIR, JIT_LIB_NAME)
+      JIT_LIB_PATH =
+        resolve_backend_lib_path(JIT_EXT_DIR, JIT_LIB_NAME, crate_name: 'ir_jit')
 
       COMPILER_EXT_DIR = File.expand_path('ir_compiler/lib', __dir__)
       COMPILER_LIB_NAME = sim_lib_name('ir_compiler')
-      COMPILER_LIB_PATH = File.join(COMPILER_EXT_DIR, COMPILER_LIB_NAME)
+      COMPILER_LIB_PATH =
+        resolve_backend_lib_path(COMPILER_EXT_DIR, COMPILER_LIB_NAME, crate_name: 'ir_compiler')
 
       INTERPRETER_AVAILABLE = sim_backend_available?(IR_INTERPRETER_LIB_PATH)
       JIT_AVAILABLE = sim_backend_available?(JIT_LIB_PATH)
@@ -391,19 +420,20 @@ module RHDL
         end
 
         def compile
-
-          error_ptr = Fiddle::Pointer.malloc(Fiddle::SIZEOF_VOIDP)
-          error_ptr[0, Fiddle::SIZEOF_VOIDP] = [0].pack('Q')
+          error_ptr = scratch_pointer_ptr
+          clear_pointer_ptr!(error_ptr)
           result = core_exec(SIM_EXEC_COMPILE, 0, 0, error_ptr)
           return result[:value] != 0 if result[:ok]
 
-          error_str_ptr = error_ptr[0, Fiddle::SIZEOF_VOIDP].unpack1('Q')
+          error_str_ptr = read_pointer_ptr(error_ptr)
           if error_str_ptr != 0
             error_msg = Fiddle::Pointer.new(error_str_ptr).to_s
             @fn_free_error.call(error_str_ptr)
             raise RuntimeError, "Compilation failed: #{error_msg}"
           end
-          false
+
+          raise RuntimeError,
+                'Compilation failed: native compiler backend rejected the design; compile fast path is required and no runtime fallback is allowed'
         end
 
         def generated_code
@@ -1314,20 +1344,40 @@ module RHDL
           @scratch_ulong_ptr ||= Fiddle::Pointer.malloc(Fiddle::SIZEOF_LONG)
         end
 
+        def scratch_pointer_ptr
+          @scratch_pointer_ptr ||= Fiddle::Pointer.malloc(Fiddle::SIZEOF_VOIDP)
+        end
+
         def clear_ulong_ptr!(ptr)
           ptr[0, Fiddle::SIZEOF_LONG] = packed_zero_ulong
+        end
+
+        def clear_pointer_ptr!(ptr)
+          ptr[0, Fiddle::SIZEOF_VOIDP] = packed_zero_pointer
         end
 
         def read_ulong_ptr(ptr)
           ptr[0, Fiddle::SIZEOF_LONG].unpack1(packed_ulong_format)
         end
 
+        def read_pointer_ptr(ptr)
+          ptr[0, Fiddle::SIZEOF_VOIDP].unpack1(packed_pointer_format)
+        end
+
         def packed_zero_ulong
           @packed_zero_ulong ||= [0].pack(packed_ulong_format)
         end
 
+        def packed_zero_pointer
+          @packed_zero_pointer ||= [0].pack(packed_pointer_format)
+        end
+
         def packed_ulong_format
           @packed_ulong_format ||= (Fiddle::SIZEOF_LONG == 8 ? 'Q' : 'L')
+        end
+
+        def packed_pointer_format
+          @packed_pointer_format ||= (Fiddle::SIZEOF_VOIDP == 8 ? 'Q' : 'L')
         end
 
         def scratch_wide_in_ptr

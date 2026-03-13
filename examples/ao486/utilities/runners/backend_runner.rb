@@ -14,7 +14,9 @@ module RHDL
         BOOT1_ADDR = 0xC0000
         CURSOR_BDA = DisplayAdapter::CURSOR_BDA
 
-        attr_reader :backend, :sim_backend, :cycles_run, :floppy_image, :last_run_stats
+        MAX_FLOPPY_SLOTS = 2
+
+        attr_reader :backend, :sim_backend, :cycles_run, :floppy_image, :last_run_stats, :active_floppy_slot
 
         def initialize(backend:, sim: nil, debug: false, speed: nil, headless: false, cycles: nil)
           @backend = backend.to_sym
@@ -26,6 +28,10 @@ module RHDL
           @memory = Hash.new(0)
           @rom = {}
           @floppy_image = nil
+          @floppy_slots = {}
+          @active_floppy_slot = nil
+          @active_floppy_geometry = nil
+          @mounted_disk_size = 0
           @cycles_run = 0
           @last_io = nil
           @last_irq = nil
@@ -76,16 +82,30 @@ module RHDL
           }
         end
 
-        def load_dos(path: dos_path)
+        def load_dos(path: dos_path, slot: 0, activate: nil)
           dos_image_path = File.expand_path(path)
           ensure_file!(dos_image_path, 'AO486 DOS image')
-          @floppy_image = File.binread(dos_image_path)
-
-          {
+          slot_index = normalize_floppy_slot(slot)
+          bytes = File.binread(dos_image_path)
+          metadata = {
             path: dos_image_path,
-            size: @floppy_image.bytesize,
-            bytes: @floppy_image.dup
+            size: bytes.bytesize,
+            bytes: bytes,
+            geometry: infer_floppy_geometry(bytes)
           }
+          @floppy_slots[slot_index] = metadata
+          activate = slot_index.zero? || @active_floppy_slot.nil? if activate.nil?
+          return metadata.merge(slot: slot_index, active: false) unless activate
+
+          activate_dos(slot_index)
+        end
+
+        def swap_dos(slot)
+          slot_index = normalize_floppy_slot(slot)
+          metadata = @floppy_slots[slot_index]
+          raise ArgumentError, "AO486 DOS slot #{slot_index} has not been loaded" unless metadata
+
+          activate_dos(slot_index)
         end
 
         def load_bytes(base, bytes, target: @memory)
@@ -107,6 +127,22 @@ module RHDL
           end
         end
 
+        def dump_memory(base, length, mapped: true, bytes_per_row: 16)
+          row_width = bytes_per_row.to_i
+          raise ArgumentError, 'bytes_per_row must be positive' unless row_width.positive?
+
+          bytes = read_bytes(base, length.to_i, mapped: mapped)
+          return '' if bytes.empty?
+
+          field_width = row_width * 3 - 1
+          bytes.each_slice(row_width).with_index.map do |slice, idx|
+            addr = base + (idx * row_width)
+            hex = slice.map { |byte| format('%02X', byte) }.join(' ')
+            ascii = slice.map { |byte| printable_ascii(byte) }.join
+            format('%08X  %-*s  %s', addr, field_width, hex, ascii)
+          end.join("\n")
+        end
+
         def write_memory(addr, value)
           @memory[addr] = value.to_i & 0xFF
         end
@@ -121,7 +157,7 @@ module RHDL
         end
 
         def dos_loaded?
-          !@floppy_image.nil?
+          !@active_floppy_slot.nil?
         end
 
         def native?
@@ -177,7 +213,7 @@ module RHDL
         def run(cycles: nil, speed: nil, headless: @headless, max_cycles: nil)
           started_at = Process.clock_gettime(Process::CLOCK_MONOTONIC)
           start_cycles = @cycles_run
-          chunk = cycles || @requested_cycles || speed || @speed || DEFAULT_UNLIMITED_CHUNK
+          chunk = max_cycles || cycles || @requested_cycles || speed || @speed || DEFAULT_UNLIMITED_CHUNK
           @cycles_run += tick_backend(chunk.to_i)
           @shell_prompt_detected ||= false
           record_run_stats(operation: :run, cycles: @cycles_run - start_cycles, started_at: started_at)
@@ -200,6 +236,9 @@ module RHDL
             dos_loaded: dos_loaded?,
             cycles_run: @cycles_run,
             floppy_image_size: @floppy_image&.bytesize || 0,
+            active_floppy_slot: @active_floppy_slot,
+            floppy_slots: @floppy_slots.transform_values { |metadata| metadata.slice(:path, :size) },
+            active_floppy_geometry: @active_floppy_geometry&.dup,
             last_io: @last_io,
             last_irq: @last_irq,
             keyboard_buffer_size: @keyboard_buffer.bytesize,
@@ -291,6 +330,88 @@ module RHDL
           return if File.file?(path)
 
           raise ArgumentError, "#{label} not found: #{path}"
+        end
+
+        def activate_dos(slot_index)
+          metadata = @floppy_slots.fetch(slot_index)
+          @active_floppy_slot = slot_index
+          @active_floppy_geometry = metadata[:geometry]&.dup
+          @floppy_image = metadata.fetch(:bytes).dup
+          sync_active_dos_image!(metadata)
+          metadata.merge(slot: slot_index, active: true)
+        end
+
+        def dos_shortcut_enabled_for?(metadata = nil)
+          active = metadata || (@active_floppy_slot.nil? ? nil : @floppy_slots[@active_floppy_slot])
+          return false if active.nil?
+
+          active.fetch(:path) == File.expand_path(dos_path) && (@active_floppy_slot || 0).zero?
+        end
+
+        def sync_active_dos_image!(_metadata)
+          nil
+        end
+
+        def normalize_floppy_slot(slot)
+          slot_index = Integer(slot)
+          return slot_index if slot_index.between?(0, MAX_FLOPPY_SLOTS - 1)
+
+          raise ArgumentError, "AO486 DOS slot must be 0 or 1, got #{slot.inspect}"
+        rescue ArgumentError, TypeError
+          raise ArgumentError, "AO486 DOS slot must be 0 or 1, got #{slot.inspect}"
+        end
+
+        def printable_ascii(byte)
+          value = byte.to_i & 0xFF
+          return value.chr if value.between?(32, 126)
+
+          '.'
+        end
+
+        def infer_floppy_geometry(bytes)
+          raw = bytes.is_a?(String) ? bytes.b : Array(bytes).pack('C*')
+          bytes_per_sector = little_endian_u16(raw, 11)
+          sectors_per_track = little_endian_u16(raw, 24)
+          heads = little_endian_u16(raw, 26)
+          total_sectors = little_endian_u16(raw, 19)
+          total_sectors = little_endian_u32(raw, 32) if total_sectors.zero?
+
+          geometry = geometry_from_size(raw.bytesize)
+          if bytes_per_sector.positive? && sectors_per_track.positive? && heads.positive? && total_sectors.positive?
+            cylinders = total_sectors / (sectors_per_track * heads)
+            geometry[:bytes_per_sector] = bytes_per_sector
+            geometry[:sectors_per_track] = sectors_per_track
+            geometry[:heads] = heads
+            geometry[:cylinders] = cylinders if cylinders.positive?
+          end
+          geometry
+        end
+
+        def geometry_from_size(bytesize)
+          case bytesize
+          when 368_640
+            { bytes_per_sector: 512, sectors_per_track: 9, heads: 2, cylinders: 40, drive_type: 1 }
+          when 737_280
+            { bytes_per_sector: 512, sectors_per_track: 9, heads: 2, cylinders: 80, drive_type: 3 }
+          when 1_474_560
+            { bytes_per_sector: 512, sectors_per_track: 18, heads: 2, cylinders: 80, drive_type: 4 }
+          else
+            { bytes_per_sector: 512, sectors_per_track: 18, heads: 2, cylinders: 80, drive_type: 4 }
+          end
+        end
+
+        def little_endian_u16(raw, offset)
+          bytes = raw.byteslice(offset, 2)
+          return 0 unless bytes && bytes.bytesize == 2
+
+          bytes.unpack1('v')
+        end
+
+        def little_endian_u32(raw, offset)
+          bytes = raw.byteslice(offset, 4)
+          return 0 unless bytes && bytes.bytesize == 4
+
+          bytes.unpack1('V')
         end
       end
     end

@@ -102,6 +102,18 @@ RSpec.describe 'VerilogRunner' do
       runner_class = RHDL::Examples::Apple2::VerilogRunner
       expect(runner_class.instance_method(:native?).source_location).not_to be_nil
     end
+
+    it 'rejects native libraries with the wrong runner kind' do
+      skip 'Verilator not available' unless HdlToolchain.verilator_available?
+
+      runner = RHDL::Examples::Apple2::VerilogRunner.allocate
+      sim = instance_double('Sim', runner_supported?: true, runner_kind: :riscv, close: true)
+
+      expect(sim).to receive(:close)
+      expect do
+        runner.send(:ensure_runner_abi!, sim, expected_kind: :apple2, backend_label: 'Apple2 Verilator')
+      end.to raise_error(RuntimeError, /expected :apple2/i)
+    end
   end
 
   describe 'constants' do

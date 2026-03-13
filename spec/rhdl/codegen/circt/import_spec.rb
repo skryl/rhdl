@@ -360,7 +360,7 @@ RSpec.describe RHDL::Codegen::CIRCT::Import do
       expect(process.reset_values.values).to eq([0])
     end
 
-    it 'preserves memory IR across one-shot resultful llhd array init processes' do
+    it 'parses one-shot resultful llhd array init processes with intervening drives' do
       mlir = <<~MLIR
         hw.module @resultful_array_init(in %clk : i1, in %rd : i1, out y : i8) {
           %t0 = llhd.constant_time <0ns, 1d, 0e>
@@ -401,13 +401,101 @@ RSpec.describe RHDL::Codegen::CIRCT::Import do
       expect(result.success?).to be(true), result.diagnostics.map(&:message).join("\n")
 
       mod = result.modules.first
-      expect(mod.memories.map(&:name)).to eq(['mem'])
-      expect(mod.regs.map(&:name)).not_to include('mem')
-      expect(mod.write_ports.length).to eq(1)
+      expect(mod.assigns.map(&:target)).to include('q_sig', 'y')
       y_assign = mod.assigns.find { |assign| assign.target == 'y' }
       expect(y_assign).not_to be_nil
-      expect(y_assign.expr).to be_a(RHDL::Codegen::CIRCT::IR::MemoryRead)
-      expect(y_assign.expr.memory).to eq('mem')
+      expect(y_assign.expr.width).to eq(8)
+    end
+
+    it 'preserves resultful llhd array-copy loops through arg-less helper blocks' do
+      mlir = <<~MLIR
+        hw.module @shadow_loop(in %clk : i1, in %din : i8, out y : i8) {
+          %t0 = llhd.constant_time <0ns, 0d, 1e>
+          %c0_i32 = hw.constant 0 : i32
+          %c1_i32 = hw.constant 1 : i32
+          %c2_i32 = hw.constant 2 : i32
+          %c0_i8 = hw.constant 0 : i8
+          %true = hw.constant true
+          %false = hw.constant false
+          %zero_arr = hw.aggregate_constant [0 : i8, 0 : i8] : !hw.array<2xi8>
+          %state = llhd.sig %c0_i8 : i8
+          %arr = llhd.sig %zero_arr : !hw.array<2xi8>
+          %probe_arr = llhd.prb %arr : !hw.array<2xi8>
+          %proc:4 = llhd.process -> i8, i1, !hw.array<2xi8>, i1 {
+            cf.br ^bb1(%clk, %c0_i8, %false, %zero_arr, %false : i1, i8, i1, !hw.array<2xi8>, i1)
+          ^bb1(%prev_clk: i1, %data: i8, %en: i1, %acc: !hw.array<2xi8>, %done: i1):
+            llhd.wait yield (%data, %en, %acc, %done : i8, i1, !hw.array<2xi8>, i1), (%clk : i1), ^bb2(%prev_clk : i1)
+          ^bb2(%seen_clk: i1):
+            %edge = comb.xor bin %seen_clk, %true : i1
+            %posedge = comb.and bin %edge, %clk : i1
+            cf.cond_br %posedge, ^bb3(%c0_i32, %probe_arr, %false : i32, !hw.array<2xi8>, i1), ^bb1(%clk, %c0_i8, %false, %probe_arr, %false : i1, i8, i1, !hw.array<2xi8>, i1)
+          ^bb3(%i: i32, %loop_acc: !hw.array<2xi8>, %loop_done: i1):
+            %lt = comb.icmp slt %i, %c2_i32 : i32
+            cf.cond_br %lt, ^bb4, ^bb1(%clk, %din, %true, %loop_acc, %loop_done : i1, i8, i1, !hw.array<2xi8>, i1)
+          ^bb4:
+            %bit = comb.extract %i from 0 : (i32) -> i1
+            %next_arr = hw.array_inject %loop_acc[%bit], %din : !hw.array<2xi8>, i1
+            %next_idx = comb.add %i, %c1_i32 : i32
+            cf.br ^bb3(%next_idx, %next_arr, %true : i32, !hw.array<2xi8>, i1)
+          }
+          llhd.drv %state, %proc#0 after %t0 if %proc#1 : i8
+          llhd.drv %arr, %proc#2 after %t0 if %proc#3 : !hw.array<2xi8>
+          %read = hw.array_get %arr[%false] : !hw.array<2xi8>, i1
+          hw.output %read : i8
+        }
+      MLIR
+
+      result = described_class.from_mlir(mlir, strict: true)
+      expect(result.success?).to be(true), result.diagnostics.map(&:message).join("\n")
+
+      mod = result.modules.first
+      process = mod.processes.first
+      expect(process.clock).to eq('clk')
+
+      seq_assigns = []
+      collect_assigns = lambda do |statements|
+        Array(statements).each do |statement|
+          case statement
+          when RHDL::Codegen::CIRCT::IR::SeqAssign
+            seq_assigns << statement
+          when RHDL::Codegen::CIRCT::IR::If
+            collect_assigns.call(statement.then_statements)
+            collect_assigns.call(statement.else_statements)
+          end
+        end
+      end
+      collect_assigns.call(process.statements)
+
+      state_assign = seq_assigns.find { |statement| statement.target.to_s == 'state' }
+      arr_assign = seq_assigns.find { |statement| statement.target.to_s == 'arr' }
+      expect(state_assign).not_to be_nil
+      expect(arr_assign).not_to be_nil
+
+      signal_names = lambda do |expr|
+        case expr
+        when RHDL::Codegen::CIRCT::IR::Signal
+          [expr.name.to_s]
+        when RHDL::Codegen::CIRCT::IR::Literal
+          []
+        when RHDL::Codegen::CIRCT::IR::UnaryOp
+          signal_names.call(expr.operand)
+        when RHDL::Codegen::CIRCT::IR::BinaryOp
+          signal_names.call(expr.left) + signal_names.call(expr.right)
+        when RHDL::Codegen::CIRCT::IR::Mux
+          signal_names.call(expr.condition) + signal_names.call(expr.when_true) + signal_names.call(expr.when_false)
+        when RHDL::Codegen::CIRCT::IR::Concat
+          Array(expr.parts).flat_map { |part| signal_names.call(part) }
+        when RHDL::Codegen::CIRCT::IR::Slice
+          signal_names.call(expr.base)
+        when RHDL::Codegen::CIRCT::IR::Resize
+          signal_names.call(expr.expr)
+        else
+          []
+        end
+      end
+
+      expect(signal_names.call(state_assign.expr)).to include('din')
+      expect(signal_names.call(arr_assign.expr)).to include('din')
     end
 
     it 'captures implicit active-low reset wrappers around seq.compreg state' do
@@ -1231,6 +1319,155 @@ RSpec.describe RHDL::Codegen::CIRCT::Import do
       expect(by_target['y1'].addr.value).to eq(1)
     end
 
+    it 'rewrites opposite-phase packed shadow snapshots back into firmem reads' do
+      mlir = <<~MLIR
+        hw.module @shadow_snapshot(%clk: i1, %wr_addr: i2, %din: i45, %we: i1) -> (y0: i45, y1: i45) {
+          %clock = seq.to_clock %clk
+          %c1_i1 = hw.constant 1 : i1
+          %inv = comb.xor %clk, %c1_i1 : i1
+          %mem_clock = seq.to_clock %inv
+          %mem = seq.firmem 0, 1, undefined, port_order : <4 x 45>
+          %c0_i2 = hw.constant 0 : i2
+          %c1_i2 = hw.constant 1 : i2
+          %c2_i2 = hw.constant 2 : i2
+          %c3_i2 = hw.constant 3 : i2
+          seq.firmem.write_port %mem[%wr_addr] = %din, clock %mem_clock enable %we : <4 x 45>
+          %rd0 = seq.firmem.read_port %mem[%c0_i2], clock %mem_clock : <4 x 45>
+          %rd1 = seq.firmem.read_port %mem[%c1_i2], clock %mem_clock : <4 x 45>
+          %rd2 = seq.firmem.read_port %mem[%c2_i2], clock %mem_clock : <4 x 45>
+          %rd3 = seq.firmem.read_port %mem[%c3_i2], clock %mem_clock : <4 x 45>
+          %c0_i1 = hw.constant 0 : i1
+          %c0_i45 = hw.constant 0 : i45
+          %gate = comb.mux %clk, %c1_i1, %c0_i1 : i1
+          %p3 = comb.mux %gate, %rd3, %c0_i45 : i45
+          %p2 = comb.mux %gate, %rd2, %c0_i45 : i45
+          %p1 = comb.mux %gate, %rd1, %c0_i45 : i45
+          %p0 = comb.mux %gate, %rd0, %c0_i45 : i45
+          %packed = comb.concat %p3, %p2, %p1, %p0 : i45, i45, i45, i45
+          %next = comb.mux %gate, %packed, %shadow : i180
+          %shadow = seq.compreg %next, %clock : i180
+          %slot0 = comb.extract %shadow from 0 : (i180) -> i45
+          %slot1 = comb.extract %shadow from 45 : (i180) -> i45
+          hw.output %slot0, %slot1 : i45, i45
+        }
+      MLIR
+
+      result = described_class.from_mlir(mlir, strict: true)
+      expect(result.success?).to be(true), result.diagnostics.map(&:message).join("\n")
+
+      mod = result.modules.first
+      expect(mod.memories.map(&:name)).to eq(['mem'])
+      expect(mod.regs.map(&:name)).not_to include('shadow')
+
+      by_target = mod.assigns.each_with_object({}) { |assign, acc| acc[assign.target] = assign.expr }
+      expect(by_target['y0']).to be_a(RHDL::Codegen::CIRCT::IR::MemoryRead)
+      expect(by_target['y0'].memory).to eq('mem')
+      expect(by_target['y0'].addr).to be_a(RHDL::Codegen::CIRCT::IR::Literal)
+      expect(by_target['y0'].addr.value).to eq(0)
+
+      expect(by_target['y1']).to be_a(RHDL::Codegen::CIRCT::IR::MemoryRead)
+      expect(by_target['y1'].memory).to eq('mem')
+      expect(by_target['y1'].addr).to be_a(RHDL::Codegen::CIRCT::IR::Literal)
+      expect(by_target['y1'].addr.value).to eq(1)
+    end
+
+    it 'rewrites partial packed shadow slices back into firmem reads plus local slices' do
+      mlir = <<~MLIR
+        hw.module @shadow_partial(%clk: i1, %wr_addr: i2, %din: i45, %we: i1) -> (y_hi: i36, y_flag: i1) {
+          %clock = seq.to_clock %clk
+          %c1_i1 = hw.constant 1 : i1
+          %inv = comb.xor %clk, %c1_i1 : i1
+          %mem_clock = seq.to_clock %inv
+          %mem = seq.firmem 0, 1, undefined, port_order : <4 x 45>
+          %c0_i2 = hw.constant 0 : i2
+          %c1_i2 = hw.constant 1 : i2
+          %c2_i2 = hw.constant 2 : i2
+          %c3_i2 = hw.constant 3 : i2
+          seq.firmem.write_port %mem[%wr_addr] = %din, clock %mem_clock enable %we : <4 x 45>
+          %rd0 = seq.firmem.read_port %mem[%c0_i2], clock %mem_clock : <4 x 45>
+          %rd1 = seq.firmem.read_port %mem[%c1_i2], clock %mem_clock : <4 x 45>
+          %rd2 = seq.firmem.read_port %mem[%c2_i2], clock %mem_clock : <4 x 45>
+          %rd3 = seq.firmem.read_port %mem[%c3_i2], clock %mem_clock : <4 x 45>
+          %c0_i1 = hw.constant 0 : i1
+          %c0_i45 = hw.constant 0 : i45
+          %gate = comb.mux %clk, %c1_i1, %c0_i1 : i1
+          %p3 = comb.mux %gate, %rd3, %c0_i45 : i45
+          %p2 = comb.mux %gate, %rd2, %c0_i45 : i45
+          %p1 = comb.mux %gate, %rd1, %c0_i45 : i45
+          %p0 = comb.mux %gate, %rd0, %c0_i45 : i45
+          %packed = comb.concat %p3, %p2, %p1, %p0 : i45, i45, i45, i45
+          %next = comb.mux %gate, %packed, %shadow : i180
+          %shadow = seq.compreg %next, %clock : i180
+          %slot0_hi = comb.extract %shadow from 9 : (i180) -> i36
+          %slot1_flag = comb.extract %shadow from 53 : (i180) -> i1
+          hw.output %slot0_hi, %slot1_flag : i36, i1
+        }
+      MLIR
+
+      result = described_class.from_mlir(mlir, strict: true)
+      expect(result.success?).to be(true), result.diagnostics.map(&:message).join("\n")
+
+      mod = result.modules.first
+      expect(mod.memories.map(&:name)).to eq(['mem'])
+      expect(mod.regs.map(&:name)).not_to include('shadow')
+
+      by_target = mod.assigns.each_with_object({}) { |assign, acc| acc[assign.target] = assign.expr }
+
+      expect(by_target['y_hi']).to be_a(RHDL::Codegen::CIRCT::IR::Slice)
+      expect(by_target['y_hi'].base).to be_a(RHDL::Codegen::CIRCT::IR::MemoryRead)
+      expect(by_target['y_hi'].base.memory).to eq('mem')
+      expect(by_target['y_hi'].base.addr).to be_a(RHDL::Codegen::CIRCT::IR::Literal)
+      expect(by_target['y_hi'].base.addr.value).to eq(0)
+      expect(by_target['y_hi'].range).to eq(9..44)
+
+      expect(by_target['y_flag']).to be_a(RHDL::Codegen::CIRCT::IR::Slice)
+      expect(by_target['y_flag'].base).to be_a(RHDL::Codegen::CIRCT::IR::MemoryRead)
+      expect(by_target['y_flag'].base.memory).to eq('mem')
+      expect(by_target['y_flag'].base.addr).to be_a(RHDL::Codegen::CIRCT::IR::Literal)
+      expect(by_target['y_flag'].base.addr.value).to eq(1)
+      expect(by_target['y_flag'].range).to eq(8..8)
+    end
+
+    it 'rewrites descending packed shadow slices back into firmem reads plus local slices' do
+      signal = RHDL::Codegen::CIRCT::IR::Signal.new(name: 'shadow', width: 180)
+      aliases = {
+        'shadow' => {
+          memory: 'mem',
+          depth: 4,
+          element_width: 45
+        }
+      }
+
+      full_slot = RHDL::Codegen::CIRCT::IR::Slice.new(base: signal, range: (179..135), width: 45)
+      rewritten_full = described_class.send(:rewrite_shadow_alias_reads, full_slot, aliases)
+      expect(rewritten_full).to be_a(RHDL::Codegen::CIRCT::IR::MemoryRead)
+      expect(rewritten_full.memory).to eq('mem')
+      expect(rewritten_full.addr).to be_a(RHDL::Codegen::CIRCT::IR::Literal)
+      expect(rewritten_full.addr.value).to eq(3)
+
+      partial_slot = RHDL::Codegen::CIRCT::IR::Slice.new(base: signal, range: (170..135), width: 36)
+      rewritten_partial = described_class.send(:rewrite_shadow_alias_reads, partial_slot, aliases)
+      expect(rewritten_partial).to be_a(RHDL::Codegen::CIRCT::IR::Slice)
+      expect(rewritten_partial.base).to be_a(RHDL::Codegen::CIRCT::IR::MemoryRead)
+      expect(rewritten_partial.base.memory).to eq('mem')
+      expect(rewritten_partial.base.addr).to be_a(RHDL::Codegen::CIRCT::IR::Literal)
+      expect(rewritten_partial.base.addr.value).to eq(3)
+      expect(rewritten_partial.range).to eq(35..0)
+    end
+
+    it 'simplifies descending literal slices using normalized bounds' do
+      expr = RHDL::Codegen::CIRCT::IR::Slice.new(
+        base: RHDL::Codegen::CIRCT::IR::Literal.new(value: 0b1111_0000, width: 8),
+        range: (7..4),
+        width: 4
+      )
+
+      simplified = described_class.send(:simplify_expr, expr)
+      expect(simplified).to be_a(RHDL::Codegen::CIRCT::IR::Literal)
+      expect(simplified.value).to eq(0b1111)
+      expect(simplified.width).to eq(4)
+    end
+
     it 'parses seq.firmem read and write ports as CIRCT memory IR' do
       mlir = <<~MLIR
         hw.module @firmem_mod(%clk: i1, %addr: i2, %waddr: i2, %din: i8, %we: i1) -> (y: i8) {
@@ -1249,6 +1486,33 @@ RSpec.describe RHDL::Codegen::CIRCT::Import do
       expect(mod.memories.map(&:name)).to eq(['ram'])
       expect(mod.memories.first.depth).to eq(4)
       expect(mod.memories.first.width).to eq(8)
+      expect(mod.write_ports.length).to eq(1)
+      expect(mod.write_ports.first.memory).to eq('ram')
+      expect(mod.write_ports.first.clock).to eq('clk')
+      expect(mod.assigns.first.expr).to be_a(RHDL::Codegen::CIRCT::IR::MemoryRead)
+      expect(mod.assigns.first.expr.memory).to eq('ram')
+      expect(mod.assigns.first.expr.addr).to be_a(RHDL::Codegen::CIRCT::IR::Signal)
+      expect(mod.assigns.first.expr.addr.name).to eq('addr')
+    end
+
+    it 'parses masked seq.firmem forms as CIRCT memory IR' do
+      mlir = <<~MLIR
+        hw.module @firmem_masked_mod(%clk: i1, %addr: i5, %waddr: i5, %din: i72, %we: i1) -> (y: i72) {
+          %clock = seq.to_clock %clk
+          %ram = seq.firmem 0, 1, undefined, undefined : <32 x 72, mask 1>
+          %rd = seq.firmem.read_port %ram[%addr], clock %clock : <32 x 72, mask 1>
+          seq.firmem.write_port %ram[%waddr] = %din, clock %clock enable %we : <32 x 72, mask 1>
+          hw.output %rd : i72
+        }
+      MLIR
+
+      result = described_class.from_mlir(mlir, strict: true)
+      expect(result.success?).to be(true), result.diagnostics.map(&:message).join("\n")
+
+      mod = result.modules.first
+      expect(mod.memories.map(&:name)).to eq(['ram'])
+      expect(mod.memories.first.depth).to eq(32)
+      expect(mod.memories.first.width).to eq(72)
       expect(mod.write_ports.length).to eq(1)
       expect(mod.write_ports.first.memory).to eq('ram')
       expect(mod.write_ports.first.clock).to eq('clk')

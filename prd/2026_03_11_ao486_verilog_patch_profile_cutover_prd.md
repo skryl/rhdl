@@ -16,7 +16,7 @@ That violates the requested import boundary. The AO486 import flow already suppo
 
 ## Goals
 
-1. Move AO486 trace/parity/runner structural rewrites to checked-in Verilog patch profiles under `examples/ao486/patches/`.
+1. Move AO486 parity/runner structural rewrites to checked-in Verilog patch profiles under `examples/ao486/patches/`, with parity also carrying the trace surface.
 2. Make AO486 importers support named patch profiles in addition to raw `patches_dir:`.
 3. Retarget IR, Verilator, and Arcilator AO486 runner builds to consume patched imported MLIR directly.
 4. Remove production/test dependencies on Ruby-side AO486 package rewrite helpers.
@@ -37,7 +37,7 @@ Red:
 2. Add failing coverage that AO486 runner/parity builders no longer need Ruby package rewrites.
 
 Green:
-1. Add named AO486 patch-profile resolution for `trace`, `parity`, and `runner`.
+1. Add named AO486 patch-profile resolution for `parity` and `runner`.
 2. Keep explicit `patches_dir:` support for ad hoc staged patch series.
 3. Thread patch profiles through `CpuImporter` and the AO486 runner build paths.
 
@@ -53,11 +53,10 @@ Red:
 
 Green:
 1. Add checked-in patch series under:
-   - `examples/ao486/patches/trace/`
    - `examples/ao486/patches/parity/`
    - `examples/ao486/patches/runner/`
 2. Encode the current AO486 trace/parity/runner structural changes entirely in those patch series.
-3. Make the parity profile extend trace semantics and the runner profile extend trace semantics without post-import rewrites.
+3. Make the parity profile carry the trace semantics and determine whether the runner profile can be eliminated or must remain separate.
 
 Exit Criteria:
 1. Patched-import MLIR already contains the required trace and fetch-path behavior.
@@ -110,11 +109,39 @@ Exit Criteria:
 
 ## Implementation Checklist
 
-- [ ] Add named AO486 patch-profile resolution and focused importer specs.
-- [ ] Generate/check in trace patch series.
-- [ ] Generate/check in parity patch series.
-- [ ] Generate/check in runner patch series.
-- [ ] Retarget AO486 runners to patch-profiled imports.
-- [ ] Update AO486 specs/helpers to the patch-profiled boundary.
-- [ ] Remove obsolete AO486 post-import rewrite helpers from production/test paths.
+- [x] Add named AO486 patch-profile resolution and focused importer specs.
+- [x] Generate/check in parity patch series.
+- [x] Generate/check in runner patch series.
+- [x] Retarget AO486 runners to patch-profiled imports.
+- [x] Update AO486 specs/helpers to the patch-profiled boundary.
+- [x] Remove obsolete AO486 post-import rewrite helpers from production/test paths.
 - [ ] Run targeted AO486 validation and resume Verilator DOS debugging.
+
+## Update - 2026-03-11
+
+Completed in this pass:
+
+1. Restored checked-in AO486 patch profiles under `examples/ao486/patches/` and regenerated the trace/parity/runner RTL deltas from the former rewrite outputs.
+2. Retargeted AO486 runner construction so patched imported MLIR is consumed directly:
+   - `IrRunner.runtime_bundle` now imports with `patch_profile: :runner`
+   - `VerilatorRunner.runtime_bundle` now imports with `patch_profile: :runner`
+   - `IrRunner.build_from_cleaned_mlir`, `VerilatorRunner.build_from_cleaned_mlir`, and `ArcilatorRunner.build_from_cleaned_mlir` now treat the input MLIR as already patched
+3. Retargeted the AO486 trace/parity specs to import with the appropriate patch profile instead of mutating imported packages afterward.
+4. Removed the AO486 post-import rewrite helper files from the active code path:
+   - `cpu_trace_package.rb`
+   - `cpu_parity_package.rb`
+   - `cpu_runner_package.rb`
+
+Targeted validation completed sequentially:
+
+1. `bundle exec rspec spec/examples/ao486/import/cpu_trace_package_spec.rb -e 'adds stable retire-trace ports to the imported ao486 package' --format documentation`
+2. `bundle exec rspec spec/examples/ao486/import/cpu_parity_package_spec.rb --format documentation`
+3. `bundle exec rspec spec/examples/ao486/import/cpu_parity_runtime_spec.rb -e 'drives deterministic reset-vector PC byte groups on the parity package' --format documentation`
+4. `INCLUDE_SLOW_TESTS=1 bundle exec rspec spec/examples/ao486/import/runtime_cpu_fetch_parity_spec.rb --format documentation`
+5. `INCLUDE_SLOW_TESTS=1 bundle exec rspec spec/examples/ao486/integration/verilator_runner_boot_smoke_spec.rb --format documentation`
+
+Verilator DOS status on the new boundary:
+
+1. The old early Verilator `#UD` around `0xE0AB` is gone on the patch-profiled runner path.
+2. Verilator now reaches the visible `FreeDOS_` milestone and later DOS disk-read path rather than dying in early POST.
+3. The remaining DOS blocker has moved later into the shared bootloader/runtime path instead of the old Ruby rewrite layer.

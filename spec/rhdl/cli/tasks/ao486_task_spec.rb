@@ -62,8 +62,12 @@ RSpec.describe RHDL::CLI::Tasks::AO486Task do
       @calls << :load_bios
     end
 
-    def load_dos
-      @calls << :load_dos
+    def load_dos(**kwargs)
+      @calls << [:load_dos, kwargs]
+    end
+
+    def swap_dos(slot)
+      @calls << [:swap_dos, slot]
     end
 
     def run
@@ -102,7 +106,7 @@ RSpec.describe RHDL::CLI::Tasks::AO486Task do
       headless: true,
       cycles: 678
     )
-    expect(FakeHeadlessRunner.instance.calls).to eq(%i[load_bios load_dos run])
+    expect(FakeHeadlessRunner.instance.calls).to eq([:load_bios, [:load_dos, {}], :run])
   end
 
   it 'does not load optional software artifacts unless requested' do
@@ -119,6 +123,25 @@ RSpec.describe RHDL::CLI::Tasks::AO486Task do
       headless: false
     )
     expect(FakeHeadlessRunner.instance.calls).to eq([:run])
+  end
+
+  it 'loads custom DOS disk1 and disk2 paths into separate runner slots for default run mode' do
+    task = described_class.new(
+      action: :run,
+      dos_disk1: '/tmp/msdos4_disk1.img',
+      dos_disk2: '/tmp/msdos4_disk2.img',
+      headless_runner_class: FakeHeadlessRunner
+    )
+
+    task.run
+
+    expect(FakeHeadlessRunner.instance.calls).to eq(
+      [
+        [:load_dos, { path: '/tmp/msdos4_disk1.img', slot: 0, activate: true }],
+        [:load_dos, { path: '/tmp/msdos4_disk2.img', slot: 1, activate: false }],
+        :run
+      ]
+    )
   end
 
   it 'runs import action and prints summary on success' do

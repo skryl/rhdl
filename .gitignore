@@ -50,6 +50,7 @@ lib/rhdl/sim/native/ir/ir_compiler/*.json
 
 # Arcilator build artifacts
 .arcilator_build/
+.arcilator_build.bak_*/
 .arcilator_gpu_build/
 
 # HDL build artifacts (Verilator/Arcilator for example systems)
@@ -114,4 +115,3 @@ web/build/verilator/*
 /examples/gameboy/import/
 /examples/ao486/import/
 /examples/sparc64/import/
-

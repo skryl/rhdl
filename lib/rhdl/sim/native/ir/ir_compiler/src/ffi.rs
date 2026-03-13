@@ -32,6 +32,7 @@ pub struct IrSimContext {
     pub core: CoreSimulator,
     pub apple2: Option<Apple2Extension>,
     pub cpu8bit: Option<Cpu8BitExtension>,
+    pub generated_code_cache: Option<String>,
     pub gameboy: Option<GameBoyExtension>,
     pub mos6502: Option<Mos6502Extension>,
     pub riscv: Option<RiscvExtension>,
@@ -106,6 +107,7 @@ impl IrSimContext {
             core,
             apple2,
             cpu8bit,
+            generated_code_cache: None,
             gameboy,
             mos6502,
             riscv,
@@ -144,6 +146,10 @@ impl IrSimContext {
     }
 
     fn generate_code(&self) -> String {
+        if let Some(code) = &self.generated_code_cache {
+            return code.clone();
+        }
+
         // The compiled simulator always needs the generated combinational
         // evaluator, but the large generic tick-helper surface is only used by
         // extensions that emit direct calls into those helpers. Plain cores,
@@ -188,27 +194,20 @@ impl IrSimContext {
             let force_runtime_only = std::env::var("RHDL_IR_COMPILER_FORCE_RUNTIME_ONLY")
                 .map(|value| !value.trim().is_empty() && value != "0")
                 .unwrap_or(false);
-            if force_rustc && force_runtime_only {
-                return Err(
-                    "RHDL_IR_COMPILER_FORCE_RUSTC and RHDL_IR_COMPILER_FORCE_RUNTIME_ONLY cannot both be enabled".to_string()
-                );
-            }
             if force_runtime_only {
-                self.core.enable_runtime_only_compile();
-                return Ok(true);
-            }
-            if force_rustc && self.core.requires_runtime_only_compile(needs_tick_helpers) {
                 return Err(
-                    "full rustc compiler mode does not support overwide (>128-bit) runtime signals; use auto/runtime-only compiler mode".to_string()
+                    "RHDL_IR_COMPILER_FORCE_RUNTIME_ONLY has been removed; the compiler backend is now compile-or-fail".to_string()
                 );
             }
-            if !force_rustc && self.core.should_use_runtime_only_compile(needs_tick_helpers) {
-                self.core.enable_runtime_only_compile();
-                return Ok(true);
+            if let Some(blocker) = self.core.compile_fast_path_blocker(needs_tick_helpers) {
+                let mode = if force_rustc { "forced rustc mode" } else { "compiler mode" };
+                return Err(format!("{} cannot compile this design: {}", mode, blocker));
             }
 
             let code = self.generate_code();
-            self.core.compile_code(&code)
+            let compiled_from_cache = self.core.compile_code(&code)?;
+            self.generated_code_cache = Some(code);
+            Ok(compiled_from_cache)
         }
     }
 }

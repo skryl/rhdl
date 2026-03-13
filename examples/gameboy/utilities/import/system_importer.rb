@@ -634,7 +634,36 @@ module RHDL
                 signal mem : mem_t := (others => (others => '0'));
                 signal q_a_reg : std_logic_vector(width_a - 1 downto 0) := (others => '0');
                 signal q_b_reg : std_logic_vector(width_b - 1 downto 0) := (others => '0');
+                signal q_a_comb : std_logic_vector(width_a - 1 downto 0) := (others => '0');
+                signal q_b_comb : std_logic_vector(width_b - 1 downto 0) := (others => '0');
               begin
+                process (all)
+                  variable idx_a : integer;
+                  variable idx_b : integer;
+                  variable word_a : std_logic_vector(MEM_WIDTH - 1 downto 0);
+                  variable word_b : std_logic_vector(MEM_WIDTH - 1 downto 0);
+                begin
+                  word_a := (others => '0');
+                  idx_a := to_integer(unsigned(address_a));
+                  if idx_a >= 0 and idx_a < MEM_DEPTH then
+                    word_a := mem(idx_a);
+                    if wren_a = '1' and read_during_write_mode_port_a = "NEW_DATA_NO_NBE_READ" then
+                      word_a(width_a - 1 downto 0) := data_a;
+                    end if;
+                  end if;
+                  q_a_comb <= word_a(width_a - 1 downto 0);
+
+                  word_b := (others => '0');
+                  idx_b := to_integer(unsigned(address_b));
+                  if idx_b >= 0 and idx_b < MEM_DEPTH then
+                    word_b := mem(idx_b);
+                    if wren_b = '1' and read_during_write_mode_port_b = "NEW_DATA_NO_NBE_READ" then
+                      word_b(width_b - 1 downto 0) := data_b;
+                    end if;
+                  end if;
+                  q_b_comb <= word_b(width_b - 1 downto 0);
+                end process;
+
                 process (clock0, clock1)
                   variable idx_a : integer;
                   variable idx_b : integer;
@@ -647,12 +676,18 @@ module RHDL
                       if idx_a >= 0 and idx_a < MEM_DEPTH then
                         word_a := mem(idx_a);
                         if wren_a = '1' then
-                          word_a(width_a - 1 downto 0) := data_a;
+                          if read_during_write_mode_port_a = "NEW_DATA_NO_NBE_READ" then
+                            word_a(width_a - 1 downto 0) := data_a;
+                          end if;
                           mem(idx_a) <= word_a;
                         end if;
-                        q_a_reg <= word_a(width_a - 1 downto 0);
+                        if outdata_reg_a /= "UNREGISTERED" then
+                          q_a_reg <= word_a(width_a - 1 downto 0);
+                        end if;
                       else
-                        q_a_reg <= (others => '0');
+                        if outdata_reg_a /= "UNREGISTERED" then
+                          q_a_reg <= (others => '0');
+                        end if;
                       end if;
                     end if;
                   end if;
@@ -663,19 +698,25 @@ module RHDL
                       if idx_b >= 0 and idx_b < MEM_DEPTH then
                         word_b := mem(idx_b);
                         if wren_b = '1' then
-                          word_b(width_b - 1 downto 0) := data_b;
+                          if read_during_write_mode_port_b = "NEW_DATA_NO_NBE_READ" then
+                            word_b(width_b - 1 downto 0) := data_b;
+                          end if;
                           mem(idx_b) <= word_b;
                         end if;
-                        q_b_reg <= word_b(width_b - 1 downto 0);
+                        if outdata_reg_b /= "UNREGISTERED" then
+                          q_b_reg <= word_b(width_b - 1 downto 0);
+                        end if;
                       else
-                        q_b_reg <= (others => '0');
+                        if outdata_reg_b /= "UNREGISTERED" then
+                          q_b_reg <= (others => '0');
+                        end if;
                       end if;
                     end if;
                   end if;
                 end process;
 
-                q_a <= q_a_reg;
-                q_b <= q_b_reg;
+                q_a <= q_a_comb when outdata_reg_a = "UNREGISTERED" else q_a_reg;
+                q_b <= q_b_comb when outdata_reg_b = "UNREGISTERED" else q_b_reg;
               end architecture;
             VHDL
             path
@@ -892,8 +933,10 @@ module RHDL
             raised_inventory = raised_component_inventory(files_written)
             synth_inventory = synth_output_inventory(report.dig('mixed_import', 'vhdl_synth_outputs'))
 
-            modules.map do |entry|
+            modules.filter_map do |entry|
               module_name = entry.fetch('name').to_s
+              next if runtime_helper_module?(module_name)
+
               staged = component_staged_metadata_from_report(entry) || staged_inventory[module_name]
               raise "Missing staged pure-Verilog module mapping for imported component #{module_name}" unless staged
 
@@ -928,6 +971,11 @@ module RHDL
                 'emitted_base_class' => entry['emitted_base_class'] || raised[:base_class]
               }.compact
             end.sort_by { |entry| entry.fetch('verilog_module_name') }
+          end
+
+          def runtime_helper_module?(module_name)
+            name = module_name.to_s
+            name.start_with?('dpram_dif__vhdl_') && name.end_with?('__byte_mem')
           end
 
           def component_staged_metadata_from_report(entry)

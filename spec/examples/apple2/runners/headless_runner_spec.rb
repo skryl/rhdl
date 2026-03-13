@@ -73,6 +73,11 @@ RSpec.describe RHDL::Examples::Apple2::HeadlessRunner, :slow do
         expect(runner.memory_sample).to have_key(:reset_vector)
       end
     end
+
+    it 'returns nil from sim when the active backend has no native sim object' do
+      runner = described_class.new
+      expect(runner.sim).to be_nil
+    end
   end
 
   describe 'IR mode with interpret backend' do
@@ -217,6 +222,21 @@ RSpec.describe RHDL::Examples::Apple2::HeadlessRunner, :slow do
     it 'sets native flag to true for verilog' do
       runner = described_class.new(mode: :verilog)
       expect(runner.native?).to be true
+    end
+
+    it 'exposes the native sim object uniformly' do
+      require_relative '../../../../examples/apple2/utilities/runners/verilator_runner'
+      fake_sim = instance_double('Sim')
+      fake_runner = instance_double(
+        'RHDL::Examples::Apple2::VerilogRunner',
+        native?: true,
+        simulator_type: :hdl_verilator,
+        sim: fake_sim
+      )
+      allow(RHDL::Examples::Apple2::VerilogRunner).to receive(:new).and_return(fake_runner)
+
+      runner = described_class.new(mode: :verilog)
+      expect(runner.sim).to eq(fake_sim)
     end
 
     it 'loads demo program into Verilator memory' do

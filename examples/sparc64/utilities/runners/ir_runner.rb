@@ -1,5 +1,9 @@
 # frozen_string_literal: true
 
+require 'digest'
+require 'fileutils'
+require 'json'
+
 require 'rhdl/codegen'
 require 'rhdl/sim/native/ir/simulator'
 
@@ -14,18 +18,20 @@ module RHDL
         include Integration
         COMPILER_MAX_SIGNAL_WIDTH = 128
 
-        attr_reader :sim, :clock_count, :backend, :compiler_mode
+        attr_reader :sim, :clock_count, :backend, :compiler_mode, :import_dir
 
         def initialize(backend: :compile, import_dir: nil, top: 'S1Top', component_class: nil,
                        sim_factory: nil, strict_runner_kind: true, trace_reader: nil, fault_reader: nil,
-                       fast_boot: false, compiler_mode: :auto)
+                       fast_boot: false, compiler_mode: :rustc)
           @backend = backend.to_sym
           @compiler_mode = normalize_compiler_mode(compiler_mode)
+          @import_dir = import_dir && Integration::ImportLoader.resolve_import_dir(import_dir: import_dir)
           @component_class = component_class || Integration::ImportLoader.load_component_class(
             top: top,
-            import_dir: import_dir,
+            import_dir: @import_dir,
             fast_boot: fast_boot
           )
+          @import_dir ||= Integration::ImportLoader.loaded_from if component_class.nil?
           @sim = sim_factory ? sim_factory.call : build_simulator(@component_class, @backend)
           @trace_reader = trace_reader || default_trace_reader
           @fault_reader = fault_reader || default_fault_reader
@@ -184,10 +190,85 @@ module RHDL
         private
 
         def build_simulator(component_class, backend)
-          nodes = component_class.to_flat_circt_nodes
           with_compiler_env do
-            json = RHDL::Sim::Native::IR.sim_json(nodes, backend: backend)
+            json = cached_runtime_json_payload(component_class) ||
+                   RHDL::Sim::Native::IR.sim_json(component_class.to_flat_circt_nodes, backend: backend)
             RHDL::Sim::Native::IR::Simulator.new(json, backend: backend)
+          end
+        end
+
+        def cached_runtime_json_payload(component_class)
+          path = ensure_runtime_json_cache_path!(component_class)
+          return nil unless path && File.file?(path)
+
+          File.read(path)
+        end
+
+        def ensure_runtime_json_cache_path!(component_class)
+          return nil unless import_dir
+
+          artifact_path = runtime_json_path_from_report
+          return artifact_path if artifact_path && File.file?(artifact_path)
+
+          verilog_name = component_class.respond_to?(:verilog_module_name) ? component_class.verilog_module_name.to_s : nil
+          return nil if verilog_name.nil? || verilog_name.empty?
+
+          runtime_json_path = File.join(import_dir, '.mixed_import', "#{verilog_name}.runtime.json")
+          require 'rhdl/codegen/circt/runtime_json' unless defined?(RHDL::Codegen::CIRCT::RuntimeJSON)
+          FileUtils.mkdir_p(File.dirname(runtime_json_path))
+          File.open(runtime_json_path, 'w') do |io|
+            RHDL::Codegen::CIRCT::RuntimeJSON.dump_to_io(component_class.to_flat_circt_nodes, io, compact_exprs: true)
+          end
+          update_runtime_json_path_in_report(runtime_json_path)
+          runtime_json_path
+        end
+
+        def runtime_json_path_from_report
+          report = read_import_report
+          artifact_path = report.dig('artifacts', 'runtime_json_path')
+          return nil if artifact_path.nil? || artifact_path.empty?
+          signature = report.dig('artifacts', 'runtime_json_export_signature')
+          return File.expand_path(artifact_path, import_dir) if signature.nil? || signature.empty?
+          return nil unless signature == runtime_json_export_signature
+
+          File.expand_path(artifact_path, import_dir)
+        end
+
+        def update_runtime_json_path_in_report(runtime_json_path)
+          report_path = import_report_path
+          return unless report_path && File.file?(report_path)
+
+          report = read_import_report
+          report['artifacts'] ||= {}
+          report['artifacts']['runtime_json_path'] = runtime_json_path
+          report['artifacts']['runtime_json_export_signature'] = runtime_json_export_signature
+          File.write(report_path, JSON.pretty_generate(report))
+        rescue JSON::GeneratorError
+          nil
+        end
+
+        def read_import_report
+          report_path = import_report_path
+          return {} unless report_path && File.file?(report_path)
+
+          JSON.parse(File.read(report_path))
+        rescue JSON::ParserError
+          {}
+        end
+
+        def import_report_path
+          return nil unless import_dir
+
+          File.join(import_dir, 'import_report.json')
+        end
+
+        def runtime_json_export_signature
+          @runtime_json_export_signature ||= begin
+            runtime_json_file = File.expand_path('../../../../lib/rhdl/codegen/circt/runtime_json.rb', __dir__)
+            Digest::SHA256.hexdigest([
+              Digest::SHA256.file(runtime_json_file).hexdigest,
+              'compact_exprs=true'
+            ].join("\n"))
           end
         end
 
@@ -331,28 +412,18 @@ module RHDL
         end
 
         def normalize_compiler_mode(value)
-          mode = (value || :auto).to_sym
-          return mode if %i[auto rustc runtime_only].include?(mode)
+          mode = (value || :rustc).to_sym
+          return :rustc if mode == :rustc
 
-          raise ArgumentError, "Unsupported SPARC64 compiler mode #{value.inspect}. Use :auto, :rustc, or :runtime_only."
+          raise ArgumentError,
+                "Unsupported SPARC64 compiler mode #{value.inspect}. The compiler backend is rustc-only; use :jit for fallback."
         end
 
         def with_compiler_env
           return yield unless backend.to_sym == :compile
 
           previous = ENV['RHDL_IR_COMPILER_FORCE_RUSTC']
-          previous_runtime_only = ENV['RHDL_IR_COMPILER_FORCE_RUNTIME_ONLY']
-          case compiler_mode
-          when :rustc
-            ENV['RHDL_IR_COMPILER_FORCE_RUSTC'] = '1'
-            ENV.delete('RHDL_IR_COMPILER_FORCE_RUNTIME_ONLY')
-          when :runtime_only
-            ENV.delete('RHDL_IR_COMPILER_FORCE_RUSTC')
-            ENV['RHDL_IR_COMPILER_FORCE_RUNTIME_ONLY'] = '1'
-          else
-            ENV.delete('RHDL_IR_COMPILER_FORCE_RUSTC')
-            ENV.delete('RHDL_IR_COMPILER_FORCE_RUNTIME_ONLY')
-          end
+          ENV['RHDL_IR_COMPILER_FORCE_RUSTC'] = '1'
           yield
         ensure
           if previous.nil?
@@ -360,11 +431,7 @@ module RHDL
           else
             ENV['RHDL_IR_COMPILER_FORCE_RUSTC'] = previous
           end
-          if previous_runtime_only.nil?
-            ENV.delete('RHDL_IR_COMPILER_FORCE_RUNTIME_ONLY')
-          else
-            ENV['RHDL_IR_COMPILER_FORCE_RUNTIME_ONLY'] = previous_runtime_only
-          end
+          ENV.delete('RHDL_IR_COMPILER_FORCE_RUNTIME_ONLY')
         end
 
         def ensure_sparc64_runner!
