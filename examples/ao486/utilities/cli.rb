@@ -47,7 +47,7 @@ module RHDL
                 -m, --mode ir|verilog|circt
                 --sim interpret|jit|compile
                 --bios
-                --dos
+                --dos               Load the patched verbose MS-DOS 6.22 boot disk
                 --dos-disk1 FILE
                 --dos-disk2 FILE
                 --headless
@@ -180,10 +180,16 @@ module RHDL
             opts.on('--bios', 'Load BIOS ROMs from examples/ao486/software/rom') do
               options[:bios] = true
             end
-            opts.on('--dos', 'Load MS-DOS 4.00 dual-disk setup from examples/ao486/software/bin') do
+            opts.on('--dos', 'Load the patched verbose MS-DOS 6.22 boot disk from examples/ao486/software/bin') do
               options[:dos] = true
             end
-            opts.on('--hdd [FILE]', String, 'Mount hard disk image (default: fs.img when --dos is set)') do |v|
+            opts.on('--dos-disk1 FILE', String, 'Load FILE as the primary floppy image in slot 0') do |v|
+              options[:dos_disk1] = v
+            end
+            opts.on('--dos-disk2 FILE', String, 'Preload FILE as the secondary floppy image in slot 1') do |v|
+              options[:dos_disk2] = v
+            end
+            opts.on('--hdd [FILE]', String, 'Mount hard disk image (default: fs.img when FILE is omitted)') do |v|
               options[:hdd] = v || true
             end
             opts.on('--headless', 'Run once without the interactive terminal loop') do

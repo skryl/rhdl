@@ -21,9 +21,10 @@ module RHDL
         #   :ruby   -> :ruby
         #   :ir     -> :interpret, :jit, :compile
         #   :verilog -> ignored (nil)
-        def initialize(mode: :isa, sim: nil)
+        def initialize(mode: :isa, sim: nil, threads: 1)
           @mode = mode
           @sim_backend = sim || default_backend(mode)
+          @threads = RHDL::Codegen::Verilog::VerilogSimulator.normalize_threads(threads)
 
           @runner = case mode
                     when :isa
@@ -38,7 +39,7 @@ module RHDL
                       raise "Netlist mode not yet implemented for MOS6502"
                     when :verilog
                       require_relative 'verilator_runner'
-                      RHDL::Examples::MOS6502::VerilogRunner.new
+                      RHDL::Examples::MOS6502::VerilogRunner.new(threads: @threads)
                     else
                       raise "Unknown mode: #{mode}. Valid modes: isa, ruby, ir, netlist, verilog"
                     end

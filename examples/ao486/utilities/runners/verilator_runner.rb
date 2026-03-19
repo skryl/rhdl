@@ -25,9 +25,10 @@ module RHDL
         StepEvent = Struct.new(:eip, :consumed, :bytes, keyword_init: true)
 
         class << self
-          def runtime_bundle
+          def runtime_bundle(threads: 1)
+            normalized_threads = RHDL::Codegen::Verilog::VerilogSimulator.normalize_threads(threads)
             mutex.synchronize do
-              @runtime_bundle ||= build_runtime_bundle
+              runtime_cache[normalized_threads] ||= build_runtime_bundle(threads: normalized_threads)
             end
           end
 
@@ -37,37 +38,39 @@ module RHDL
             @mutex ||= Mutex.new
           end
 
-          def build_runtime_bundle
+          def runtime_cache
+            @runtime_cache ||= {}
+          end
+
+          def build_runtime_bundle(threads:)
             out_dir = Dir.mktmpdir('rhdl_ao486_verilator_out')
             workspace_dir = Dir.mktmpdir('rhdl_ao486_verilator_ws')
             build_dir = File.join(BUILD_ROOT, 'ao486_runner')
             FileUtils.mkdir_p(build_dir)
 
-            import_result = RHDL::Examples::AO486::Import::CpuImporter.new(
+            importer = RHDL::Examples::AO486::Import::CpuImporter.new(
               output_dir: out_dir,
               workspace_dir: workspace_dir,
               keep_workspace: true,
+              import_strategy: :tree,
               patches_dir: RHDL::Examples::AO486::Import::CpuImporter::DEFAULT_PATCHES_ROOT,
               strict: false
-            ).run
-            raise Array(import_result.diagnostics).join("\n") unless import_result.success?
-
-            mlir_path = File.join(build_dir, 'ao486_runner.mlir')
-            verilog_path = File.join(build_dir, 'verilog', 'ao486_runner.v')
-            wrapper_path = File.join(build_dir, 'verilog', 'ao486_runner_wrapper.cpp')
-            FileUtils.mkdir_p(File.dirname(verilog_path))
-            FileUtils.cp(import_result.normalized_core_mlir_path, mlir_path)
-
-            firtool_stdout, firtool_stderr, firtool_status = Open3.capture3(
-              'firtool',
-              mlir_path,
-              '--verilog',
-              '-o',
-              verilog_path
             )
-            unless firtool_status.success?
-              raise "firtool export failed:\n#{firtool_stdout}\n#{firtool_stderr}"
+            diagnostics = []
+            command_log = []
+            source_prep = importer.send(
+              :prepare_import_source_tree,
+              workspace_dir,
+              diagnostics: diagnostics,
+              command_log: command_log
+            )
+            unless source_prep[:success]
+              raise diagnostics.join("\n")
             end
+
+            prepared = importer.send(:prepare_workspace, workspace_dir, strategy: :tree)
+            wrapper_path = File.join(build_dir, 'verilog', 'ao486_runner_wrapper.cpp')
+            FileUtils.mkdir_p(File.dirname(wrapper_path))
 
             File.write(wrapper_path, wrapper_source)
 
@@ -79,13 +82,24 @@ module RHDL
               verilator_prefix: 'Vao486',
               x_assign: '0',
               x_initial: '0',
-              extra_verilator_flags: ['--public-flat-rw', '-Wno-UNOPTFLAT', '-Wno-PINMISSING', '-Wno-WIDTHEXPAND', '-Wno-WIDTHTRUNC']
+              extra_verilator_flags: [
+                '--public-flat-rw',
+                '-Wno-UNOPTFLAT',
+                '-Wno-PINMISSING',
+                '-Wno-WIDTHEXPAND',
+                '-Wno-WIDTHTRUNC',
+                *prepared.fetch(:staged_include_dirs).map { |dir| "-I#{dir}" }
+              ],
+              threads: threads
             )
             simulator.prepare_build_dirs!
-            simulator.compile_backend(verilog_file: verilog_path, wrapper_file: wrapper_path)
+            simulator.compile_backend(
+              verilog_file: prepared.fetch(:wrapper_path),
+              wrapper_file: wrapper_path
+            )
 
             {
-              import_result: import_result,
+              prepared: prepared,
               build_dir: build_dir,
               library_path: simulator.shared_library_path
             }
@@ -134,6 +148,7 @@ module RHDL
               void sim_poke(void* sim, const char* name, uint32_t value) {
                 auto* ctx = static_cast<SimContext*>(sim);
                 if (!ctx || !ctx->dut || !name) return;
+                auto* root = ctx->dut->rootp;
                 if      (!std::strcmp(name, "clk"))               ctx->dut->clk = value;
                 else if (!std::strcmp(name, "rst_n"))             ctx->dut->rst_n = value;
                 else if (!std::strcmp(name, "a20_enable"))        ctx->dut->a20_enable = value;
@@ -151,6 +166,14 @@ module RHDL
                 else if (!std::strcmp(name, "io_read_data"))      ctx->dut->io_read_data = value;
                 else if (!std::strcmp(name, "io_read_done"))      ctx->dut->io_read_done = value;
                 else if (!std::strcmp(name, "io_write_done"))     ctx->dut->io_write_done = value;
+                else if (!std::strcmp(name, "pipeline_inst__acflag")) root->ao486__DOT__pipeline_inst__DOT__acflag = value;
+                else if (!std::strcmp(name, "pipeline_inst__write_inst__acflag")) root->ao486__DOT__pipeline_inst__DOT__write_inst__DOT__acflag = value;
+                else if (!std::strcmp(name, "pipeline_inst__write_inst__write_commands_inst__acflag")) root->ao486__DOT__pipeline_inst__DOT__write_inst__DOT__write_commands_inst__DOT__acflag = value;
+                else if (!std::strcmp(name, "pipeline_inst__write_inst__write_commands_inst__acflag_to_reg")) root->ao486__DOT__pipeline_inst__DOT__write_inst__DOT__write_commands_inst__DOT__acflag_to_reg = value;
+                else if (!std::strcmp(name, "pipeline_inst__write_inst__write_register_inst__acflag")) root->ao486__DOT__pipeline_inst__DOT__write_inst__DOT__write_register_inst__DOT__acflag = value;
+                else if (!std::strcmp(name, "pipeline_inst__write_inst__write_register_inst__acflag_to_reg")) root->ao486__DOT__pipeline_inst__DOT__write_inst__DOT__write_register_inst__DOT__acflag_to_reg = value;
+                else if (!std::strcmp(name, "memory_inst__acflag")) root->ao486__DOT__memory_inst__DOT__acflag = value;
+                else if (!std::strcmp(name, "memory_inst__tlb_inst__acflag")) root->ao486__DOT__memory_inst__DOT__tlb_inst__DOT__acflag = value;
               }
 
               uint32_t sim_peek_u32(void* sim, const char* name) {
@@ -193,6 +216,11 @@ module RHDL
                 else if (!std::strcmp(name, "trace_arch_esp")) return ctx->dut->trace_arch_esp;
                 else if (!std::strcmp(name, "trace_arch_ebp")) return ctx->dut->trace_arch_ebp;
                 else if (!std::strcmp(name, "trace_arch_eip")) return ctx->dut->trace_arch_eip;
+                else if (!std::strcmp(name, "pipeline_inst__acflag")) return root->ao486__DOT__pipeline_inst__DOT__acflag;
+                else if (!std::strcmp(name, "pipeline_inst__cr0_am")) return root->ao486__DOT___pipeline_inst_cr0_am;
+                else if (!std::strcmp(name, "pipeline_inst__wr_int")) return root->ao486__DOT___pipeline_inst_wr_int;
+                else if (!std::strcmp(name, "pipeline_inst__wr_int_soft_int")) return root->ao486__DOT___pipeline_inst_wr_int_soft_int;
+                else if (!std::strcmp(name, "pipeline_inst__wr_int_vector")) return root->ao486__DOT___pipeline_inst_wr_int_vector;
                 else if (!std::strcmp(name, "pipeline_inst__glob_param_1")) return root->ao486__DOT___pipeline_inst_glob_param_1_value;
                 else if (!std::strcmp(name, "pipeline_inst__glob_param_2")) return root->ao486__DOT___pipeline_inst_glob_param_2_value;
                 else if (!std::strcmp(name, "pipeline_inst__glob_param_3")) return root->ao486__DOT___pipeline_inst_glob_param_3_value;
@@ -200,7 +228,30 @@ module RHDL
                 else if (!std::strcmp(name, "global_regs_inst__glob_param_2")) return root->ao486__DOT___global_regs_inst_glob_param_2;
                 else if (!std::strcmp(name, "global_regs_inst__glob_param_3")) return root->ao486__DOT___global_regs_inst_glob_param_3;
                 else if (!std::strcmp(name, "pipeline_inst__decode_inst__fetch_valid")) return root->ao486__DOT__pipeline_inst__DOT__decode_inst__DOT__fetch_valid;
-                else if (!std::strcmp(name, "pipeline_inst__decode_inst__decoder_count")) return root->ao486__DOT__pipeline_inst__DOT__decode_inst__DOT___decode_regs_inst_decoder_count;
+                else if (!std::strcmp(name, "pipeline_inst__decode_inst__consume_count")) return root->ao486__DOT__pipeline_inst__DOT__decode_inst__DOT__consume_count;
+                else if (!std::strcmp(name, "pipeline_inst__decode_inst__consume_count_local")) return root->ao486__DOT__pipeline_inst__DOT__decode_inst__DOT__consume_count_local;
+                else if (!std::strcmp(name, "pipeline_inst__decode_inst__consume_one")) return root->ao486__DOT__pipeline_inst__DOT__decode_inst__DOT__consume_one;
+                else if (!std::strcmp(name, "pipeline_inst__decode_inst__consume_one_one")) return root->ao486__DOT__pipeline_inst__DOT__decode_inst__DOT__consume_one_one;
+                else if (!std::strcmp(name, "pipeline_inst__decode_inst__consume_call_jmp_imm")) return root->ao486__DOT__pipeline_inst__DOT__decode_inst__DOT__consume_call_jmp_imm;
+                else if (!std::strcmp(name, "pipeline_inst__decode_inst__decoder_count")) return root->ao486__DOT__pipeline_inst__DOT__decode_inst__DOT__decoder_count;
+                else if (!std::strcmp(name, "pipeline_inst__decode_inst__dec_ready_one_one")) return root->ao486__DOT__pipeline_inst__DOT__decode_inst__DOT__dec_ready_one_one;
+                else if (!std::strcmp(name, "pipeline_inst__decode_inst__dec_ready_call_jmp_imm")) return root->ao486__DOT__pipeline_inst__DOT__decode_inst__DOT__dec_ready_call_jmp_imm;
+                else if (!std::strcmp(name, "pipeline_inst__decode_inst__dec_cmd")) return root->ao486__DOT__pipeline_inst__DOT__decode_inst__DOT__dec_cmd;
+                else if (!std::strcmp(name, "pipeline_inst__decode_inst__dec_cmdex")) return root->ao486__DOT__pipeline_inst__DOT__decode_inst__DOT__dec_cmdex;
+                else if (!std::strcmp(name, "pipeline_inst__decode_inst__dec_exception_ud")) return root->ao486__DOT__pipeline_inst__DOT__decode_inst__DOT__dec_exception_ud;
+                else if (!std::strcmp(name, "pipeline_inst__decode_inst__decode_ready_inst__decoder_count")) return root->ao486__DOT__pipeline_inst__DOT__decode_inst__DOT__decode_ready_inst__DOT__decoder_count;
+                else if (!std::strcmp(name, "pipeline_inst__decode_inst__decode_ready_inst__consume_count_local")) return root->ao486__DOT__pipeline_inst__DOT__decode_inst__DOT__decode_ready_inst__DOT__consume_count_local;
+                else if (!std::strcmp(name, "pipeline_inst__decode_inst__decode_ready_inst__consume_one")) return root->ao486__DOT__pipeline_inst__DOT__decode_inst__DOT__decode_ready_inst__DOT__consume_one;
+                else if (!std::strcmp(name, "pipeline_inst__decode_inst__decode_ready_inst__consume_one_one")) return root->ao486__DOT__pipeline_inst__DOT__decode_inst__DOT__decode_ready_inst__DOT__consume_one_one;
+                else if (!std::strcmp(name, "pipeline_inst__decode_inst__decode_ready_inst__consume_call_jmp_imm")) return root->ao486__DOT__pipeline_inst__DOT__decode_inst__DOT__decode_ready_inst__DOT__consume_call_jmp_imm;
+                else if (!std::strcmp(name, "pipeline_inst__decode_inst__decode_ready_inst__dec_ready_one_one")) return root->ao486__DOT__pipeline_inst__DOT__decode_inst__DOT__decode_ready_inst__DOT__dec_ready_one_one;
+                else if (!std::strcmp(name, "pipeline_inst__decode_inst__decode_ready_inst__dec_ready_call_jmp_imm")) return root->ao486__DOT__pipeline_inst__DOT__decode_inst__DOT__decode_ready_inst__DOT__dec_ready_call_jmp_imm;
+                else if (!std::strcmp(name, "pipeline_inst__decode_inst__decode_ready_inst__call_jmp_imm_len")) return root->ao486__DOT__pipeline_inst__DOT__decode_inst__DOT__decode_ready_inst__DOT__call_jmp_imm_len;
+                else if (!std::strcmp(name, "pipeline_inst__decode_inst__decode_regs_inst__decoder_count")) return root->ao486__DOT__pipeline_inst__DOT__decode_inst__DOT__decode_regs_inst__DOT__decoder_count;
+                else if (!std::strcmp(name, "pipeline_inst__decode_inst__decode_regs_inst__after_consume_count")) return root->ao486__DOT__pipeline_inst__DOT__decode_inst__DOT__decode_regs_inst__DOT__after_consume_count;
+                else if (!std::strcmp(name, "pipeline_inst__decode_inst__decoder_w0")) return root->ao486__DOT__pipeline_inst__DOT__decode_inst__DOT__decoder[0];
+                else if (!std::strcmp(name, "pipeline_inst__decode_inst__decoder_w1")) return root->ao486__DOT__pipeline_inst__DOT__decode_inst__DOT__decoder[1];
+                else if (!std::strcmp(name, "pipeline_inst__decode_inst__decoder_w2")) return root->ao486__DOT__pipeline_inst__DOT__decode_inst__DOT__decoder[2];
                 else if (!std::strcmp(name, "pipeline_inst__decode_inst__micro_busy")) return root->ao486__DOT__pipeline_inst__DOT__decode_inst__DOT__micro_busy;
                 else if (!std::strcmp(name, "pipeline_inst__decode_inst__eip")) return root->ao486__DOT___pipeline_inst_dec_eip;
                 else if (!std::strcmp(name, "pipeline_inst__read_inst__rd_cmd")) return root->ao486__DOT__pipeline_inst__DOT__read_inst__DOT__rd_cmd;
@@ -220,9 +271,12 @@ module RHDL
                 else if (!std::strcmp(name, "pipeline_inst__write_inst__write_length")) return root->ao486__DOT__pipeline_inst__DOT__write_inst__DOT__write_length;
                 else if (!std::strcmp(name, "pipeline_inst__write_inst__write_address")) return root->ao486__DOT__pipeline_inst__DOT__write_inst__DOT__write_address;
                 else if (!std::strcmp(name, "pipeline_inst__write_inst__write_data")) return root->ao486__DOT__pipeline_inst__DOT__write_inst__DOT__write_data;
+                else if (!std::strcmp(name, "pipeline_inst__write_inst__acflag")) return root->ao486__DOT__pipeline_inst__DOT__write_inst__DOT__acflag;
                 else if (!std::strcmp(name, "pipeline_inst__write_inst__wr_string_es_fault")) return root->ao486__DOT__pipeline_inst__DOT__write_inst__DOT__wr_string_es_fault;
                 else if (!std::strcmp(name, "pipeline_inst__write_inst__write_commands_inst__wr_cmd")) return root->ao486__DOT__pipeline_inst__DOT__write_inst__DOT__write_commands_inst__DOT__wr_cmd;
                 else if (!std::strcmp(name, "pipeline_inst__write_inst__write_commands_inst__wr_cmdex")) return root->ao486__DOT__pipeline_inst__DOT__write_inst__DOT__write_commands_inst__DOT__wr_cmdex;
+                else if (!std::strcmp(name, "pipeline_inst__write_inst__write_commands_inst__acflag")) return root->ao486__DOT__pipeline_inst__DOT__write_inst__DOT__write_commands_inst__DOT__acflag;
+                else if (!std::strcmp(name, "pipeline_inst__write_inst__write_commands_inst__acflag_to_reg")) return root->ao486__DOT__pipeline_inst__DOT__write_inst__DOT__write_commands_inst__DOT__acflag_to_reg;
                 else if (!std::strcmp(name, "pipeline_inst__write_inst__write_commands_inst__write_rmw_virtual")) return root->ao486__DOT__pipeline_inst__DOT__write_inst__DOT__write_commands_inst__DOT__write_rmw_virtual;
                 else if (!std::strcmp(name, "pipeline_inst__write_inst__write_commands_inst__write_virtual")) return root->ao486__DOT__pipeline_inst__DOT__write_inst__DOT__write_commands_inst__DOT__write_virtual;
                 else if (!std::strcmp(name, "pipeline_inst__write_inst__write_commands_inst__write_rmw_system_dword")) return root->ao486__DOT__pipeline_inst__DOT__write_inst__DOT__write_commands_inst__DOT__write_rmw_system_dword;
@@ -259,44 +313,75 @@ module RHDL
                 else if (!std::strcmp(name, "pipeline_inst__write_inst__write_string_inst__es_cache_valid")) return root->ao486__DOT__pipeline_inst__DOT__write_inst__DOT__write_string_inst__DOT__es_cache_valid;
                 else if (!std::strcmp(name, "pipeline_inst__fetch_inst__fetch_limit")) return root->ao486__DOT__pipeline_inst__DOT__fetch_inst__DOT__fetch_limit;
                 else if (!std::strcmp(name, "pipeline_inst__fetch_inst__fetch_page_fault")) return root->ao486__DOT__pipeline_inst__DOT__fetch_inst__DOT__fetch_page_fault;
+                else if (!std::strcmp(name, "pipeline_inst__fetch_inst__prefetchfifo_accept_do")) return root->ao486__DOT__pipeline_inst__DOT__fetch_inst__DOT__prefetchfifo_accept_do;
                 else if (!std::strcmp(name, "pipeline_inst__execute_inst__exe_eip")) return root->ao486__DOT__pipeline_inst__DOT___execute_inst_exe_eip_final;
-                else if (!std::strcmp(name, "memory_inst__prefetch_inst__prefetch_address")) return root->ao486__DOT__memory_inst__DOT___prefetch_control_inst_icacheread_address;
-                else if (!std::strcmp(name, "memory_inst__prefetch_inst__prefetch_length")) return root->ao486__DOT__memory_inst__DOT___prefetch_inst_prefetch_length;
-                else if (!std::strcmp(name, "memory_inst__prefetch_inst__delivered_eip")) return root->ao486__DOT__memory_inst__DOT___prefetch_inst_delivered_eip;
+                else if (!std::strcmp(name, "memory_inst__prefetch_inst__prefetch_address")) return root->ao486__DOT__memory_inst__DOT__prefetch_inst__DOT__prefetch_address;
+                else if (!std::strcmp(name, "memory_inst__prefetch_inst__prefetch_length")) return root->ao486__DOT__memory_inst__DOT__prefetch_inst__DOT__prefetch_length;
+                else if (!std::strcmp(name, "memory_inst__prefetch_inst__delivered_eip")) return root->ao486__DOT__memory_inst__DOT__prefetch_inst__DOT__delivered_eip;
                 else if (!std::strcmp(name, "memory_inst__prefetch_control_inst__prefetchfifo_used")) return root->ao486__DOT__memory_inst__DOT__prefetch_control_inst__DOT__prefetchfifo_used;
                 else if (!std::strcmp(name, "memory_inst__prefetch_control_inst__state")) return root->ao486__DOT__memory_inst__DOT__prefetch_control_inst__DOT__state;
                 else if (!std::strcmp(name, "memory_inst__avalon_mem_inst__state")) return root->ao486__DOT__memory_inst__DOT__avalon_mem_inst__DOT__state;
-                else if (!std::strcmp(name, "memory_inst__prefetch_control_inst__tlbcoderequest_do")) return root->ao486__DOT__memory_inst__DOT___prefetch_control_inst_tlbcoderequest_do;
-                else if (!std::strcmp(name, "memory_inst__prefetch_control_inst__icacheread_do")) return root->ao486__DOT__memory_inst__DOT___prefetch_control_inst_icacheread_do;
-                else if (!std::strcmp(name, "memory_inst__prefetch_control_inst__icacheread_address")) return root->ao486__DOT__memory_inst__DOT___prefetch_control_inst_icacheread_address;
-                else if (!std::strcmp(name, "memory_inst__prefetch_control_inst__icacheread_length")) return root->ao486__DOT__memory_inst__DOT___prefetch_control_inst_icacheread_length;
-                else if (!std::strcmp(name, "memory_inst__prefetch_fifo_inst__prefetchfifo_used")) return root->ao486__DOT__memory_inst__DOT___prefetch_fifo_inst_prefetchfifo_used;
+                else if (!std::strcmp(name, "memory_inst__prefetch_control_inst__tlbcoderequest_do")) return root->ao486__DOT__memory_inst__DOT__prefetch_control_inst__DOT__tlbcoderequest_do;
+                else if (!std::strcmp(name, "memory_inst__prefetch_control_inst__icacheread_do")) return root->ao486__DOT__memory_inst__DOT__prefetch_control_inst__DOT__icacheread_do;
+                else if (!std::strcmp(name, "memory_inst__prefetch_control_inst__icacheread_address")) return root->ao486__DOT__memory_inst__DOT__prefetch_control_inst__DOT__icacheread_address;
+                else if (!std::strcmp(name, "memory_inst__prefetch_control_inst__icacheread_length")) return root->ao486__DOT__memory_inst__DOT__prefetch_control_inst__DOT__icacheread_length;
+                else if (!std::strcmp(name, "memory_inst__prefetch_fifo_inst__prefetchfifo_used")) return root->ao486__DOT__memory_inst__DOT__prefetch_fifo_inst__DOT__prefetchfifo_used;
                 else if (!std::strcmp(name, "memory_inst__memory_write_inst__write_do")) return root->ao486__DOT__memory_inst__DOT__memory_write_inst__DOT__write_do;
                 else if (!std::strcmp(name, "memory_inst__memory_write_inst__write_done")) return root->ao486__DOT__memory_inst__DOT__memory_write_inst__DOT__write_done;
                 else if (!std::strcmp(name, "memory_inst__memory_write_inst__write_length")) return root->ao486__DOT__memory_inst__DOT__memory_write_inst__DOT__write_length;
                 else if (!std::strcmp(name, "memory_inst__memory_write_inst__write_address")) return root->ao486__DOT__memory_inst__DOT__memory_write_inst__DOT__write_address;
                 else if (!std::strcmp(name, "memory_inst__memory_write_inst__write_data")) return root->ao486__DOT__memory_inst__DOT__memory_write_inst__DOT__write_data;
+                else if (!std::strcmp(name, "memory_inst__memory_write_inst__ac_fault")) return root->ao486__DOT__memory_inst__DOT__memory_write_inst__DOT__ac_fault;
                 else if (!std::strcmp(name, "memory_inst__memory_write_inst__tlbwrite_do")) return root->ao486__DOT__memory_inst__DOT__memory_write_inst__DOT__tlbwrite_do;
                 else if (!std::strcmp(name, "memory_inst__memory_write_inst__tlbwrite_length")) return root->ao486__DOT__memory_inst__DOT__memory_write_inst__DOT__tlbwrite_length;
                 else if (!std::strcmp(name, "memory_inst__memory_write_inst__tlbwrite_address")) return root->ao486__DOT__memory_inst__DOT__memory_write_inst__DOT__tlbwrite_address;
                 else if (!std::strcmp(name, "memory_inst__memory_write_inst__tlbwrite_data")) return root->ao486__DOT__memory_inst__DOT__memory_write_inst__DOT__tlbwrite_data;
-                else if (!std::strcmp(name, "memory_inst__icache_inst__readcode_do")) return root->ao486__DOT__memory_inst__DOT___icache_inst_readcode_do;
-                else if (!std::strcmp(name, "memory_inst__icache_inst__readcode_address")) return root->ao486__DOT__memory_inst__DOT___icache_inst_readcode_address;
-                else if (!std::strcmp(name, "memory_inst__icache_inst__prefetched_do")) return root->ao486__DOT__memory_inst__DOT___icache_inst_prefetched_do;
-                else if (!std::strcmp(name, "memory_inst__icache_inst__prefetched_length")) return root->ao486__DOT__memory_inst__DOT___icache_inst_prefetched_length;
-                else if (!std::strcmp(name, "memory_inst__icache_inst__reset_prefetch")) return root->ao486__DOT__memory_inst__DOT___icache_inst_reset_prefetch;
-                else if (!std::strcmp(name, "memory_inst__icache_inst__prefetchfifo_write_do")) return root->ao486__DOT__memory_inst__DOT___icache_inst_prefetchfifo_write_do;
-                else if (!std::strcmp(name, "memory_inst__icache_inst__rt_tmp_7_1")) return root->ao486__DOT__memory_inst__DOT__icache_inst__DOT__rt_tmp_7_1;
-                else if (!std::strcmp(name, "memory_inst__icache_inst__rt_tmp_8_1")) return root->ao486__DOT__memory_inst__DOT__icache_inst__DOT__rt_tmp_8_1;
-                else if (!std::strcmp(name, "memory_inst__icache_inst__rt_tmp_9_5")) return root->ao486__DOT__memory_inst__DOT__icache_inst__DOT__rt_tmp_9_5;
-                else if (!std::strcmp(name, "memory_inst__icache_inst__rt_tmp_10_12")) return root->ao486__DOT__memory_inst__DOT__icache_inst__DOT__rt_tmp_10_12;
-                else if (!std::strcmp(name, "memory_inst__icache_inst__rt_tmp_11_1")) return root->ao486__DOT__memory_inst__DOT__icache_inst__DOT__rt_tmp_11_1;
-                else if (!std::strcmp(name, "memory_inst__icache_inst__rt_tmp_12_4")) return root->ao486__DOT__memory_inst__DOT__icache_inst__DOT__rt_tmp_12_4;
+                else if (!std::strcmp(name, "memory_inst__memory_read_inst__read_ac_fault")) return root->ao486__DOT__memory_inst__DOT__memory_read_inst__DOT__read_ac_fault;
+                else if (!std::strcmp(name, "memory_inst__read_ac_fault")) return root->ao486__DOT___memory_inst_read_ac_fault;
+                else if (!std::strcmp(name, "memory_inst__write_ac_fault")) return root->ao486__DOT___memory_inst_write_ac_fault;
+                else if (!std::strcmp(name, "memory_inst__icache_inst__readcode_do")) return root->ao486__DOT__memory_inst__DOT__icache_inst__DOT__readcode_do;
+                else if (!std::strcmp(name, "memory_inst__icache_inst__readcode_address")) return root->ao486__DOT__memory_inst__DOT__icache_inst__DOT__readcode_address;
+                else if (!std::strcmp(name, "memory_inst__icache_inst__prefetched_do")) return root->ao486__DOT__memory_inst__DOT__icache_inst__DOT__prefetched_do;
+                else if (!std::strcmp(name, "memory_inst__icache_inst__prefetched_length")) return root->ao486__DOT__memory_inst__DOT__icache_inst__DOT__prefetched_length;
+                else if (!std::strcmp(name, "memory_inst__icache_inst__reset_prefetch")) return root->ao486__DOT__memory_inst__DOT__icache_inst__DOT__reset_prefetch;
+                else if (!std::strcmp(name, "memory_inst__icache_inst__prefetchfifo_write_do")) return root->ao486__DOT__memory_inst__DOT__icache_inst__DOT__prefetchfifo_write_do;
+                else if (!std::strcmp(name, "memory_inst__icache_inst__l1_icache_inst__state")) return root->ao486__DOT__memory_inst__DOT__icache_inst__DOT__l1_icache_inst__DOT__state;
+                else if (!std::strcmp(name, "memory_inst__icache_inst__l1_icache_inst__fillcount")) return root->ao486__DOT__memory_inst__DOT__icache_inst__DOT__l1_icache_inst__DOT__fillcount;
+                else if (!std::strcmp(name, "memory_inst__icache_inst__l1_icache_inst__cache_mux")) return root->ao486__DOT__memory_inst__DOT__icache_inst__DOT__l1_icache_inst__DOT__cache_mux;
+                else if (!std::strcmp(name, "memory_inst__icache_inst__l1_icache_inst__memory_addr_a")) return root->ao486__DOT__memory_inst__DOT__icache_inst__DOT__l1_icache_inst__DOT__memory_addr_a;
+                else if (!std::strcmp(name, "memory_inst__icache_inst__l1_icache_inst__read_addr")) return root->ao486__DOT__memory_inst__DOT__icache_inst__DOT__l1_icache_inst__DOT__read_addr;
+                else if (!std::strcmp(name, "memory_inst__icache_inst__l1_icache_inst__CPU_VALID")) return root->ao486__DOT__memory_inst__DOT__icache_inst__DOT__l1_icache_inst__DOT__CPU_VALID;
+                else if (!std::strcmp(name, "memory_inst__icache_inst__l1_icache_inst__CPU_DONE")) return root->ao486__DOT__memory_inst__DOT__icache_inst__DOT__l1_icache_inst__DOT__CPU_DONE;
+                else if (!std::strcmp(name, "memory_inst__icache_inst__l1_icache_inst__MEM_REQ")) return root->ao486__DOT__memory_inst__DOT__icache_inst__DOT__l1_icache_inst__DOT__MEM_REQ;
+                else if (!std::strcmp(name, "memory_inst__icache_inst__l1_icache_inst__MEM_ADDR")) return root->ao486__DOT__memory_inst__DOT__icache_inst__DOT__l1_icache_inst__DOT__MEM_ADDR;
+                else if (!std::strcmp(name, "memory_inst__icache_inst__l1_icache_inst__tags_dirty_out")) return root->ao486__DOT__memory_inst__DOT__icache_inst__DOT__l1_icache_inst__DOT__tags_dirty_out;
+                else if (!std::strcmp(name, "memory_inst__icache_inst__l1_icache_inst__LRU_addr")) return root->ao486__DOT__memory_inst__DOT__icache_inst__DOT__l1_icache_inst__DOT__LRU_addr;
+                else if (!std::strcmp(name, "memory_inst__icache_inst__l1_icache_inst__LRU_out_0")) return root->ao486__DOT__memory_inst__DOT__icache_inst__DOT__l1_icache_inst__DOT__LRU_out[0];
+                else if (!std::strcmp(name, "memory_inst__icache_inst__l1_icache_inst__LRU_out_1")) return root->ao486__DOT__memory_inst__DOT__icache_inst__DOT__l1_icache_inst__DOT__LRU_out[1];
+                else if (!std::strcmp(name, "memory_inst__icache_inst__l1_icache_inst__LRU_out_2")) return root->ao486__DOT__memory_inst__DOT__icache_inst__DOT__l1_icache_inst__DOT__LRU_out[2];
+                else if (!std::strcmp(name, "memory_inst__icache_inst__l1_icache_inst__LRU_out_3")) return root->ao486__DOT__memory_inst__DOT__icache_inst__DOT__l1_icache_inst__DOT__LRU_out[3];
+                else if (!std::strcmp(name, "memory_inst__icache_inst__l1_icache_inst__tags_read_0")) return root->ao486__DOT__memory_inst__DOT__icache_inst__DOT__l1_icache_inst__DOT__tags_read[0];
+                else if (!std::strcmp(name, "memory_inst__icache_inst__l1_icache_inst__tags_read_1")) return root->ao486__DOT__memory_inst__DOT__icache_inst__DOT__l1_icache_inst__DOT__tags_read[1];
+                else if (!std::strcmp(name, "memory_inst__icache_inst__l1_icache_inst__tags_read_2")) return root->ao486__DOT__memory_inst__DOT__icache_inst__DOT__l1_icache_inst__DOT__tags_read[2];
+                else if (!std::strcmp(name, "memory_inst__icache_inst__l1_icache_inst__tags_read_3")) return root->ao486__DOT__memory_inst__DOT__icache_inst__DOT__l1_icache_inst__DOT__tags_read[3];
+                else if (!std::strcmp(name, "memory_inst__icache_inst__l1_icache_inst__readdata_cache_0")) return root->ao486__DOT__memory_inst__DOT__icache_inst__DOT__l1_icache_inst__DOT__readdata_cache[0];
+                else if (!std::strcmp(name, "memory_inst__icache_inst__l1_icache_inst__readdata_cache_1")) return root->ao486__DOT__memory_inst__DOT__icache_inst__DOT__l1_icache_inst__DOT__readdata_cache[1];
+                else if (!std::strcmp(name, "memory_inst__icache_inst__l1_icache_inst__readdata_cache_2")) return root->ao486__DOT__memory_inst__DOT__icache_inst__DOT__l1_icache_inst__DOT__readdata_cache[2];
+                else if (!std::strcmp(name, "memory_inst__icache_inst__l1_icache_inst__readdata_cache_3")) return root->ao486__DOT__memory_inst__DOT__icache_inst__DOT__l1_icache_inst__DOT__readdata_cache[3];
+                else if (!std::strcmp(name, "memory_inst__icache_inst__l1_icache_inst__ram0_q_b")) return root->ao486__DOT__memory_inst__DOT__icache_inst__DOT__l1_icache_inst__DOT__gcache__BRA__0__KET____DOT__ram__DOT__q_b;
+                else if (!std::strcmp(name, "memory_inst__icache_inst__l1_icache_inst__ram1_q_b")) return root->ao486__DOT__memory_inst__DOT__icache_inst__DOT__l1_icache_inst__DOT__gcache__BRA__1__KET____DOT__ram__DOT__q_b;
+                else if (!std::strcmp(name, "memory_inst__icache_inst__l1_icache_inst__ram2_q_b")) return root->ao486__DOT__memory_inst__DOT__icache_inst__DOT__l1_icache_inst__DOT__gcache__BRA__2__KET____DOT__ram__DOT__q_b;
+                else if (!std::strcmp(name, "memory_inst__icache_inst__l1_icache_inst__ram3_q_b")) return root->ao486__DOT__memory_inst__DOT__icache_inst__DOT__l1_icache_inst__DOT__gcache__BRA__3__KET____DOT__ram__DOT__q_b;
+                else if (!std::strcmp(name, "memory_inst__icache_inst__l1_icache_inst__ram0_address_b_reg_clock0")) return root->ao486__DOT__memory_inst__DOT__icache_inst__DOT__l1_icache_inst__DOT__gcache__BRA__0__KET____DOT__ram__DOT__address_b_reg_clock0;
                 else if (!std::strcmp(name, "memory_inst__avalon_mem_inst__readcode_do")) return root->ao486__DOT__memory_inst__DOT__avalon_mem_inst__DOT__readcode_do;
                 else if (!std::strcmp(name, "memory_inst__avalon_mem_inst__readcode_address")) return root->ao486__DOT__memory_inst__DOT__avalon_mem_inst__DOT__readcode_address;
-                else if (!std::strcmp(name, "memory_inst__avalon_mem_inst__readcode_done")) return root->ao486__DOT__memory_inst__DOT___avalon_mem_inst_readcode_done;
-                else if (!std::strcmp(name, "memory_inst__prefetch_inst__prefetchfifo_signal_limit_do")) return root->ao486__DOT__memory_inst__DOT___prefetch_inst_prefetchfifo_signal_limit_do;
-                else if (!std::strcmp(name, "memory_inst__tlb_inst__prefetchfifo_signal_pf_do")) return root->ao486__DOT__memory_inst__DOT___tlb_inst_prefetchfifo_signal_pf_do;
+                else if (!std::strcmp(name, "memory_inst__avalon_mem_inst__readcode_done")) return root->ao486__DOT__memory_inst__DOT__avalon_mem_inst__DOT__readcode_done;
+                else if (!std::strcmp(name, "memory_inst__prefetch_inst__prefetchfifo_signal_limit_do")) return root->ao486__DOT__memory_inst__DOT__prefetch_inst__DOT__prefetchfifo_signal_limit_do;
+                else if (!std::strcmp(name, "memory_inst__tlb_inst__prefetchfifo_signal_pf_do")) return root->ao486__DOT__memory_inst__DOT__tlb_inst__DOT__prefetchfifo_signal_pf_do;
+                else if (!std::strcmp(name, "memory_inst__acflag")) return root->ao486__DOT__memory_inst__DOT__acflag;
+                else if (!std::strcmp(name, "memory_inst__tlb_inst__acflag")) return root->ao486__DOT__memory_inst__DOT__tlb_inst__DOT__acflag;
+                else if (!std::strcmp(name, "memory_inst__tlb_inst__tlbread_ac_fault")) return root->ao486__DOT__memory_inst__DOT__tlb_inst__DOT__tlbread_ac_fault;
+                else if (!std::strcmp(name, "memory_inst__tlb_inst__tlbwrite_ac_fault")) return root->ao486__DOT__memory_inst__DOT__tlb_inst__DOT__tlbwrite_ac_fault;
                 else if (!std::strcmp(name, "exception_inst__exc_vector")) return root->ao486__DOT___exception_inst_exc_vector;
                 else if (!std::strcmp(name, "exception_inst__exc_eip")) return root->ao486__DOT___exception_inst_exc_eip;
                 return 0;
@@ -308,14 +393,30 @@ module RHDL
                 auto* root = ctx->dut->rootp;
                 if (!std::strcmp(name, "trace_cs_cache")) return ctx->dut->trace_cs_cache;
                 else if (!std::strcmp(name, "pipeline_inst__decode_inst__cs_cache")) return ctx->dut->trace_cs_cache;
+                else if (!std::strcmp(name, "pipeline_inst__decode_inst__fetch")) return root->ao486__DOT__pipeline_inst__DOT__decode_inst__DOT__fetch;
+                else if (!std::strcmp(name, "pipeline_inst__fetch_inst__fetch")) return root->ao486__DOT__pipeline_inst__DOT__fetch_inst__DOT__fetch;
                 else if (!std::strcmp(name, "trace_fetch_bytes")) return ctx->dut->trace_fetch_bytes;
+                else if (!std::strcmp(name, "pipeline_inst__read_inst__ds_cache")) return root->ao486__DOT__pipeline_inst__DOT__read_inst__DOT__ds_cache;
                 else if (!std::strcmp(name, "pipeline_inst__read_inst__ss_cache")) return root->ao486__DOT__pipeline_inst__DOT__read_inst__DOT__ss_cache;
+                else if (!std::strcmp(name, "pipeline_inst__execute_inst__zflag")) return root->ao486__DOT__pipeline_inst__DOT__execute_inst__DOT__zflag;
                 else if (!std::strcmp(name, "pipeline_inst__write_inst__es_cache")) return root->ao486__DOT__pipeline_inst__DOT__write_inst__DOT__es_cache;
+                else if (!std::strcmp(name, "pipeline_inst__write_inst__ds_cache")) return root->ao486__DOT__pipeline_inst__DOT__write_inst__DOT__ds_cache;
+                else if (!std::strcmp(name, "pipeline_inst__write_inst__zflag")) return root->ao486__DOT__pipeline_inst__DOT__write_inst__DOT__zflag;
                 else if (!std::strcmp(name, "pipeline_inst__write_inst__write_commands_inst__cs_cache_to_reg")) return root->ao486__DOT__pipeline_inst__DOT__write_inst__DOT__write_commands_inst__DOT__cs_cache_to_reg;
+                else if (!std::strcmp(name, "pipeline_inst__write_inst__write_commands_inst__ds_cache_to_reg")) return root->ao486__DOT__pipeline_inst__DOT__write_inst__DOT__write_commands_inst__DOT__ds_cache_to_reg;
                 else if (!std::strcmp(name, "pipeline_inst__write_inst__write_commands_inst__ss_cache_to_reg")) return root->ao486__DOT__pipeline_inst__DOT__write_inst__DOT__write_commands_inst__DOT__ss_cache_to_reg;
-                else if (!std::strcmp(name, "pipeline_inst__write_inst__write_register_inst__cs_cache")) return root->ao486__DOT__pipeline_inst__DOT__write_inst__DOT__write_register_inst__DOT__cs_cache_0;
-                else if (!std::strcmp(name, "pipeline_inst__write_inst__write_register_inst__ss_cache")) return root->ao486__DOT__pipeline_inst__DOT__write_inst__DOT__write_register_inst__DOT__ss_cache_0;
+                else if (!std::strcmp(name, "pipeline_inst__write_inst__write_register_inst__cs_cache")) return root->ao486__DOT__pipeline_inst__DOT__write_inst__DOT__write_register_inst__DOT__cs_cache;
+                else if (!std::strcmp(name, "pipeline_inst__write_inst__write_register_inst__acflag")) return root->ao486__DOT__pipeline_inst__DOT__write_inst__DOT__write_register_inst__DOT__acflag;
+                else if (!std::strcmp(name, "pipeline_inst__write_inst__write_register_inst__eax")) return root->ao486__DOT__pipeline_inst__DOT__write_inst__DOT__write_register_inst__DOT__eax;
+                else if (!std::strcmp(name, "pipeline_inst__write_inst__write_register_inst__ebx")) return root->ao486__DOT__pipeline_inst__DOT__write_inst__DOT__write_register_inst__DOT__ebx;
+                else if (!std::strcmp(name, "pipeline_inst__write_inst__write_register_inst__ecx")) return root->ao486__DOT__pipeline_inst__DOT__write_inst__DOT__write_register_inst__DOT__ecx;
+                else if (!std::strcmp(name, "pipeline_inst__write_inst__write_register_inst__edx")) return root->ao486__DOT__pipeline_inst__DOT__write_inst__DOT__write_register_inst__DOT__edx;
+                else if (!std::strcmp(name, "pipeline_inst__write_inst__write_register_inst__ds_cache")) return root->ao486__DOT__pipeline_inst__DOT__write_inst__DOT__write_register_inst__DOT__ds_cache;
+                else if (!std::strcmp(name, "pipeline_inst__write_inst__write_register_inst__ss_cache")) return root->ao486__DOT__pipeline_inst__DOT__write_inst__DOT__write_register_inst__DOT__ss_cache;
+                else if (!std::strcmp(name, "pipeline_inst__write_inst__write_register_inst__zflag")) return root->ao486__DOT__pipeline_inst__DOT__write_inst__DOT__write_register_inst__DOT__zflag;
                 else if (!std::strcmp(name, "pipeline_inst__write_inst__write_register_inst__cs_cache_to_reg")) return root->ao486__DOT__pipeline_inst__DOT__write_inst__DOT__write_register_inst__DOT__cs_cache_to_reg;
+                else if (!std::strcmp(name, "pipeline_inst__write_inst__write_register_inst__acflag_to_reg")) return root->ao486__DOT__pipeline_inst__DOT__write_inst__DOT__write_register_inst__DOT__acflag_to_reg;
+                else if (!std::strcmp(name, "pipeline_inst__write_inst__write_register_inst__ds_cache_to_reg")) return root->ao486__DOT__pipeline_inst__DOT__write_inst__DOT__write_register_inst__DOT__ds_cache_to_reg;
                 else if (!std::strcmp(name, "pipeline_inst__write_inst__write_register_inst__ss_cache_to_reg")) return root->ao486__DOT__pipeline_inst__DOT__write_inst__DOT__write_register_inst__DOT__ss_cache_to_reg;
                 else if (!std::strcmp(name, "pipeline_inst__write_inst__write_register_inst__wr_seg_cache_mask")) return root->ao486__DOT__pipeline_inst__DOT__write_inst__DOT__write_register_inst__DOT__wr_seg_cache_mask;
                 else if (!std::strcmp(name, "pipeline_inst__write_inst__write_register_inst__es_cache")) return root->ao486__DOT__pipeline_inst__DOT__write_inst__DOT___write_register_inst_es_cache;
@@ -327,7 +428,7 @@ module RHDL
                 else if (!std::strcmp(name, "pipeline_inst__write_inst__write_commands_inst__exe_buffer_shifted_w3")) return root->ao486__DOT__pipeline_inst__DOT__write_inst__DOT__write_commands_inst__DOT__exe_buffer_shifted[3];
                 else if (!std::strcmp(name, "pipeline_inst__write_inst__write_register_inst__ebp")) return root->ao486__DOT__pipeline_inst__DOT__write_inst__DOT__write_register_inst__DOT__ebp;
                 else if (!std::strcmp(name, "pipeline_inst__write_inst__write_string_inst__es_cache")) return root->ao486__DOT__pipeline_inst__DOT__write_inst__DOT__write_string_inst__DOT__es_cache;
-                else if (!std::strcmp(name, "memory_inst__icache_inst__prefetchfifo_write_data")) return root->ao486__DOT__memory_inst__DOT___icache_inst_prefetchfifo_write_data;
+                else if (!std::strcmp(name, "memory_inst__icache_inst__prefetchfifo_write_data")) return root->ao486__DOT__memory_inst__DOT__icache_inst__DOT__prefetchfifo_write_data;
                 else if (!std::strcmp(name, "pipeline_inst__fetch_inst__prefetchfifo_accept_data")) {
                   return static_cast<uint64_t>(root->ao486__DOT__pipeline_inst__DOT__fetch_inst__DOT__prefetchfifo_accept_data[0])
                     | (static_cast<uint64_t>(root->ao486__DOT__pipeline_inst__DOT__fetch_inst__DOT__prefetchfifo_accept_data[1]) << 32);
@@ -347,13 +448,14 @@ module RHDL
           end
         end
 
-        def self.build_from_cleaned_mlir(mlir_text, work_dir:)
-          new(headless: true).tap do |runner|
+        def self.build_from_cleaned_mlir(mlir_text, work_dir:, threads: 1)
+          new(headless: true, threads: threads).tap do |runner|
             runner.send(:build_imported_parity!, mlir_text, work_dir: work_dir)
           end
         end
 
-        def initialize(**kwargs)
+        def initialize(threads: 1, **kwargs)
+          @threads = RHDL::Codegen::Verilog::VerilogSimulator.normalize_threads(threads)
           super(runner_backend: :verilator, **kwargs)
           @work_dir = nil
           @binary_path = nil
@@ -372,7 +474,7 @@ module RHDL
         def ensure_sim!
           return @sim if @sim
 
-          bundle = self.class.runtime_bundle
+          bundle = self.class.runtime_bundle(threads: @threads)
           @sim = SimBridge.new(bundle.fetch(:library_path))
           sync_loaded_artifacts_to_sim!
           sync_runtime_windows!
@@ -414,6 +516,21 @@ module RHDL
               0xB4, 0x02
             ] + Array.new(GENERIC_DOS_STAGE_CHS_HELPER_ORIGINAL.length - 24, 0x90)
           ).freeze
+          DOS_INT2F_VECTOR = 0x2F
+          DOS_INT2F_WRAPPER_SEGMENT = 0x7000
+          DOS_INT2F_WRAPPER_OFFSET = 0x0000
+          DOS_INT2F_BOOTSTRAP_DOS_SEGMENT = 0x0070
+          DOS_INT2F_BOOTSTRAP_DOS_OFFSET = 0x1CAF
+          DOS_INT2F_LATE_FALLBACK_AFTER_CYCLES = 4_500_000
+          DOS_INT2F_LATE_FALLBACK_AFTER_LBA = 226
+          DOS_INT2F_LATE_FALLBACK_AX = [
+            0x1902, 0x1123, 0x1116, 0xAE00, 0x1119, 0x122E, 0x1125
+          ].freeze
+          DOS_INT12_WRAPPER_SEGMENT = 0x0070
+          DOS_INT12_WRAPPER_OFFSET = 0x03CD
+          DOS_INT12_WRAPPER_SAVED_VECTOR_OFFSET = DOS_INT12_WRAPPER_OFFSET - 4
+          DOS_INT12_BIOS_SEGMENT = 0xF000
+          DOS_INT12_BIOS_OFFSET = 0xF841
           DOS_INT13_RESULT_PORTS = {
             0x0EDC => [:dos_int13_result_ax, 0],
             0x0EDD => [:dos_int13_result_ax, 8],
@@ -449,18 +566,33 @@ module RHDL
           WIDE_SIGNAL_NAMES = %w[
             trace_cs_cache
             pipeline_inst__decode_inst__cs_cache
+            pipeline_inst__decode_inst__decoder_lo
+            pipeline_inst__decode_inst__fetch
+            pipeline_inst__fetch_inst__fetch
             trace_fetch_bytes
             memory_inst__icache_inst__prefetchfifo_write_data
             pipeline_inst__fetch_inst__prefetchfifo_accept_data
+            pipeline_inst__read_inst__ds_cache
             pipeline_inst__read_inst__ss_cache
+            pipeline_inst__execute_inst__zflag
+            pipeline_inst__write_inst__ds_cache
             pipeline_inst__write_inst__es_cache
+            pipeline_inst__write_inst__zflag
             pipeline_inst__write_inst__write_register_inst__es_cache
             pipeline_inst__write_inst__write_string_inst__es_cache
             pipeline_inst__write_inst__write_commands_inst__cs_cache_to_reg
+            pipeline_inst__write_inst__write_commands_inst__ds_cache_to_reg
             pipeline_inst__write_inst__write_commands_inst__ss_cache_to_reg
             pipeline_inst__write_inst__write_register_inst__cs_cache
+            pipeline_inst__write_inst__write_register_inst__eax
+            pipeline_inst__write_inst__write_register_inst__ebx
+            pipeline_inst__write_inst__write_register_inst__ecx
+            pipeline_inst__write_inst__write_register_inst__edx
+            pipeline_inst__write_inst__write_register_inst__ds_cache
             pipeline_inst__write_inst__write_register_inst__ss_cache
+            pipeline_inst__write_inst__write_register_inst__zflag
             pipeline_inst__write_inst__write_register_inst__cs_cache_to_reg
+            pipeline_inst__write_inst__write_register_inst__ds_cache_to_reg
             pipeline_inst__write_inst__write_register_inst__ss_cache_to_reg
             pipeline_inst__write_inst__write_register_inst__wr_seg_cache_mask
           ].freeze
@@ -652,12 +784,15 @@ module RHDL
               unless reset_active
                 commit_memory_write_if_needed(committed_writes)
                 maybe_repair_generic_dos_stage_vars
+                maybe_repair_dos_int12_wrapper_chain
+                maybe_install_late_dos_int2f_fallback
                 handle_interrupt_ack
                 maybe_seed_post_init_ivt
                 advance_timers
               end
               advance_read_burst(retargeted ? false : !read_response.nil?)
               @reset_cycles_remaining = [@reset_cycles_remaining - 1, 0].max
+              @host_cycles_total += 1
               @prev_io_read_do = current_io_read_do
               @prev_io_write_do = current_io_write_do
             end
@@ -723,7 +858,11 @@ module RHDL
           def runner_ao486_dos_int1a_state
             {
               ax: @dos_int1a_ax,
+              cx: @dos_int1a_cx,
+              dx: @dos_int1a_dx,
               result_ax: @dos_int1a_result_ax,
+              result_cx: @dos_int1a_result_cx,
+              result_dx: @dos_int1a_result_dx,
               flags: @dos_int1a_result_flags
             }
           end
@@ -786,6 +925,8 @@ module RHDL
             @last_io_write_meta = nil
             @last_irq_vector = nil
             @pc_history = []
+            @host_cycles_total = 0
+            @dos_int2f_wrapper_installed = false
             write_bios_tick_count(0)
             @memory[0x0470] = 0
             @reset_cycles_remaining = 1
@@ -1025,7 +1166,9 @@ module RHDL
             (0x70..0x77).each { |vector| write_interrupt_vector(vector, 0xF000, 0xE9EC) }
             write_interrupt_vector(0x11, 0xF000, 0xF84D)
             write_interrupt_vector(0x12, 0xF000, 0xF841)
-            write_interrupt_vector(0x15, 0xF000, 0xF859)
+            write_interrupt_vector(0x15, 0xF000, VerilatorRunner::DOS_INT15_STUB_OFFSET)
+            write_interrupt_vector(0x2A, 0xF000, VerilatorRunner::DOS_INT2A_STUB_OFFSET)
+            write_interrupt_vector(0x2F, 0xF000, VerilatorRunner::DOS_INT2F_STUB_OFFSET)
             write_interrupt_vector(0x17, 0xF000, 0xEFD2)
             write_interrupt_vector(0x18, 0xF000, 0x8666)
             {
@@ -1495,6 +1638,62 @@ module RHDL
             load_store!(@memory, GENERIC_DOS_STAGE_CHS_HELPER_PATCH, helper_base)
           end
 
+          def maybe_repair_dos_int12_wrapper_chain
+            return unless memory_u16(0x12 * 4) == DOS_INT12_WRAPPER_OFFSET
+            return unless memory_u16((0x12 * 4) + 2) == DOS_INT12_WRAPPER_SEGMENT
+
+            wrapper_base = DOS_INT12_WRAPPER_SEGMENT << 4
+            saved_vector_addr = wrapper_base + DOS_INT12_WRAPPER_SAVED_VECTOR_OFFSET
+            return if memory_u16(saved_vector_addr) == DOS_INT12_BIOS_OFFSET &&
+                      memory_u16(saved_vector_addr + 2) == DOS_INT12_BIOS_SEGMENT
+
+            write_u16(saved_vector_addr, DOS_INT12_BIOS_OFFSET)
+            write_u16(saved_vector_addr + 2, DOS_INT12_BIOS_SEGMENT)
+          end
+
+          def maybe_install_late_dos_int2f_fallback
+            return if @dos_int2f_wrapper_installed
+            return unless @host_cycles_total >= DOS_INT2F_LATE_FALLBACK_AFTER_CYCLES
+            return unless @dos_int13_history.any? { |entry| entry[:lba] == DOS_INT2F_LATE_FALLBACK_AFTER_LBA }
+
+            current_offset = memory_u16(DOS_INT2F_VECTOR * 4)
+            current_segment = memory_u16((DOS_INT2F_VECTOR * 4) + 2)
+            if current_offset == DOS_INT2F_WRAPPER_OFFSET &&
+               current_segment == DOS_INT2F_WRAPPER_SEGMENT
+              @dos_int2f_wrapper_installed = true
+              return
+            end
+
+            return unless current_offset == DOS_INT2F_BOOTSTRAP_DOS_OFFSET
+            return unless current_segment == DOS_INT2F_BOOTSTRAP_DOS_SEGMENT
+
+            load_store!(
+              @memory,
+              dos_int2f_late_fallback_wrapper_bytes(current_offset, current_segment),
+              (DOS_INT2F_WRAPPER_SEGMENT << 4) + DOS_INT2F_WRAPPER_OFFSET
+            )
+            write_interrupt_vector(DOS_INT2F_VECTOR, DOS_INT2F_WRAPPER_SEGMENT, DOS_INT2F_WRAPPER_OFFSET)
+            @dos_int2f_wrapper_installed = true
+          end
+
+          def dos_int2f_late_fallback_wrapper_bytes(old_offset, old_segment)
+            bytes = []
+            DOS_INT2F_LATE_FALLBACK_AX.each do |value|
+              bytes.concat(
+                [
+                  0x9C,
+                  0x3D, value & 0xFF, (value >> 8) & 0xFF,
+                  0x75, 0x02,
+                  0x9D,
+                  0xCF,
+                  0x9D
+                ]
+              )
+            end
+            bytes.concat([0xEA, old_offset & 0xFF, (old_offset >> 8) & 0xFF, old_segment & 0xFF, (old_segment >> 8) & 0xFF])
+            bytes
+          end
+
           def memory_u16(addr)
             @memory.fetch(addr, 0) | (@memory.fetch(addr + 1, 0) << 8)
           end
@@ -1565,7 +1764,7 @@ module RHDL
                 @dos_int16_result_flags = 1
               end
             when 0x02
-              @dos_int16_result_flags = 1
+              @dos_int16_result_flags = 0
             end
           end
 
@@ -1975,7 +2174,7 @@ module RHDL
           end
 
           def hdd_drive?(drive)
-            (drive & 0xFF) >= 0x80 && !@hdd_store.empty?
+            (drive & 0xFF) == 0x80 && !@hdd_store.empty?
           end
 
           def invalid_dos_floppy_request
@@ -1999,6 +2198,7 @@ module RHDL
 
           def default_cmos
             Array.new(128, 0).tap do |cmos|
+              seed_cmos_datetime!(cmos)
               cmos[0x0A] = 0x26
               cmos[0x0B] = 0x02
               cmos[0x0D] = 0x80
@@ -2029,6 +2229,25 @@ module RHDL
               cmos[0x5B] = 0x00
               cmos[0x5C] = 0x07
             end
+          end
+
+          def seed_cmos_datetime!(cmos, time = Time.now.getlocal)
+            seconds = time.sec
+            seconds = 1 if time.hour.zero? && time.min.zero? && seconds.zero?
+
+            cmos[0x00] = encode_cmos_bcd(seconds)
+            cmos[0x02] = encode_cmos_bcd(time.min)
+            cmos[0x04] = encode_cmos_bcd(time.hour)
+            cmos[0x06] = encode_cmos_bcd(time.wday.zero? ? 7 : time.wday)
+            cmos[0x07] = encode_cmos_bcd(time.day)
+            cmos[0x08] = encode_cmos_bcd(time.month)
+            cmos[0x09] = encode_cmos_bcd(time.year % 100)
+            cmos[0x32] = encode_cmos_bcd(time.year / 100)
+          end
+
+          def encode_cmos_bcd(value)
+            normalized = value.to_i.abs
+            ((normalized / 10) << 4) | (normalized % 10)
           end
 
           def set_pit_reload(value)

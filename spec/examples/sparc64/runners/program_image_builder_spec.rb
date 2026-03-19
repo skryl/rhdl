@@ -45,7 +45,10 @@ RSpec.describe RHDL::Examples::SPARC64::Integration::ProgramImageBuilder do
       expect(File.read(boot_linker_path)).to include('program_entry = 0x10000;')
       expect(result.boot_bytes.bytesize).to eq(64)
       expect(File.read(result.program_source_path)).to include('MAILBOX_STATUS')
-      expect(File.read(result.program_source_path)).to match(/\.section \.text\n(?:nop\n){8}/)
+      expect(File.read(result.program_source_path)).to include('.equ PROGRAM_ENTRY_LOCK, 0x1010')
+      expect(File.read(result.program_source_path)).to include('ldstub [%g6], %g7')
+      expect(File.read(result.program_source_path)).to include('benchmark_parking_loop:')
+      expect(File.read(result.program_source_path)).to match(/\.section \.text\n(?:  nop\n){8}/)
     end
   end
 

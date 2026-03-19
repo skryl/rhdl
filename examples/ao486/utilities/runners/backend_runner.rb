@@ -7,6 +7,7 @@ module RHDL
     module AO486
       class BackendRunner
         DEFAULT_UNLIMITED_CHUNK = 100_000
+        SHELL_PROMPT_PATTERN = /(?:^|\n)[A-Z](?::\\?)?>/.freeze
         SOFTWARE_ROOT = File.expand_path('../../software', __dir__)
         ROM_ROOT = File.join(SOFTWARE_ROOT, 'rom')
         BIN_ROOT = File.join(SOFTWARE_ROOT, 'bin')
@@ -15,6 +16,8 @@ module RHDL
         CURSOR_BDA = DisplayAdapter::CURSOR_BDA
 
         MAX_FLOPPY_SLOTS = 2
+        HDD_MBR_PARTITION_OFFSET = 0x1BE
+        HDD_DEFAULT_PARTITION_START_LBA = 63
 
         attr_reader :backend, :sim_backend, :cycles_run, :floppy_image, :last_run_stats, :active_floppy_slot
 
@@ -63,11 +66,11 @@ module RHDL
         end
 
         def dos_path
-          software_path('bin', 'msdos4_disk1.img')
+          software_path('bin', 'msdos622_boot.img')
         end
 
         def dos_disk2_path
-          software_path('bin', 'msdos4_disk2.img')
+          dos_path
         end
 
         def hdd_path
@@ -174,9 +177,16 @@ module RHDL
           hdd_image_path = File.expand_path(path)
           ensure_file!(hdd_image_path, 'AO486 HDD image')
           bytes = File.binread(hdd_image_path)
-          @hdd_image = bytes
-          @hdd_geometry = infer_hdd_geometry(bytes)
-          { path: hdd_image_path, size: bytes.bytesize, geometry: @hdd_geometry }
+          prepared = prepare_hdd_image(bytes)
+          @hdd_image = prepared.fetch(:image)
+          @hdd_geometry = prepared.fetch(:geometry)
+          {
+            path: hdd_image_path,
+            size: bytes.bytesize,
+            presented_size: @hdd_image.bytesize,
+            geometry: @hdd_geometry,
+            wrapped: prepared.fetch(:wrapped)
+          }
         end
 
         def hdd_loaded?
@@ -238,7 +248,7 @@ module RHDL
           start_cycles = @cycles_run
           chunk = max_cycles || cycles || @requested_cycles || speed || @speed || DEFAULT_UNLIMITED_CHUNK
           @cycles_run += tick_backend(chunk.to_i)
-          @shell_prompt_detected ||= false
+          update_shell_prompt_detection!
           record_run_stats(operation: :run, cycles: @cycles_run - start_cycles, started_at: started_at)
 
           state.merge(cycles: @cycles_run, speed: speed || @speed, headless: headless)
@@ -331,6 +341,15 @@ module RHDL
             elapsed_seconds: elapsed_seconds,
             cycles_per_second: cycles_per_second
           }
+        end
+
+        def update_shell_prompt_detection!(display_text = nil)
+          @shell_prompt_detected ||= shell_prompt_visible?(display_text)
+        end
+
+        def shell_prompt_visible?(display_text = nil)
+          text = display_text || render_display(debug_lines: [])
+          text.match?(SHELL_PROMPT_PATTERN)
         end
 
         def tick_backend(cycles)
@@ -426,6 +445,101 @@ module RHDL
             cylinders: cylinders,
             total_sectors: total_sectors
           }
+        end
+
+        def prepare_hdd_image(bytes)
+          raw = bytes.is_a?(String) ? bytes.b.dup : Array(bytes).pack('C*')
+          return { image: raw, geometry: infer_hdd_geometry(raw), wrapped: false } unless raw_hdd_volume_without_partition_table?(raw)
+
+          bytes_per_sector = little_endian_u16(raw, 11)
+          sectors_per_track = little_endian_u16(raw, 24)
+          heads = little_endian_u16(raw, 26)
+          total_sectors = little_endian_u16(raw, 19)
+          total_sectors = little_endian_u32(raw, 32) if total_sectors.zero?
+
+          partition_start_lba = HDD_DEFAULT_PARTITION_START_LBA
+          sectors_per_cylinder = sectors_per_track * heads
+          disk_total_sectors = partition_start_lba + total_sectors
+          disk_total_sectors = ((disk_total_sectors + sectors_per_cylinder - 1) / sectors_per_cylinder) * sectors_per_cylinder
+
+          disk_image = "\x00".b * (disk_total_sectors * bytes_per_sector)
+          volume = raw.dup
+          write_little_endian_u32!(volume, 28, partition_start_lba)
+          disk_image[(partition_start_lba * bytes_per_sector), volume.bytesize] = volume
+          disk_image[HDD_MBR_PARTITION_OFFSET, 16] = build_hdd_partition_entry(
+            start_lba: partition_start_lba,
+            total_sectors: total_sectors,
+            heads: heads,
+            sectors_per_track: sectors_per_track
+          )
+          disk_image.setbyte(510, 0x55)
+          disk_image.setbyte(511, 0xAA)
+
+          {
+            image: disk_image,
+            geometry: {
+              bytes_per_sector: bytes_per_sector,
+              sectors_per_track: sectors_per_track,
+              heads: heads,
+              cylinders: [disk_total_sectors / sectors_per_cylinder, 1].max,
+              total_sectors: disk_total_sectors
+            },
+            wrapped: true
+          }
+        end
+
+        def raw_hdd_volume_without_partition_table?(raw)
+          return false if raw.bytesize < 512
+          return false unless raw.byteslice(HDD_MBR_PARTITION_OFFSET, 64)&.bytes&.all?(&:zero?)
+          return false unless boot_sector_signature?(raw)
+          return false unless little_endian_u16(raw, 11).positive?
+          return false unless little_endian_u16(raw, 24).positive?
+          return false unless little_endian_u16(raw, 26).positive?
+
+          total_sectors = little_endian_u16(raw, 19)
+          total_sectors = little_endian_u32(raw, 32) if total_sectors.zero?
+          total_sectors.positive?
+        end
+
+        def boot_sector_signature?(raw)
+          raw.getbyte(510) == 0x55 && raw.getbyte(511) == 0xAA
+        end
+
+        def build_hdd_partition_entry(start_lba:, total_sectors:, heads:, sectors_per_track:)
+          end_lba = start_lba + total_sectors - 1
+          start_chs = encode_partition_chs(start_lba, heads: heads, sectors_per_track: sectors_per_track)
+          end_chs = encode_partition_chs(end_lba, heads: heads, sectors_per_track: sectors_per_track)
+
+          ([0x80] + start_chs + [partition_type_for(total_sectors)] + end_chs).pack('C8') +
+            [start_lba, total_sectors].pack('V2')
+        end
+
+        def partition_type_for(total_sectors)
+          total_sectors <= 65_535 ? 0x04 : 0x06
+        end
+
+        def encode_partition_chs(lba, heads:, sectors_per_track:)
+          sectors_per_cylinder = heads * sectors_per_track
+          cylinder = lba / sectors_per_cylinder
+          remainder = lba % sectors_per_cylinder
+          head = remainder / sectors_per_track
+          sector = (remainder % sectors_per_track) + 1
+
+          if cylinder > 1023
+            cylinder = 1023
+            head = heads - 1
+            sector = sectors_per_track
+          end
+
+          [
+            head & 0xFF,
+            (sector & 0x3F) | ((cylinder >> 2) & 0xC0),
+            cylinder & 0xFF
+          ]
+        end
+
+        def write_little_endian_u32!(raw, offset, value)
+          raw[offset, 4] = [value].pack('V')
         end
 
         def geometry_from_size(bytesize)

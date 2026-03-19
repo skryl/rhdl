@@ -15,6 +15,8 @@ module RHDL
           BOOT_PROGRAM_ENTRY = PROGRAM_BASE
           BOOT_SHIM_REVISION = 'uncached_boot_prom_slot_branch_table_va_8000'.freeze
           PROGRAM_ENTRY_PAD_REVISION = 'entry_pad_8_nops'.freeze
+          PROGRAM_ENTRY_LOCK_REVISION = 'program_entry_lock_ldstub_1010'.freeze
+          PROGRAM_ENTRY_LOCK_ADDR = 0x0000_0000_0000_1010
 
           BuildResult = Struct.new(
             :program,
@@ -110,6 +112,7 @@ module RHDL
               MAILBOX_VALUE,
               BOOT_SHIM_REVISION,
               PROGRAM_ENTRY_PAD_REVISION,
+              PROGRAM_ENTRY_LOCK_REVISION,
               program.name,
               program.program_source
             ].join("\n"))
@@ -218,6 +221,7 @@ module RHDL
               .equ STACK_TOP, #{format('0x%X', STACK_TOP)}
               .equ MAILBOX_STATUS, #{format('0x%X', MAILBOX_STATUS)}
               .equ MAILBOX_VALUE, #{format('0x%X', MAILBOX_VALUE)}
+              .equ PROGRAM_ENTRY_LOCK, #{format('0x%X', PROGRAM_ENTRY_LOCK_ADDR)}
 
               .section .text
               nop
@@ -228,6 +232,18 @@ module RHDL
               nop
               nop
               nop
+
+              # Let both cores reach DRAM handoff, then park the loser here.
+              sethi %hi(PROGRAM_ENTRY_LOCK), %g6
+              or %g6, %lo(PROGRAM_ENTRY_LOCK), %g6
+              ldstub [%g6], %g7
+              cmp %g7, 0
+              be benchmark_entry
+              nop
+            benchmark_parking_loop:
+              ba benchmark_parking_loop
+              nop
+            benchmark_entry:
 
               #{program.program_source}
             ASM

@@ -160,6 +160,17 @@ module Sparc64IntegrationSupport
     pending("SPARC64 HeadlessRunner construction not ready yet: #{e.message}")
   end
 
+  def benchmark_handoff_trace(trace)
+    events = normalize_wishbone_trace(trace)
+    start_index = events.index do |event|
+      addr = event.fetch(:addr).to_i
+      addr >= PROGRAM_BASE && addr < RHDL::Examples::SPARC64::Integration::FLASH_BOOT_BASE
+    end
+    return [] unless start_index
+
+    events[start_index..]
+  end
+
   def normalize_run_result(result)
     data =
       case result

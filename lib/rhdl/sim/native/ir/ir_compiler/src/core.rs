@@ -56,12 +56,59 @@ struct ExprCodegenState {
     emitted: HashSet<usize>,
     emitting: HashSet<usize>,
     temp_counter: usize,
+    wide_expr_ref_temps: HashMap<usize, String>,
+    wide_signal_temps: HashMap<usize, String>,
+    wide_slice_temps: HashMap<(usize, usize, usize), String>,
 }
 
 impl ExprCodegenState {
     fn fresh_temp(&mut self, prefix: &str) -> String {
         let name = format!("{}_{}", prefix, self.temp_counter);
         self.temp_counter += 1;
+        name
+    }
+
+    fn cached_wide_signal_load(
+        &mut self,
+        idx: usize,
+        signals_ptr: &str,
+        wide_words_ptr: &str,
+        emitted_lines: &mut Vec<String>,
+    ) -> String {
+        if let Some(name) = self.wide_signal_temps.get(&idx) {
+            return name.clone();
+        }
+
+        let name = self.fresh_temp("wide_signal");
+        emitted_lines.push(format!(
+            "let {} = wide_load_signal({}, {}, {});",
+            name, signals_ptr, wide_words_ptr, idx
+        ));
+        self.wide_signal_temps.insert(idx, name.clone());
+        name
+    }
+
+    fn cached_wide_signal_slice(
+        &mut self,
+        idx: usize,
+        low: usize,
+        width: usize,
+        signals_ptr: &str,
+        wide_words_ptr: &str,
+        emitted_lines: &mut Vec<String>,
+    ) -> String {
+        let key = (idx, low, width);
+        if let Some(name) = self.wide_slice_temps.get(&key) {
+            return name.clone();
+        }
+
+        let base = self.cached_wide_signal_load(idx, signals_ptr, wide_words_ptr, emitted_lines);
+        let name = self.fresh_temp("wide_slice");
+        emitted_lines.push(format!(
+            "let {} = wide_slice_u128({}, {}, {});",
+            name, base, low, width
+        ));
+        self.wide_slice_temps.insert(key, name.clone());
         name
     }
 }
@@ -3089,6 +3136,17 @@ impl CoreSimulator {
         code.push_str("    }\n");
         code.push_str("    out\n");
         code.push_str("}\n\n");
+        code.push_str("#[inline(always)]\n");
+        code.push_str("fn wide_repeat_pattern(value: WideValue256, part_width: usize, repeat_count: usize) -> WideValue256 {\n");
+        code.push_str("    if part_width == 0 || repeat_count == 0 { return wide_zero(); }\n");
+        code.push_str("    let masked = wide_mask(value, part_width);\n");
+        code.push_str("    let mut out = wide_zero();\n");
+        code.push_str("    for _ in 0..repeat_count {\n");
+        code.push_str("        out = wide_shift_left(out, part_width);\n");
+        code.push_str("        out = wide_or(out, masked);\n");
+        code.push_str("    }\n");
+        code.push_str("    out\n");
+        code.push_str("}\n\n");
 
         let flat_assign_indices = &self.compiled_comb_assign_indices;
         // Compact CIRCT payloads already carry an explicit shared-expression
@@ -3389,6 +3447,10 @@ impl CoreSimulator {
         state: &mut ExprCodegenState,
         emitted_lines: &mut Vec<String>,
     ) -> String {
+        if let Some(name) = state.wide_expr_ref_temps.get(&id) {
+            return name.clone();
+        }
+
         if state.emitting.contains(&id) {
             return "wide_zero()".to_string();
         }
@@ -3408,7 +3470,16 @@ impl CoreSimulator {
             emitted_lines,
         );
         state.emitting.remove(&id);
-        expr_code
+
+        let use_count = self.expr_ref_use_counts.get(id).copied().unwrap_or(0);
+        if use_count <= 1 {
+            return expr_code;
+        }
+
+        let var_name = format!("ew{}", id);
+        emitted_lines.push(format!("let {} = {};", var_name, expr_code));
+        state.wide_expr_ref_temps.insert(id, var_name.clone());
+        var_name
     }
 
     fn emit_expr_ref_value(
@@ -3596,16 +3667,39 @@ impl CoreSimulator {
                         _ => "0u128".to_string(),
                     }
                 } else if base_width > 128 {
-                    let wide_base = self.expr_to_rust_wide_cached_emitting(
-                        base,
-                        signals_ptr,
-                        wide_words_ptr.unwrap_or("wh"),
-                        overwide_ptrs.unwrap_or("ow"),
-                        cache,
-                        state,
-                        emitted_lines,
-                    );
-                    format!("wide_slice_u128({}, {}, {})", wide_base, low, width)
+                    match self.resolve_expr(base) {
+                        ExprDef::Signal { name, .. } => {
+                            let idx = self.name_to_idx.get(name).copied().unwrap_or(0);
+                            state.cached_wide_signal_slice(
+                                idx,
+                                *low,
+                                *width,
+                                signals_ptr,
+                                wide_words_ptr.unwrap_or("wh"),
+                                emitted_lines,
+                            )
+                        }
+                        ExprDef::SignalIndex { idx, .. } => state.cached_wide_signal_slice(
+                            *idx,
+                            *low,
+                            *width,
+                            signals_ptr,
+                            wide_words_ptr.unwrap_or("wh"),
+                            emitted_lines,
+                        ),
+                        _ => {
+                            let wide_base = self.expr_to_rust_wide_cached_emitting(
+                                base,
+                                signals_ptr,
+                                wide_words_ptr.unwrap_or("wh"),
+                                overwide_ptrs.unwrap_or("ow"),
+                                cache,
+                                state,
+                                emitted_lines,
+                            );
+                            format!("wide_slice_u128({}, {}, {})", wide_base, low, width)
+                        }
+                    }
                 } else if *low >= 128 {
                     "0u128".to_string()
                 } else {
@@ -3778,30 +3872,20 @@ impl CoreSimulator {
         state: &mut ExprCodegenState,
         emitted_lines: &mut Vec<String>,
     ) -> String {
-        match self.resolve_expr(expr) {
+        match expr {
             ExprDef::Signal { name, width } => {
                 let idx = self.name_to_idx.get(name).copied().unwrap_or(0);
                 if *width <= 128 {
                     format!("wide_from_u128(*{}.add({}))", signals_ptr, idx)
                 } else {
-                    if let Some(cache) = cache {
-                        if let Some(temp) = cache.get(&idx) {
-                            return format!("wide_from_u128({})", temp);
-                        }
-                    }
-                    format!("wide_load_signal({}, {}, {})", signals_ptr, wide_words_ptr, idx)
+                    state.cached_wide_signal_load(idx, signals_ptr, wide_words_ptr, emitted_lines)
                 }
             }
             ExprDef::SignalIndex { idx, width } => {
                 if *width <= 128 {
                     format!("wide_from_u128(*{}.add({}))", signals_ptr, idx)
                 } else {
-                    if let Some(cache) = cache {
-                        if let Some(temp) = cache.get(idx) {
-                            return format!("wide_from_u128({})", temp);
-                        }
-                    }
-                    format!("wide_load_signal({}, {}, {})", signals_ptr, wide_words_ptr, idx)
+                    state.cached_wide_signal_load(*idx, signals_ptr, wide_words_ptr, emitted_lines)
                 }
             }
             ExprDef::Literal { value, width, .. } => self.wide_literal_const(value, *width),
@@ -3855,6 +3939,43 @@ impl CoreSimulator {
                 temp
             }
             ExprDef::Concat { parts, width } => {
+                if let Some((repeat_part, part_width, repeat_count)) =
+                    self.repeated_concat_part(parts, *width)
+                {
+                    let part_code = if part_width > 128 {
+                        self.expr_to_rust_wide_cached_emitting(
+                            repeat_part,
+                            signals_ptr,
+                            wide_words_ptr,
+                            overwide_ptrs,
+                            cache,
+                            state,
+                            emitted_lines,
+                        )
+                    } else {
+                        let narrow_part = self.expr_to_rust_ptr_cached_emitting(
+                            repeat_part,
+                            signals_ptr,
+                            Some(wide_words_ptr),
+                            Some(overwide_ptrs),
+                            cache,
+                            state,
+                            emitted_lines,
+                        );
+                        format!(
+                            "wide_from_u128(({}) & {})",
+                            narrow_part,
+                            Self::mask_const(part_width)
+                        )
+                    };
+                    let temp = state.fresh_temp("wide_repeat");
+                    emitted_lines.push(format!(
+                        "let {} = wide_mask(wide_repeat_pattern({}, {}, {}), {});",
+                        temp, part_code, part_width, repeat_count, width
+                    ));
+                    return temp;
+                }
+
                 let temp = state.fresh_temp("wide_concat");
                 emitted_lines.push(format!("let mut {} = wide_zero();", temp));
                 for part in parts {

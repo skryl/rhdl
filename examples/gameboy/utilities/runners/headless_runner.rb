@@ -29,7 +29,8 @@ module RHDL
       # @param use_rhdl_source [Boolean] Force export from the selected RHDL top instead of imported Verilog.
       # @param jit [Boolean, nil] Compatibility override for the arcilator JIT path.
       def initialize(mode: :ruby, sim: nil, hdl_dir: nil, verilog_dir: nil, top: nil,
-                     use_staged_verilog: true, use_normalized_verilog: false, use_rhdl_source: false, jit: nil)
+                     use_staged_verilog: true, use_normalized_verilog: false, use_rhdl_source: false, jit: nil,
+                     threads: 1)
         @mode = mode
         @sim_backend = sim || default_backend(mode)
         @hdl_dir = hdl_dir
@@ -41,6 +42,7 @@ module RHDL
         normalize_source_selection!
         @sim_backend = normalize_backend_for_mode(@sim_backend)
         @jit = jit.nil? ? (@sim_backend == :jit) : !!jit
+        @threads = RHDL::Codegen::Verilog::VerilogSimulator.normalize_threads(threads)
 
         # Create runner based on mode and sim backend
         @runner = case mode
@@ -61,7 +63,8 @@ module RHDL
                       top: @top,
                       use_staged_verilog: @use_staged_verilog,
                       use_normalized_verilog: @use_normalized_verilog,
-                      use_rhdl_source: @use_rhdl_source
+                      use_rhdl_source: @use_rhdl_source,
+                      threads: @threads
                     )
                   when :circt, :arcilator
                     require_relative 'arcilator_runner'

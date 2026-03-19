@@ -63,6 +63,8 @@ module altsyncram #(
     reg [MEM_WIDTH-1:0] mem [0:MEM_DEPTH-1];
     reg [width_a-1:0] q_a_word;
     reg [width_b-1:0] q_b_word;
+    reg [widthad_b-1:0] address_b_reg_clock0;
+    reg [widthad_b-1:0] address_b_reg_clock1;
     integer idx;
 
     function [MEM_WIDTH-1:0] apply_byteena_a;
@@ -110,8 +112,31 @@ module altsyncram #(
             for (idx = 0; idx < MEM_DEPTH; idx = idx + 1) begin
                 mem[idx] <= {MEM_WIDTH{1'b0}};
             end
+            if (widthad_b > 0) begin
+                address_b_reg_clock0 <= {widthad_b{1'b0}};
+            end
         end else if (clocken0 && !addressstall_a && wren_a) begin
             mem[address_a] <= apply_byteena_a(mem[address_a], data_a, byteena_a);
+        end
+    end
+
+    always @(posedge clock0 or posedge aclr0) begin
+        if (aclr0) begin
+            if (widthad_b > 0) begin
+                address_b_reg_clock0 <= {widthad_b{1'b0}};
+            end
+        end else if (address_reg_b == "CLOCK0" && clocken0 && !addressstall_b) begin
+            address_b_reg_clock0 <= address_b;
+        end
+    end
+
+    always @(posedge clock1 or posedge aclr1) begin
+        if (aclr1) begin
+            if (widthad_b > 0) begin
+                address_b_reg_clock1 <= {widthad_b{1'b0}};
+            end
+        end else if (address_reg_b == "CLOCK1" && clocken1 && !addressstall_b) begin
+            address_b_reg_clock1 <= address_b;
         end
     end
 
@@ -126,12 +151,18 @@ module altsyncram #(
     end
 
     always @* begin
+        reg [widthad_b-1:0] effective_address_b;
+
         q_b_word = {width_b{1'b0}};
+        if (address_reg_b == "CLOCK0") begin
+            effective_address_b = address_b_reg_clock0;
+        end else if (address_reg_b == "CLOCK1") begin
+            effective_address_b = address_b_reg_clock1;
+        end else begin
+            effective_address_b = address_b;
+        end
         if (clocken3 && !addressstall_b && rden_b) begin
-            q_b_word = mem[address_b][width_b-1:0];
-            if (clocken0 && !addressstall_a && wren_a && (address_a == address_b)) begin
-                q_b_word = apply_byteena_a(mem[address_a], data_a, byteena_a)[width_b-1:0];
-            end
+            q_b_word = mem[effective_address_b][width_b-1:0];
         end
     end
 

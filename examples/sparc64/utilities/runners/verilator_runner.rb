@@ -59,7 +59,56 @@ module RHDL
           'wbm_data_o' => 64
         }.freeze
 
-        SIGNAL_WIDTHS = INPUT_SIGNAL_WIDTHS.merge(OUTPUT_SIGNAL_WIDTHS).freeze
+        DEBUG_SIGNAL_WIDTHS = {
+          'os2wb_inst__state' => 5,
+          'os2wb_inst__cpx_ready' => 1,
+          'os2wb_inst__cpu' => 1,
+          'os2wb_inst__pcx_req_d' => 5,
+          'os2wb_inst__wb_cycle' => 1,
+          'os2wb_inst__wb_strobe' => 1,
+          'os2wb_inst__wb_we' => 1,
+          'os2wb_inst__wb_addr' => 64,
+          'sparc_0__ifu__errdp__fdp_erb_pc_f' => 48,
+          'sparc_0__tlu__misctl__ifu_npc_w' => 49,
+          'sparc_0__ifu__swl__thrfsm0__thr_state' => 5,
+          'sparc_0__ifu__swl__thrfsm1__thr_state' => 5,
+          'sparc_0__ifu__swl__thrfsm2__thr_state' => 5,
+          'sparc_0__ifu__swl__thrfsm3__thr_state' => 5,
+          'sparc_0__ifu__swl__dtu_fcl_nextthr_bf' => 4,
+          'sparc_0__ifu__swl__completion' => 4,
+          'sparc_0__ifu__swl__schedule' => 4,
+          'sparc_0__ifu__swl__int_activate' => 4,
+          'sparc_0__ifu__swl__start_thread' => 4,
+          'sparc_0__ifu__swl__thaw_thread' => 4,
+          'sparc_0__ifu__swl__resum_thread' => 4,
+          'sparc_0__ifu__swl__rdy' => 4,
+          'sparc_0__ifu__swl__retr_thr_wakeup' => 4,
+          'sparc_0__ifu__fcl__rune_ff__q' => 1,
+          'sparc_0__ifu__fcl__rund_ff__q' => 1,
+          'sparc_0__ifu__fcl__runm_ff__q' => 1,
+          'sparc_0__ifu__fcl__runw_ff__q' => 1,
+          'sparc_1__ifu__errdp__fdp_erb_pc_f' => 48,
+          'sparc_1__tlu__misctl__ifu_npc_w' => 49,
+          'sparc_1__ifu__swl__thrfsm0__thr_state' => 5,
+          'sparc_1__ifu__swl__thrfsm1__thr_state' => 5,
+          'sparc_1__ifu__swl__thrfsm2__thr_state' => 5,
+          'sparc_1__ifu__swl__thrfsm3__thr_state' => 5,
+          'sparc_1__ifu__swl__dtu_fcl_nextthr_bf' => 4,
+          'sparc_1__ifu__swl__completion' => 4,
+          'sparc_1__ifu__swl__schedule' => 4,
+          'sparc_1__ifu__swl__int_activate' => 4,
+          'sparc_1__ifu__swl__start_thread' => 4,
+          'sparc_1__ifu__swl__thaw_thread' => 4,
+          'sparc_1__ifu__swl__resum_thread' => 4,
+          'sparc_1__ifu__swl__rdy' => 4,
+          'sparc_1__ifu__swl__retr_thr_wakeup' => 4,
+          'sparc_1__ifu__fcl__rune_ff__q' => 1,
+          'sparc_1__ifu__fcl__rund_ff__q' => 1,
+          'sparc_1__ifu__fcl__runm_ff__q' => 1,
+          'sparc_1__ifu__fcl__runw_ff__q' => 1
+        }.freeze
+
+        SIGNAL_WIDTHS = INPUT_SIGNAL_WIDTHS.merge(OUTPUT_SIGNAL_WIDTHS).merge(DEBUG_SIGNAL_WIDTHS).freeze
 
         VERILATOR_WARNING_FLAGS = %w[
           --no-timing
@@ -92,8 +141,10 @@ module RHDL
                        import_top_file: nil,
                        top: 'S1Top',
                        component_class: nil,
-                       compile_now: true)
+                       compile_now: true,
+                       threads: 1)
           @source_kind = normalize_source_kind(source_kind)
+          @threads = RHDL::Codegen::Verilog::VerilogSimulator.normalize_threads(threads)
           @source_bundle = source_bundle || resolve_source_bundle(
             fast_boot: fast_boot,
             source_bundle_class: source_bundle_class,
@@ -206,7 +257,25 @@ module RHDL
         end
 
         def debug_snapshot
-          {}
+          {
+            reset: {
+              cycle_counter: clock_count,
+              mailbox_status: mailbox_status,
+              mailbox_value: mailbox_value
+            },
+            bridge: compact_hash({
+              state: peek_first('os2wb_inst__state'),
+              cpx_ready: peek_bool('os2wb_inst__cpx_ready'),
+              cpu: peek_first('os2wb_inst__cpu'),
+              pcx_req_d: peek_first('os2wb_inst__pcx_req_d'),
+              wb_cycle: peek_bool('os2wb_inst__wb_cycle'),
+              wb_strobe: peek_bool('os2wb_inst__wb_strobe'),
+              wb_we: peek_bool('os2wb_inst__wb_we'),
+              wb_addr: peek_first('os2wb_inst__wb_addr')
+            }),
+            thread0: thread_debug_snapshot(0),
+            thread1: thread_debug_snapshot(1)
+          }
         end
 
         private
@@ -314,6 +383,64 @@ module RHDL
           (0..7).map { |i| (value >> ((7 - i) * 8)) & 0xFF }
         end
 
+        def thread_debug_snapshot(cpu_index)
+          compact_hash({
+            fetch_pc_f: peek_first("sparc_#{cpu_index}__ifu__errdp__fdp_erb_pc_f"),
+            npc_w: peek_first("sparc_#{cpu_index}__tlu__misctl__ifu_npc_w"),
+            scheduler: compact_hash({
+              nextthr: peek_first("sparc_#{cpu_index}__ifu__swl__dtu_fcl_nextthr_bf"),
+              completion: peek_first("sparc_#{cpu_index}__ifu__swl__completion"),
+              schedule: peek_first("sparc_#{cpu_index}__ifu__swl__schedule"),
+              int_activate: peek_first("sparc_#{cpu_index}__ifu__swl__int_activate"),
+              start_thread: peek_first("sparc_#{cpu_index}__ifu__swl__start_thread"),
+              thaw_thread: peek_first("sparc_#{cpu_index}__ifu__swl__thaw_thread"),
+              resum_thread: peek_first("sparc_#{cpu_index}__ifu__swl__resum_thread"),
+              rdy: peek_first("sparc_#{cpu_index}__ifu__swl__rdy"),
+              retr_thr_wakeup: peek_first("sparc_#{cpu_index}__ifu__swl__retr_thr_wakeup")
+            }),
+            thread_states: (0..3).map do |thread_idx|
+              peek_first("sparc_#{cpu_index}__ifu__swl__thrfsm#{thread_idx}__thr_state")
+            end.compact,
+            run_flags: compact_hash({
+              rune: peek_bool("sparc_#{cpu_index}__ifu__fcl__rune_ff__q"),
+              rund: peek_bool("sparc_#{cpu_index}__ifu__fcl__rund_ff__q"),
+              runm: peek_bool("sparc_#{cpu_index}__ifu__fcl__runm_ff__q"),
+              runw: peek_bool("sparc_#{cpu_index}__ifu__fcl__runw_ff__q")
+            })
+          })
+        end
+
+        def peek_first(*candidates)
+          return nil unless sim.respond_to?(:has_signal?) && sim.respond_to?(:peek)
+
+          name = candidates.find { |candidate| sim.has_signal?(candidate) }
+          return nil unless name
+
+          sim.peek(name)
+        end
+
+        def peek_bool(*candidates)
+          value = peek_first(*candidates)
+          return nil if value.nil?
+
+          !value.to_i.zero?
+        end
+
+        def compact_hash(hash)
+          hash.each_with_object({}) do |(key, value), acc|
+            next if value.nil?
+            next if value.respond_to?(:empty?) && value.empty?
+
+            acc[key] =
+              case value
+              when Hash
+                compact_hash(value)
+              else
+                value
+              end
+          end
+        end
+
         # ---- Build pipeline ----
 
         def build_and_load
@@ -340,7 +467,7 @@ module RHDL
           verilog_sim.compile_backend(
             verilog_file: @source_bundle.top_file,
             wrapper_file: wrapper_file,
-            log_file: File.join(@source_bundle.build_dir, 'verilator_std_abi_build.log')
+            log_file: verilator_build_log
           ) if needs_build
 
           load_shared_library(lib_file)
@@ -353,7 +480,8 @@ module RHDL
             library_basename: "sparc64_std_sim_#{sanitize_identifier(@top_module)}",
             top_module: @top_module,
             verilator_prefix: @verilator_prefix,
-            extra_verilator_flags: (VERILATOR_WARNING_FLAGS + VERILATOR_DEFAULT_FLAGS + @source_bundle.verilator_args).uniq
+            extra_verilator_flags: (VERILATOR_WARNING_FLAGS + VERILATOR_DEFAULT_FLAGS + @source_bundle.verilator_args).uniq,
+            threads: @threads
           ).tap(&:ensure_backend_available!)
         end
 
@@ -385,6 +513,12 @@ module RHDL
           name.to_s.gsub(/[^A-Za-z0-9_]/, '_')
         end
 
+        def verilator_build_log
+          return File.join(@source_bundle.build_dir, 'verilator_std_abi_build.log') if @threads == 1
+
+          File.join(@source_bundle.build_dir, "verilator_std_abi_build_threads#{@threads}.log")
+        end
+
         def write_file_if_changed(path, content)
           return if File.exist?(path) && File.read(path) == content
 
@@ -396,6 +530,7 @@ module RHDL
         def write_std_abi_wrapper(cpp_file, header_file)
           input_signal_names = INPUT_SIGNAL_WIDTHS.keys
           output_signal_names = OUTPUT_SIGNAL_WIDTHS.keys
+          debug_signal_names = DEBUG_SIGNAL_WIDTHS.keys
           input_names_csv = input_signal_names.join(',')
           output_names_csv = output_signal_names.join(',')
 
@@ -413,7 +548,7 @@ module RHDL
             void sim_reset(void* sim);
             void sim_eval(void* sim);
             void sim_poke(void* sim, const char* name, unsigned int value);
-            unsigned int sim_peek(void* sim, const char* name);
+            unsigned long long sim_peek(void* sim, const char* name);
             int sim_get_caps(const void* sim, unsigned int* caps_out);
             int sim_signal(void* sim, unsigned int op, const char* name, unsigned int idx, unsigned long value, unsigned long* out_value);
             int sim_exec(void* sim, unsigned int op, unsigned long arg0, unsigned long arg1, unsigned long* out_value, void* error_out);
@@ -789,18 +924,24 @@ module RHDL
             static const char* k_output_signal_names[] = {
               #{output_signal_names.map { |n| %("#{n}") }.join(", ")}
             };
+            static const char* k_debug_signal_names[] = {
+              #{debug_signal_names.map { |n| %("#{n}") }.join(", ")}
+            };
             static const char k_input_names_csv[] = "#{input_names_csv}";
             static const char k_output_names_csv[] = "#{output_names_csv}";
             static const unsigned int k_input_signal_count = #{input_signal_names.length}u;
             static const unsigned int k_output_signal_count = #{output_signal_names.length}u;
+            static const unsigned int k_debug_signal_count = #{debug_signal_names.length}u;
 
             static inline void write_out_ulong(unsigned long* out, unsigned long value) { if (out) *out = value; }
-            static unsigned int total_signal_count() { return k_input_signal_count + k_output_signal_count; }
+            static unsigned int total_signal_count() { return k_input_signal_count + k_output_signal_count + k_debug_signal_count; }
 
             static const char* signal_name_from_index(unsigned int idx) {
               if (idx < k_input_signal_count) return k_input_signal_names[idx];
               idx -= k_input_signal_count;
-              return idx < k_output_signal_count ? k_output_signal_names[idx] : nullptr;
+              if (idx < k_output_signal_count) return k_output_signal_names[idx];
+              idx -= k_output_signal_count;
+              return idx < k_debug_signal_count ? k_debug_signal_names[idx] : nullptr;
             }
 
             static int signal_index_from_name(const char* name) {
@@ -809,6 +950,8 @@ module RHDL
                 if (!std::strcmp(name, k_input_signal_names[i])) return static_cast<int>(i);
               for (unsigned int i = 0; i < k_output_signal_count; i++)
                 if (!std::strcmp(name, k_output_signal_names[i])) return static_cast<int>(k_input_signal_count + i);
+              for (unsigned int i = 0; i < k_debug_signal_count; i++)
+                if (!std::strcmp(name, k_debug_signal_names[i])) return static_cast<int>(k_input_signal_count + k_output_signal_count + i);
               return -1;
             }
 
@@ -873,15 +1016,63 @@ module RHDL
               else if (!std::strcmp(n, "wbm_data_i"))  ctx->dut->wbm_data_i = static_cast<std::uint64_t>(v);
             }
 
-            unsigned int sim_peek(void* sim, const char* n) {
+            unsigned long long sim_peek(void* sim, const char* n) {
               SimContext* ctx = static_cast<SimContext*>(sim);
               if (!std::strcmp(n, "wbm_cycle_o"))  return ctx->dut->wbm_cycle_o;
               if (!std::strcmp(n, "wbm_strobe_o")) return ctx->dut->wbm_strobe_o;
               if (!std::strcmp(n, "wbm_we_o"))     return ctx->dut->wbm_we_o;
-              if (!std::strcmp(n, "wbm_sel_o"))    return static_cast<unsigned int>(ctx->dut->wbm_sel_o & 0xFFu);
-              if (!std::strcmp(n, "wbm_addr_o"))   return static_cast<unsigned int>(ctx->dut->wbm_addr_o & 0xFFFFFFFFu);
-              if (!std::strcmp(n, "wbm_data_o"))   return static_cast<unsigned int>(ctx->dut->wbm_data_o & 0xFFFFFFFFu);
-              return 0;
+              if (!std::strcmp(n, "wbm_sel_o"))    return static_cast<unsigned long long>(ctx->dut->wbm_sel_o & 0xFFu);
+              if (!std::strcmp(n, "wbm_addr_o"))   return static_cast<unsigned long long>(ctx->dut->wbm_addr_o);
+              if (!std::strcmp(n, "wbm_data_o"))   return static_cast<unsigned long long>(ctx->dut->wbm_data_o);
+
+              auto* root = ctx->dut->rootp;
+              if (!std::strcmp(n, "os2wb_inst__state")) return static_cast<unsigned long long>(root->#{sanitize_identifier(@top_module)}__DOT__os2wb_inst__DOT__state);
+              if (!std::strcmp(n, "os2wb_inst__cpx_ready")) return static_cast<unsigned long long>(root->#{sanitize_identifier(@top_module)}__DOT__os2wb_inst__DOT__cpx_ready);
+              if (!std::strcmp(n, "os2wb_inst__cpu")) return static_cast<unsigned long long>(root->#{sanitize_identifier(@top_module)}__DOT__os2wb_inst__DOT__cpu);
+              if (!std::strcmp(n, "os2wb_inst__pcx_req_d")) return static_cast<unsigned long long>(root->#{sanitize_identifier(@top_module)}__DOT__os2wb_inst__DOT__pcx_req_d);
+              if (!std::strcmp(n, "os2wb_inst__wb_cycle")) return static_cast<unsigned long long>(root->#{sanitize_identifier(@top_module)}__DOT__os2wb_inst__DOT__wb_cycle);
+              if (!std::strcmp(n, "os2wb_inst__wb_strobe")) return static_cast<unsigned long long>(root->#{sanitize_identifier(@top_module)}__DOT__os2wb_inst__DOT__wb_strobe);
+              if (!std::strcmp(n, "os2wb_inst__wb_we")) return static_cast<unsigned long long>(root->#{sanitize_identifier(@top_module)}__DOT__os2wb_inst__DOT__wb_we);
+              if (!std::strcmp(n, "os2wb_inst__wb_addr")) return static_cast<unsigned long long>(root->#{sanitize_identifier(@top_module)}__DOT__os2wb_inst__DOT__wb_addr);
+              if (!std::strcmp(n, "sparc_0__ifu__errdp__fdp_erb_pc_f")) return static_cast<unsigned long long>(root->#{sanitize_identifier(@top_module)}__DOT__sparc_0__DOT__ifu__DOT__errdp__DOT__fdp_erb_pc_f);
+              if (!std::strcmp(n, "sparc_0__tlu__misctl__ifu_npc_w")) return static_cast<unsigned long long>(root->#{sanitize_identifier(@top_module)}__DOT__sparc_0__DOT__tlu__DOT__misctl__DOT__ifu_npc_w);
+              if (!std::strcmp(n, "sparc_0__ifu__swl__thrfsm0__thr_state")) return static_cast<unsigned long long>(root->#{sanitize_identifier(@top_module)}__DOT__sparc_0__DOT__ifu__DOT__swl__DOT__thrfsm0__DOT__thr_state);
+              if (!std::strcmp(n, "sparc_0__ifu__swl__thrfsm1__thr_state")) return static_cast<unsigned long long>(root->#{sanitize_identifier(@top_module)}__DOT__sparc_0__DOT__ifu__DOT__swl__DOT__thrfsm1__DOT__thr_state);
+              if (!std::strcmp(n, "sparc_0__ifu__swl__thrfsm2__thr_state")) return static_cast<unsigned long long>(root->#{sanitize_identifier(@top_module)}__DOT__sparc_0__DOT__ifu__DOT__swl__DOT__thrfsm2__DOT__thr_state);
+              if (!std::strcmp(n, "sparc_0__ifu__swl__thrfsm3__thr_state")) return static_cast<unsigned long long>(root->#{sanitize_identifier(@top_module)}__DOT__sparc_0__DOT__ifu__DOT__swl__DOT__thrfsm3__DOT__thr_state);
+              if (!std::strcmp(n, "sparc_0__ifu__swl__dtu_fcl_nextthr_bf")) return static_cast<unsigned long long>(root->#{sanitize_identifier(@top_module)}__DOT__sparc_0__DOT__ifu__DOT__swl__DOT__dtu_fcl_nextthr_bf);
+              if (!std::strcmp(n, "sparc_0__ifu__swl__completion")) return static_cast<unsigned long long>(root->#{sanitize_identifier(@top_module)}__DOT__sparc_0__DOT__ifu__DOT__swl__DOT__completion);
+              if (!std::strcmp(n, "sparc_0__ifu__swl__schedule")) return static_cast<unsigned long long>(root->#{sanitize_identifier(@top_module)}__DOT__sparc_0__DOT__ifu__DOT__swl__DOT__schedule);
+              if (!std::strcmp(n, "sparc_0__ifu__swl__int_activate")) return static_cast<unsigned long long>(root->#{sanitize_identifier(@top_module)}__DOT__sparc_0__DOT__ifu__DOT__swl__DOT__int_activate);
+              if (!std::strcmp(n, "sparc_0__ifu__swl__start_thread")) return static_cast<unsigned long long>(root->#{sanitize_identifier(@top_module)}__DOT__sparc_0__DOT__ifu__DOT__swl__DOT__start_thread);
+              if (!std::strcmp(n, "sparc_0__ifu__swl__thaw_thread")) return static_cast<unsigned long long>(root->#{sanitize_identifier(@top_module)}__DOT__sparc_0__DOT__ifu__DOT__swl__DOT__thaw_thread);
+              if (!std::strcmp(n, "sparc_0__ifu__swl__resum_thread")) return static_cast<unsigned long long>(root->#{sanitize_identifier(@top_module)}__DOT__sparc_0__DOT__ifu__DOT__swl__DOT__resum_thread);
+              if (!std::strcmp(n, "sparc_0__ifu__swl__rdy")) return static_cast<unsigned long long>(root->#{sanitize_identifier(@top_module)}__DOT__sparc_0__DOT__ifu__DOT__swl__DOT__rdy);
+              if (!std::strcmp(n, "sparc_0__ifu__swl__retr_thr_wakeup")) return static_cast<unsigned long long>(root->#{sanitize_identifier(@top_module)}__DOT__sparc_0__DOT__ifu__DOT__swl__DOT__retr_thr_wakeup);
+              if (!std::strcmp(n, "sparc_0__ifu__fcl__rune_ff__q")) return static_cast<unsigned long long>(root->#{sanitize_identifier(@top_module)}__DOT__sparc_0__DOT__ifu__DOT__fcl__DOT__rune_ff__DOT__q);
+              if (!std::strcmp(n, "sparc_0__ifu__fcl__rund_ff__q")) return static_cast<unsigned long long>(root->#{sanitize_identifier(@top_module)}__DOT__sparc_0__DOT__ifu__DOT__fcl__DOT__rund_ff__DOT__q);
+              if (!std::strcmp(n, "sparc_0__ifu__fcl__runm_ff__q")) return static_cast<unsigned long long>(root->#{sanitize_identifier(@top_module)}__DOT__sparc_0__DOT__ifu__DOT__fcl__DOT__runm_ff__DOT__q);
+              if (!std::strcmp(n, "sparc_0__ifu__fcl__runw_ff__q")) return static_cast<unsigned long long>(root->#{sanitize_identifier(@top_module)}__DOT__sparc_0__DOT__ifu__DOT__fcl__DOT__runw_ff__DOT__q);
+              if (!std::strcmp(n, "sparc_1__ifu__errdp__fdp_erb_pc_f")) return static_cast<unsigned long long>(root->#{sanitize_identifier(@top_module)}__DOT__sparc_1__DOT__ifu__DOT__errdp__DOT__fdp_erb_pc_f);
+              if (!std::strcmp(n, "sparc_1__tlu__misctl__ifu_npc_w")) return static_cast<unsigned long long>(root->#{sanitize_identifier(@top_module)}__DOT__sparc_1__DOT__tlu__DOT__misctl__DOT__ifu_npc_w);
+              if (!std::strcmp(n, "sparc_1__ifu__swl__thrfsm0__thr_state")) return static_cast<unsigned long long>(root->#{sanitize_identifier(@top_module)}__DOT__sparc_1__DOT__ifu__DOT__swl__DOT__thrfsm0__DOT__thr_state);
+              if (!std::strcmp(n, "sparc_1__ifu__swl__thrfsm1__thr_state")) return static_cast<unsigned long long>(root->#{sanitize_identifier(@top_module)}__DOT__sparc_1__DOT__ifu__DOT__swl__DOT__thrfsm1__DOT__thr_state);
+              if (!std::strcmp(n, "sparc_1__ifu__swl__thrfsm2__thr_state")) return static_cast<unsigned long long>(root->#{sanitize_identifier(@top_module)}__DOT__sparc_1__DOT__ifu__DOT__swl__DOT__thrfsm2__DOT__thr_state);
+              if (!std::strcmp(n, "sparc_1__ifu__swl__thrfsm3__thr_state")) return static_cast<unsigned long long>(root->#{sanitize_identifier(@top_module)}__DOT__sparc_1__DOT__ifu__DOT__swl__DOT__thrfsm3__DOT__thr_state);
+              if (!std::strcmp(n, "sparc_1__ifu__swl__dtu_fcl_nextthr_bf")) return static_cast<unsigned long long>(root->#{sanitize_identifier(@top_module)}__DOT__sparc_1__DOT__ifu__DOT__swl__DOT__dtu_fcl_nextthr_bf);
+              if (!std::strcmp(n, "sparc_1__ifu__swl__completion")) return static_cast<unsigned long long>(root->#{sanitize_identifier(@top_module)}__DOT__sparc_1__DOT__ifu__DOT__swl__DOT__completion);
+              if (!std::strcmp(n, "sparc_1__ifu__swl__schedule")) return static_cast<unsigned long long>(root->#{sanitize_identifier(@top_module)}__DOT__sparc_1__DOT__ifu__DOT__swl__DOT__schedule);
+              if (!std::strcmp(n, "sparc_1__ifu__swl__int_activate")) return static_cast<unsigned long long>(root->#{sanitize_identifier(@top_module)}__DOT__sparc_1__DOT__ifu__DOT__swl__DOT__int_activate);
+              if (!std::strcmp(n, "sparc_1__ifu__swl__start_thread")) return static_cast<unsigned long long>(root->#{sanitize_identifier(@top_module)}__DOT__sparc_1__DOT__ifu__DOT__swl__DOT__start_thread);
+              if (!std::strcmp(n, "sparc_1__ifu__swl__thaw_thread")) return static_cast<unsigned long long>(root->#{sanitize_identifier(@top_module)}__DOT__sparc_1__DOT__ifu__DOT__swl__DOT__thaw_thread);
+              if (!std::strcmp(n, "sparc_1__ifu__swl__resum_thread")) return static_cast<unsigned long long>(root->#{sanitize_identifier(@top_module)}__DOT__sparc_1__DOT__ifu__DOT__swl__DOT__resum_thread);
+              if (!std::strcmp(n, "sparc_1__ifu__swl__rdy")) return static_cast<unsigned long long>(root->#{sanitize_identifier(@top_module)}__DOT__sparc_1__DOT__ifu__DOT__swl__DOT__rdy);
+              if (!std::strcmp(n, "sparc_1__ifu__swl__retr_thr_wakeup")) return static_cast<unsigned long long>(root->#{sanitize_identifier(@top_module)}__DOT__sparc_1__DOT__ifu__DOT__swl__DOT__retr_thr_wakeup);
+              if (!std::strcmp(n, "sparc_1__ifu__fcl__rune_ff__q")) return static_cast<unsigned long long>(root->#{sanitize_identifier(@top_module)}__DOT__sparc_1__DOT__ifu__DOT__fcl__DOT__rune_ff__DOT__q);
+              if (!std::strcmp(n, "sparc_1__ifu__fcl__rund_ff__q")) return static_cast<unsigned long long>(root->#{sanitize_identifier(@top_module)}__DOT__sparc_1__DOT__ifu__DOT__fcl__DOT__rund_ff__DOT__q);
+              if (!std::strcmp(n, "sparc_1__ifu__fcl__runm_ff__q")) return static_cast<unsigned long long>(root->#{sanitize_identifier(@top_module)}__DOT__sparc_1__DOT__ifu__DOT__fcl__DOT__runm_ff__DOT__q);
+              if (!std::strcmp(n, "sparc_1__ifu__fcl__runw_ff__q")) return static_cast<unsigned long long>(root->#{sanitize_identifier(@top_module)}__DOT__sparc_1__DOT__ifu__DOT__fcl__DOT__runw_ff__DOT__q);
+              return 0ull;
             }
 
             int sim_get_caps(const void* sim, unsigned int* caps_out) {

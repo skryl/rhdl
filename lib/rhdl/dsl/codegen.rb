@@ -91,41 +91,21 @@ module RHDL
         end
 
         # Generate CIRCT MLIR for this component hierarchy.
-        # Uses cached MLIR text for imported modules (avoiding expensive IR rebuild
-        # for large modules like bw_r_scm), regenerating only when needed.
+        # Imported components are always re-exported through the rebuilt
+        # RHDL/CIRCT path. `core_mlir_path` is retained only for call-site
+        # compatibility and is intentionally ignored here.
         def to_mlir_hierarchy(top_name: nil, core_mlir_path: nil)
-          # Build a lookup of raw MLIR text per module from the core.mlir
-          # so we can skip expensive IR rebuild for modules that don't need
-          # re-emission (e.g., stubs and memory primitives).
-          raw_module_texts = core_mlir_path ? extract_module_texts_from_mlir(core_mlir_path) : {}
-
-          text_fragments = []
+          _unused_core_mlir_path = core_mlir_path
           ir_modules = []
 
           collect_submodule_specs.each do |component_class, parameters|
-            mod_name = component_class.respond_to?(:verilog_module_name) ?
-              component_class.verilog_module_name.to_s : nil
-
-            # Prefer cached MLIR text on the class (set during import)
-            cached_text = component_class.cached_imported_circt_module_text(
-              top_name: nil, parameters: parameters || {}
-            ) if component_class.respond_to?(:cached_imported_circt_module_text)
-
-            if cached_text
-              text_fragments << cached_text
-            elsif mod_name && raw_module_texts.key?(mod_name) &&
-                  !module_text_needs_regeneration?(raw_module_texts[mod_name])
-              text_fragments << raw_module_texts[mod_name]
-            else
-              ir_modules << component_class.to_circt_nodes(parameters: parameters || {})
-            end
+            ir_modules << component_class.to_circt_nodes(parameters: parameters || {})
           end
           ir_modules << to_circt_nodes(top_name: top_name)
 
-          generated = RHDL::Codegen::CIRCT::MLIR.generate(
+          RHDL::Codegen::CIRCT::MLIR.generate(
             RHDL::Codegen::CIRCT::IR::Package.new(modules: ir_modules)
           )
-          (text_fragments + [generated]).join("\n\n")
         end
 
         # Returns true if this module's raw MLIR text has the broken async reset
@@ -240,12 +220,10 @@ module RHDL
         end
 
         # Build CIRCT node graph from the component.
-        # This is the canonical in-memory IR for DSL lowering.
+        # This is the canonical in-memory IR for DSL lowering and always
+        # rebuilds from the raised DSL structure instead of reusing imported
+        # CIRCT modules.
         def to_circt_nodes(top_name: nil, parameters: {})
-          if (cached = cached_imported_circt_module(top_name: top_name, parameters: parameters))
-            return cached
-          end
-
           build_circt_module(top_name: top_name, parameters: parameters)
         end
 
@@ -913,11 +891,9 @@ module RHDL
         end
 
         # Generate CIRCT MLIR text from the component.
+        # Never short-circuit back to cached imported MLIR text; exports should
+        # always be regenerated from the in-memory CIRCT IR path.
         def to_ir(top_name: nil, parameters: {})
-          if (cached_text = cached_imported_circt_module_text(top_name: top_name, parameters: parameters))
-            return cached_text
-          end
-
           RHDL::Codegen::CIRCT::MLIR.generate(to_circt_nodes(top_name: top_name, parameters: parameters))
         end
 

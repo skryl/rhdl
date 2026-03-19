@@ -542,7 +542,7 @@ RSpec.describe RHDL::Codegen::CIRCT::RuntimeJSON do
     )
   end
 
-  it 'hoists shared root expressions reused across multiple assigns before dump serialization' do
+  it 'does not hoist shared root expressions by default during dump serialization' do
     sel = ir::Signal.new(name: :sel, width: 1)
     a = ir::Signal.new(name: :a, width: 8)
     b = ir::Signal.new(name: :b, width: 8)
@@ -581,10 +581,54 @@ RSpec.describe RHDL::Codegen::CIRCT::RuntimeJSON do
     y0_expr = assigns_by_target.fetch('y0')
     y1_expr = assigns_by_target.fetch('y1')
 
-    expect(y0_expr.fetch('kind')).to eq('signal')
-    expect(y1_expr.fetch('kind')).to eq('signal')
-    expect(y0_expr.fetch('name')).to eq(y1_expr.fetch('name'))
-    expect(runtime_mod.fetch('nets').map { |net| net.fetch('name') }).to include(y0_expr.fetch('name'))
+    expect(y0_expr.fetch('kind')).to eq('mux')
+    expect(y1_expr.fetch('kind')).to eq('mux')
+    expect(runtime_mod.fetch('nets')).to eq([])
+  end
+
+  it 'can still hoist shared root expressions when explicitly enabled' do
+    sel = ir::Signal.new(name: :sel, width: 1)
+    a = ir::Signal.new(name: :a, width: 8)
+    b = ir::Signal.new(name: :b, width: 8)
+    shared = ir::Mux.new(
+      condition: sel,
+      when_true: ir::BinaryOp.new(op: :+, left: a, right: b, width: 8),
+      when_false: ir::BinaryOp.new(op: :-, left: a, right: b, width: 8),
+      width: 8
+    )
+
+    mod = ir::ModuleOp.new(
+      name: 'runtime_shared_root_assign_opt_in',
+      ports: [
+        ir::Port.new(name: :sel, direction: :in, width: 1),
+        ir::Port.new(name: :a, direction: :in, width: 8),
+        ir::Port.new(name: :b, direction: :in, width: 8),
+        ir::Port.new(name: :y0, direction: :out, width: 8),
+        ir::Port.new(name: :y1, direction: :out, width: 8)
+      ],
+      nets: [],
+      regs: [],
+      assigns: [
+        ir::Assign.new(target: :y0, expr: shared),
+        ir::Assign.new(target: :y1, expr: shared)
+      ],
+      processes: [],
+      instances: [],
+      memories: [],
+      write_ports: [],
+      sync_read_ports: [],
+      parameters: {}
+    )
+
+    runtime_mod = described_class.send(:normalize_module_for_runtime, mod, hoist_shared_exprs: true)
+    assigns_by_target = runtime_mod.assigns.to_h { |assign| [assign.target.to_s, assign.expr] }
+    y0_expr = assigns_by_target.fetch('y0')
+    y1_expr = assigns_by_target.fetch('y1')
+
+    expect(y0_expr).to be_a(ir::Signal)
+    expect(y1_expr).to be_a(ir::Signal)
+    expect(y0_expr.name.to_s).to eq(y1_expr.name.to_s)
+    expect(runtime_mod.nets.map { |net| net.name.to_s }).to include(y0_expr.name.to_s)
   end
 
   it 'rewrites wide packed-bus slices into narrow runtime-safe expressions' do

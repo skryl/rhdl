@@ -1,6 +1,0 @@
-Source: https://diskettes.pcjs.org/pcx86/sys/dos/microsoft/4.00/MSDOS400-DISK1.json
-Name: MSDOS400-DISK1.img
-Format: PC360K
-Hash: 717c57e65734de6d6097c5aaf9c30bd9
-Checksum: 350560163
-DiskSize: 368640

@@ -55,10 +55,9 @@ module RHDL
             runner.load_dos(path: options[:dos_disk2], slot: 1, activate: false) if options[:dos_disk2]
           elsif options[:dos]
             runner.load_dos
-            runner.load_dos(path: runner.dos_disk2_path, slot: 1, activate: false)
           end
           hdd_opt = options[:hdd]
-          if hdd_opt || options[:dos]
+          if hdd_opt
             hdd_path = hdd_opt.is_a?(String) ? hdd_opt : runner.hdd_path
             runner.load_hdd(path: hdd_path)
           end

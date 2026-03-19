@@ -433,7 +433,7 @@ rhdl examples ao486 <subcommand> [options]
 | `-m`, `--mode TYPE` | Simulation mode: `ir` (default), `verilog`, `circt` |
 | `--sim TYPE` | IR simulator backend: `compile` (default), `interpret`, `jit` |
 | `--bios` | Load BIOS ROMs from `examples/ao486/software/rom` |
-| `--dos` | Load DOS floppy image from `examples/ao486/software/bin` |
+| `--dos` | Load the patched verbose MS-DOS 6.22 boot disk from `examples/ao486/software/bin` |
 | `--dos-disk1 FILE` | Load `FILE` as the primary floppy image in slot 0 |
 | `--dos-disk2 FILE` | Preload `FILE` as the secondary floppy image in slot 1 for hot swapping |
 | `--headless` | Run once without the interactive terminal loop |
@@ -458,8 +458,8 @@ rhdl examples ao486 -m verilog --bios --dos --headless --cycles 100000
 # Run the AO486 CPU-top on the Arcilator-backed path with debug output
 rhdl examples ao486 -m circt --bios --dos -d -s 5000
 
-# Preload two AO486 floppy images for runtime hot swapping
-rhdl examples ao486 -m verilog --bios --dos-disk1 examples/ao486/software/bin/msdos4_disk1.img --dos-disk2 examples/ao486/software/bin/msdos4_disk2.img --headless --cycles 100000
+# Preload the patched verbose MS-DOS 6.22 boot disk directly
+rhdl examples ao486 -m verilog --bios --dos-disk1 examples/ao486/software/bin/msdos622_boot.img --headless --cycles 100000
 
 # Regenerate examples/ao486/import from rtl/ao486/ao486.v
 rhdl examples ao486 import --out examples/ao486/import

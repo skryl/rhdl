@@ -1578,7 +1578,8 @@ module RHDL
         BUILD_BASE = File.expand_path('../../.hdl_build', __dir__)
         alias_method :initialize_backend_runner, :initialize
 
-        def initialize(mem_size: Memory::DEFAULT_SIZE)
+        def initialize(mem_size: Memory::DEFAULT_SIZE, threads: 1)
+          @threads = RHDL::Codegen::Verilog::VerilogSimulator.normalize_threads(threads)
           initialize_backend_runner(backend_sym: :verilator, simulator_type_sym: :hdl_verilator, mem_size: mem_size)
         end
 
@@ -1626,7 +1627,8 @@ module RHDL
             top_module: 'riscv_cpu',
             verilator_prefix: 'Vriscv',
             x_assign: '0',
-            x_initial: '0'
+            x_initial: '0',
+            threads: @threads
           )
 
           lib_file = @verilog_simulator.shared_library_path
@@ -1637,10 +1639,20 @@ module RHDL
 
           if needs_build
             puts '  Compiling with Verilator...'
-            @verilog_simulator.compile_backend(verilog_file: verilog_file, wrapper_file: wrapper_file)
+            @verilog_simulator.compile_backend(
+              verilog_file: verilog_file,
+              wrapper_file: wrapper_file,
+              log_file: verilator_build_log
+            )
           end
 
           @lib_path = lib_file
+        end
+
+        def verilator_build_log
+          return File.join(build_dir, 'build.log') if @threads == 1
+
+          File.join(build_dir, "build_threads#{@threads}.log")
         end
 
         def write_verilator_wrapper(cpp_file, header_file)

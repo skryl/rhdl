@@ -167,6 +167,21 @@ RSpec.describe RHDL::Examples::SPARC64::HeadlessRunner do
     expect(fake_verilog_runner_class.last_kwargs).to include(fast_boot: true, source_kind: :rhdl_verilog)
   end
 
+  it 'forwards threads to the Verilator runner' do
+    described_class.new(
+      mode: :verilog,
+      verilator_runner_class: fake_verilog_runner_class,
+      builder: builder,
+      threads: 4
+    )
+
+    expect(fake_verilog_runner_class.last_kwargs).to include(
+      fast_boot: true,
+      source_kind: :staged_verilog,
+      threads: 4
+    )
+  end
+
   it 'creates an arcilator-backed runner when requested' do
     runner = described_class.new(
       mode: :arcilator,

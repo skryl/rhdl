@@ -229,7 +229,7 @@ RSpec.describe RHDL::Examples::SPARC64::Import::SystemImporter do
             workspace_dir: workspace,
             top: 's1_top',
             top_file: File.join(described_class::DEFAULT_REFERENCE_ROOT, 'os2wb', 's1_top.v'),
-            patches_dir: File.expand_path('../../../../examples/sparc64/patches/fast_boot', __dir__)
+            patches_dir: File.expand_path('../../../../examples/sparc64/patches/minimal', __dir__)
           )
           resolved = importer.resolve_sources(workspace: workspace)
           bundle = importer.write_import_source_bundle(workspace: workspace, resolved: resolved)
@@ -258,7 +258,7 @@ RSpec.describe RHDL::Examples::SPARC64::Import::SystemImporter do
             workspace_dir: workspace,
             top: 's1_top',
             top_file: File.join(described_class::DEFAULT_REFERENCE_ROOT, 'os2wb', 's1_top.v'),
-            patches_dir: File.expand_path('../../../../examples/sparc64/patches/fast_boot', __dir__)
+            patches_dir: File.expand_path('../../../../examples/sparc64/patches/minimal', __dir__)
           )
           resolved = importer.resolve_sources(workspace: workspace)
           bundle = importer.write_import_source_bundle(workspace: workspace, resolved: resolved)
@@ -287,7 +287,7 @@ RSpec.describe RHDL::Examples::SPARC64::Import::SystemImporter do
             workspace_dir: workspace,
             top: 's1_top',
             top_file: File.join(described_class::DEFAULT_REFERENCE_ROOT, 'os2wb', 's1_top.v'),
-            patches_dir: File.expand_path('../../../../examples/sparc64/patches/fast_boot', __dir__)
+            patches_dir: File.expand_path('../../../../examples/sparc64/patches/minimal', __dir__)
           )
           resolved = importer.resolve_sources(workspace: workspace)
           bundle = importer.write_import_source_bundle(workspace: workspace, resolved: resolved)

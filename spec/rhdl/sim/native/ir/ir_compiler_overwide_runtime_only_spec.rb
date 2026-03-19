@@ -278,6 +278,61 @@ RSpec.describe 'IR compiler overwide runtime-only support' do
     )
   end
 
+  def build_repeated_packet256_probe_package
+    word = ir::Signal.new(name: :word, width: 64)
+    packed = ir::Signal.new(name: :packed, width: 256)
+    packed_expr = ir::Concat.new(
+      parts: [word, word, word, word],
+      width: 256
+    )
+
+    ir::Package.new(
+      modules: [
+        ir::ModuleOp.new(
+          name: 'compiler_repeated_packet256_probe',
+          ports: [
+            ir::Port.new(name: :word, direction: :in, width: 64),
+            ir::Port.new(name: :packed, direction: :out, width: 256),
+            ir::Port.new(name: :packet_word3, direction: :out, width: 64),
+            ir::Port.new(name: :packet_word2, direction: :out, width: 64),
+            ir::Port.new(name: :packet_word1, direction: :out, width: 64),
+            ir::Port.new(name: :packet_word0, direction: :out, width: 64)
+          ],
+          nets: [],
+          regs: [],
+          assigns: [
+            ir::Assign.new(
+              target: :packed,
+              expr: packed_expr
+            ),
+            ir::Assign.new(
+              target: :packet_word3,
+              expr: ir::Slice.new(base: packed, range: 255..192, width: 64)
+            ),
+            ir::Assign.new(
+              target: :packet_word2,
+              expr: ir::Slice.new(base: packed, range: 191..128, width: 64)
+            ),
+            ir::Assign.new(
+              target: :packet_word1,
+              expr: ir::Slice.new(base: packed, range: 127..64, width: 64)
+            ),
+            ir::Assign.new(
+              target: :packet_word0,
+              expr: ir::Slice.new(base: packed, range: 63..0, width: 64)
+            )
+          ],
+          processes: [],
+          instances: [],
+          memories: [],
+          write_ports: [],
+          sync_read_ports: [],
+          parameters: {}
+        )
+      ]
+    )
+  end
+
   def build_packet320_probe_package
     word4 = ir::Signal.new(name: :word4, width: 64)
     word3 = ir::Signal.new(name: :word3, width: 64)
@@ -350,6 +405,82 @@ RSpec.describe 'IR compiler overwide runtime-only support' do
           sync_read_ports: [],
           parameters: {}
         )
+      ]
+    )
+  end
+
+  def build_wide_expr_ref_probe_json
+    JSON.generate(
+      circt_json_version: 1,
+      dialects: %w[hw comb seq],
+      modules: [
+        {
+          name: 'compiler_wide_expr_ref_probe',
+          ports: [
+            { name: 'word', direction: 'in', width: 64 },
+            { name: 'packet_word3', direction: 'out', width: 64 },
+            { name: 'packet_word2', direction: 'out', width: 64 },
+            { name: 'packet_word1', direction: 'out', width: 64 },
+            { name: 'packet_word0', direction: 'out', width: 64 }
+          ],
+          nets: [],
+          regs: [],
+          exprs: [
+            {
+              kind: 'concat',
+              parts: Array.new(4) { { kind: 'signal', name: 'word', width: 64 } },
+              width: 256
+            }
+          ],
+          assigns: [
+            {
+              target: 'packet_word3',
+              expr: {
+                kind: 'slice',
+                base: { kind: 'expr_ref', id: 0, width: 256 },
+                range_begin: 255,
+                range_end: 192,
+                width: 64
+              }
+            },
+            {
+              target: 'packet_word2',
+              expr: {
+                kind: 'slice',
+                base: { kind: 'expr_ref', id: 0, width: 256 },
+                range_begin: 191,
+                range_end: 128,
+                width: 64
+              }
+            },
+            {
+              target: 'packet_word1',
+              expr: {
+                kind: 'slice',
+                base: { kind: 'expr_ref', id: 0, width: 256 },
+                range_begin: 127,
+                range_end: 64,
+                width: 64
+              }
+            },
+            {
+              target: 'packet_word0',
+              expr: {
+                kind: 'slice',
+                base: { kind: 'expr_ref', id: 0, width: 256 },
+                range_begin: 63,
+                range_end: 0,
+                width: 64
+              }
+            }
+          ],
+          processes: [],
+          instances: [],
+          memories: [],
+          write_ports: [],
+          sync_read_ports: [],
+          parameters: {}
+        }
       ]
     )
   end
@@ -658,6 +789,60 @@ RSpec.describe 'IR compiler overwide runtime-only support' do
       expect(sim.peek('packet_word2')).to eq(0x1111_2222_3333_4444)
       expect(sim.peek('packet_word1')).to eq(0x5555_6666_7777_8888)
       expect(sim.peek('packet_word0')).to eq(0x9999_AAAA_BBBB_CCCC)
+    end
+  end
+
+  it 'reuses a single wide signal load across repeated 256-bit slices on the compiler backend' do
+    sim = create_compiler(build_packet256_probe_package)
+    sim.reset
+
+    sim.poke('rst', 0)
+    sim.poke('load', 1)
+    sim.poke('word3', 0x0123_4567_89AB_CDEF)
+    sim.poke('word2', 0x1111_2222_3333_4444)
+    sim.poke('word1', 0x5555_6666_7777_8888)
+    sim.poke('word0', 0x9999_AAAA_BBBB_CCCC)
+
+    step(sim)
+
+    aggregate_failures do
+      expect(sim.compiled?).to be(true)
+      expect(sim.generated_code.scan(/wide_load_signal\(s, wh, /).length).to eq(1)
+      expect(sim.generated_code.scan(/wide_slice_u128\(wide_load_signal\(s, wh, /).length).to eq(0)
+    end
+  end
+
+  it 'uses a compact helper for repeated 256-bit concat patterns on the compiler backend' do
+    sim = create_compiler(build_repeated_packet256_probe_package)
+    sim.reset
+
+    sim.poke('word', 0x0123_4567_89AB_CDEF)
+    sim.evaluate
+
+    aggregate_failures do
+      expect(sim.compiled?).to be(true)
+      expect(sim.peek('packet_word3')).to eq(0x0123_4567_89AB_CDEF)
+      expect(sim.peek('packet_word2')).to eq(0x0123_4567_89AB_CDEF)
+      expect(sim.peek('packet_word1')).to eq(0x0123_4567_89AB_CDEF)
+      expect(sim.peek('packet_word0')).to eq(0x0123_4567_89AB_CDEF)
+      expect(sim.generated_code.scan(/wide_repeat_pattern\(/).length).to be >= 2
+    end
+  end
+
+  it 'materializes reused wide expr_ref trees once on the compiler backend' do
+    sim = create_compiler(build_wide_expr_ref_probe_json)
+    sim.reset
+
+    sim.poke('word', 0x0123_4567_89AB_CDEF)
+    sim.evaluate
+
+    aggregate_failures do
+      expect(sim.compiled?).to be(true)
+      expect(sim.peek('packet_word3')).to eq(0x0123_4567_89AB_CDEF)
+      expect(sim.peek('packet_word2')).to eq(0x0123_4567_89AB_CDEF)
+      expect(sim.peek('packet_word1')).to eq(0x0123_4567_89AB_CDEF)
+      expect(sim.peek('packet_word0')).to eq(0x0123_4567_89AB_CDEF)
+      expect(sim.generated_code.scan(/wide_repeat_pattern\(/).length).to eq(2)
     end
   end
 

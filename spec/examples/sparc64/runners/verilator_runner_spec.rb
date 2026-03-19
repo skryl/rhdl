@@ -14,6 +14,7 @@ RSpec.describe RHDL::Examples::SPARC64::VerilatorRunner do
         @rom_loads = []
         @memory_loads = []
         @memory_writes = []
+        @signals = {}
       end
 
       def runner_supported?
@@ -64,6 +65,18 @@ RSpec.describe RHDL::Examples::SPARC64::VerilatorRunner do
 
       def runner_sparc64_unmapped_accesses
         []
+      end
+
+      def set_signal(name, value)
+        @signals[name] = value
+      end
+
+      def has_signal?(name)
+        @signals.key?(name)
+      end
+
+      def peek(name)
+        @signals.fetch(name)
       end
     end.new
   end
@@ -129,5 +142,53 @@ RSpec.describe RHDL::Examples::SPARC64::VerilatorRunner do
 
   it 'exposes VerilatorRunner as the primary class' do
     expect(RHDL::Examples::SPARC64::VerilatorRunner).to eq(described_class)
+  end
+
+  it 'captures a structured debug snapshot from the underlying simulator' do
+    mock_sim.set_signal('os2wb_inst__state', 7)
+    mock_sim.set_signal('sparc_0__ifu__swl__thrfsm0__thr_state', 3)
+    mock_sim.set_signal('sparc_0__ifu__swl__thrfsm1__thr_state', 0)
+    mock_sim.set_signal('sparc_0__ifu__fcl__rune_ff__q', 1)
+    mock_sim.set_signal('sparc_0__ifu__fcl__rund_ff__q', 1)
+    mock_sim.set_signal('sparc_0__ifu__fcl__runm_ff__q', 0)
+    mock_sim.set_signal('sparc_0__ifu__fcl__runw_ff__q', 0)
+    mock_sim.set_signal('sparc_1__ifu__swl__thrfsm0__thr_state', 4)
+    mock_sim.set_signal('sparc_1__ifu__swl__thrfsm1__thr_state', 4)
+    mock_sim.set_signal('sparc_1__ifu__fcl__rune_ff__q', 0)
+    mock_sim.set_signal('sparc_1__ifu__fcl__rund_ff__q', 0)
+    mock_sim.set_signal('sparc_1__ifu__fcl__runm_ff__q', 0)
+    mock_sim.set_signal('sparc_1__ifu__fcl__runw_ff__q', 0)
+
+    runner = build_runner_with_mock_sim(mock_sim)
+    runner.run_cycles(12)
+
+    expect(runner.debug_snapshot).to include(
+      reset: {
+        cycle_counter: 12,
+        mailbox_status: 0,
+        mailbox_value: 0
+      },
+      bridge: include(
+        state: 7
+      ),
+      thread0: include(
+        thread_states: [3, 0],
+        run_flags: {
+          rune: true,
+          rund: true,
+          runm: false,
+          runw: false
+        }
+      ),
+      thread1: include(
+        thread_states: [4, 4],
+        run_flags: {
+          rune: false,
+          rund: false,
+          runm: false,
+          runw: false
+        }
+      )
+    )
   end
 end

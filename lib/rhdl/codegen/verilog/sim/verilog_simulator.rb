@@ -19,7 +19,14 @@ module RHDL
 
         attr_reader :backend, :build_dir, :verilog_dir, :obj_dir
         attr_reader :library_basename, :top_module, :verilator_prefix
-        attr_reader :cxx, :cflags, :x_assign, :x_initial
+        attr_reader :cxx, :cflags, :x_assign, :x_initial, :threads
+
+        class << self
+          def normalize_threads(value)
+            count = value.to_i
+            count > 1 ? count : 1
+          end
+        end
 
         def initialize(
           backend:,
@@ -31,12 +38,14 @@ module RHDL
           cflags: '-fPIC -O3 -march=native',
           x_assign: '0',
           x_initial: 'unique',
-          extra_verilator_flags: []
+          extra_verilator_flags: [],
+          threads: 1
         )
           @backend = backend.to_sym
+          @threads = self.class.normalize_threads(threads)
           @build_dir = build_dir
           @verilog_dir = File.join(build_dir, 'verilog')
-          @library_basename = library_basename
+          @library_basename = threaded_library_basename(library_basename)
           @obj_dir = File.join(build_dir, 'obj_dir', sanitize_path_component(@library_basename))
           @top_module = top_module
           @verilator_prefix = verilator_prefix
@@ -44,7 +53,7 @@ module RHDL
           @cflags = cflags
           @x_assign = x_assign
           @x_initial = x_initial
-          @extra_verilator_flags = extra_verilator_flags
+          @extra_verilator_flags = threaded_verilator_flags(extra_verilator_flags)
         end
 
         def ensure_backend_available!
@@ -130,6 +139,19 @@ module RHDL
 
         def sanitize_path_component(value)
           value.to_s.gsub(/[^A-Za-z0-9_.-]/, '_')
+        end
+
+        def threaded_library_basename(base_name)
+          return base_name.to_s unless backend == :verilator && threads > 1
+
+          "#{base_name}_threads#{threads}"
+        end
+
+        def threaded_verilator_flags(flags)
+          resolved = Array(flags).flatten.compact
+          return resolved unless backend == :verilator && threads > 1
+
+          resolved + ['--threads', threads.to_s]
         end
 
         def compile_verilator(verilog_file: nil, verilog_files: nil, wrapper_file:, log_file:)

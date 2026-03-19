@@ -95,7 +95,7 @@ RSpec.describe RHDL::CLI::Tasks::AO486Task do
     FakeHeadlessRunner.instance = nil
   end
 
-  it 'runs default action through the AO486 headless runner surface' do
+  it 'runs default action through the AO486 headless runner surface using the DOS 6.22 default only' do
     task = described_class.new(
       action: :run,
       mode: :verilator,
@@ -121,7 +121,22 @@ RSpec.describe RHDL::CLI::Tasks::AO486Task do
     expect(FakeHeadlessRunner.instance.calls).to eq([
       :load_bios,
       [:load_dos, {}],
-      [:load_dos, { path: '/fake/dos_disk2.img', slot: 1, activate: false }],
+      :run
+    ])
+  end
+
+  it 'loads the default hard disk image when DOS boot is requested with explicit hdd support' do
+    task = described_class.new(
+      action: :run,
+      dos: true,
+      hdd: true,
+      headless_runner_class: FakeHeadlessRunner
+    )
+
+    task.run
+
+    expect(FakeHeadlessRunner.instance.calls).to eq([
+      [:load_dos, {}],
       [:load_hdd, { path: '/fake/hdd.img' }],
       :run
     ])
@@ -146,8 +161,8 @@ RSpec.describe RHDL::CLI::Tasks::AO486Task do
   it 'loads custom DOS disk1 and disk2 paths into separate runner slots for default run mode' do
     task = described_class.new(
       action: :run,
-      dos_disk1: '/tmp/msdos4_disk1.img',
-      dos_disk2: '/tmp/msdos4_disk2.img',
+      dos_disk1: '/tmp/msdos622_boot.img',
+      dos_disk2: '/tmp/msdos622_boot_copy.img',
       headless_runner_class: FakeHeadlessRunner
     )
 
@@ -155,8 +170,8 @@ RSpec.describe RHDL::CLI::Tasks::AO486Task do
 
     expect(FakeHeadlessRunner.instance.calls).to eq(
       [
-        [:load_dos, { path: '/tmp/msdos4_disk1.img', slot: 0, activate: true }],
-        [:load_dos, { path: '/tmp/msdos4_disk2.img', slot: 1, activate: false }],
+        [:load_dos, { path: '/tmp/msdos622_boot.img', slot: 0, activate: true }],
+        [:load_dos, { path: '/tmp/msdos622_boot_copy.img', slot: 1, activate: false }],
         :run
       ]
     )

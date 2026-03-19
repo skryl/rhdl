@@ -4,6 +4,10 @@ require 'spec_helper'
 require_relative '../../../../examples/ao486/utilities/runners/verilator_runner'
 
 RSpec.describe RHDL::Examples::AO486::VerilatorRunner, timeout: 360 do
+  def dos622_disk_path
+    File.expand_path('../../../../examples/ao486/software/bin/msdos622_boot.img', __dir__)
+  end
+
   it 'preserves SP across repeated DOS INT 13h reads on the real runner path' do
     skip 'firtool not available' unless HdlToolchain.which('firtool')
     skip 'verilator not available' unless HdlToolchain.verilator_available?
@@ -111,7 +115,7 @@ RSpec.describe RHDL::Examples::AO486::VerilatorRunner, timeout: 360 do
 
     runner = described_class.new(headless: true)
     runner.load_bios
-    runner.load_dos(path: runner.software_path('bin', 'msdos4_disk1.img'))
+    runner.load_dos(path: dos622_disk_path)
     runner.send(:ensure_sim!)
 
     state_before = runner.sim.runner_ao486_dos_int13_state
@@ -141,13 +145,93 @@ RSpec.describe RHDL::Examples::AO486::VerilatorRunner, timeout: 360 do
     )
   end
 
+  it 'rejects DL=0x81 reads when only one hard disk is mounted on the generic custom-DOS path' do
+    skip 'firtool not available' unless HdlToolchain.which('firtool')
+    skip 'verilator not available' unless HdlToolchain.verilator_available?
+
+    runner = described_class.new(headless: true)
+    runner.load_bios
+    runner.load_dos(path: dos622_disk_path)
+    runner.load_hdd(path: runner.software_path('bin', 'fs.img'))
+    runner.send(:ensure_sim!)
+
+    runner.sim.send(:write_io_value, 0x0ED0, 1, 0x01)
+    runner.sim.send(:write_io_value, 0x0ED1, 1, 0x02)
+    runner.sim.send(:write_io_value, 0x0ED2, 1, 0x00)
+    runner.sim.send(:write_io_value, 0x0ED3, 1, 0x00)
+    runner.sim.send(:write_io_value, 0x0ED4, 1, 0x01)
+    runner.sim.send(:write_io_value, 0x0ED5, 1, 0x00)
+    runner.sim.send(:write_io_value, 0x0ED6, 1, 0x81)
+    runner.sim.send(:write_io_value, 0x0ED7, 1, 0x00)
+    runner.sim.send(:write_io_value, 0x0ED8, 1, 0x70)
+    runner.sim.send(:write_io_value, 0x0ED9, 1, 0x00)
+    runner.sim.send(:write_io_value, 0x0EDA, 1, 0x00)
+
+    expect(runner.sim.runner_ao486_dos_int13_state).to include(
+      ax: 0x0201,
+      bx: 0x0000,
+      cx: 0x0001,
+      dx: 0x0081,
+      es: 0x0070,
+      result_ax: 0x0100,
+      flags: 1
+    )
+  end
+
+  it 'returns a CF-set INT 13h failure to guest code for DL=0x81 on the single-HDD runner path' do
+    skip 'firtool not available' unless HdlToolchain.which('firtool')
+    skip 'verilator not available' unless HdlToolchain.verilator_available?
+
+    runner = described_class.new(headless: true)
+    runner.load_bios
+    runner.load_dos(path: dos622_disk_path)
+    runner.load_hdd(path: runner.software_path('bin', 'fs.img'))
+
+    base = described_class::DOS_BOOT_SECTOR_ADDR
+    payload = [
+      0xFA,                   # cli
+      0x31, 0xC0,             # xor ax, ax
+      0x8E, 0xD0,             # mov ss, ax
+      0xBC, 0x00, 0x08,       # mov sp, 0x0800
+      0x8E, 0xD8,             # mov ds, ax
+      0x8E, 0xC0,             # mov es, ax
+      0xBB, 0x00, 0x00,       # mov bx, 0x0000
+      0xB8, 0x01, 0x02,       # mov ax, 0x0201
+      0xB9, 0x01, 0x00,       # mov cx, 0x0001
+      0xBA, 0x81, 0x00,       # mov dx, 0x0081
+      0xCD, 0x13,             # int 0x13
+      0x89, 0x06, 0x00, 0x06, # mov [0x0600], ax
+      0x9C,                   # pushf
+      0x58,                   # pop ax
+      0xA3, 0x02, 0x06,       # mov [0x0602], ax
+      0xEB, 0xFE              # jmp $
+    ]
+    payload.each_with_index do |byte, idx|
+      runner.load_bytes(base + idx, [byte])
+    end
+
+    runner.run(cycles: 10_000)
+
+    ax = runner.read_bytes(0x0600, 2, mapped: false)
+    flags = runner.read_bytes(0x0602, 2, mapped: false)
+    flags_value = flags[0] | (flags[1] << 8)
+
+    expect(ax).to eq([0x00, 0x01])
+    expect(flags_value & 0x0001).to eq(0x0001)
+    expect(runner.state.dig(:dos_bridge, :int13)).to include(
+      dx: 0x0081,
+      result_ax: 0x0100,
+      flags: 1
+    )
+  end
+
   it 'records recent DOS INT 13h requests with CHS/LBA detail on the generic custom-DOS path' do
     skip 'firtool not available' unless HdlToolchain.which('firtool')
     skip 'verilator not available' unless HdlToolchain.verilator_available?
 
     runner = described_class.new(headless: true)
     runner.load_bios
-    runner.load_dos(path: runner.software_path('bin', 'msdos4_disk1.img'))
+    runner.load_dos(path: dos622_disk_path)
     runner.send(:ensure_sim!)
 
     runner.sim.send(:write_io_value, 0x0ED0, 1, 0x01)
@@ -185,7 +269,7 @@ RSpec.describe RHDL::Examples::AO486::VerilatorRunner, timeout: 360 do
 
     runner = described_class.new(headless: true)
     runner.load_bios
-    runner.load_dos(path: runner.software_path('bin', 'msdos400_pcjs_disk1.img'))
+    runner.load_dos(path: runner.software_path('bin', 'msdos622_boot.img'))
 
     runner.run(cycles: 5_000)
 
@@ -200,93 +284,220 @@ RSpec.describe RHDL::Examples::AO486::VerilatorRunner, timeout: 360 do
     )
   end
 
-  it 'repairs BPB-derived generic DOS stage vars on the PCjs MS-DOS 4.00 Disk 1 path' do
+  it 'returns a non-zero RTC time through INT 1Ah AH=02 on the live Verilator runner path' do
     skip 'firtool not available' unless HdlToolchain.which('firtool')
     skip 'verilator not available' unless HdlToolchain.verilator_available?
 
     runner = described_class.new(headless: true)
     runner.load_bios
-    runner.load_dos(path: runner.software_path('bin', 'msdos400_pcjs_disk1.img'))
+    runner.load_dos(path: runner.software_path('bin', 'msdos622_boot.img'))
+    runner.send(:ensure_sim!)
+
+    runner.sim.send(:write_io_value, 0x0F00, 1, 0x00)
+    runner.sim.send(:write_io_value, 0x0F01, 1, 0x02)
+    runner.sim.send(:write_io_value, 0x0F06, 1, 0x00)
+
+    expect(runner.sim.runner_ao486_dos_int1a_state).to include(
+      ax: 0x0200,
+      result_ax: 0x0000,
+      flags: 0
+    )
+    expect(
+      runner.sim.runner_ao486_dos_int1a_state[:result_cx] |
+      runner.sim.runner_ao486_dos_int1a_state[:result_dx]
+    ).not_to eq(0)
+  end
+
+  it 'reports A20 gate support through the real INT 15h stub on the DOS 6.22 path' do
+    skip 'firtool not available' unless HdlToolchain.which('firtool')
+    skip 'verilator not available' unless HdlToolchain.verilator_available?
+
+    runner = described_class.new(headless: true)
+    runner.load_bios
+    runner.load_dos(path: dos622_disk_path)
+
+    payload = [
+      0xFA,                   # cli
+      0x31, 0xC0,             # xor ax, ax
+      0x8E, 0xD8,             # mov ds, ax
+      0xB8, 0x03, 0x24,       # mov ax, 0x2403
+      0xCD, 0x15,             # int 0x15
+      0xA3, 0x00, 0x09,       # mov [0x0900], ax
+      0x89, 0x1E, 0x02, 0x09, # mov [0x0902], bx
+      0x9C,                   # pushf
+      0x58,                   # pop ax
+      0xA3, 0x04, 0x09,       # mov [0x0904], ax
+      0xEB, 0xFE              # jmp $
+    ]
+    payload.each_with_index do |byte, idx|
+      runner.write_memory(described_class::DOS_BOOT_SECTOR_ADDR + idx, byte)
+    end
+
+    runner.run(cycles: 5_000)
+
+    ax = runner.read_bytes(0x0900, 2, mapped: false)
+    bx = runner.read_bytes(0x0902, 2, mapped: false)
+    flags = runner.read_bytes(0x0904, 2, mapped: false)
+    flags_value = flags[0] | (flags[1] << 8)
+
+    expect(ax).to eq([0x00, 0x00])
+    expect(bx).to eq([0x03, 0x00])
+    expect(flags_value & 0x0001).to eq(0x0000)
+  end
+
+  it 'returns cleanly from the real INT 2Ah stub on the DOS 6.22 path' do
+    skip 'firtool not available' unless HdlToolchain.which('firtool')
+    skip 'verilator not available' unless HdlToolchain.verilator_available?
+
+    runner = described_class.new(headless: true)
+    runner.load_bios
+    runner.load_dos(path: dos622_disk_path)
+
+    payload = [
+      0xFA,                   # cli
+      0x31, 0xC0,             # xor ax, ax
+      0x8E, 0xD8,             # mov ds, ax
+      0xB8, 0x34, 0x12,       # mov ax, 0x1234
+      0xCD, 0x2A,             # int 0x2A
+      0xA3, 0x00, 0x09,       # mov [0x0900], ax
+      0x9C,                   # pushf
+      0x58,                   # pop ax
+      0xA3, 0x02, 0x09,       # mov [0x0902], ax
+      0xEB, 0xFE              # jmp $
+    ]
+    payload.each_with_index do |byte, idx|
+      runner.write_memory(described_class::DOS_BOOT_SECTOR_ADDR + idx, byte)
+    end
+
+    runner.run(cycles: 5_000)
+
+    ax = runner.read_bytes(0x0900, 2, mapped: false)
+    flags = runner.read_bytes(0x0902, 2, mapped: false)
+    flags_value = flags[0] | (flags[1] << 8)
+
+    expect(ax).to eq([0x34, 0x12])
+    expect(flags_value & 0x0001).to eq(0x0000)
+  end
+
+  it 'returns cleanly from the real INT 2Fh stub on the DOS 6.22 path' do
+    skip 'firtool not available' unless HdlToolchain.which('firtool')
+    skip 'verilator not available' unless HdlToolchain.verilator_available?
+
+    runner = described_class.new(headless: true)
+    runner.load_bios
+    runner.load_dos(path: dos622_disk_path)
+
+    payload = [
+      0xFA,                   # cli
+      0x31, 0xC0,             # xor ax, ax
+      0x8E, 0xD8,             # mov ds, ax
+      0xB8, 0x78, 0x56,       # mov ax, 0x5678
+      0xCD, 0x2F,             # int 0x2F
+      0xA3, 0x00, 0x09,       # mov [0x0900], ax
+      0x9C,                   # pushf
+      0x58,                   # pop ax
+      0xA3, 0x02, 0x09,       # mov [0x0902], ax
+      0xEB, 0xFE              # jmp $
+    ]
+    payload.each_with_index do |byte, idx|
+      runner.write_memory(described_class::DOS_BOOT_SECTOR_ADDR + idx, byte)
+    end
+
+    runner.run(cycles: 5_000)
+
+    ax = runner.read_bytes(0x0900, 2, mapped: false)
+    flags = runner.read_bytes(0x0902, 2, mapped: false)
+    flags_value = flags[0] | (flags[1] << 8)
+
+    expect(ax).to eq([0x78, 0x56])
+    expect(flags_value & 0x0001).to eq(0x0000)
+  end
+
+  it 'issues early multi-sector floppy reads on the DOS 6.22 boot disk path' do
+    skip 'firtool not available' unless HdlToolchain.which('firtool')
+    skip 'verilator not available' unless HdlToolchain.verilator_available?
+
+    runner = described_class.new(headless: true)
+    runner.load_bios
+    runner.load_dos(path: runner.software_path('bin', 'msdos622_boot.img'))
 
     runner.run(cycles: 4_600)
 
-    expect(runner.read_bytes(0x079B, 2, mapped: false)).to eq([0x00, 0x02])
-    expect(runner.read_bytes(0x07AB, 2, mapped: false)).to eq([0x09, 0x00])
-    expect(runner.read_bytes(0x07B7, 1, mapped: false)).to eq([0x02])
-    expect(runner.read_bytes(0x07AE, 1, mapped: false)).to eq([0x01])
-  end
-
-  it 'repairs the relocated generic DOS CHS helper on the PCjs MS-DOS 4.00 Disk 1 path' do
-    skip 'firtool not available' unless HdlToolchain.which('firtool')
-    skip 'verilator not available' unless HdlToolchain.verilator_available?
-
-    runner = described_class.new(headless: true)
-    runner.load_bios
-    runner.load_dos(path: runner.software_path('bin', 'msdos400_pcjs_disk1.img'))
-
-    runner.run(cycles: 20_000)
-
-    helper_addr = 0x0700 + described_class::SimBridge::GENERIC_DOS_STAGE_CHS_HELPER_OFFSET
-    expect(
-      runner.read_bytes(
-        helper_addr,
-        described_class::SimBridge::GENERIC_DOS_STAGE_CHS_HELPER_PATCH.length,
-        mapped: false
-      )
-    ).to eq(described_class::SimBridge::GENERIC_DOS_STAGE_CHS_HELPER_PATCH)
-
-    state = runner.run(cycles: 20_000)
-    expect(state[:exception_eip]).not_to eq(0x0346)
-    expect(state.dig(:pc, :trace)).not_to eq(0x0346)
-  end
-
-  it 'keeps later PCjs MS-DOS 4.00 Disk 1 INT 13h requests sane on the generic DOS path' do
-    skip 'firtool not available' unless HdlToolchain.which('firtool')
-    skip 'verilator not available' unless HdlToolchain.verilator_available?
-
-    runner = described_class.new(headless: true)
-    runner.load_bios
-    runner.load_dos(path: runner.software_path('bin', 'msdos400_pcjs_disk1.img'))
-
-    runner.run(cycles: 30_000)
-
     expect(runner.sim.runner_ao486_dos_int13_history.last).to include(
       function: 0x02,
-      ax: 0x0202,
-      cx: 0x0006,
-      dx: 0x0100,
-      es: 0x0000,
-      result_ax: 0x0002,
+      drive: 0x00,
+      lba: 19,
+      result_ax: 0x0001,
       flags: 0
     )
   end
 
-  it 'keeps the dual-disk beta path on the established late plateau', slow: true do
+  it 'keeps advancing the DOS 6.22 loader without the old generic-loader fault address' do
     skip 'firtool not available' unless HdlToolchain.which('firtool')
     skip 'verilator not available' unless HdlToolchain.verilator_available?
 
     runner = described_class.new(headless: true)
     runner.load_bios
-    runner.load_dos(path: runner.software_path('bin', 'msdos4_disk1.img'))
-    runner.load_dos(path: runner.software_path('bin', 'msdos4_disk2.img'), slot: 1, activate: false)
-    runner.load_hdd(path: runner.software_path('bin', 'fs.img'))
+    runner.load_dos(path: runner.software_path('bin', 'msdos622_boot.img'))
 
-    state = runner.run(cycles: 500_000)
-    cs_cache = runner.peek('trace_cs_cache')
-    cs_base = (((cs_cache >> 56) & 0xFF) << 24) | ((cs_cache >> 16) & 0xFFFFFF)
-
-    expect(state[:shell_prompt_detected]).to be(false)
-    expect(state.dig(:pc, :trace)).to eq(0xFEA4)
-    expect(state.dig(:pc, :decode)).to eq(0xFEA4)
-    expect(state.dig(:pc, :arch)).to eq(0xFEA4)
-    expect(state[:exception_eip]).to eq(0x5171)
-    expect(cs_base).to eq(0x3F10)
-    expect(runner.sim.runner_ao486_dos_int13_history.last(2)).to match(
-      [
-        include(drive: 0x80, lba: 0, result_ax: 0x0001, flags: 0),
-        include(drive: 0x81, lba: 0, result_ax: 0x0001, flags: 0)
-      ]
+    state = runner.run(cycles: 20_000)
+    expect(runner.sim.runner_ao486_dos_int13_history.length).to be >= 5
+    expect(runner.sim.runner_ao486_dos_int13_history.last).to include(
+      function: 0x02,
+      drive: 0x00,
+      lba: 35,
+      result_ax: 0x0001,
+      flags: 0
     )
+    expect(state[:exception_eip]).not_to eq(0x0346)
+    expect(state.dig(:pc, :trace)).not_to eq(0x0346)
+  end
+
+  it 'boots the verbose DOS 6.22 image to A:\\>', slow: true, timeout: 720 do
+    skip 'firtool not available' unless HdlToolchain.which('firtool')
+    skip 'verilator not available' unless HdlToolchain.verilator_available?
+
+    runner = described_class.new(headless: true)
+    runner.load_bios
+    runner.load_dos(path: dos622_disk_path)
+
+    state = runner.run(cycles: 6_000_000)
+    final_display = runner.render_display
+    pc_tail = runner.sim.runner_ao486_pc_history.last(12)
+    int13_tail = runner.sim.runner_ao486_dos_int13_history.last(12)
+    vector_2a = runner.read_bytes(0x2A * 4, 4, mapped: false)
+    vector_2f = runner.read_bytes(0x2F * 4, 4, mapped: false)
+
+    expect(state[:shell_prompt_detected]).to be(
+      true
+    ), [
+      "state=#{state.slice(:shell_prompt_detected, :exception_vector, :exception_eip, :cycles_run).inspect}",
+      "pc_tail=#{pc_tail.inspect}",
+      "int13_tail=#{int13_tail.inspect}",
+      "vector_2a=#{vector_2a.inspect}",
+      "vector_2f=#{vector_2f.inspect}",
+      final_display
+    ].join("\n")
+    expect(final_display).to include('Booting MS-DOS 6.22')
+    expect(final_display).to include('A:\\>')
+  end
+
+  it 'keeps the single-disk DOS path out of the INT 12h self-loop', slow: true do
+    skip 'firtool not available' unless HdlToolchain.which('firtool')
+    skip 'verilator not available' unless HdlToolchain.verilator_available?
+
+    runner = described_class.new(headless: true)
+    runner.load_bios
+    runner.load_dos(path: dos622_disk_path)
+
+    runner.run(cycles: 100_000)
+
+    saved_vector_addr =
+      (described_class::SimBridge::DOS_INT12_WRAPPER_SEGMENT << 4) +
+      described_class::SimBridge::DOS_INT12_WRAPPER_SAVED_VECTOR_OFFSET
+
+    expect(runner.read_bytes(saved_vector_addr, 4, mapped: false)).to eq([0x41, 0xF8, 0x00, 0xF0])
+    expect(runner.render_display).not_to include('Error - Interrupt 12')
   end
 
   it 'reports mounted floppy geometry and drive count through INT 13h AH=08 on the generic custom-DOS hot-swap path' do
@@ -295,7 +506,7 @@ RSpec.describe RHDL::Examples::AO486::VerilatorRunner, timeout: 360 do
 
     runner = described_class.new(headless: true)
     runner.load_bios
-    runner.load_dos(path: runner.software_path('bin', 'msdos4_disk1.img'))
+    runner.load_dos(path: dos622_disk_path)
     runner.send(:ensure_sim!)
 
     runner.sim.send(:write_io_value, 0x0ED0, 1, 0x00)
@@ -309,11 +520,11 @@ RSpec.describe RHDL::Examples::AO486::VerilatorRunner, timeout: 360 do
       dx: 0x0000,
       result_ax: 0x0000,
       result_bx: 0x0400,
-      result_cx: 0x2709,
+      result_cx: 0x4F12,
       result_dx: 0x0101
     )
 
-    runner.load_dos(path: runner.software_path('bin', 'msdos4_disk2.img'), slot: 1, activate: false)
+    runner.load_dos(path: dos622_disk_path, slot: 1, activate: false)
 
     runner.sim.send(:write_io_value, 0x0ED0, 1, 0x00)
     runner.sim.send(:write_io_value, 0x0ED1, 1, 0x08)
@@ -323,7 +534,7 @@ RSpec.describe RHDL::Examples::AO486::VerilatorRunner, timeout: 360 do
 
     expect(runner.sim.runner_ao486_dos_int13_state).to include(
       result_bx: 0x0400,
-      result_cx: 0x2709,
+      result_cx: 0x4F12,
       result_dx: 0x0102
     )
   end
@@ -334,8 +545,8 @@ RSpec.describe RHDL::Examples::AO486::VerilatorRunner, timeout: 360 do
 
     runner = described_class.new(headless: true)
     runner.load_bios
-    runner.load_dos(path: runner.software_path('bin', 'msdos4_disk1.img'))
-    runner.load_dos(path: runner.software_path('bin', 'msdos4_disk2.img'), slot: 1, activate: false)
+    runner.load_dos(path: dos622_disk_path)
+    runner.load_dos(path: dos622_disk_path, slot: 1, activate: false)
 
     payload = [
       0xFA,                   # cli
@@ -355,7 +566,7 @@ RSpec.describe RHDL::Examples::AO486::VerilatorRunner, timeout: 360 do
 
     runner.run(cycles: 5_000)
 
-    expect(runner.read_bytes(0x0900, 6, mapped: false)).to eq([0x01, 0x00, 0x09, 0x27, 0x02, 0x01])
+    expect(runner.read_bytes(0x0900, 6, mapped: false)).to eq([0x01, 0x00, 0x12, 0x4F, 0x02, 0x01])
   end
 
 end

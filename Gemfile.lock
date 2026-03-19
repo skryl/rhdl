@@ -93,6 +93,7 @@ GEM
       parser (>= 3.3.7.2)
       prism (~> 1.7)
     ruby-progressbar (1.13.0)
+    stackprof (0.2.28)
     stringio (3.2.0)
     syntax_tree (6.3.0)
       prettier_print (>= 1.2.0)
@@ -116,6 +117,7 @@ DEPENDENCIES
   rhdl!
   rspec (~> 3.12)
   rubocop
+  stackprof
   webrick
 
 BUNDLED WITH

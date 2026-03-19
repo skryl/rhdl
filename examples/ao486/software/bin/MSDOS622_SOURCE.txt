@@ -1,0 +1,7 @@
+Source: https://www.allbootdisks.com/disk_images/Dos6.22.img
+Downloaded: 2026-03-19
+SHA-256: 1ab300a0a54b8f384cc457424ea0d2f3f46bef11c0172429c6b207b2ec539e6e
+Local file: msdos622_boot.img
+Local patches:
+- CONFIG.SYS stripped down to a minimal non-CD-ROM startup
+- AUTOEXEC.BAT set to ECHO ON with a visible boot banner and PROMPT $P$G

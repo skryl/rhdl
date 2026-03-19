@@ -30,11 +30,12 @@ module RHDL
 
         attr_reader :cpu, :mode, :sim_backend, :effective_mode, :core
 
-        def initialize(mode: :ir, sim: nil, core: :single, mem_size: nil)
+        def initialize(mode: :ir, sim: nil, core: :single, mem_size: nil, threads: 1)
           @mode = (mode || :ir).to_sym
           @effective_mode = normalize_mode(@mode)
           @sim_backend = (sim || default_backend(@mode)).to_sym
           @core = normalize_core(core)
+          @threads = RHDL::Codegen::Verilog::VerilogSimulator.normalize_threads(threads)
           resolved_mem_size = mem_size || DEFAULT_MEM_SIZE
 
           @cpu = case @effective_mode
@@ -49,7 +50,7 @@ module RHDL
                      @core = :single
                    end
                    require_relative 'verilator_runner'
-                   VerilogRunner.new(mem_size: resolved_mem_size)
+                   VerilogRunner.new(mem_size: resolved_mem_size, threads: @threads)
                  when :circt
                    if @core != :single
                      warn "CIRCT mode only supports single-cycle core; overriding core=#{@core} to single."

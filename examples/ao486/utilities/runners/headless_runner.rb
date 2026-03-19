@@ -32,17 +32,17 @@ module RHDL
           circt: :arcilator
         }.freeze
 
-        attr_reader :runner, :mode, :sim_backend, :speed, :debug, :headless, :cycles
+        attr_reader :runner, :mode, :sim_backend, :speed, :debug, :headless, :cycles, :threads
 
-        def self.build_from_cleaned_mlir(cleaned_mlir, mode: DEFAULT_MODE, sim: DEFAULT_SIM, debug: false, speed: nil, headless: true, cycles: nil, work_dir: nil)
-          instance = new(mode: mode, sim: sim, debug: debug, speed: speed, headless: headless, cycles: cycles, runner: nil)
+        def self.build_from_cleaned_mlir(cleaned_mlir, mode: DEFAULT_MODE, sim: DEFAULT_SIM, debug: false, speed: nil, headless: true, cycles: nil, work_dir: nil, threads: 1)
+          instance = new(mode: mode, sim: sim, debug: debug, speed: speed, headless: headless, cycles: cycles, runner: nil, threads: threads)
           backend_runner = case instance.effective_mode
                            when :ir
                              IrRunner.build_from_cleaned_mlir(cleaned_mlir, backend: sim || DEFAULT_SIM)
                            when :verilog
                              raise ArgumentError, 'work_dir is required for AO486 Verilator parity runner builds' if work_dir.nil?
 
-                             VerilatorRunner.build_from_cleaned_mlir(cleaned_mlir, work_dir: work_dir)
+                             VerilatorRunner.build_from_cleaned_mlir(cleaned_mlir, work_dir: work_dir, threads: threads)
                            when :circt
                              raise ArgumentError, 'work_dir is required for AO486 Arcilator parity runner builds' if work_dir.nil?
 
@@ -54,13 +54,14 @@ module RHDL
           instance
         end
 
-        def initialize(mode: DEFAULT_MODE, sim: DEFAULT_SIM, debug: false, speed: nil, headless: false, cycles: nil, runner: :auto)
+        def initialize(mode: DEFAULT_MODE, sim: DEFAULT_SIM, debug: false, speed: nil, headless: false, cycles: nil, runner: :auto, threads: 1)
           @mode = mode.to_sym
           @sim_backend = sim&.to_sym
           @debug = !!debug
           @speed = speed
           @headless = !!headless
           @cycles = cycles
+          @threads = RHDL::Codegen::Verilog::VerilogSimulator.normalize_threads(threads)
           @display_adapter = DisplayAdapter.new
           @runner = runner == :auto ? build_runner : runner
         end
@@ -428,7 +429,7 @@ module RHDL
           when :ir
             IrRunner.new(sim: sim_backend, debug: debug, speed: speed, headless: headless, cycles: cycles)
           when :verilog
-            VerilatorRunner.new(sim: sim_backend, debug: debug, speed: speed, headless: headless, cycles: cycles)
+            VerilatorRunner.new(sim: sim_backend, debug: debug, speed: speed, headless: headless, cycles: cycles, threads: threads)
           when :circt
             ArcilatorRunner.new(sim: sim_backend, debug: debug, speed: speed, headless: headless, cycles: cycles)
           else

@@ -158,7 +158,7 @@ diff --git a/ao486/memory/prefetch.v b/ao486/memory/prefetch.v
 +    automatic logic [4:0]  _GEN_1 =
 +      rt_tmp_1_32 < {27'h0, prefetched_length} ? rt_tmp_1_32[4:0] : prefetched_length;	// /var/folders/fx/2jqq5cks33g297zlybsqw6c40000gn/T/ao486_patch_profile_ws20260311-55795-e9mvr1/parity.mlir:1860:19, :1862:19, :1863:18, :1864:18, :1865:18, :1872:18
 +    automatic logic        _GEN_2 = pr_reset | reset_prefetch;
-+    automatic logic [31:0] _GEN_3 = {16'h0, prefetch_eip[15:0]} + 32'hF0000;	// /var/folders/fx/2jqq5cks33g297zlybsqw6c40000gn/T/ao486_patch_profile_ws20260311-55795-e9mvr1/parity.mlir:1877:19, :1878:19, :1879:19, :1880:19, :1881:19
++    automatic logic [31:0] _GEN_3 = {cs_cache[63:56], cs_cache[39:16]} + prefetch_eip;	// keep prefetch linearized to the active CS base
 +    rt_tmp_1_32 <=
 +      ~rst_n
 +        ? 32'hFFFF
@@ -173,7 +173,7 @@ diff --git a/ao486/memory/prefetch.v b/ao486/memory/prefetch.v
 +        : _GEN_2
 +            ? _GEN_3
 +            : prefetched_do
-+                ? {16'h0, rt_tmp_4_32[15:0] + {11'h0, _GEN_1}} + 32'hF0000
++                ? rt_tmp_4_32 + {27'h0, _GEN_1}
 +                : rt_tmp_4_32;	// /var/folders/fx/2jqq5cks33g297zlybsqw6c40000gn/T/ao486_patch_profile_ws20260311-55795-e9mvr1/parity.mlir:1844:17, :1865:18, :1870:19, :1876:19, :1877:19, :1878:19, :1881:19, :1882:19, :1883:19, :1884:19, :1885:19, :1886:19, :1887:19, :1889:19, :1890:19, :1891:18
 +    rt_tmp_5_32 <=
 +      ~rst_n
@@ -181,7 +181,7 @@ diff --git a/ao486/memory/prefetch.v b/ao486/memory/prefetch.v
 +        : _GEN_2
 +            ? _GEN_3
 +            : rt_tmp_2_1
-+                ? {16'h0, rt_tmp_5_32[15:0] + {12'h0, rt_tmp_3_4}} + 32'hF0000
++                ? rt_tmp_5_32 + {28'h0, rt_tmp_3_4}
 +                : rt_tmp_5_32;	// /var/folders/fx/2jqq5cks33g297zlybsqw6c40000gn/T/ao486_patch_profile_ws20260311-55795-e9mvr1/parity.mlir:1844:17, :1870:19, :1873:17, :1874:17, :1876:19, :1877:19, :1878:19, :1881:19, :1893:19, :1896:19, :1897:19, :1898:19, :1899:19, :1900:19, :1902:19, :1903:19, :1904:18
 +    rt_tmp_6_1 <= ~(~rst_n | pr_reset) & (_GEN | rt_tmp_6_1);	// /var/folders/fx/2jqq5cks33g297zlybsqw6c40000gn/T/ao486_patch_profile_ws20260311-55795-e9mvr1/parity.mlir:1844:17, :1906:18, :1910:18, :1911:18, :1912:18, :1913:17
 +  end // always_ff @(posedge)
@@ -191,4 +191,3 @@ diff --git a/ao486/memory/prefetch.v b/ao486/memory/prefetch.v
 +  assign prefetchfifo_signal_limit_do = _GEN;	// /var/folders/fx/2jqq5cks33g297zlybsqw6c40000gn/T/ao486_patch_profile_ws20260311-55795-e9mvr1/parity.mlir:1910:18, :1921:3
 +  assign delivered_eip = rt_tmp_5_32;	// /var/folders/fx/2jqq5cks33g297zlybsqw6c40000gn/T/ao486_patch_profile_ws20260311-55795-e9mvr1/parity.mlir:1904:18, :1921:3
  endmodule
-

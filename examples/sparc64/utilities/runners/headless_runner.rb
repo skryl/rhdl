@@ -13,14 +13,15 @@ module RHDL
       class HeadlessRunner
         include RHDL::Sim::Native::HeadlessTrace
         attr_reader :runner, :mode, :sim_backend, :builder, :fast_boot, :compile_mode,
-                    :verilator_source, :arcilator_source
+                    :verilator_source, :arcilator_source, :threads
 
         def initialize(mode: :ir, sim: nil, runner: nil, ir_runner_class: IrRunner,
                        verilator_runner_class: VerilatorRunner, arcilator_runner_class: ArcilatorRunner, builder: nil,
                        builder_class: Integration::ProgramImageBuilder, fast_boot: true,
                        compile_mode: :rustc,
                        verilator_source: :staged_verilog,
-                       arcilator_source: :rhdl_mlir)
+                       arcilator_source: :rhdl_mlir,
+                       threads: 1)
           @mode = (mode || :ir).to_sym
           @sim_backend = (sim || default_backend(@mode)).to_sym
           @builder = builder || builder_class.new
@@ -28,6 +29,7 @@ module RHDL
           @compile_mode = normalize_compile_mode(compile_mode)
           @verilator_source = normalize_verilator_source(verilator_source)
           @arcilator_source = normalize_arcilator_source(arcilator_source)
+          @threads = RHDL::Codegen::Verilog::VerilogSimulator.normalize_threads(threads)
           @runner = runner || build_runner(
             ir_runner_class: ir_runner_class,
             verilator_runner_class: verilator_runner_class,
@@ -112,7 +114,8 @@ module RHDL
           when :verilog
             verilator_runner_class.new(
               fast_boot: fast_boot,
-              source_kind: verilator_source
+              source_kind: verilator_source,
+              threads: threads
             )
           when :circt, :arcilator
             arcilator_runner_class.new(

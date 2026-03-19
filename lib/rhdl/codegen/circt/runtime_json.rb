@@ -77,7 +77,9 @@ module RHDL
               runtime_sensitive_names: runtime_sensitive_names,
               needs_cache: simplification_needed_cache,
               simplify_cache: simplification_cache,
-              hoist_shared_exprs: !compact_exprs
+              # Keep shared-expression hoisting opt-in; on large real designs
+              # like SPARC64 it makes export materially more expensive.
+              hoist_shared_exprs: false
             )
           end
         end
@@ -117,7 +119,7 @@ module RHDL
 
         def normalize_module_for_runtime(mod, live_assign_targets: nil, assign_map: nil, inlineable_names: nil,
                                          signal_widths: nil, runtime_sensitive_names: nil, needs_cache: nil,
-                                         simplify_cache: nil, hoist_shared_exprs: true)
+                                         simplify_cache: nil, hoist_shared_exprs: false)
           temp_counter = 0
           extra_nets = []
           extra_assigns = []
@@ -226,7 +228,8 @@ module RHDL
             live_assign_targets: live_assign_targets,
             preserve_assign_targets: live_assign_targets
           )
-          hoist_shared_exprs ? hoist_module_shared_exprs(pruned_module) : pruned_module
+          collapsed_module = collapse_runtime_alias_assigns(pruned_module)
+          hoist_shared_exprs ? hoist_module_shared_exprs(collapsed_module) : collapsed_module
         end
 
         def recursion_cache_key(expr_or_id, expanding)
@@ -260,7 +263,7 @@ module RHDL
 
         def normalize_process_statements(statements, temp_counter:, prefix:, assign_map:, inlineable_names:, needs_cache:,
                                          simplify_cache:, runtime_sensitive_names:, signal_widths: nil,
-                                         hoist_shared_exprs: true)
+                                         hoist_shared_exprs: false)
           extra_assigns = []
           extra_nets = []
           signal_widths ||= {}
@@ -1886,6 +1889,67 @@ module RHDL
           )
         end
 
+        def collapse_runtime_alias_assigns(mod, preserve_assign_targets: nil)
+          output_targets = Array(mod.ports)
+                           .select { |port| port.direction.to_sym == :out }
+                           .map { |port| port.name.to_s }
+                           .to_set
+          preserve_assign_targets = Set.new(Array(preserve_assign_targets).map(&:to_s))
+          hierarchical_assign_targets = Array(mod.assigns)
+                                        .map { |assign| assign.target.to_s }
+                                        .select { |name| hierarchical_runtime_signal_name?(name) }
+                                        .to_set
+          preserved_targets = output_targets |
+                              runtime_non_assign_signal_refs(mod) |
+                              hierarchical_assign_targets |
+                              preserve_assign_targets
+
+          alias_targets = {}
+          Array(mod.assigns).each do |assign|
+            target_name = assign.target.to_s
+            next if preserved_targets.include?(target_name)
+            next unless assign.expr.is_a?(IR::Signal)
+
+            source_name = assign.expr.name.to_s
+            next if source_name == target_name
+
+            alias_targets[target_name] = source_name
+          end
+
+          return mod if alias_targets.empty?
+
+          signal_widths = build_signal_width_map(mod)
+          resolution_cache = {}
+          rewritten_assigns = Array(mod.assigns).map do |assign|
+            expr = rewrite_runtime_expr_aliases(
+              assign.expr,
+              alias_targets: alias_targets,
+              signal_widths: signal_widths,
+              resolution_cache: resolution_cache
+            )
+            expr.equal?(assign.expr) ? assign : IR::Assign.new(target: assign.target, expr: expr)
+          end.reject { |assign| alias_targets.key?(assign.target.to_s) }
+
+          collapsed_module = IR::ModuleOp.new(
+            name: mod.name,
+            ports: mod.ports,
+            nets: mod.nets,
+            regs: mod.regs,
+            assigns: rewritten_assigns,
+            processes: mod.processes,
+            instances: mod.instances,
+            memories: mod.memories,
+            write_ports: mod.write_ports,
+            sync_read_ports: mod.sync_read_ports,
+            parameters: mod.parameters || {}
+          )
+
+          prune_dead_runtime_assigns_and_signals(
+            collapsed_module,
+            preserve_assign_targets: preserved_targets
+          )
+        end
+
         def runtime_non_assign_signal_refs(mod)
           refs = Set.new
           process_writes = Set.new
@@ -2041,6 +2105,60 @@ module RHDL
                  end
           visiting.delete(oid)
           cache[oid] = refs.frozen? ? refs : refs.freeze
+        end
+
+        def rewrite_runtime_expr_aliases(expr, alias_targets:, signal_widths:, resolution_cache:, visiting: nil)
+          return expr if expr.nil?
+
+          case expr
+          when IR::Signal
+            resolved_name = resolve_runtime_alias_name(
+              expr.name.to_s,
+              alias_targets: alias_targets,
+              resolution_cache: resolution_cache,
+              visiting: visiting
+            )
+            return expr if resolved_name == expr.name.to_s
+
+            IR::Signal.new(name: resolved_name, width: signal_widths[resolved_name].to_i.nonzero? || expr.width.to_i)
+          else
+            children = expr_children(expr)
+            return expr if children.empty?
+
+            rewritten_children = children.map do |child|
+              rewrite_runtime_expr_aliases(
+                child,
+                alias_targets: alias_targets,
+                signal_widths: signal_widths,
+                resolution_cache: resolution_cache,
+                visiting: visiting
+              )
+            end
+            return expr if rewritten_children.each_with_index.all? { |child, index| child.equal?(children[index]) }
+
+            rebuild_expr(expr, rewritten_children)
+          end
+        end
+
+        def resolve_runtime_alias_name(name, alias_targets:, resolution_cache:, visiting: nil)
+          signal_name = name.to_s
+          return resolution_cache[signal_name] if resolution_cache.key?(signal_name)
+
+          visiting ||= Set.new
+          return signal_name if visiting.include?(signal_name)
+
+          target = alias_targets[signal_name]
+          return resolution_cache[signal_name] = signal_name if target.nil?
+
+          visiting.add(signal_name)
+          resolved = resolve_runtime_alias_name(
+            target,
+            alias_targets: alias_targets,
+            resolution_cache: resolution_cache,
+            visiting: visiting
+          )
+          visiting.delete(signal_name)
+          resolution_cache[signal_name] = resolved
         end
 
         def hoist_shared_exprs_to_assigns(expr, temp_counter:, prefix:)
@@ -2655,7 +2773,7 @@ module RHDL
         end
 
         def serialize_module(mod, expr_cache:, compact_exprs: false)
-          compact_state = compact_exprs ? { cache: {}, exprs: [] } : nil
+          compact_state = compact_exprs ? { cache: {}, exprs: [], repeat_key_cache: {} } : nil
 
           serialized = {
             name: mod.name.to_s,
@@ -2744,7 +2862,12 @@ module RHDL
 
         def serialize_runtime_expr(expr, expr_cache:, compact_state: nil)
           if compact_state
-            serialize_expr_compact(expr, cache: compact_state[:cache], exprs: compact_state[:exprs])
+            serialize_expr_compact(
+              expr,
+              cache: compact_state[:cache],
+              exprs: compact_state[:exprs],
+              repeat_key_cache: compact_state[:repeat_key_cache]
+            )
           else
             serialize_expr(expr, cache: expr_cache)
           end
@@ -2822,96 +2945,205 @@ module RHDL
           end
         end
 
-        def serialize_expr_compact(expr, cache:, exprs:)
+        def serialize_expr_compact(expr, cache:, exprs:, repeat_key_cache:, force_pool: false)
           return nil if expr.nil?
 
-          key = expr.object_id
+          key = [expr.object_id, force_pool]
           return cache[key] if cache.key?(key)
+          structural_key = compact_structural_pool_key(expr, cache: repeat_key_cache)
+          structural_cache_key = structural_key ? [:structural, structural_key] : nil
+          return cache[structural_cache_key] if structural_cache_key && cache.key?(structural_cache_key)
 
-          case expr
-          when IR::Signal
-            cache[key] = { kind: 'signal', name: expr.name.to_s, width: expr.width.to_i }
-          when IR::Literal
-            cache[key] = { kind: 'literal', value: serialize_runtime_integer(expr.value), width: expr.width.to_i }
-          else
-            expr_id = exprs.length
-            ref = { kind: 'expr_ref', id: expr_id, width: expr.width.to_i }
-            cache[key] = ref
-            # Reserve the index before recursing so nested children cannot shift
-            # the parent node away from the expr_ref id we just assigned.
-            exprs << nil
-            exprs[expr_id] = serialize_expr_compact_node(expr, cache: cache, exprs: exprs)
-            ref
-          end
+          result = case expr
+                   when IR::Signal
+                     if force_pool
+                       expr_id = exprs.length
+                       ref = { kind: 'expr_ref', id: expr_id, width: expr.width.to_i }
+                       cache[key] = ref
+                       exprs << nil
+                       exprs[expr_id] = serialize_expr_compact_node(
+                         expr,
+                         cache: cache,
+                         exprs: exprs,
+                         repeat_key_cache: repeat_key_cache
+                       )
+                       ref
+                     else
+                       cache[key] = { kind: 'signal', name: expr.name.to_s, width: expr.width.to_i }
+                     end
+                   when IR::Literal
+                     if force_pool
+                       expr_id = exprs.length
+                       ref = { kind: 'expr_ref', id: expr_id, width: expr.width.to_i }
+                       cache[key] = ref
+                       exprs << nil
+                       exprs[expr_id] = serialize_expr_compact_node(
+                         expr,
+                         cache: cache,
+                         exprs: exprs,
+                         repeat_key_cache: repeat_key_cache
+                       )
+                       ref
+                     else
+                       cache[key] = { kind: 'literal', value: serialize_runtime_integer(expr.value), width: expr.width.to_i }
+                     end
+                   else
+                     expr_id = exprs.length
+                     ref = { kind: 'expr_ref', id: expr_id, width: expr.width.to_i }
+                     cache[key] = ref
+                     # Reserve the index before recursing so nested children cannot shift
+                     # the parent node away from the expr_ref id we just assigned.
+                     exprs << nil
+                     exprs[expr_id] = serialize_expr_compact_node(
+                       expr,
+                       cache: cache,
+                       exprs: exprs,
+                       repeat_key_cache: repeat_key_cache
+                     )
+                     ref
+                   end
+          cache[structural_cache_key] = result if structural_cache_key
+          result
         end
 
-        def serialize_expr_compact_node(expr, cache:, exprs:)
+        def serialize_expr_compact_node(expr, cache:, exprs:, repeat_key_cache:)
           case expr
+          when IR::Signal
+            { kind: 'signal', name: expr.name.to_s, width: expr.width.to_i }
+          when IR::Literal
+            { kind: 'literal', value: serialize_runtime_integer(expr.value), width: expr.width.to_i }
           when IR::UnaryOp
             {
               kind: 'unary',
               op: expr.op.to_s,
-              operand: serialize_expr_compact(expr.operand, cache: cache, exprs: exprs),
+              operand: serialize_expr_compact(expr.operand, cache: cache, exprs: exprs, repeat_key_cache: repeat_key_cache),
               width: expr.width.to_i
             }
           when IR::BinaryOp
             {
               kind: 'binary',
               op: expr.op.to_s,
-              left: serialize_expr_compact(expr.left, cache: cache, exprs: exprs),
-              right: serialize_expr_compact(expr.right, cache: cache, exprs: exprs),
+              left: serialize_expr_compact(expr.left, cache: cache, exprs: exprs, repeat_key_cache: repeat_key_cache),
+              right: serialize_expr_compact(expr.right, cache: cache, exprs: exprs, repeat_key_cache: repeat_key_cache),
               width: expr.width.to_i
             }
           when IR::Mux
             {
               kind: 'mux',
-              condition: serialize_expr_compact(expr.condition, cache: cache, exprs: exprs),
-              when_true: serialize_expr_compact(expr.when_true, cache: cache, exprs: exprs),
-              when_false: serialize_expr_compact(expr.when_false, cache: cache, exprs: exprs),
+              condition: serialize_expr_compact(expr.condition, cache: cache, exprs: exprs, repeat_key_cache: repeat_key_cache),
+              when_true: serialize_expr_compact(expr.when_true, cache: cache, exprs: exprs, repeat_key_cache: repeat_key_cache),
+              when_false: serialize_expr_compact(expr.when_false, cache: cache, exprs: exprs, repeat_key_cache: repeat_key_cache),
               width: expr.width.to_i
             }
           when IR::Slice
             {
               kind: 'slice',
-              base: serialize_expr_compact(expr.base, cache: cache, exprs: exprs),
+              base: serialize_expr_compact(expr.base, cache: cache, exprs: exprs, repeat_key_cache: repeat_key_cache),
               range_begin: expr.range.begin,
               range_end: expr.range.end,
               width: expr.width.to_i
             }
           when IR::Concat
+            repeated_part = repeated_compact_concat_part(expr.parts, cache: repeat_key_cache)
             {
               kind: 'concat',
-              parts: expr.parts.map { |part| serialize_expr_compact(part, cache: cache, exprs: exprs) },
+              parts: if repeated_part
+                       repeated_ref = serialize_expr_compact(
+                         repeated_part,
+                         cache: cache,
+                         exprs: exprs,
+                         repeat_key_cache: repeat_key_cache,
+                         force_pool: true
+                       )
+                       Array.new(expr.parts.length) { repeated_ref.dup }
+                     else
+                       expr.parts.map do |part|
+                         serialize_expr_compact(part, cache: cache, exprs: exprs, repeat_key_cache: repeat_key_cache)
+                       end
+                     end,
               width: expr.width.to_i
             }
           when IR::Resize
             {
               kind: 'resize',
-              expr: serialize_expr_compact(expr.expr, cache: cache, exprs: exprs),
+              expr: serialize_expr_compact(expr.expr, cache: cache, exprs: exprs, repeat_key_cache: repeat_key_cache),
               width: expr.width.to_i
             }
           when IR::Case
             {
               kind: 'case',
-              selector: serialize_expr_compact(expr.selector, cache: cache, exprs: exprs),
-              cases: expr.cases.transform_values { |value| serialize_expr_compact(value, cache: cache, exprs: exprs) },
-              default: expr.default ? serialize_expr_compact(expr.default, cache: cache, exprs: exprs) : nil,
+              selector: serialize_expr_compact(expr.selector, cache: cache, exprs: exprs, repeat_key_cache: repeat_key_cache),
+              cases: expr.cases.transform_values do |value|
+                serialize_expr_compact(value, cache: cache, exprs: exprs, repeat_key_cache: repeat_key_cache)
+              end,
+              default: expr.default ? serialize_expr_compact(expr.default, cache: cache, exprs: exprs, repeat_key_cache: repeat_key_cache) : nil,
               width: expr.width.to_i
             }
           when IR::MemoryRead
             {
               kind: 'memory_read',
               memory: expr.memory.to_s,
-              addr: serialize_expr_compact(expr.addr, cache: cache, exprs: exprs),
+              addr: serialize_expr_compact(expr.addr, cache: cache, exprs: exprs, repeat_key_cache: repeat_key_cache),
               width: expr.width.to_i
             }
           when IR::Signal, IR::Literal
-            serialize_expr_compact(expr, cache: cache, exprs: exprs)
+            serialize_expr_compact(expr, cache: cache, exprs: exprs, repeat_key_cache: repeat_key_cache)
           else
             {
               kind: 'unknown',
               class: expr.class.to_s
             }
+          end
+        end
+
+        def repeated_compact_concat_part(parts, cache:)
+          first = Array(parts).first
+          return nil if first.nil? || parts.length < 2
+
+          first_key = compact_repeat_key(first, cache: cache)
+          return nil unless parts.all? { |part| compact_repeat_key(part, cache: cache) == first_key }
+
+          first
+        end
+
+        def compact_repeat_key(expr, cache:)
+          return nil if expr.nil?
+
+          key = expr.object_id
+          return cache[key] if cache.key?(key)
+
+          cache[key] = case expr
+                       when IR::Signal
+                         [:signal, expr.name.to_s, expr.width.to_i]
+                       when IR::Literal
+                         [:literal, serialize_runtime_integer(expr.value), expr.width.to_i]
+                       when IR::UnaryOp
+                         [:unary, expr.op.to_s, compact_repeat_key(expr.operand, cache: cache), expr.width.to_i]
+                       when IR::BinaryOp
+                         [:binary, expr.op.to_s, compact_repeat_key(expr.left, cache: cache), compact_repeat_key(expr.right, cache: cache), expr.width.to_i]
+                       when IR::Mux
+                         [:mux, compact_repeat_key(expr.condition, cache: cache), compact_repeat_key(expr.when_true, cache: cache), compact_repeat_key(expr.when_false, cache: cache), expr.width.to_i]
+                       when IR::Slice
+                         [:slice, compact_repeat_key(expr.base, cache: cache), expr.range.begin, expr.range.end, expr.width.to_i]
+                       when IR::Concat
+                         [:concat, expr.parts.map { |part| compact_repeat_key(part, cache: cache) }, expr.width.to_i]
+                       when IR::Resize
+                         [:resize, compact_repeat_key(expr.expr, cache: cache), expr.width.to_i]
+                       when IR::Case
+                         [:case, compact_repeat_key(expr.selector, cache: cache), expr.cases.transform_values { |value| compact_repeat_key(value, cache: cache) }, compact_repeat_key(expr.default, cache: cache), expr.width.to_i]
+                       when IR::MemoryRead
+                         [:memory_read, expr.memory.to_s, compact_repeat_key(expr.addr, cache: cache), expr.width.to_i]
+                       else
+                         [:unknown, expr.class.to_s]
+                       end
+        end
+
+        def compact_structural_pool_key(expr, cache:)
+          case expr
+          when IR::Slice, IR::Resize, IR::BinaryOp, IR::Mux
+            compact_repeat_key(expr, cache: cache)
+          else
+            nil
           end
         end
 
@@ -2993,7 +3225,7 @@ module RHDL
 
         def write_compact_module_json(io, mod)
           expr_cache = {}
-          compact_state = { cache: {}, exprs: [] }
+          compact_state = { cache: {}, exprs: [], repeat_key_cache: {} }
 
           write_json_object(io) do |field|
             field.call('name')

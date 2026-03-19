@@ -73,8 +73,9 @@ module RHDL
 
       # Initialize the Apple II Verilator runner
       # @param sub_cycles [Integer] Sub-cycles per CPU cycle (1-14, default: 14)
-      def initialize(sub_cycles: 14)
+      def initialize(sub_cycles: 14, threads: 1)
         @sub_cycles = sub_cycles.clamp(1, 14)
+        @threads = RHDL::Codegen::Verilog::VerilogSimulator.normalize_threads(threads)
 
         check_verilator_available!
 
@@ -435,7 +436,8 @@ module RHDL
           top_module: 'apple2_apple2',
           verilator_prefix: 'Vapple2',
           x_assign: '0',
-          x_initial: 'unique'
+          x_initial: 'unique',
+          threads: @threads
         )
       end
 

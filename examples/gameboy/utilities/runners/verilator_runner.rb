@@ -102,11 +102,12 @@ module RHDL
       # @param use_normalized_verilog [Boolean] Force the normalized imported Verilog artifact when available.
       # @param use_rhdl_source [Boolean] Force export from the selected RHDL top instead of imported Verilog.
       def initialize(hdl_dir: nil, verilog_dir: nil, top: nil,
-                     use_staged_verilog: true, use_normalized_verilog: false, use_rhdl_source: false)
+                     use_staged_verilog: true, use_normalized_verilog: false, use_rhdl_source: false, threads: 1)
         if hdl_dir && verilog_dir
           raise ArgumentError, 'Pass either hdl_dir or verilog_dir, not both'
         end
 
+        @threads = RHDL::Codegen::Verilog::VerilogSimulator.normalize_threads(threads)
         @import_top_name = top&.to_s
         @use_staged_verilog = !!use_staged_verilog
         @use_normalized_verilog = !!use_normalized_verilog
@@ -1655,7 +1656,8 @@ module RHDL
           library_basename: "gameboy_sim_#{build_artifact_stem}",
           top_module: @top_module_name,
           verilator_prefix: @verilator_prefix,
-          extra_verilator_flags: ['--public-flat-rw', *VERILATOR_WARN_FLAGS]
+          extra_verilator_flags: ['--public-flat-rw', *VERILATOR_WARN_FLAGS],
+          threads: @threads
         )
       end
 

@@ -16,9 +16,9 @@ module RHDL
           DEFAULT_TOP = 's1_top'
           DEFAULT_TOP_FILE = File.join(DEFAULT_REFERENCE_ROOT, 'os2wb', 's1_top.v').freeze
           DEFAULT_CACHE_ROOT = File.expand_path('../../../../tmp/sparc64_verilator_sources', __dir__).freeze
-          FAST_BOOT_PATCHES_DIR = ImportPatchSet::FAST_BOOT_PATCH_DIR
-          FAST_BOOT_MEM_SIZE = ImportPatchSet::FAST_BOOT_MEM_SIZE
-          FAST_BOOT_PATCH_TARGETS = ImportPatchSet::FAST_BOOT_PATCH_TARGETS
+          MINIMAL_PATCHES_DIR = ImportPatchSet::MINIMAL_PATCH_DIR
+          MINIMAL_MEM_SIZE = ImportPatchSet::MINIMAL_MEM_SIZE
+          MINIMAL_PATCH_TARGETS = ImportPatchSet::MINIMAL_PATCH_TARGETS
 
           Result = Struct.new(
             :build_dir,
@@ -32,17 +32,19 @@ module RHDL
             keyword_init: true
           )
 
-          attr_reader :cache_root, :reference_root, :top, :top_file, :fast_boot, :force_stub_hierarchy_sources
+          attr_reader :cache_root, :reference_root, :top, :top_file, :fast_boot, :force_stub_hierarchy_sources,
+                      :patches_dir_override
 
           def initialize(cache_root: DEFAULT_CACHE_ROOT, reference_root: DEFAULT_REFERENCE_ROOT,
                          top: DEFAULT_TOP, top_file: DEFAULT_TOP_FILE, fast_boot: true,
-                         force_stub_hierarchy_sources: false)
+                         force_stub_hierarchy_sources: false, patches_dir: nil)
             @cache_root = File.expand_path(cache_root)
             @reference_root = File.expand_path(reference_root)
             @top = top.to_s
             @top_file = File.expand_path(top_file)
             @fast_boot = !!fast_boot
             @force_stub_hierarchy_sources = !!force_stub_hierarchy_sources
+            @patches_dir_override = patches_dir
           end
 
           def build
@@ -127,11 +129,11 @@ module RHDL
           end
 
           def patch_input_files
-            ImportPatchSet.patch_files(fast_boot: fast_boot)
+            ImportPatchSet.staged_verilog_patch_files(fast_boot: fast_boot, override: patches_dir_override)
           end
 
           def patches_dir
-            ImportPatchSet.patches_dir(fast_boot: fast_boot)
+            ImportPatchSet.staged_verilog_patches_dir(fast_boot: fast_boot, override: patches_dir_override)
           end
 
           def binary_file?(path)

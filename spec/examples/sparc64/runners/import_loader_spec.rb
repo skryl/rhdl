@@ -19,7 +19,7 @@ RSpec.describe RHDL::Examples::SPARC64::Integration::ImportLoader do
     expect(klass.verilog_module_name).to eq('s1_top')
   end
 
-  it 'builds a fast-boot import tree through the importer patch path when requested' do
+  it 'builds a patched import tree through the importer patch path when requested' do
     fake_result_class = Class.new do
       def initialize(success: true, diagnostics: [])
         @success = success
@@ -72,7 +72,7 @@ RSpec.describe RHDL::Examples::SPARC64::Integration::ImportLoader do
 
       expect(File).to exist(File.join(built_dir, 's1_top.rb'))
       expect(fake_importer_class.last_kwargs.fetch(:patches_dir)).to eq(
-        RHDL::Examples::SPARC64::Integration::ImportPatchSet::FAST_BOOT_PATCH_DIR
+        RHDL::Examples::SPARC64::Integration::ImportPatchSet::MINIMAL_PATCH_DIR
       )
       expect(fake_importer_class.last_kwargs.fetch(:emit_runtime_json)).to eq(true)
     ensure
@@ -80,7 +80,7 @@ RSpec.describe RHDL::Examples::SPARC64::Integration::ImportLoader do
     end
   end
 
-  it 'invalidates the fast-boot build digest when the shared import pipeline changes' do
+  it 'invalidates the patched build digest when the shared import pipeline changes' do
     shared_import_path = File.expand_path('../../../../lib/rhdl/codegen/circt/import.rb', __dir__)
     digests = Hash.new('same-digest')
     allow(Digest::SHA256).to receive(:file) do |path|
@@ -92,7 +92,7 @@ RSpec.describe RHDL::Examples::SPARC64::Integration::ImportLoader do
       reference_root: described_class::DEFAULT_REFERENCE_ROOT,
       import_top: 's1_top',
       import_top_file: described_class::DEFAULT_IMPORT_TOP_FILE,
-      patches_dir: RHDL::Examples::SPARC64::Integration::ImportPatchSet::FAST_BOOT_PATCH_DIR,
+      patches_dir: RHDL::Examples::SPARC64::Integration::ImportPatchSet::MINIMAL_PATCH_DIR,
       patch_files: []
     )
 
@@ -103,7 +103,7 @@ RSpec.describe RHDL::Examples::SPARC64::Integration::ImportLoader do
       reference_root: described_class::DEFAULT_REFERENCE_ROOT,
       import_top: 's1_top',
       import_top_file: described_class::DEFAULT_IMPORT_TOP_FILE,
-      patches_dir: RHDL::Examples::SPARC64::Integration::ImportPatchSet::FAST_BOOT_PATCH_DIR,
+      patches_dir: RHDL::Examples::SPARC64::Integration::ImportPatchSet::MINIMAL_PATCH_DIR,
       patch_files: []
     )
 

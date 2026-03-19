@@ -2,6 +2,8 @@
 
 require 'spec_helper'
 require 'rhdl'
+require 'benchmark'
+require 'etc'
 
 RSpec.describe 'RISC-V HDL Runners' do
   before(:all) do
@@ -111,6 +113,27 @@ RSpec.describe 'RISC-V HDL Runners' do
       expect(runner.cpu.simulator_type).to eq(:hdl_verilator)
     rescue LoadError, RuntimeError => e
       skip "Verilator backend unavailable: #{e.message}"
+    end
+
+    it 'forwards threads to the verilator-backed runner' do
+      skip 'Verilator not available' unless @verilator_available
+
+      fake_cpu = instance_double(
+        'RHDL::Examples::RISCV::VerilogRunner',
+        native?: true,
+        simulator_type: :hdl_verilator,
+        backend: :verilator,
+        sim: instance_double('Sim')
+      )
+      allow(RHDL::Examples::RISCV::VerilogRunner).to receive(:new).and_return(fake_cpu)
+
+      runner = RHDL::Examples::RISCV::HeadlessRunner.new(mode: :verilog, threads: 4)
+
+      expect(runner.cpu).to eq(fake_cpu)
+      expect(RHDL::Examples::RISCV::VerilogRunner).to have_received(:new).with(
+        mem_size: RHDL::Examples::RISCV::HeadlessRunner::DEFAULT_MEM_SIZE,
+        threads: 4
+      )
     end
 
     it 'creates arcilator-backed runner' do
@@ -298,11 +321,59 @@ RSpec.describe 'RISC-V HDL Runners' do
   end
 
   context 'with VerilogRunner', :slow do
+    let(:asm) { RHDL::Examples::RISCV::Assembler }
+
     before do
       skip 'Verilator not available' unless @verilator_available
     end
 
     include_examples 'RISC-V HDL backend', :VerilogRunner
+
+    it 'benchmarks default Verilator against a --threads 4 build on the same workload' do
+      skip 'Need at least 4 host CPUs for a meaningful threaded comparison' if Etc.nprocessors < 4
+
+      bench_cycles = Integer(ENV.fetch('RHDL_RISCV_VERILATOR_BENCH_CYCLES', '200000'), 10)
+      program = [
+        asm.addi(1, 0, 0),
+        asm.addi(2, 0, 1),
+        asm.addi(3, 0, 200),
+        asm.add(1, 1, 2),
+        asm.xori(2, 2, 0x55),
+        asm.addi(3, 3, -1),
+        asm.bne(3, 0, -12),
+        asm.jal(0, -16)
+      ]
+
+      single = RHDL::Examples::RISCV::VerilogRunner.new(mem_size: 4096)
+      threaded = RHDL::Examples::RISCV::VerilogRunner.new(mem_size: 4096, threads: 4)
+
+      [single, threaded].each do |runner|
+        runner.load_program(program)
+        runner.reset!
+        runner.run_cycles(1024)
+        runner.load_program(program)
+        runner.reset!
+      end
+
+      single_time = Benchmark.measure { single.run_cycles(bench_cycles) }
+      threaded_time = Benchmark.measure { threaded.run_cycles(bench_cycles) }
+
+      expect(threaded.read_pc).to eq(single.read_pc)
+      [1, 2, 3].each do |reg|
+        expect(threaded.read_reg(reg)).to eq(single.read_reg(reg))
+      end
+
+      puts "\n" + "=" * 60
+      puts "RISC-V Verilator Thread Benchmark (#{bench_cycles} cycles)"
+      puts "=" * 60
+      puts "Verilator default:     #{single_time.real.round(4)}s (#{(bench_cycles / single_time.real).round(0)} cycles/s)"
+      puts "Verilator --threads 4: #{threaded_time.real.round(4)}s (#{(bench_cycles / threaded_time.real).round(0)} cycles/s)"
+      puts "Ratio (threads/default): #{(threaded_time.real / single_time.real).round(3)}x"
+      puts "=" * 60
+
+      expect(single_time.real).to be > 0
+      expect(threaded_time.real).to be > 0
+    end
   end
 
   context 'with ArcilatorRunner', :slow do

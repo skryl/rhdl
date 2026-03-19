@@ -78,7 +78,8 @@ module RHDL
     ].freeze
 
     # Initialize the MOS 6502 Verilator runner
-    def initialize
+    def initialize(threads: 1)
+      @threads = RHDL::Codegen::Verilog::VerilogSimulator.normalize_threads(threads)
       check_verilator_available!
 
       puts "Initializing MOS6502 Verilator simulation..."
@@ -367,7 +368,8 @@ module RHDL
         top_module: 'mos6502_cpu',
         verilator_prefix: 'Vmos6502_cpu',
         x_assign: '0',
-        x_initial: 'unique'
+        x_initial: 'unique',
+        threads: @threads
       )
     end
 

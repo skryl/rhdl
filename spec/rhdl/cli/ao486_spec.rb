@@ -4,7 +4,7 @@ require 'spec_helper'
 require 'open3'
 require 'rbconfig'
 
-RSpec.describe 'rhdl examples ao486 command' do
+RSpec.describe 'rhdl examples ao486 command', timeout: 30 do
   let(:project_root) { File.expand_path('../../..', __dir__) }
   let(:cli_path) { File.join(project_root, 'exe/rhdl') }
 
@@ -79,6 +79,19 @@ RSpec.describe 'rhdl examples ao486 command' do
     expect(stdout).to include('--dos-disk2 FILE')
     expect(stdout).to include('-s, --speed CYCLES')
     expect(stdout).to include('-d, --debug')
+  end
+
+  it 'accepts custom DOS disk flags in default run mode', timeout: 20 do
+    _stdout, stderr, status = run_cli(
+      'examples', 'ao486',
+      '--dos-disk1', 'examples/ao486/software/bin/msdos622_boot.img',
+      '--dos-disk2', 'examples/ao486/software/bin/msdos622_boot.img',
+      '--help'
+    )
+
+    expect(status.success?).to be(true)
+    expect(stderr).not_to include('invalid option: --dos-disk1')
+    expect(stderr).not_to include('invalid option: --dos-disk2')
   end
 
   it 'accepts compiler as a direct IR sim backend option' do

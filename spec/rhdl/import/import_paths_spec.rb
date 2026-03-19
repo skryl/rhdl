@@ -49,6 +49,19 @@ RSpec.describe 'RHDL import path coverage' do
     MLIR
   end
 
+  let(:circt_hier_mlir) do
+    <<~MLIR
+      hw.module @child(in %a: i1, out y: i1) {
+        hw.output %a : i1
+      }
+
+      hw.module @top(in %a: i1, out y: i1) {
+        %u.y = hw.instance "u" @child(a: %a : i1) -> (y: i1)
+        hw.output %u.y : i1
+      }
+    MLIR
+  end
+
   let(:comb_inputs) { { a: 8, b: 8 } }
   let(:comb_outputs) { { y: 8 } }
   let(:comb_vectors) do
@@ -190,6 +203,56 @@ RSpec.describe 'RHDL import path coverage' do
 
       expect(roundtrip_outputs).to eq(source_outputs)
     end
+  end
+
+  it 'does not reuse cached imported MLIR text during hierarchy or direct MLIR regeneration' do
+    components = RHDL::Codegen.raise_circt_components(circt_hier_mlir, top: 'top')
+    expect(components.success?).to be(true), diagnostic_summary(components.diagnostics)
+
+    top_component = components.components.fetch('top')
+    child_component = components.components.fetch('child')
+
+    cached_child_text = <<~MLIR.strip
+      hw.module @child(in %a: i1, out y: i1) {
+        %true = hw.constant true
+        hw.output %true : i1
+      }
+    MLIR
+    poisoned_child_module = RHDL::Codegen::CIRCT::IR::ModuleOp.new(
+      name: 'child',
+      ports: [
+        RHDL::Codegen::CIRCT::IR::Port.new(name: :a, direction: :in, width: 1),
+        RHDL::Codegen::CIRCT::IR::Port.new(name: :y, direction: :out, width: 1)
+      ],
+      nets: [],
+      regs: [],
+      assigns: [
+        RHDL::Codegen::CIRCT::IR::Assign.new(
+          target: :y,
+          expr: RHDL::Codegen::CIRCT::IR::Literal.new(value: 1, width: 1)
+        )
+      ],
+      processes: [],
+      instances: [],
+      memories: [],
+      write_ports: [],
+      sync_read_ports: [],
+      parameters: {}
+    )
+    child_component.instance_variable_set(:@_imported_circt_module_text, cached_child_text)
+    child_component.instance_variable_set(:@_imported_circt_module_text_by_name, { 'child' => cached_child_text })
+    child_component.instance_variable_set(:@_imported_circt_module, poisoned_child_module)
+    child_component.instance_variable_set(:@_imported_circt_module_by_name, { 'child' => poisoned_child_module })
+
+    hierarchy_mlir = top_component.to_mlir_hierarchy(top_name: 'top')
+    direct_mlir = child_component.to_ir(top_name: 'child')
+
+    expect(hierarchy_mlir).not_to include('hw.constant true')
+    expect(hierarchy_mlir).to include('hw.module @child')
+    expect(hierarchy_mlir).to include('hw.output %a : i1')
+    expect(direct_mlir).not_to include('hw.constant true')
+    expect(direct_mlir).to include('hw.module @child')
+    expect(direct_mlir).to include('hw.output %a : i1')
   end
 
   private

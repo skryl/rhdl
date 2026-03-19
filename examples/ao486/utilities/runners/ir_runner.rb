@@ -63,6 +63,12 @@ module RHDL
         DOS_INT15_STUB_OFFSET = 0x8CC0
         DOS_INT15_STUB_SEGMENT = 0xF000
         DOS_INT15_VECTOR_ADDR = 0x15 * 4
+        DOS_INT2A_STUB_OFFSET = 0x8D00
+        DOS_INT2A_STUB_SEGMENT = 0xF000
+        DOS_INT2A_VECTOR_ADDR = 0x2A * 4
+        DOS_INT2F_STUB_OFFSET = 0x8D10
+        DOS_INT2F_STUB_SEGMENT = 0xF000
+        DOS_INT2F_VECTOR_ADDR = 0x2F * 4
         DOS_INT16_STUB_OFFSET = 0x1110
         DOS_INT16_STUB_SEGMENT = 0xF000
         DOS_INT16_VECTOR_ADDR = 0x16 * 4
@@ -115,7 +121,9 @@ module RHDL
         POST_INIT_IVT_SPECIAL_VECTORS = {
           0x11 => 0xF84D,
           0x12 => 0xF841,
-          0x15 => 0xF859,
+          0x15 => DOS_INT15_STUB_OFFSET,
+          0x2A => DOS_INT2A_STUB_OFFSET,
+          0x2F => DOS_INT2F_STUB_OFFSET,
           0x17 => 0xEFD2,
           0x18 => 0x8666,
           0x19 => 0xE6F2
@@ -159,7 +167,7 @@ module RHDL
               output_dir: out_dir,
               workspace_dir: workspace_dir,
               keep_workspace: true,
-              patches_dir: CpuImporter::DEFAULT_PATCHES_ROOT,
+              patches_dir: RHDL::Examples::AO486::Import::CpuImporter::DEFAULT_PATCHES_ROOT,
               strict: false
             ).run
             raise Array(import_result.diagnostics).join("\n") unless import_result.success?
@@ -235,6 +243,8 @@ module RHDL
             seed_dos_int12_stub_rom!
             seed_dos_int13_stub_rom!
             seed_dos_int15_stub_rom!
+            seed_dos_int2a_stub_rom!
+            seed_dos_int2f_stub_rom!
             seed_dos_int1a_stub_rom!
             seed_dos_int16_stub_rom!
             seed_dos_post_state_memory!
@@ -331,7 +341,7 @@ module RHDL
           sync_runtime_windows!(display: text_dirty || chunk.to_i != 1 || !headless || @debug)
           @last_io = @sim.runner_ao486_last_io_write || @sim.runner_ao486_last_io_read
           @last_irq = @sim.runner_ao486_last_irq_vector
-          @shell_prompt_detected ||= render_display.match?(/[A-Z]:\\>/)
+          update_shell_prompt_detection!
           record_run_stats(operation: :run, cycles: @cycles_run - start_cycles, started_at: started_at)
           state.merge(cycles: @cycles_run, speed: speed || @speed, headless: headless)
         end
@@ -864,6 +874,20 @@ module RHDL
           sync_rom_segment(dos_int15_bootstrap_bytes, BOOT0_ADDR + DOS_INT15_STUB_OFFSET)
         end
 
+        def seed_dos_int2a_stub_rom!
+          dos_int2a_bootstrap_bytes.each_with_index do |byte, idx|
+            rom_store[BOOT0_ADDR + DOS_INT2A_STUB_OFFSET + idx] = byte
+          end
+          sync_rom_segment(dos_int2a_bootstrap_bytes, BOOT0_ADDR + DOS_INT2A_STUB_OFFSET)
+        end
+
+        def seed_dos_int2f_stub_rom!
+          dos_int2f_bootstrap_bytes.each_with_index do |byte, idx|
+            rom_store[BOOT0_ADDR + DOS_INT2F_STUB_OFFSET + idx] = byte
+          end
+          sync_rom_segment(dos_int2f_bootstrap_bytes, BOOT0_ADDR + DOS_INT2F_STUB_OFFSET)
+        end
+
         def seed_dos_int1a_stub_rom!
           dos_int1a_bootstrap_bytes.each_with_index do |byte, idx|
             rom_store[BOOT0_ADDR + DOS_INT1A_STUB_OFFSET + idx] = byte
@@ -1160,11 +1184,29 @@ module RHDL
             0x31, 0xC0,             # xor ax, ax (0 KB extended)
             0xF8,                   # clc
             0xCF,                   # iret
+            0x3D, 0x00, 0x24,       # cmp ax, 0x2400 (disable A20 gate)
+            0x74, 0x18,             # je success_zero
+            0x3D, 0x01, 0x24,       # cmp ax, 0x2401 (enable A20 gate)
+            0x74, 0x13,             # je success_zero
+            0x3D, 0x02, 0x24,       # cmp ax, 0x2402 (get A20 gate status)
+            0x74, 0x12,             # je a20_enabled
+            0x3D, 0x03, 0x24,       # cmp ax, 0x2403 (query A20 gate support)
+            0x74, 0x12,             # je a20_support
             0x80, 0xFC, 0xC0,       # cmp ah, 0xC0 (get system config)
             0x75, 0x02,             # jne unsupported
             0xF9,                   # stc (not supported)
             0xCF,                   # iret
             0xF9,                   # stc (unsupported function)
+            0xCF,                   # iret
+            0x31, 0xC0,             # success_zero: xor ax, ax
+            0xF8,                   # clc
+            0xCF,                   # iret
+            0xB8, 0x01, 0x00,       # a20_enabled: mov ax, 0x0001
+            0xF8,                   # clc
+            0xCF,                   # iret
+            0x31, 0xC0,             # a20_support: xor ax, ax
+            0xBB, 0x03, 0x00,       # mov bx, 0x0003
+            0xF8,                   # clc
             0xCF                    # iret
           ]
         end
@@ -1194,6 +1236,18 @@ module RHDL
             0x58,
             0x5D,
             0xCF
+          ]
+        end
+
+        def dos_int2a_bootstrap_bytes
+          [
+            0xCF # iret
+          ]
+        end
+
+        def dos_int2f_bootstrap_bytes
+          [
+            0xCF # iret
           ]
         end
 

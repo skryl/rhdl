@@ -685,7 +685,7 @@ bundle exec rake native:check          # Check extension availability
 # AO486 import/parity workflow (CLI)
 bundle exec rhdl examples ao486 -m verilog --bios --dos --headless --cycles 100000 # Run AO486 on the Verilator-backed path using the shared mode naming
 bundle exec rhdl examples ao486 -m circt --bios --dos -d -s 5000 # Run AO486 on the Arcilator-backed path with boxed debug output
-bundle exec rhdl examples ao486 -m verilog --bios --dos-disk1 examples/ao486/software/bin/msdos4_disk1.img --dos-disk2 examples/ao486/software/bin/msdos4_disk2.img --headless --cycles 100000 # Preload two DOS floppies for runtime hot swapping
+bundle exec rhdl examples ao486 -m verilog --bios --dos-disk1 examples/ao486/software/bin/msdos622_boot.img --headless --cycles 100000 # Run the patched verbose MS-DOS 6.22 boot disk explicitly
 bundle exec rhdl examples ao486 import --out examples/ao486/import # Import rtl/ao486/ao486.v via CIRCT and regenerate examples/ao486/import
 bundle exec rhdl examples ao486 import --out examples/ao486/import --strategy stubbed # Force a stubbed CPU-top baseline import
 bundle exec rhdl examples ao486 import --out examples/ao486/import --report tmp/ao486_import_report.json # Emit AO486 import report JSON for the default CPU-top tree import
