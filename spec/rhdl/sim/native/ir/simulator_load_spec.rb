@@ -78,9 +78,9 @@ RSpec.describe RHDL::Sim::Native::IR do
           {
             name: 'top',
             ports: [
-              { name: 'a', direction: 'in', width: 64 },
-              { name: 'b', direction: 'in', width: 64 },
-              { name: 'wide_out', direction: 'out', width: 145 }
+              { name: 'a', direction: 'in', width: 128 },
+              { name: 'b', direction: 'in', width: 128 },
+              { name: 'wide_out', direction: 'out', width: 257 }
             ],
             nets: [],
             regs: [],
@@ -91,11 +91,11 @@ RSpec.describe RHDL::Sim::Native::IR do
                 expr: {
                   kind: 'concat',
                   parts: [
-                    { kind: 'literal', value: 1, width: 17 },
-                    { kind: 'signal', name: 'a', width: 64 },
-                    { kind: 'signal', name: 'b', width: 64 }
+                    { kind: 'literal', value: 1, width: 1 },
+                    { kind: 'signal', name: 'a', width: 128 },
+                    { kind: 'signal', name: 'b', width: 128 }
                   ],
-                  width: 145
+                  width: 257
                 }
               }
             ],

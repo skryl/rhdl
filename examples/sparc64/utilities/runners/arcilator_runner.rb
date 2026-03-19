@@ -1,109 +1,61 @@
 # frozen_string_literal: true
 
+# SPARC64 Standard-ABI Arcilator Runner
+#
+# Uses the standard runner ABI (lib/rhdl/sim/native/abi.rb) with a shared
+# library compiled from CIRCT arcilator output.  The C++ wrapper exports the
+# canonical sim_create / sim_signal / sim_exec / sim_blob / runner_* functions
+# so the library can be loaded through Arcilator::Runtime.open and validated
+# with ensure_runner_abi!.
+#
+# Wishbone protocol logic is identical to StdVerilogRunner but uses arcilator
+# state-buffer offsets instead of Verilator DUT fields.
+
 require 'digest'
-require 'etc'
 require 'fileutils'
 require 'json'
 require 'open3'
 require 'rbconfig'
-require 'shellwords'
 
 require 'rhdl/codegen'
+require 'rhdl/codegen/circt/tooling'
+require 'rhdl/sim/native/mlir/arcilator/runtime'
 
+require_relative '../integration/constants'
 require_relative '../integration/import_loader'
-require_relative 'shared_runtime_support'
+require_relative '../integration/staged_verilog_bundle'
 
 module RHDL
   module Examples
     module SPARC64
       class ArcilatorRunner
         include Integration
-        include SharedRuntimeSupport::AdapterMethods
 
-        BUILD_BASE = File.expand_path('../../.arcilator_build', __dir__).freeze
-        OBSERVE_FLAGS = %w[--observe-ports --observe-wires --observe-registers].freeze
-        DEFAULT_JIT_RESET_CYCLES = 4
-        DEFAULT_JIT_SMOKE_CYCLES = 32
-        DEBUG_WORDS = 99
-        DEBUG_SIGNAL_SPECS = {
-          core0_stb_cam_wr_data_hi30_q: { name: 'sparc_0/lsu/stb_cam/rt_tmp_1_30', preferred_type: 'register' },
-          core0_stb_cam_wr_data_lo15_q: { name: 'sparc_0/lsu/stb_cam/rt_tmp_2_15', preferred_type: 'register' },
-          core0_pcx_xmit_ff_q: { name: 'sparc_0/lsu/qdp1/pcx_xmit_ff/q', preferred_type: 'register' },
-          core0_ff_cpx_data_cx3: { name: 'sparc_0/ff_cpx/cpx_spc_data_cx3', preferred_type: 'register' },
-          core0_qctl2_ifill_pkt_fwd_done_ff: { name: 'sparc_0/lsu/qctl2/ifill_pkt_fwd_done_ff/q', preferred_type: 'register' },
-          core0_qctl2_dfq_wptr_ff: { name: 'sparc_0/lsu/qctl2/dfq_wptr_ff/q', preferred_type: 'register' },
-          core0_qctl2_dfq_vld: { name: 'sparc_0/lsu/qctl2/dfq_vld/q', preferred_type: 'register' },
-          core0_qctl2_dfq_inv: { name: 'sparc_0/lsu/qctl2/dfq_inv/q', preferred_type: 'register' },
-          core0_qctl2_rvld_stgd1: { name: 'sparc_0/lsu/qctl2/rvld_stgd1/q', preferred_type: 'register' },
-          core0_qctl2_rvld_stgd1_new: { name: 'sparc_0/lsu/qctl2/rvld_stgd1_new/q', preferred_type: 'register' },
-          core0_qdp2_dfq_data_stg: { name: 'sparc_0/lsu/qdp2/dfq_data_stg/q', preferred_type: 'register' },
-          core0_pcx_atom_q: { name: 'sparc_0/lsu/qctl1/ff_spc_pcx_atom_pq/q', preferred_type: 'register' },
-          core0_store_pkt_d1: { name: 'sparc_0/lsu/qdp1/ff_spu_lsu_ldst_pckt_d1/q', preferred_type: 'register' },
-          core0_stb_cam_wptr_vld_q: { name: 'sparc_0/lsu/stb_cam/rt_tmp_3_1', preferred_type: 'register' },
-          core0_stb_cam_rptr_vld_q: { name: 'sparc_0/lsu/stb_cam/rt_tmp_4_1', preferred_type: 'register' },
-          core0_stb_cam_rw_tid_q: { name: 'sparc_0/lsu/stb_cam/rt_tmp_5_2', preferred_type: 'register' },
-          core0_stb_cam_alt_wsel_q: { name: 'sparc_0/lsu/stb_cam/rt_tmp_6_1', preferred_type: 'register' },
-          core0_stb_cam_rw_addr_q: { name: 'sparc_0/lsu/stb_cam/rt_tmp_7_5', preferred_type: 'register' },
-          core0_stb_cam_r0_addr: { name: 'sparc_0/lsu/stb_cam/stb_ramc_ext/R0_addr', preferred_type: 'wire' },
-          core0_stb_cam_rdata_q: { name: 'sparc_0/lsu/stb_cam/rt_tmp_8_45', preferred_type: 'register' },
-          core0_stb_cam_r0_data: { name: 'sparc_0/lsu/stb_cam/stb_ramc_ext/R0_data', preferred_type: 'wire' },
-          core0_stb_data_local_dout: { name: 'sparc_0/lsu/stb_data/local_dout', preferred_type: 'register' },
-          core0_dtlb_bypass_e: { name: 'sparc_0/lsu/dctl_lsu_dtlb_bypass_e', preferred_type: 'wire' },
-          core0_dtlb_bypass_va: { name: 'sparc_0/lsu/dtlb__tlb_bypass_va__bridge', preferred_type: 'wire' },
-          core0_dtlb_cam_key: { name: 'sparc_0/lsu/dtlb__tlb_cam_key__bridge', preferred_type: 'wire' },
-          core0_dtlb_va_tag_plus: { name: 'sparc_0/lsu/dtlb/rt_tmp_3_31', preferred_type: 'register' },
-          core0_dtlb_vrtl_pgnum_m: { name: 'sparc_0/lsu/dtlb/rt_tmp_4_30', preferred_type: 'register' },
-          core0_dtlb_bypass_d: { name: 'sparc_0/lsu/dtlb/rt_tmp_5_1', preferred_type: 'register' },
-          core0_dtlb_pgnum_m: { name: 'sparc_0/lsu/dtlb/rt_tmp_6_30', preferred_type: 'register' },
-          core0_dtlb_pgnum_crit: { name: 'sparc_0/lsu/dtlb_tlb_pgnum_crit', preferred_type: 'wire' },
-          core0_dctldp_va_stgm: { name: 'sparc_0/lsu/dctldp/va_stgm/q', preferred_type: 'register' },
-          core0_exu_rs1_data_dff: { name: 'sparc_0/exu/bypass/rs1_data_dff/q', preferred_type: 'register' },
-          core0_exu_rs2_data_dff: { name: 'sparc_0/exu/bypass/rs2_data_dff/q', preferred_type: 'register' },
-          core0_exu_c_used_dff: { name: 'sparc_0/exu/ecl/c_used_dff/q', preferred_type: 'register' },
-          core0_exu_sub_dff: { name: 'sparc_0/exu/alu/addsub/sub_dff/q', preferred_type: 'register' },
-          core0_exu_rd_data_e2m: { name: 'sparc_0/exu/bypass/dff_rd_data_e2m/q', preferred_type: 'register' },
-          core0_exu_rd_data_m2w: { name: 'sparc_0/exu/bypass/dff_rd_data_m2w/q', preferred_type: 'register' },
-          core0_exu_rd_data_g2w: { name: 'sparc_0/exu/bypass/dff_rd_data_g2w/q', preferred_type: 'register' },
-          core0_exu_dfill_data_dff: { name: 'sparc_0/exu/bypass/dfill_data_dff/q', preferred_type: 'register' },
-          core0_tlu_stgg_eldxa: { name: 'sparc_0/tlu/mmu_dp/stgg_eldxa/q', preferred_type: 'register' },
-          core0_irf_active_win_thr_rd_w_neg: { name: 'sparc_0/exu/irf/active_win_thr_rd_w_neg', preferred_type: 'register' },
-          core0_irf_thr_rd_w_neg: { name: 'sparc_0/exu/irf/thr_rd_w_neg', preferred_type: 'register' },
-          core0_irf_active_win_thr_rd_w2_neg: { name: 'sparc_0/exu/irf/active_win_thr_rd_w2_neg', preferred_type: 'register' },
-          core0_irf_thr_rd_w2_neg: { name: 'sparc_0/exu/irf/thr_rd_w2_neg', preferred_type: 'register' },
-          core0_ifq_thrrdy_ctr: { name: 'sparc_0/ifu/swl/thrrdy_ctr/q', preferred_type: 'register' },
-          core0_ifqop_reg: { name: 'sparc_0/ifu/ifqdp/ifqop_reg/q', preferred_type: 'register' },
-          core0_ifq_ibuf: { name: 'sparc_0/ifu/ifqdp/ibuf/q', preferred_type: 'register' },
-          core0_ifq_imsf_ff: { name: 'sparc_0/ifu/ifqctl/imsf_ff/q', preferred_type: 'register' },
-          core0_ifq_cpxreq_reg: { name: 'sparc_0/ifu/ifqctl/cpxreq_reg/q', preferred_type: 'register' },
-          core0_ifq_qadv_ff: { name: 'sparc_0/ifu/ifqctl/qadv_ff/q', preferred_type: 'register' },
-          core0_ifq_pcxreq_reg: { name: 'sparc_0/ifu/ifqdp/pcxreq_reg/q', preferred_type: 'register' },
-          core0_ifq_pcxreqvd_ff: { name: 'sparc_0/ifu/ifqctl/pcxreqvd_ff/q', preferred_type: 'register' },
-          core0_ifq_pcxreqve_ff: { name: 'sparc_0/ifu/ifqctl/pcxreqve_ff/q', preferred_type: 'register' },
-          os2wb_rt_tmp_42: { name: 'os2wb_inst/rt_tmp_42_145', preferred_type: 'register' },
-          os2wb_rt_tmp_43: { name: 'os2wb_inst/rt_tmp_43_145', preferred_type: 'register' },
-          os2wb_rt_tmp_19: { name: 'os2wb_inst/rt_tmp_19_145', preferred_type: 'register' },
-          os2wb_rt_tmp_30: { name: 'os2wb_inst/rt_tmp_30_145', preferred_type: 'register' },
-          os2wb_fifo_state: { name: 'os2wb_inst/pcx_fifo_inst/rt_tmp_3_3', preferred_type: 'register' },
-          os2wb_rt_tmp_16_5: { name: 'os2wb_inst/rt_tmp_16_5', preferred_type: 'register' },
-          os2wb_rt_tmp_20_1: { name: 'os2wb_inst/rt_tmp_20_1', preferred_type: 'wire' },
-          os2wb_rt_tmp_21_1: { name: 'os2wb_inst/rt_tmp_21_1', preferred_type: 'wire' },
-          os2wb_rt_tmp_22_1: { name: 'os2wb_inst/rt_tmp_22_1', preferred_type: 'wire' },
-          os2wb_rt_tmp_23_8: { name: 'os2wb_inst/rt_tmp_23_8', preferred_type: 'wire' },
-          os2wb_rt_tmp_24_64: { name: 'os2wb_inst/rt_tmp_24_64', preferred_type: 'wire' },
-          os2wb_rt_tmp_25_64: { name: 'os2wb_inst/rt_tmp_25_64', preferred_type: 'wire' },
-          os2wb_rt_tmp_26_124: { name: 'os2wb_inst/rt_tmp_26_124', preferred_type: 'register' },
-          os2wb_rt_tmp_38_1: { name: 'os2wb_inst/rt_tmp_38_1', preferred_type: 'wire' },
-          os2wb_fifo_rd_ptr: { name: 'os2wb_inst/pcx_fifo_inst/rt_tmp_1_2', preferred_type: 'register' },
-          os2wb_fifo_wr_ptr: { name: 'os2wb_inst/pcx_fifo_inst/rt_tmp_2_2', preferred_type: 'register' },
-          os2wb_fifo_slot0_meta: { name: 'os2wb_inst/pcx_fifo_inst/rt_tmp_4_6', preferred_type: 'register' },
-          os2wb_fifo_slot0_payload: { name: 'os2wb_inst/pcx_fifo_inst/rt_tmp_5_124', preferred_type: 'register' },
-          os2wb_fifo_slot1_meta: { name: 'os2wb_inst/pcx_fifo_inst/rt_tmp_6_6', preferred_type: 'register' },
-          os2wb_fifo_slot1_payload: { name: 'os2wb_inst/pcx_fifo_inst/rt_tmp_7_124', preferred_type: 'register' }
+        INPUT_SIGNAL_WIDTHS = {
+          'sys_clock_i' => 1,
+          'sys_reset_i' => 1,
+          'eth_irq_i' => 1,
+          'wbm_ack_i' => 1,
+          'wbm_data_i' => 64
         }.freeze
 
-        attr_reader :import_dir, :build_dir, :top_module_name, :core_mlir_path, :build_result, :clock_count, :cleanup_mode
+        OUTPUT_SIGNAL_WIDTHS = {
+          'wbm_cycle_o' => 1,
+          'wbm_strobe_o' => 1,
+          'wbm_we_o' => 1,
+          'wbm_sel_o' => 8,
+          'wbm_addr_o' => 64,
+          'wbm_data_o' => 64
+        }.freeze
 
-        def initialize(import_dir: nil, fast_boot: true,
+        SIGNAL_WIDTHS = INPUT_SIGNAL_WIDTHS.merge(OUTPUT_SIGNAL_WIDTHS).freeze
+
+        OBSERVE_FLAGS = %w[--observe-ports --observe-wires --observe-registers].freeze
+        BUILD_BASE = File.expand_path('../../.arcilator_std_build', __dir__).freeze
+
+        attr_reader :sim, :clock_count, :build_dir, :source_kind
+
+        def initialize(fast_boot: true, import_dir: nil,
                        build_cache_root: Integration::ImportLoader::DEFAULT_BUILD_CACHE_ROOT,
                        reference_root: Integration::ImportLoader::DEFAULT_REFERENCE_ROOT,
                        import_top: Integration::ImportLoader::DEFAULT_IMPORT_TOP,
@@ -111,22 +63,29 @@ module RHDL
                        build_dir: nil,
                        compile_now: true,
                        jit: false,
-                       cleanup_mode: :syntax_only)
-          @import_dir = resolve_import_dir(
-            import_dir: import_dir,
+                       cleanup_mode: :syntax_only,
+                       source_kind: :rhdl_mlir,
+                       source_bundle: nil,
+                       source_bundle_class: Integration::StagedVerilogBundle,
+                       source_bundle_options: {})
+          @source_kind = normalize_source_kind(source_kind)
+          @jit = !!jit
+          @cleanup_mode = (cleanup_mode || :syntax_only).to_sym
+          configure_source_artifacts!(
             fast_boot: fast_boot,
+            import_dir: import_dir,
             build_cache_root: build_cache_root,
             reference_root: reference_root,
             import_top: import_top,
-            import_top_file: import_top_file
+            import_top_file: import_top_file,
+            source_bundle: source_bundle,
+            source_bundle_class: source_bundle_class,
+            source_bundle_options: source_bundle_options
           )
-          @jit = !!jit
-          @cleanup_mode = (cleanup_mode || :syntax_only).to_sym
-          @top_module_name = import_top.to_s
-          @core_mlir_path = resolve_core_mlir_path!
           @build_dir = File.expand_path(build_dir || default_build_dir)
           @clock_count = 0
-          @build_result = compile_now ? build! : nil
+
+          build_and_load if compile_now
         end
 
         def native?
@@ -146,102 +105,66 @@ module RHDL
         end
 
         def compiled?
-          !!(@build_result && @build_result[:success])
+          !!@sim
         end
 
         def runtime_contract_ready?
           true
         end
 
-        def subprocess_runtime?
-          true
-        end
-
-        def run_cycles(n)
-          ensure_runtime_built!
-          response = send_jit_command("RUN #{n.to_i}")
-          _tag, cycles_run = response.split(' ', 2)
-          ran = cycles_run.to_i
-          @clock_count += ran
-          ran
-        end
-
         def reset!
+          @sim.reset
           @clock_count = 0
-          ensure_runtime_built!
-          send_jit_command('RESET')
           self
         end
 
+        def run_cycles(n)
+          result = @sim.runner_run_cycles(n.to_i)
+          return nil unless result
+
+          @clock_count += result[:cycles_run].to_i
+          result
+        end
+
         def load_images(boot_image:, program_image:)
-          @clock_count = 0
-          ensure_runtime_built!
-          send_jit_command('CLEAR_MEMORY')
+          reset!
           load_flash(boot_image, base_addr: Integration::FLASH_BOOT_BASE)
           load_memory(boot_image, base_addr: 0)
           load_memory(boot_image, base_addr: Integration::BOOT_PROM_ALIAS_BASE)
           load_memory(program_image, base_addr: Integration::PROGRAM_BASE)
-          reset!
           self
         end
 
-        def load_flash(bytes, base_addr:)
-          ensure_runtime_built!
-          send_jit_payload_command("LOAD_FLASH #{base_addr.to_i}", bytes)
-          self
+        def load_flash(bytes, base_addr: 0)
+          @sim.runner_load_rom(bytes, base_addr.to_i)
         end
 
-        def load_memory(bytes, base_addr:)
-          ensure_runtime_built!
-          send_jit_payload_command("LOAD_MEMORY #{base_addr.to_i}", bytes)
-          self
+        def load_memory(bytes, base_addr: 0)
+          @sim.runner_load_memory(bytes, base_addr.to_i, false)
         end
 
         def read_memory(addr, length)
-          ensure_runtime_built!
-          response = send_jit_command("READ_MEMORY #{addr.to_i} #{length.to_i}")
-          _tag, hex = response.split(' ', 2)
-          parse_jit_hex_bytes(hex)
+          @sim.runner_read_memory(addr.to_i, length.to_i, mapped: false)
         end
 
         def write_memory(addr, bytes)
-          ensure_runtime_built!
-          response = send_jit_payload_command("WRITE_MEMORY #{addr.to_i}", bytes)
-          _tag, count = response.split(' ', 2)
-          count.to_i
+          @sim.runner_write_memory(addr.to_i, bytes, mapped: false)
         end
 
-        def wishbone_trace
-          ensure_runtime_built!
-          response = send_jit_command('TRACE')
-          _tag, count, hex = response.split(' ', 3)
-          words = parse_jit_u64_words(hex, count.to_i * SharedRuntimeSupport::TRACE_WORDS)
-          words.each_slice(SharedRuntimeSupport::TRACE_WORDS).map do |cycle, op, addr, sel, write_data, read_data|
-            write = !op.to_i.zero?
-            {
-              cycle: cycle,
-              op: write ? :write : :read,
-              addr: addr,
-              sel: sel,
-              write_data: write ? write_data : nil,
-              read_data: write ? nil : read_data
-            }
-          end
+        def read_u64(addr)
+          decode_u64_be(read_memory(addr, 8))
         end
 
-        def unmapped_accesses
-          ensure_runtime_built!
-          response = send_jit_command('FAULTS')
-          _tag, count, hex = response.split(' ', 3)
-          words = parse_jit_u64_words(hex, count.to_i * SharedRuntimeSupport::FAULT_WORDS)
-          words.each_slice(SharedRuntimeSupport::FAULT_WORDS).map do |cycle, op, addr, sel|
-            {
-              cycle: cycle,
-              op: op.to_i.zero? ? :read : :write,
-              addr: addr,
-              sel: sel
-            }
-          end
+        def write_u64(addr, value)
+          write_memory(addr, encode_u64_be(value))
+        end
+
+        def mailbox_status
+          read_u64(Integration::MAILBOX_STATUS)
+        end
+
+        def mailbox_value
+          read_u64(Integration::MAILBOX_VALUE)
         end
 
         def completed?
@@ -249,302 +172,107 @@ module RHDL
         end
 
         def run_until_complete(max_cycles:, batch_cycles: 1_000)
-          ensure_runtime_built!
           while clock_count < max_cycles.to_i
             run_cycles([batch_cycles.to_i, max_cycles.to_i - clock_count].min)
-            return completion_result if completed? || unmapped_accesses.any?
+            return completion_result if completed?
+
+            faults = unmapped_accesses
+            return completion_result(faults: faults) if faults.any?
           end
 
           completion_result(timeout: true)
         end
 
+        def wishbone_trace
+          raw = @sim.runner_sparc64_wishbone_trace
+          Integration.normalize_wishbone_trace(raw)
+        end
+
+        def unmapped_accesses
+          Array(@sim.runner_sparc64_unmapped_accesses)
+        end
+
         def debug_snapshot
-          words =
-            ensure_runtime_built!
-            response = send_jit_command('DEBUG')
-            _tag, count, hex = response.split(' ', 3)
-            parse_jit_u64_words(hex, count.to_i)
-
-          {
-            cycle_counter: words[0],
-            wbm_cycle_o: words[1],
-            wbm_strobe_o: words[2],
-            wbm_we_o: words[3],
-            wbm_addr_o: words[4],
-            wbm_data_o: words[5],
-            wbm_sel_o: words[6],
-            core0_pcx_xmit_ff_q_low64: words[7],
-            core0_pcx_atom_q: words[8],
-            os2wb_rt_tmp_42_low64: words[9],
-            os2wb_rt_tmp_43_low64: words[10],
-            os2wb_rt_tmp_19_low64: words[11],
-            os2wb_fifo_state: words[12],
-            core0_pcx_xmit_ff_q_hi64: words[13],
-            os2wb_rt_tmp_42_hi64: words[14],
-            os2wb_rt_tmp_43_hi64: words[15],
-            os2wb_rt_tmp_19_hi64: words[16],
-            os2wb_rt_tmp_30_hi64: words[17],
-            os2wb_rt_tmp_42_top: words[18],
-            os2wb_rt_tmp_43_top: words[19],
-            os2wb_rt_tmp_19_top: words[20],
-            os2wb_rt_tmp_30_top: words[21],
-            os2wb_rt_tmp_16_5: words[22],
-            os2wb_rt_tmp_20_1: words[23],
-            os2wb_rt_tmp_21_1: words[24],
-            os2wb_rt_tmp_22_1: words[25],
-            os2wb_rt_tmp_23_8: words[26],
-            os2wb_rt_tmp_24_64: words[27],
-            os2wb_rt_tmp_25_64: words[28],
-            os2wb_rt_tmp_26_low64: words[29],
-            os2wb_rt_tmp_26_hi64: words[30],
-            os2wb_rt_tmp_38_1: words[31],
-            os2wb_fifo_rd_ptr: words[32],
-            os2wb_fifo_wr_ptr: words[33],
-            os2wb_fifo_slot0_meta: words[34],
-            os2wb_fifo_slot0_low64: words[35],
-            os2wb_fifo_slot0_hi64: words[36],
-            os2wb_fifo_slot1_meta: words[37],
-            os2wb_fifo_slot1_low64: words[38],
-            os2wb_fifo_slot1_hi64: words[39],
-            os2wb_fifo_slot1_top: words[40],
-            core0_stb_cam_rdata_q: words[41],
-            core0_stb_cam_r0_data: words[42],
-            core0_stb_data_local_dout_low64: words[43],
-            core0_stb_data_local_dout_hi16: words[44],
-            core0_stb_cam_wptr_vld_q: words[45],
-            core0_stb_cam_rptr_vld_q: words[46],
-            core0_stb_cam_rw_tid_q: words[47],
-            core0_stb_cam_rw_addr_q: words[48],
-            core0_stb_cam_r0_addr: words[49],
-            core0_stb_cam_wr_data_hi30_q: words[50],
-            core0_stb_cam_wr_data_lo15_q: words[51],
-            core0_stb_cam_wdata_ramc_q: ((words[50] << 15) | words[51]),
-            core0_stb_cam_alt_wsel_q: words[52],
-            core0_dtlb_bypass_e: words[53],
-            core0_dtlb_bypass_va: words[54],
-            core0_dtlb_cam_key: words[55],
-            core0_dtlb_va_tag_plus: words[56],
-            core0_dtlb_vrtl_pgnum_m: words[57],
-            core0_dtlb_bypass_d: words[58],
-            core0_dtlb_pgnum_m: words[59],
-            core0_dtlb_pgnum_crit: words[60],
-            core0_store_pkt_d1_low64: words[61],
-            core0_store_pkt_d1_hi64: words[62],
-            core0_store_pkt_d1_top: words[63],
-            core0_dctldp_va_stgm: words[64],
-            core0_exu_rs1_data_dff: words[65],
-            core0_exu_rs2_data_dff: words[66],
-            core0_exu_c_used_dff: words[67],
-            core0_exu_sub_dff: words[68],
-            core0_exu_rd_data_e2m: words[69],
-            core0_exu_rd_data_m2w: words[70],
-            core0_exu_rd_data_g2w: words[71],
-            core0_exu_dfill_data_dff: words[72],
-            core0_tlu_stgg_eldxa: words[73],
-            core0_irf_active_win_thr_rd_w_neg: words[74],
-            core0_irf_thr_rd_w_neg: words[75],
-            core0_irf_active_win_thr_rd_w2_neg: words[76],
-            core0_irf_thr_rd_w2_neg: words[77],
-            core0_ifq_thrrdy_ctr: words[78],
-            core0_ifq_imsf_ff: words[79],
-            core0_ifq_pcxreqvd_ff: words[80],
-            core0_ifq_pcxreqve_ff: words[81],
-            core0_ifq_pcxreq_reg: words[82],
-            core0_ifqop_reg_low64: words[83],
-            core0_ifqop_reg_hi64: words[84],
-            core0_ifqop_reg_top: words[85],
-            core0_ifq_cpxreq_reg: words[86],
-            core0_ifq_qadv_ff: words[87],
-            core0_ifq_ibuf_top: words[88],
-            core0_ff_cpx_data_cx3_top: words[89],
-            core0_qctl2_ifill_pkt_fwd_done_ff: words[90],
-            core0_qctl2_dfq_wptr_ff: words[91],
-            core0_qctl2_dfq_vld: words[92],
-            core0_qctl2_dfq_inv: words[93],
-            core0_qctl2_rvld_stgd1: words[94],
-            core0_qctl2_rvld_stgd1_new: words[95],
-            core0_qdp2_dfq_data_stg_low64: words[96],
-            core0_qdp2_dfq_data_stg_hi64: words[97],
-            core0_qdp2_dfq_data_stg_top: words[98],
-            core0_store_pkt_d1_addr: (words[61] & ((1 << 40) - 1)),
-            core0_stb_data_addr_nibble: (words[44] & 0xF),
-            core0_stb_packet_addr: (((words[41] >> 9) << 4) | (words[44] & 0xF)),
-            core0_stb_cam_wdata_addr36_q: (words[50] >> 9),
-            core0_stb_cam_wdata_meta15_q: words[51],
-            core0_stb_cam_wdata_addr_low6_q: ((words[51] >> 9) & 0x3F),
-            core0_stb_cam_wdata_flags9_q: (words[51] & 0x1FF),
-            core0_stb_cam_wdata_addr40_q: (((words[50] << 6) | ((words[51] >> 9) & 0x3F)) << 4),
-            core0_ifqop_cpxvld_bit: ((words[85] >> 16) & 0x1),
-            core0_ifqop_cpxreq_top5: ((words[85] >> 12) & 0x1F),
-            core0_ifq_ibuf_cpxreq_top5: ((words[88] >> 12) & 0x1F),
-            core0_ff_cpx_cpxreq_top5: ((words[89] >> 12) & 0x1F),
-            core0_qctl2_dfq_local_pkt: ((words[92] >> 9) & 0x1),
-            core0_qctl2_dfq_byp_full: ((words[92] >> 6) & 0x1),
-            core0_qctl2_dfq_ld_vld: ((words[92] >> 5) & 0x1),
-            core0_qctl2_dfq_inv_vld: ((words[92] >> 4) & 0x1),
-            core0_qctl2_dfq_st_vld: ((words[92] >> 3) & 0x1),
-            core0_qctl2_dfq_local_inv: ((words[92] >> 2) & 0x1)
-          }
-        end
-
-        def run_jit_smoke!(cycles: DEFAULT_JIT_SMOKE_CYCLES, reset_cycles: DEFAULT_JIT_RESET_CYCLES)
-          raise ArgumentError, 'SPARC64 ArcilatorRunner JIT smoke requires jit: true' unless jit?
-          raise RuntimeError, 'SPARC64 ArcilatorRunner JIT smoke requires a successful build' unless build_result&.fetch(:success, false)
-          ensure_runtime_built!
-          response = send_jit_command("SMOKE #{cycles.to_i} #{reset_cycles.to_i}")
-          _tag, *fields = response.split
-          stdout = +"JIT_OK"
-          stdout << " cycles=#{fields[0]}"
-          stdout << " reset_cycles=#{fields[1]}"
-          stdout << " wbm_cycle_o=#{fields[2]}"
-          stdout << " wbm_strobe_o=#{fields[3]}"
-          stdout << " wbm_we_o=#{fields[4]}"
-          stdout << " wbm_addr_o=#{fields[5]}"
-          stdout << " wbm_data_o=#{fields[6]}"
-          stdout << " wbm_sel_o=#{fields[7]}\n"
-          {
-            success: true,
-            command: "lli --jit-kind=orc-lazy #{build_result[:jit_bitcode_path]}",
-            stdout: stdout,
-            stderr: '',
-            cycles: cycles.to_i,
-            reset_cycles: reset_cycles.to_i,
-            jit_bitcode_path: build_result[:jit_bitcode_path]
-          }
-        end
-
-        def build!
-          return @build_result if compiled? && runtime_artifact_ready?
-
-          check_tools_available!
-          FileUtils.mkdir_p(build_dir)
-          FileUtils.mkdir_p(arc_dir)
-
-          prepare_start = monotonic_time
-          prepared = RHDL::Codegen::CIRCT::Tooling.prepare_arc_mlir_from_circt_mlir(
-            mlir_path: core_mlir_path,
-            work_dir: arc_dir,
-            base_name: top_module_name,
-            top: top_module_name,
-            cleanup_mode: cleanup_mode
-          )
-          prepare_ms = elapsed_ms_since(prepare_start)
-
-          result = {
-            import_dir: import_dir,
-            build_dir: build_dir,
-            top_module_name: top_module_name,
-            core_mlir_path: core_mlir_path,
-            arc_mlir_path: prepared[:arc_mlir_path],
-            prepared: prepared,
-            prepare_ms: prepare_ms,
-            arcilator_ms: nil,
-            runtime_link_ms: nil,
-            jit_link_ms: nil,
-            state_path: state_path,
-            llvm_ir_path: llvm_ir_path,
-            runtime_executable_path: runtime_executable_path,
-            jit_bitcode_path: jit_bitcode_path,
-            log_path: log_path,
-            jit: jit?,
-            success: false,
-            phase: :prepare
-          }
-
-          unless prepared[:success]
-            @build_result = result.merge(
-              stderr: prepared.dig(:arc, :stderr).to_s,
-              command: prepared.dig(:arc, :command),
-              unsupported_modules: prepared[:unsupported_modules]
-            )
-            return @build_result
-          end
-
-          RHDL::Codegen::CIRCT::Tooling.finalize_arc_mlir_for_arcilator!(
-            arc_mlir_path: prepared.fetch(:arc_mlir_path),
-            check_paths: [
-              prepared[:normalized_llhd_mlir_path],
-              prepared[:hwseq_mlir_path],
-              prepared[:flattened_hwseq_mlir_path],
-              prepared[:arc_mlir_path]
-            ]
-          )
-
-          FileUtils.rm_f(state_path)
-          FileUtils.rm_f(llvm_ir_path)
-          cmd = RHDL::Codegen::CIRCT::Tooling.arcilator_command(
-            mlir_path: prepared.fetch(:arc_mlir_path),
-            state_file: state_path,
-            out_path: llvm_ir_path,
-            extra_args: OBSERVE_FLAGS
-          )
-
-          arcilator_start = monotonic_time
-          stdout, stderr, status = Open3.capture3(*cmd)
-          arcilator_ms = elapsed_ms_since(arcilator_start)
-          append_log(log_path, stdout, stderr)
-
-          unless status.success?
-            @build_result = result.merge(
-              success: false,
-              phase: :arcilator,
-              arcilator_ms: arcilator_ms,
-              command: shell_join(cmd),
-              stdout: stdout,
-              stderr: stderr
-            )
-            return @build_result
-          end
-
-          state_info = parse_state_file!(state_path)
-          if jit?
-            FileUtils.rm_f(jit_wrapper_path)
-            FileUtils.rm_f(jit_wrapper_ll_path)
-            FileUtils.rm_f(jit_bitcode_path)
-            File.write(runtime_header_path, SharedRuntimeSupport.wrapper_header)
-            write_runtime_wrapper(path: jit_wrapper_path, state_info: state_info, include_jit_main: true)
-
-            jit_link_start = monotonic_time
-            compile_wrapper_llvm_ir!(
-              wrapper_path: jit_wrapper_path,
-              wrapper_ll_path: jit_wrapper_ll_path,
-              jit_main: true
-            )
-            link_jit_bitcode!(
-              ll_path: llvm_ir_path,
-              wrapper_ll_path: jit_wrapper_ll_path,
-              jit_bc_path: jit_bitcode_path
-            )
-            jit_link_ms = elapsed_ms_since(jit_link_start)
-
-            @build_result = result.merge(
-              success: true,
-              phase: :jit_link,
-              arcilator_ms: arcilator_ms,
-              jit_link_ms: jit_link_ms,
-              command: shell_join(cmd),
-              stdout: stdout,
-              stderr: stderr
-            )
-            return @build_result
-          end
-
-          runtime_link_start = monotonic_time
-          build_runtime_executable!(state_info: state_info)
-          runtime_link_ms = elapsed_ms_since(runtime_link_start)
-
-          @build_result = result.merge(
-            success: true,
-            phase: :runtime_link,
-            arcilator_ms: arcilator_ms,
-            runtime_link_ms: runtime_link_ms,
-            command: shell_join(cmd),
-            stdout: stdout,
-            stderr: stderr
-          )
+          {}
         end
 
         private
+
+        def normalize_source_kind(value)
+          case (value || :rhdl_mlir).to_sym
+          when :staged, :staged_verilog
+            :staged_verilog
+          when :rhdl, :rhdl_mlir
+            :rhdl_mlir
+          else
+            raise ArgumentError,
+                  "Unsupported SPARC64 Arcilator source #{value.inspect}. Use :staged_verilog or :rhdl_mlir."
+          end
+        end
+
+        def configure_source_artifacts!(fast_boot:, import_dir:, build_cache_root:, reference_root:, import_top:,
+                                        import_top_file:, source_bundle:, source_bundle_class:, source_bundle_options:)
+          case source_kind
+          when :staged_verilog
+            bundle_options = { force_stub_hierarchy_sources: true }.merge(source_bundle_options)
+            @source_bundle = source_bundle || source_bundle_class.new(
+              fast_boot: fast_boot,
+              **bundle_options
+            ).build
+            @top_module_name = @source_bundle.top_module
+            @core_mlir_path = nil
+            @import_dir = nil
+          when :rhdl_mlir
+            @source_bundle = nil
+            @import_dir = resolve_import_dir(
+              import_dir: import_dir,
+              fast_boot: fast_boot,
+              build_cache_root: build_cache_root,
+              reference_root: reference_root,
+              import_top: import_top,
+              import_top_file: import_top_file
+            )
+            @top_module_name = import_top.to_s
+            @core_mlir_path = resolve_core_mlir_path!
+          else
+            raise ArgumentError, "Unhandled SPARC64 Arcilator source kind #{source_kind.inspect}"
+          end
+        end
+
+        def completion_result(timeout: false, faults: nil)
+          trace = wishbone_trace
+          faults ||= unmapped_accesses
+          {
+            completed: completed?,
+            timeout: timeout,
+            cycles: clock_count,
+            boot_handoff_seen: trace.any? do |event|
+              event.op == :read &&
+                event.addr.to_i >= Integration::PROGRAM_BASE &&
+                event.addr.to_i < Integration::FLASH_BOOT_BASE
+            end,
+            secondary_core_parked: faults.empty?,
+            mailbox_status: mailbox_status,
+            mailbox_value: mailbox_value,
+            unmapped_accesses: faults,
+            wishbone_trace: trace
+          }
+        end
+
+        def decode_u64_be(bytes)
+          arr = Array(bytes)
+          return 0 if arr.length < 8
+
+          arr[0, 8].each_with_index.reduce(0) do |acc, (byte, idx)|
+            acc | (byte.to_i << ((7 - idx) * 8))
+          end
+        end
+
+        def encode_u64_be(value)
+          (0..7).map { |i| (value >> ((7 - i) * 8)) & 0xFF }
+        end
+
+        # ---- Import resolution ----
 
         def resolve_import_dir(import_dir:, fast_boot:, build_cache_root:, reference_root:, import_top:, import_top_file:)
           return File.expand_path(import_dir) if import_dir
@@ -561,31 +289,42 @@ module RHDL
         end
 
         def resolve_core_mlir_path!
-          report_path = File.join(import_dir, 'import_report.json')
+          report_path = File.join(@import_dir, 'import_report.json')
           if File.file?(report_path)
             report = JSON.parse(File.read(report_path))
-            # ARC should lower from the imported core MLIR artifact written before
-            # the RHDL raise step. The normalized artifact is emitted later from
-            # the raised tree and is only a compatibility fallback.
-            artifact_path = report.dig('artifacts', 'core_mlir_path') ||
-                            report.dig('artifacts', 'normalized_core_mlir_path')
+            # Prefer the normalized (RHDL-raised) MLIR over the raw import MLIR.
+            # The raised model correctly preserves the os2wb bridge timing
+            # that arcilator needs for cycle-accurate Wishbone simulation.
+            artifact_path = report.dig('artifacts', 'normalized_core_mlir_path') ||
+                            report.dig('artifacts', 'core_mlir_path')
             if artifact_path && File.file?(artifact_path)
               @top_module_name = report['top'].to_s unless report['top'].to_s.empty?
-              return File.expand_path(artifact_path)
+              return artifact_path
             end
           end
 
-          fallback = File.join(import_dir, '.mixed_import', "#{top_module_name}.core.mlir")
+          # Check filesystem for normalized MLIR even if not in report
+          normalized_fallback = File.join(@import_dir, '.mixed_import', "#{@top_module_name}.normalized.core.mlir")
+          return normalized_fallback if File.file?(normalized_fallback)
+
+          fallback = File.join(@import_dir, '.mixed_import', "#{@top_module_name}.core.mlir")
           return fallback if File.file?(fallback)
 
-          raise ArgumentError, "SPARC64 core MLIR not found under #{import_dir}"
+          raise ArgumentError, "SPARC64 core MLIR not found under #{@import_dir}"
         rescue JSON::ParserError => e
-          raise ArgumentError, "Invalid SPARC64 import report at #{report_path}: #{e.message}"
+          raise ArgumentError, "Invalid SPARC64 import report: #{e.message}"
         end
 
         def default_build_dir
-          digest = Digest::SHA256.hexdigest("#{import_dir}|#{jit? ? 'jit' : 'runtime'}|#{cleanup_mode}")[0, 12]
-          File.join(BUILD_BASE, "#{sanitize_filename(top_module_name)}_#{digest}")
+          source_key =
+            case source_kind
+            when :staged_verilog
+              @source_bundle&.build_dir || @source_bundle&.top_file || @top_module_name
+            when :rhdl_mlir
+              @core_mlir_path || @import_dir || @top_module_name
+            end
+          digest = Digest::SHA256.hexdigest("#{source_kind}|#{source_key}|std_abi|#{@cleanup_mode}")[0, 12]
+          File.join(BUILD_BASE, "#{sanitize_filename(@top_module_name)}_#{digest}")
         end
 
         def sanitize_filename(value)
@@ -596,202 +335,342 @@ module RHDL
           value.to_s.upcase.gsub(/[^A-Z0-9]+/, '_')
         end
 
-        def ensure_runtime_built!
-          return if @jit_wait_thr&.alive?
+        # ---- Build pipeline ----
 
-          build! unless compiled?
-          if jit?
-            start_runtime_process(
-              ['lli', '--jit-kind=orc-lazy', "--compile-threads=#{jit_compile_threads}", '-O0', jit_bitcode_path]
+        def build_and_load
+          check_tools_available!
+          FileUtils.mkdir_p(build_dir)
+          arc_work_dir = File.join(build_dir, 'arc')
+          FileUtils.mkdir_p(arc_work_dir)
+          ll_path = llvm_ir_path
+          state_path = state_file_path
+          wrapper_path = wrapper_cpp_path
+          obj_path = object_file_path
+          lib_path = shared_lib_path
+
+          if rebuild_required?(lib_path: lib_path, state_path: state_path)
+            source_mlir_path = resolve_source_mlir_input!
+            prepared = RHDL::Codegen::CIRCT::Tooling.prepare_arc_mlir_from_circt_mlir(
+              mlir_path: source_mlir_path,
+              work_dir: arc_work_dir,
+              base_name: @top_module_name,
+              top: @top_module_name,
+              cleanup_mode: @cleanup_mode,
+              stage_index_offset: arc_stage_index_offset
             )
-          else
-            start_runtime_process([runtime_executable_path])
+            raise "ARC preparation failed:\n#{prepared.dig(:arc, :stderr)}" unless prepared[:success]
+
+            arcilator_mlir = RHDL::Codegen::CIRCT::Tooling.finalize_arc_mlir_for_arcilator!(
+              arc_mlir_path: prepared.fetch(:arc_mlir_path),
+              check_paths: [
+                prepared[:normalized_llhd_mlir_path],
+                prepared[:hwseq_mlir_path],
+                prepared[:flattened_hwseq_mlir_path],
+                prepared[:flattened_cleaned_hwseq_mlir_path],
+                prepared[:arc_mlir_path]
+              ]
+            )
+
+            cmd = RHDL::Codegen::CIRCT::Tooling.arcilator_command(
+              mlir_path: arcilator_mlir,
+              state_file: state_path,
+              out_path: ll_path,
+              extra_args: OBSERVE_FLAGS
+            )
+            system(*cmd) or raise 'arcilator failed'
+
+            state_info = parse_state_file!(state_path)
+            write_std_abi_wrapper(wrapper_path, state_info)
+            compile_llvm_ir_object!(ll_path: ll_path, obj_path: obj_path)
+            build_shared_library!(wrapper_path: wrapper_path, obj_path: obj_path, lib_path: lib_path)
           end
-        end
 
-        def arc_dir
-          File.join(build_dir, 'arc')
-        end
-
-        def state_path
-          File.join(build_dir, "#{top_module_name}.state.json")
-        end
-
-        def llvm_ir_path
-          File.join(build_dir, "#{top_module_name}.arc.ll")
-        end
-
-        def runtime_header_path
-          File.join(build_dir, "sim_wrapper_#{sanitize_identifier(top_module_name)}.h")
-        end
-
-        def runtime_wrapper_path
-          File.join(build_dir, "sim_wrapper_#{sanitize_identifier(top_module_name)}.cpp")
-        end
-
-        def runtime_wrapper_ll_path
-          File.join(build_dir, "#{top_module_name}.arc_runtime.ll")
-        end
-
-        def runtime_bitcode_path
-          File.join(build_dir, "#{top_module_name}.arc_runtime.bc")
-        end
-
-        def runtime_executable_path
-          File.join(build_dir, "#{top_module_name}.arc_runtime")
-        end
-
-        def llvm_object_path
-          File.join(build_dir, "#{top_module_name}.arc.o")
-        end
-
-        def shared_lib_path
-          File.join(build_dir, "lib#{sanitize_identifier(top_module_name)}_arcilator_runtime.#{shared_library_suffix}")
-        end
-
-        def jit_wrapper_path
-          File.join(build_dir, "#{top_module_name}.arc_jit_main.cpp")
-        end
-
-        def jit_wrapper_ll_path
-          File.join(build_dir, "#{top_module_name}.arc_jit_main.ll")
-        end
-
-        def jit_bitcode_path
-          File.join(build_dir, "#{top_module_name}.arc_jit.bc")
-        end
-
-        def log_path
-          File.join(build_dir, 'arcilator.log')
+          load_shared_library(lib_path)
         end
 
         def check_tools_available!
           %w[circt-opt arcilator].each do |tool|
             raise LoadError, "#{tool} not found in PATH" unless command_available?(tool)
           end
-
-          if jit?
-            %w[clang++ llvm-link lli].each do |tool|
-              raise LoadError, "#{tool} not found in PATH" unless command_available?(tool)
-            end
-          else
-            raise LoadError, 'clang++ not found in PATH' unless command_available?('clang++')
-            raise LoadError, 'llvm-link not found in PATH' unless command_available?('llvm-link')
-            raise LoadError, 'llc not found in PATH' unless command_available?('llc')
-            raise LoadError, 'No C++ linker found in PATH' unless command_available?('clang++') || command_available?('g++') || command_available?('c++')
+          if source_kind == :staged_verilog
+            raise LoadError, 'circt-verilog not found in PATH' unless command_available?('circt-verilog')
           end
+          raise LoadError, 'No LLVM IR compiler (llc or clang) found' unless command_available?('llc') || command_available?('clang')
+        end
+
+        def resolve_source_mlir_input!
+          case source_kind
+          when :rhdl_mlir
+            @core_mlir_path
+          when :staged_verilog
+            staged_mlir_path = staged_source_mlir_path
+            result = RHDL::Codegen::CIRCT::Tooling.verilog_to_circt_mlir(
+              verilog_path: @source_bundle.top_file,
+              out_path: staged_mlir_path,
+              extra_args: staged_verilog_import_args
+            )
+            return staged_mlir_path if result[:success]
+
+            raise "Staged Verilog -> CIRCT MLIR conversion failed:\n#{result[:stdout]}\n#{result[:stderr]}"
+          else
+            raise ArgumentError, "Unhandled SPARC64 Arcilator source kind #{source_kind.inspect}"
+          end
+        end
+
+        def staged_verilog_import_args
+          [
+            '--allow-use-before-declare',
+            '--ignore-unknown-modules',
+            '--timescale=1ns/1ps',
+            "--top=#{@top_module_name}",
+            *@source_bundle.verilator_args
+          ]
+        end
+
+        def rebuild_required?(lib_path:, state_path:)
+          return true unless File.file?(lib_path) && File.file?(state_path)
+
+          dependency_paths.any? { |path| File.mtime(path) > File.mtime(lib_path) }
+        end
+
+        def dependency_paths
+          paths = [
+            __FILE__,
+            File.expand_path('../../../../lib/rhdl/codegen/circt/tooling.rb', __dir__)
+          ]
+          case source_kind
+          when :staged_verilog
+            paths.concat([
+                           @source_bundle.top_file,
+                           *@source_bundle.source_files,
+                           File.expand_path('../integration/staged_verilog_bundle.rb', __dir__)
+                         ])
+          when :rhdl_mlir
+            paths << @core_mlir_path
+          end
+          paths.select { |path| path && File.exist?(path) }.uniq
+        end
+
+        def command_available?(tool)
+          system("which #{tool} > /dev/null 2>&1")
         end
 
         def parse_state_file!(path)
           state = JSON.parse(File.read(path))
-          mod = state.find { |entry| entry['name'].to_s == top_module_name } || state.first
+          mod = state.find { |entry| entry['name'].to_s == @top_module_name } || state.first
           raise "Arcilator state file missing module entries: #{path}" unless mod
 
           states = Array(mod['states'])
-          signals = {
-            sys_clock_i: locate_signal(states, 'sys_clock_i', preferred_type: 'input'),
-            sys_reset_i: locate_signal(states, 'sys_reset_i', preferred_type: 'input'),
-            eth_irq_i: locate_signal(states, 'eth_irq_i', preferred_type: 'input'),
-            wbm_ack_i: locate_signal(states, 'wbm_ack_i', preferred_type: 'input'),
-            wbm_data_i: locate_signal(states, 'wbm_data_i', preferred_type: 'input'),
-            wbm_cycle_o: locate_signal(states, 'wbm_cycle_o', preferred_type: 'output'),
-            wbm_strobe_o: locate_signal(states, 'wbm_strobe_o', preferred_type: 'output'),
-            wbm_we_o: locate_signal(states, 'wbm_we_o', preferred_type: 'output'),
-            wbm_addr_o: locate_signal(states, 'wbm_addr_o', preferred_type: 'output'),
-            wbm_data_o: locate_signal(states, 'wbm_data_o', preferred_type: 'output'),
-            wbm_sel_o: locate_signal(states, 'wbm_sel_o', preferred_type: 'output')
-          }
-          DEBUG_SIGNAL_SPECS.each do |key, spec|
-            signals[key] = locate_signal(states, spec.fetch(:name), preferred_type: spec.fetch(:preferred_type))
+          signals = {}
+          # Input signals may have duplicate entries (module def + instance).
+          # Only write to 'input' type entries — wire copies share offsets
+          # with internal signals and writing to them corrupts state.
+          %w[sys_clock_i sys_reset_i eth_irq_i wbm_ack_i wbm_data_i].each do |name|
+            all = locate_all_signals(states, name)
+            signals[name.to_sym] = all.select { |s| s[:type] == 'input' }
+            signals[name.to_sym] = all if signals[name.to_sym].empty?
+          end
+          %w[wbm_cycle_o wbm_strobe_o wbm_we_o wbm_addr_o wbm_data_o wbm_sel_o].each do |name|
+            signals[name.to_sym] = locate_all_signals(states, name)
           end
 
-          required = %i[sys_clock_i sys_reset_i eth_irq_i wbm_ack_i wbm_data_i]
-          missing = required.select { |key| signals[key].nil? }
-          raise "Arcilator state layout missing required SPARC64 signals: #{missing.join(', ')}" unless missing.empty?
+          required = %i[sys_clock_i sys_reset_i wbm_ack_i wbm_data_i]
+          missing = required.select { |key| signals[key].nil? || signals[key].empty? }
+          raise "Arcilator state layout missing required signals: #{missing.join(', ')}" unless missing.empty?
+
+          # Locate os2wb FSM state register and ALL 145-bit bridge registers for
+          # CPX wake-up patching. Arcilator's lowering drops the cpx_packet output
+          # register assignment in the WAKEUP state.
+          fsm_reg = locate_all_signals(states, 'os2wb_inst/rt_tmp_16_5').first
+          cpx_cx3_0 = locate_all_signals(states, 'sparc_0/ff_cpx/cpx_spc_data_cx3').first
+          cpx_cx3_1 = locate_all_signals(states, 'sparc_1/ff_cpx/cpx_spc_data_cx3').first
 
           {
             module_name: mod.fetch('name'),
             state_size: mod.fetch('numStateBytes').to_i,
-            signals: signals
+            signals: signals,
+            fsm_offset: fsm_reg&.fetch(:offset),
+            cpx_cx3_offsets: [cpx_cx3_0&.fetch(:offset), cpx_cx3_1&.fetch(:offset)].compact
           }
         end
 
-        def locate_signal(states, name, preferred_type:)
+        def locate_all_signals(states, name)
           matches = states.select { |entry| entry['name'].to_s == name.to_s }
-          return nil if matches.empty?
+          return [] if matches.empty?
 
-          match = matches.find { |entry| entry['type'].to_s == preferred_type.to_s } || matches.first
-          {
-            name: match.fetch('name'),
-            offset: match.fetch('offset').to_i,
-            bits: match.fetch('numBits').to_i,
-            type: match['type'].to_s
-          }
+          matches.map do |match|
+            {
+              name: match.fetch('name'),
+              offset: match.fetch('offset').to_i,
+              bits: match.fetch('numBits').to_i,
+              type: match['type'].to_s
+            }
+          end
         end
 
-        def build_runtime_library!(state_info:)
-          raise NotImplementedError, 'use build_runtime_executable!'
+        def compile_llvm_ir_object!(ll_path:, obj_path:)
+          if darwin_host? && command_available?('clang')
+            compile_object_with_clang(ll_path: ll_path, obj_path: obj_path) or raise "clang compile failed"
+            return
+          end
+
+          return if compile_object_with_llc(ll_path: ll_path, obj_path: obj_path)
+
+          raise "Neither llc nor clang available for LLVM IR compilation"
         end
 
-        def build_runtime_executable!(state_info:)
-          File.write(runtime_header_path, SharedRuntimeSupport.wrapper_header(include_debug_snapshot: true))
-          write_runtime_wrapper(path: runtime_wrapper_path, state_info: state_info, include_jit_main: true)
-          FileUtils.rm_f(runtime_wrapper_ll_path)
-          FileUtils.rm_f(runtime_bitcode_path)
-          FileUtils.rm_f(runtime_executable_path)
-          compile_wrapper_llvm_ir!(
-            wrapper_path: runtime_wrapper_path,
-            wrapper_ll_path: runtime_wrapper_ll_path,
-            jit_main: true
+        def compile_object_with_llc(ll_path:, obj_path:)
+          return false unless command_available?('llc')
+
+          cmd = String.new("llc -filetype=obj -O2 -relocation-model=pic")
+          cmd << " -mtriple=#{llc_target_triple}" if llc_target_triple
+          cmd << " #{ll_path} -o #{obj_path}"
+          system(cmd)
+        end
+
+        def compile_object_with_clang(ll_path:, obj_path:)
+          cmd = String.new("clang -c -O2 -fPIC")
+          cmd << " -target #{llc_target_triple}" if llc_target_triple
+          cmd << " #{ll_path} -o #{obj_path}"
+          system(cmd)
+        end
+
+        def build_shared_library!(wrapper_path:, obj_path:, lib_path:)
+          cxx = (darwin_host? && command_available?('clang++')) ? 'clang++' : 'g++'
+          cmd = String.new("#{cxx} -shared -fPIC -O2")
+          cmd << " -arch #{build_target_arch}" if build_target_arch
+          cmd << " -o #{lib_path} #{wrapper_path} #{obj_path}"
+          system(cmd) or raise "Shared library link failed"
+        end
+
+        def load_shared_library(lib_path)
+          @sim = RHDL::Sim::Native::MLIR::Arcilator::Runtime.open(
+            lib_path: lib_path,
+            config: {},
+            signal_widths_by_name: SIGNAL_WIDTHS,
+            signal_widths_by_idx: SIGNAL_WIDTHS.values,
+            backend_label: 'SPARC64 Arcilator'
           )
-          link_jit_bitcode!(
-            ll_path: llvm_ir_path,
-            wrapper_ll_path: runtime_wrapper_ll_path,
-            jit_bc_path: runtime_bitcode_path
-          )
-          compile_llvm_ir_object!(ll_path: runtime_bitcode_path, obj_path: llvm_object_path)
-          link_runtime_executable!(obj_path: llvm_object_path, exe_path: runtime_executable_path)
+          ensure_runner_abi!(@sim, expected_kind: :sparc64, backend_label: 'SPARC64 Arcilator')
         end
 
-        def signal_defines(signals)
-          signals.filter_map do |key, meta|
-            next unless meta
+        def ensure_runner_abi!(sim, expected_kind:, backend_label:)
+          unless sim.runner_supported?
+            sim.close
+            raise RuntimeError, "#{backend_label} shared library does not expose runner ABI"
+          end
+
+          actual_kind = sim.runner_kind
+          return if actual_kind == expected_kind
+
+          sim.close
+          raise RuntimeError, "#{backend_label} shared library exposes runner kind #{actual_kind.inspect}, expected #{expected_kind.inspect}"
+        end
+
+        def shared_lib_path
+          build_artifact_path(14, "libsparc64_arc_std_sim.#{darwin_host? ? 'dylib' : 'so'}")
+        end
+
+        def staged_source_mlir_path
+          build_artifact_path(1, "#{@top_module_name}.staged.core.mlir")
+        end
+
+        def llvm_ir_path
+          build_artifact_path(10, "#{@top_module_name}.arc.ll")
+        end
+
+        def state_file_path
+          build_artifact_path(11, "#{@top_module_name}.state.json")
+        end
+
+        def wrapper_cpp_path
+          build_artifact_path(12, "#{@top_module_name}.std_abi_arc_wrapper.cpp")
+        end
+
+        def object_file_path
+          build_artifact_path(13, "#{@top_module_name}.arc.o")
+        end
+
+        def arc_stage_index_offset
+          source_kind == :staged_verilog ? 1 : 0
+        end
+
+        def build_artifact_path(step, suffix)
+          File.join(build_dir, format('%02d.%s', step, suffix))
+        end
+
+        def darwin_host?(host_os: RbConfig::CONFIG['host_os'])
+          host_os.to_s.downcase.include?('darwin')
+        end
+
+        def build_target_arch(host_os: RbConfig::CONFIG['host_os'], host_cpu: RbConfig::CONFIG['host_cpu'])
+          return nil unless darwin_host?(host_os: host_os)
+
+          cpu = host_cpu.to_s.downcase
+          return 'arm64' if cpu.include?('arm64') || cpu.include?('aarch64')
+          return 'x86_64' if cpu.include?('x86_64') || cpu.include?('amd64')
+
+          nil
+        end
+
+        def llc_target_triple(host_os: RbConfig::CONFIG['host_os'], host_cpu: RbConfig::CONFIG['host_cpu'])
+          arch = build_target_arch(host_os: host_os, host_cpu: host_cpu)
+          return nil unless arch
+
+          "#{arch}-apple-macosx"
+        end
+
+        # ---- C++ wrapper generation ----
+
+        def generate_write_all_helpers(signals)
+          input_names = INPUT_SIGNAL_WIDTHS.keys.map(&:to_sym)
+          input_names.filter_map do |key|
+            copies = signals[key]
+            next if copies.nil? || copies.empty?
 
             macro = sanitize_macro(key)
-            "#define OFF_#{macro} #{meta.fetch(:offset)}\n#define BITS_#{macro} #{meta.fetch(:bits)}"
+            bits = copies.first.fetch(:bits)
+            writes = copies.each_with_index.map do |_copy, idx|
+              "write_bits(state, OFF_#{macro}_#{idx}, BITS_#{macro}, value);"
+            end.join("\n              ")
+            <<~CPP
+              static inline void write_all_#{macro}(uint8_t* state, std::uint64_t value) {
+                #{writes}
+              }
+            CPP
           end.join("\n")
         end
 
-        def read_debug_signal_expr(signals, key)
-          meta = signals[key]
-          return '0ULL' unless meta
-
-          macro = sanitize_macro(key)
-          "read_bits(ctx->state, OFF_#{macro}, BITS_#{macro})"
-        end
-
-        def read_debug_signal_word_expr(signals, key, word_idx)
-          meta = signals[key]
-          return '0ULL' unless meta
-
-          bit_width = meta.fetch(:bits).to_i
-          bit_offset = word_idx * 64
-          return '0ULL' if bit_width <= bit_offset
-
-          width = [bit_width - bit_offset, 64].min
-          byte_offset = meta.fetch(:offset).to_i + (word_idx * 8)
-          "read_bits(ctx->state, #{byte_offset}, #{width})"
-        end
-
-        def write_runtime_wrapper(path:, state_info:, include_jit_main: false)
+        def write_std_abi_wrapper(path, state_info)
           module_name = state_info.fetch(:module_name)
           state_size = state_info.fetch(:state_size)
-          includes = <<~CPP
-            #include "sim_wrapper_#{sanitize_identifier(top_module_name)}.h"
+          signals = state_info.fetch(:signals)
+          fsm_offset = state_info[:fsm_offset]
+          cpx_cx3_offsets = state_info[:cpx_cx3_offsets] || []
+          input_signal_names = INPUT_SIGNAL_WIDTHS.keys
+          output_signal_names = OUTPUT_SIGNAL_WIDTHS.keys
+          input_names_csv = input_signal_names.join(',')
+          output_names_csv = output_signal_names.join(',')
+
+          signal_defs = signals.filter_map do |key, copies|
+            next if copies.nil? || copies.empty?
+
+            macro = sanitize_macro(key)
+            bits = copies.first.fetch(:bits)
+            lines = ["#define BITS_#{macro} #{bits}"]
+            lines << "#define OFF_#{macro}_COUNT #{copies.length}"
+            copies.each_with_index do |copy, idx|
+              lines << "#define OFF_#{macro}_#{idx} #{copy.fetch(:offset)}"
+            end
+            # Primary offset for reads (first copy)
+            lines << "#define OFF_#{macro} #{copies.first.fetch(:offset)}"
+            lines.join("\n")
+          end.join("\n")
+
+          cpp = <<~CPP
             #include <algorithm>
-            #include <cstdio>
-            #include <cstdlib>
             #include <cstdint>
+            #include <cstdlib>
             #include <cstring>
             #include <string>
             #include <unordered_map>
@@ -799,38 +678,156 @@ module RHDL
 
             extern "C" void #{module_name}_eval(void* state);
 
-            #{signal_defines(state_info.fetch(:signals))}
+            #{signal_defs}
             #define STATE_SIZE #{state_size}
-          CPP
 
-          backend_helpers = <<~CPP
+            // CPX wake-up patch: arcilator's lowering drops the cpx_packet output
+            // register assignment in the WAKEUP FSM state. We detect the FSM
+            // entering WAKEUP (state 6) and inject the wake-up CPX packet directly
+            // into the SPARC cores' pipeline registers.
+            #{fsm_offset ? "#define OFF_OS2WB_FSM #{fsm_offset}" : "// FSM offset not found"}
+            #define FSM_WAKEUP_STATE 6
+            #{cpx_cx3_offsets.each_with_index.map { |off, i| "#define OFF_CPX_CX3_#{i} #{off}" }.join("\n            ")}
+            #define CPX_CX3_COUNT #{cpx_cx3_offsets.length}
+            #define CPX_WAKEUP_INJECT_CYCLES 4
+
+            namespace {
+
+            // ---- Bit-level state accessors ----
+            static inline std::uint64_t read_bits(const uint8_t* state, int offset, int bits) {
+              std::uint64_t value = 0;
+              int bytes_needed = (bits + 7) / 8;
+              for (int i = 0; i < bytes_needed && i < 8; i++)
+                value |= static_cast<std::uint64_t>(state[offset + i]) << (i * 8);
+              if (bits < 64) value &= (1ULL << bits) - 1ULL;
+              return value;
+            }
+
+            static inline void write_bits(uint8_t* state, int offset, int bits, std::uint64_t value) {
+              int bytes_needed = (bits + 7) / 8;
+              for (int i = 0; i < bytes_needed && i < 8; i++)
+                state[offset + i] = static_cast<uint8_t>((value >> (i * 8)) & 0xFFu);
+            }
+
+            // ---- Memory map constants ----
+            constexpr std::uint64_t kFlashBootBase = 0x#{Integration::FLASH_BOOT_BASE.to_s(16).upcase}ULL;
+            constexpr std::uint64_t kMailboxStatus = 0x#{Integration::MAILBOX_STATUS.to_s(16).upcase}ULL;
+            constexpr std::uint64_t kMailboxValue = 0x#{Integration::MAILBOX_VALUE.to_s(16).upcase}ULL;
+            constexpr std::uint64_t kPhysicalAddrMask = 0x#{Integration::PHYSICAL_ADDR_MASK.to_s(16).upcase}ULL;
+            constexpr std::size_t kResetCycles = 16;
+
+            struct WishboneTraceRecord {
+              std::uint64_t cycle, op, addr, sel, write_data, read_data;
+            };
+            struct FaultRecord {
+              std::uint64_t cycle, op, addr, sel;
+            };
+            struct PendingResponse {
+              bool valid = false, write = false, unmapped = false;
+              std::uint64_t addr = 0, data = 0, read_data = 0, sel = 0;
+            };
+
+            struct SimContext {
+              uint8_t state[STATE_SIZE];
+              std::unordered_map<std::uint64_t, std::uint8_t> flash;
+              std::unordered_map<std::uint64_t, std::uint8_t> dram;
+              std::unordered_map<std::uint64_t, std::uint8_t> mailbox_mmio;
+              std::vector<WishboneTraceRecord> trace;
+              std::vector<FaultRecord> faults;
+              PendingResponse pending_response;
+              PendingResponse deferred_request;
+              std::uint64_t protected_dram_limit = 0;
+              std::size_t reset_cycles_remaining = kResetCycles;
+              std::uint64_t cycles = 0;
+              std::string trace_json;
+              std::string faults_json;
+              bool trace_json_dirty = true;
+              bool faults_json_dirty = true;
+              int cpx_wakeup_remaining = 0;
+            };
+
+            std::uint64_t canonical_bus_addr(std::uint64_t addr) { return addr & kPhysicalAddrMask; }
+            bool is_flash_addr(std::uint64_t addr) { return canonical_bus_addr(addr) >= kFlashBootBase; }
+            bool is_mailbox_mmio_addr(std::uint64_t addr) {
+              const std::uint64_t p = canonical_bus_addr(addr);
+              return (p >= kMailboxStatus && p < kMailboxStatus + 8ULL) ||
+                     (p >= kMailboxValue && p < kMailboxValue + 8ULL);
+            }
+            bool is_dram_addr(std::uint64_t addr) { return canonical_bus_addr(addr) < kFlashBootBase; }
+            bool lane_selected(std::uint64_t sel, int lane) { return (sel & (0x80ULL >> lane)) != 0; }
+
+            bool read_mapped_byte(SimContext* ctx, std::uint64_t addr, std::uint8_t* out) {
+              const std::uint64_t physical = canonical_bus_addr(addr);
+              if (is_mailbox_mmio_addr(physical)) { auto it = ctx->mailbox_mmio.find(physical); *out = it == ctx->mailbox_mmio.end() ? 0 : it->second; return true; }
+              if (is_flash_addr(physical)) { auto it = ctx->flash.find(physical); *out = it == ctx->flash.end() ? 0 : it->second; return true; }
+              if (is_dram_addr(physical)) { auto it = ctx->dram.find(physical); *out = it == ctx->dram.end() ? 0 : it->second; return true; }
+              return false;
+            }
+
+            std::uint64_t read_wishbone_word(SimContext* ctx, std::uint64_t addr, std::uint64_t sel, bool* mapped) {
+              std::uint64_t value = 0; bool any = false;
+              for (int lane = 0; lane < 8; ++lane) {
+                std::uint8_t byte = 0;
+                if (!read_mapped_byte(ctx, addr + lane, &byte)) { if (lane_selected(sel, lane)) { if (mapped) *mapped = false; return 0; } byte = 0; }
+                value |= static_cast<std::uint64_t>(byte) << ((7 - lane) * 8);
+                any = any || lane_selected(sel, lane);
+              }
+              if (mapped) *mapped = any;
+              return value;
+            }
+
+            bool write_wishbone_word(SimContext* ctx, std::uint64_t addr, std::uint64_t data, std::uint64_t sel) {
+              bool any_mapped = false;
+              for (int lane = 0; lane < 8; ++lane) {
+                if (!lane_selected(sel, lane)) continue;
+                std::uint64_t byte_addr = canonical_bus_addr(addr + lane);
+                if (is_mailbox_mmio_addr(byte_addr)) { ctx->mailbox_mmio[byte_addr] = static_cast<uint8_t>((data >> ((7-lane)*8)) & 0xFF); any_mapped = true; continue; }
+                if (is_flash_addr(byte_addr)) return false;
+                if (!is_dram_addr(byte_addr)) return false;
+                if (byte_addr < ctx->protected_dram_limit) { any_mapped = true; continue; }
+                ctx->dram[byte_addr] = static_cast<uint8_t>((data >> ((7-lane)*8)) & 0xFF);
+                any_mapped = true;
+              }
+              return any_mapped;
+            }
+
+            // Write-all helpers: write value to EVERY copy of an input signal
+            #{generate_write_all_helpers(signals)}
+
             void drive_defaults(SimContext* ctx) {
-              write_bits(ctx->state, OFF_SYS_CLOCK_I, BITS_SYS_CLOCK_I, 0u);
-              write_bits(ctx->state, OFF_SYS_RESET_I, BITS_SYS_RESET_I, 0u);
-              write_bits(ctx->state, OFF_ETH_IRQ_I, BITS_ETH_IRQ_I, 0u);
-              write_bits(ctx->state, OFF_WBM_ACK_I, BITS_WBM_ACK_I, 0u);
-              write_bits(ctx->state, OFF_WBM_DATA_I, BITS_WBM_DATA_I, 0u);
+              write_all_SYS_CLOCK_I(ctx->state, 0u);
+              write_all_SYS_RESET_I(ctx->state, 0u);
+              write_all_ETH_IRQ_I(ctx->state, 0u);
+              write_all_WBM_ACK_I(ctx->state, 0u);
+              write_all_WBM_DATA_I(ctx->state, 0u);
+            }
+
+            void clear_runtime_state(SimContext* ctx) {
+              ctx->trace.clear(); ctx->faults.clear();
+              ctx->pending_response = PendingResponse{};
+              ctx->deferred_request = PendingResponse{};
+              ctx->reset_cycles_remaining = kResetCycles; ctx->cycles = 0;
+              ctx->trace_json_dirty = true; ctx->faults_json_dirty = true;
+              ctx->cpx_wakeup_remaining = 0;
             }
 
             void apply_inputs(SimContext* ctx, bool reset_active, const PendingResponse* response) {
-              write_bits(ctx->state, OFF_SYS_CLOCK_I, BITS_SYS_CLOCK_I, 0u);
-              write_bits(ctx->state, OFF_SYS_RESET_I, BITS_SYS_RESET_I, reset_active ? 1u : 0u);
-              write_bits(ctx->state, OFF_ETH_IRQ_I, BITS_ETH_IRQ_I, 0u);
+              write_all_SYS_CLOCK_I(ctx->state, 0u);
+              write_all_SYS_RESET_I(ctx->state, reset_active ? 1u : 0u);
+              write_all_ETH_IRQ_I(ctx->state, 0u);
               if (response && response->valid) {
-                write_bits(ctx->state, OFF_WBM_ACK_I, BITS_WBM_ACK_I, 1u);
-                write_bits(ctx->state, OFF_WBM_DATA_I, BITS_WBM_DATA_I, response->read_data);
+                write_all_WBM_ACK_I(ctx->state, 1u);
+                write_all_WBM_DATA_I(ctx->state, response->read_data);
               } else {
-                write_bits(ctx->state, OFF_WBM_ACK_I, BITS_WBM_ACK_I, 0u);
-                write_bits(ctx->state, OFF_WBM_DATA_I, BITS_WBM_DATA_I, 0u);
+                write_all_WBM_ACK_I(ctx->state, 0u);
+                write_all_WBM_DATA_I(ctx->state, 0u);
               }
             }
 
             PendingResponse sample_request(SimContext* ctx) {
               PendingResponse request;
               if (read_bits(ctx->state, OFF_WBM_CYCLE_O, BITS_WBM_CYCLE_O) == 0u ||
-                  read_bits(ctx->state, OFF_WBM_STROBE_O, BITS_WBM_STROBE_O) == 0u) {
-                return request;
-              }
+                  read_bits(ctx->state, OFF_WBM_STROBE_O, BITS_WBM_STROBE_O) == 0u) return request;
               request.valid = true;
               request.write = (read_bits(ctx->state, OFF_WBM_WE_O, BITS_WBM_WE_O) != 0u);
               request.addr = canonical_bus_addr(read_bits(ctx->state, OFF_WBM_ADDR_O, BITS_WBM_ADDR_O));
@@ -839,665 +836,330 @@ module RHDL
               return request;
             }
 
+            bool requests_equal(const PendingResponse& a, const PendingResponse& b) {
+              return a.valid == b.valid && a.write == b.write && a.addr == b.addr && a.data == b.data && a.sel == b.sel;
+            }
+
+            PendingResponse service_request(SimContext* ctx, const PendingResponse& request) {
+              PendingResponse response = request;
+              if (!request.valid) return response;
+              if (request.write) { response.read_data = 0; response.unmapped = !write_wishbone_word(ctx, request.addr, request.data, request.sel); }
+              else { bool mapped = false; response.read_data = read_wishbone_word(ctx, request.addr, request.sel, &mapped); response.unmapped = !mapped; }
+              return response;
+            }
+
+            void record_acknowledged_response(SimContext* ctx, const PendingResponse& response) {
+              if (!response.valid) return;
+              if (response.unmapped) { ctx->faults.push_back({ctx->cycles, response.write?1ULL:0ULL, response.addr, response.sel}); ctx->faults_json_dirty = true; }
+              ctx->trace.push_back({ctx->cycles, response.write?1ULL:0ULL, response.addr, response.sel, response.write?response.data:0ULL, response.write?0ULL:response.read_data});
+              ctx->trace_json_dirty = true;
+            }
+
+            // Inject the CPX wake-up packet (145'h17000...10001) into the bridge's
+            // cpx_packet output register(s) when the os2wb FSM enters WAKEUP.
+            // Arcilator's lowering drops this register assignment, so we patch
+            // the state buffer directly. Must be called BEFORE the rising-edge
+            // eval so the wire propagates to the SPARC cores' pipeline registers.
+            static void patch_cpx_wakeup_if_needed(SimContext* ctx) {
+              #ifdef OFF_OS2WB_FSM
+              // Detect FSM entering WAKEUP and start injection countdown
+              uint8_t fsm = read_bits(ctx->state, OFF_OS2WB_FSM, 5);
+              if (fsm == FSM_WAKEUP_STATE && ctx->cpx_wakeup_remaining == 0) {
+                ctx->cpx_wakeup_remaining = CPX_WAKEUP_INJECT_CYCLES;
+              }
+              if (ctx->cpx_wakeup_remaining <= 0) return;
+
+              // 145'h1_7000_0000_0000_0000_0000_0000_0000_0001_0001
+              static const uint8_t cpx_wakeup[19] = {
+                0x01, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00,
+                0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                0x00, 0x70, 0x01
+              };
+              // Inject directly into the SPARC cores' pipeline registers
+              #if CPX_CX3_COUNT >= 1
+              std::memcpy(&ctx->state[OFF_CPX_CX3_0], cpx_wakeup, 19);
+              #endif
+              #if CPX_CX3_COUNT >= 2
+              std::memcpy(&ctx->state[OFF_CPX_CX3_1], cpx_wakeup, 19);
+              #endif
+              ctx->cpx_wakeup_remaining--;
+              #endif
+            }
+
             void step_cycle(SimContext* ctx) {
               bool reset_active = ctx->reset_cycles_remaining > 0;
-              PendingResponse acked_response = reset_active ? PendingResponse{} : ctx->pending_response;
 
-              apply_inputs(ctx, reset_active, acked_response.valid ? &acked_response : nullptr);
+              // EVAL 1: clock LOW — let combinational logic settle
+              write_all_SYS_CLOCK_I(ctx->state, 0u);
+              write_all_SYS_RESET_I(ctx->state, reset_active ? 1u : 0u);
+              write_all_ETH_IRQ_I(ctx->state, 0u);
+              write_all_WBM_ACK_I(ctx->state, 0u);
+              write_all_WBM_DATA_I(ctx->state, 0u);
               #{module_name}_eval(ctx->state);
 
-              if (acked_response.valid) {
-                record_acknowledged_response(ctx, acked_response);
-              }
-
-              PendingResponse next_response;
+              // EVAL 2: sample Wishbone request, service it, inject ack+data
+              // (same-cycle response, like Apple2's combinational memory access)
               if (!reset_active) {
-                PendingResponse request = sample_request(ctx);
-                if (request.valid && !(acked_response.valid && requests_equal(acked_response, request))) {
-                  next_response = service_request(ctx, request);
-                  ctx->deferred_request = PendingResponse{};
-                } else if (!request.valid && ctx->deferred_request.valid &&
-                           !(acked_response.valid && requests_equal(acked_response, ctx->deferred_request))) {
-                  next_response = service_request(ctx, ctx->deferred_request);
-                  ctx->deferred_request = PendingResponse{};
-                } else if (request.valid) {
-                  ctx->deferred_request = PendingResponse{};
+                PendingResponse req = sample_request(ctx);
+                if (req.valid) {
+                  PendingResponse resp = service_request(ctx, req);
+                  write_all_WBM_ACK_I(ctx->state, 1u);
+                  write_all_WBM_DATA_I(ctx->state, resp.read_data);
+                  #{module_name}_eval(ctx->state);
+                  record_acknowledged_response(ctx, resp);
                 }
               }
 
-              write_bits(ctx->state, OFF_SYS_CLOCK_I, BITS_SYS_CLOCK_I, 1u);
+              // EVAL 3: clock HIGH — rising edge captures state
+              write_all_SYS_CLOCK_I(ctx->state, 1u);
               #{module_name}_eval(ctx->state);
 
-              if (!next_response.valid && !reset_active) {
-                PendingResponse post_edge_request = sample_request(ctx);
-                ctx->deferred_request = post_edge_request.valid ? post_edge_request : PendingResponse{};
-              } else {
-                ctx->deferred_request = PendingResponse{};
-              }
+              // EVAL 4: extra eval for output propagation
+              #{module_name}_eval(ctx->state);
 
-              ctx->pending_response = next_response;
+              // Patch: inject CPX wake-up packet AFTER all evals so the value
+              // persists in the register until the next cycle's combinational
+              // logic reads it.
+              patch_cpx_wakeup_if_needed(ctx);
+
               ctx->cycles += 1;
-              if (ctx->reset_cycles_remaining > 0) {
-                ctx->reset_cycles_remaining -= 1;
-              }
+              if (ctx->reset_cycles_remaining > 0) ctx->reset_cycles_remaining -= 1;
             }
-          CPP
 
-          sim_create_impl = <<~CPP
-            void* sim_create(void) {
+            static void ensure_trace_json(SimContext* ctx) {
+              if (!ctx->trace_json_dirty) return;
+              std::string json = "[";
+              for (std::size_t i = 0; i < ctx->trace.size(); ++i) {
+                const auto& r = ctx->trace[i];
+                if (i > 0) json += ',';
+                char buf[256];
+                std::snprintf(buf, sizeof(buf),
+                  R"({"cycle":%llu,"op":"%s","addr":%llu,"sel":%llu,"write_data":%llu,"read_data":%llu})",
+                  (unsigned long long)r.cycle, r.op==1?"write":"read",
+                  (unsigned long long)r.addr, (unsigned long long)r.sel,
+                  (unsigned long long)r.write_data, (unsigned long long)r.read_data);
+                json += buf;
+              }
+              json += ']'; ctx->trace_json = std::move(json); ctx->trace_json_dirty = false;
+            }
+
+            static void ensure_faults_json(SimContext* ctx) {
+              if (!ctx->faults_json_dirty) return;
+              std::string json = "[";
+              for (std::size_t i = 0; i < ctx->faults.size(); ++i) {
+                const auto& f = ctx->faults[i];
+                if (i > 0) json += ',';
+                char buf[192];
+                std::snprintf(buf, sizeof(buf),
+                  R"({"cycle":%llu,"op":"%s","addr":%llu,"sel":%llu})",
+                  (unsigned long long)f.cycle, f.op==1?"write":"read",
+                  (unsigned long long)f.addr, (unsigned long long)f.sel);
+                json += buf;
+              }
+              json += ']'; ctx->faults_json = std::move(json); ctx->faults_json_dirty = false;
+            }
+
+            // ---- Standard ABI constants ----
+            enum { SIM_CAP_SIGNAL_INDEX = 1u << 0, SIM_CAP_RUNNER = 1u << 6 };
+            enum { SIM_SIGNAL_HAS=0u, SIM_SIGNAL_GET_INDEX=1u, SIM_SIGNAL_PEEK=2u, SIM_SIGNAL_POKE=3u, SIM_SIGNAL_PEEK_INDEX=4u, SIM_SIGNAL_POKE_INDEX=5u };
+            enum { SIM_EXEC_EVALUATE=0u, SIM_EXEC_TICK=1u, SIM_EXEC_TICK_FORCED=2u, SIM_EXEC_RESET=5u, SIM_EXEC_RUN_TICKS=6u, SIM_EXEC_SIGNAL_COUNT=7u, SIM_EXEC_REG_COUNT=8u };
+            enum { SIM_TRACE_ENABLED=3u };
+            enum { SIM_BLOB_INPUT_NAMES=0u, SIM_BLOB_OUTPUT_NAMES=1u, SIM_BLOB_SPARC64_WISHBONE_TRACE=5u, SIM_BLOB_SPARC64_UNMAPPED_ACCESSES=6u };
+            enum { RUNNER_KIND_SPARC64 = 6 };
+            enum { RUNNER_MEM_OP_LOAD=0u, RUNNER_MEM_OP_READ=1u, RUNNER_MEM_OP_WRITE=2u };
+            enum { RUNNER_MEM_SPACE_MAIN=0u, RUNNER_MEM_SPACE_ROM=1u };
+            enum { RUNNER_PROBE_KIND=0u, RUNNER_PROBE_IS_MODE=1u, RUNNER_PROBE_SIGNAL=9u };
+
+            struct RunnerCaps { int kind; unsigned int mem_spaces, control_ops, probe_ops; };
+            struct RunnerRunResult { int text_dirty, key_cleared; unsigned int cycles_run, speaker_toggles, frames_completed; };
+
+            static const char* k_input_signal_names[] = { #{input_signal_names.map { |n| %("#{n}") }.join(", ")} };
+            static const char* k_output_signal_names[] = { #{output_signal_names.map { |n| %("#{n}") }.join(", ")} };
+            static const char k_input_names_csv[] = "#{input_names_csv}";
+            static const char k_output_names_csv[] = "#{output_names_csv}";
+            static const unsigned int k_input_signal_count = #{input_signal_names.length}u;
+            static const unsigned int k_output_signal_count = #{output_signal_names.length}u;
+
+            static inline void write_out_ulong(unsigned long* out, unsigned long v) { if (out) *out = v; }
+            static unsigned int total_signal_count() { return k_input_signal_count + k_output_signal_count; }
+            static const char* signal_name_from_index(unsigned int idx) {
+              if (idx < k_input_signal_count) return k_input_signal_names[idx];
+              idx -= k_input_signal_count;
+              return idx < k_output_signal_count ? k_output_signal_names[idx] : nullptr;
+            }
+            static int signal_index_from_name(const char* name) {
+              if (!name) return -1;
+              for (unsigned int i = 0; i < k_input_signal_count; i++) if (!std::strcmp(name, k_input_signal_names[i])) return (int)i;
+              for (unsigned int i = 0; i < k_output_signal_count; i++) if (!std::strcmp(name, k_output_signal_names[i])) return (int)(k_input_signal_count+i);
+              return -1;
+            }
+            static std::size_t copy_blob(unsigned char* out, std::size_t out_len, const char* text, std::size_t len) {
+              if (out && out_len && len) { std::size_t n = len < out_len ? len : out_len; std::memcpy(out, text, n); }
+              return len;
+            }
+
+            }  // namespace
+
+            extern "C" {
+
+            void* sim_create(const char* json, std::size_t json_len, unsigned int sub_cycles, char** err_out) {
+              (void)json; (void)json_len; (void)sub_cycles;
+              if (err_out) *err_out = nullptr;
               SimContext* ctx = new SimContext();
-              memset(ctx->state, 0, sizeof(ctx->state));
-              ctx->deferred_request = PendingResponse{};
+              std::memset(ctx->state, 0, sizeof(ctx->state));
+              // Extended reset: toggle clock for 100 cycles with reset held high
+              // to fully initialize all internal pipeline stages.
+              write_all_SYS_RESET_I(ctx->state, 1u);
+              write_all_WBM_ACK_I(ctx->state, 0u);
+              write_all_ETH_IRQ_I(ctx->state, 0u);
+              for (int i = 0; i < 100; i++) {
+                write_all_SYS_CLOCK_I(ctx->state, 0u);
+                #{module_name}_eval(ctx->state);
+                write_all_SYS_CLOCK_I(ctx->state, 1u);
+                #{module_name}_eval(ctx->state);
+              }
               drive_defaults(ctx);
               #{module_name}_eval(ctx->state);
               clear_runtime_state(ctx);
               return ctx;
             }
-          CPP
+            void sim_destroy(void* sim) { delete static_cast<SimContext*>(sim); }
+            void sim_free_error(char* err) { if (err) std::free(err); }
+            void sim_free_string(char* str) { if (str) std::free(str); }
+            void* sim_wasm_alloc(std::size_t size) { return std::malloc(size > 0 ? size : 1); }
+            void sim_wasm_dealloc(void* ptr, std::size_t size) { (void)size; std::free(ptr); }
 
-          sim_destroy_impl = <<~CPP
-            void sim_destroy(void* sim) {
-              SimContext* ctx = static_cast<SimContext*>(sim);
-              delete ctx;
-            }
-          CPP
-
-          sim_reset_impl = <<~CPP
             void sim_reset(void* sim) {
               SimContext* ctx = static_cast<SimContext*>(sim);
               clear_runtime_state(ctx);
-              ctx->deferred_request = PendingResponse{};
               drive_defaults(ctx);
-              write_bits(ctx->state, OFF_SYS_RESET_I, BITS_SYS_RESET_I, 1u);
-              write_bits(ctx->state, OFF_SYS_CLOCK_I, BITS_SYS_CLOCK_I, 0u);
+              write_all_SYS_RESET_I(ctx->state, 1u);
               #{module_name}_eval(ctx->state);
             }
-          CPP
 
-          debug_copy_impl = <<~CPP
-            unsigned int copy_debug_snapshot(SimContext* ctx, unsigned long long* out_words, unsigned int max_words) {
-              const unsigned int count = std::min<unsigned int>(max_words, kDebugWords);
-              if (count > 0) out_words[0] = ctx->cycles;
-              if (count > 1) out_words[1] = read_bits(ctx->state, OFF_WBM_CYCLE_O, BITS_WBM_CYCLE_O);
-              if (count > 2) out_words[2] = read_bits(ctx->state, OFF_WBM_STROBE_O, BITS_WBM_STROBE_O);
-              if (count > 3) out_words[3] = read_bits(ctx->state, OFF_WBM_WE_O, BITS_WBM_WE_O);
-              if (count > 4) out_words[4] = read_bits(ctx->state, OFF_WBM_ADDR_O, BITS_WBM_ADDR_O);
-              if (count > 5) out_words[5] = read_bits(ctx->state, OFF_WBM_DATA_O, BITS_WBM_DATA_O);
-              if (count > 6) out_words[6] = read_bits(ctx->state, OFF_WBM_SEL_O, BITS_WBM_SEL_O);
-              if (count > 7) out_words[7] = #{read_debug_signal_expr(state_info.fetch(:signals), :core0_pcx_xmit_ff_q)};
-              if (count > 8) out_words[8] = #{read_debug_signal_expr(state_info.fetch(:signals), :core0_pcx_atom_q)};
-              if (count > 9) out_words[9] = #{read_debug_signal_expr(state_info.fetch(:signals), :os2wb_rt_tmp_42)};
-              if (count > 10) out_words[10] = #{read_debug_signal_expr(state_info.fetch(:signals), :os2wb_rt_tmp_43)};
-              if (count > 11) out_words[11] = #{read_debug_signal_expr(state_info.fetch(:signals), :os2wb_rt_tmp_19)};
-              if (count > 12) out_words[12] = #{read_debug_signal_expr(state_info.fetch(:signals), :os2wb_fifo_state)};
-              if (count > 13) out_words[13] = #{read_debug_signal_word_expr(state_info.fetch(:signals), :core0_pcx_xmit_ff_q, 1)};
-              if (count > 14) out_words[14] = #{read_debug_signal_word_expr(state_info.fetch(:signals), :os2wb_rt_tmp_42, 1)};
-              if (count > 15) out_words[15] = #{read_debug_signal_word_expr(state_info.fetch(:signals), :os2wb_rt_tmp_43, 1)};
-              if (count > 16) out_words[16] = #{read_debug_signal_word_expr(state_info.fetch(:signals), :os2wb_rt_tmp_19, 1)};
-              if (count > 17) out_words[17] = #{read_debug_signal_word_expr(state_info.fetch(:signals), :os2wb_rt_tmp_30, 1)};
-              if (count > 18) out_words[18] = #{read_debug_signal_word_expr(state_info.fetch(:signals), :os2wb_rt_tmp_42, 2)};
-              if (count > 19) out_words[19] = #{read_debug_signal_word_expr(state_info.fetch(:signals), :os2wb_rt_tmp_43, 2)};
-              if (count > 20) out_words[20] = #{read_debug_signal_word_expr(state_info.fetch(:signals), :os2wb_rt_tmp_19, 2)};
-              if (count > 21) out_words[21] = #{read_debug_signal_word_expr(state_info.fetch(:signals), :os2wb_rt_tmp_30, 2)};
-              if (count > 22) out_words[22] = #{read_debug_signal_expr(state_info.fetch(:signals), :os2wb_rt_tmp_16_5)};
-              if (count > 23) out_words[23] = #{read_debug_signal_expr(state_info.fetch(:signals), :os2wb_rt_tmp_20_1)};
-              if (count > 24) out_words[24] = #{read_debug_signal_expr(state_info.fetch(:signals), :os2wb_rt_tmp_21_1)};
-              if (count > 25) out_words[25] = #{read_debug_signal_expr(state_info.fetch(:signals), :os2wb_rt_tmp_22_1)};
-              if (count > 26) out_words[26] = #{read_debug_signal_expr(state_info.fetch(:signals), :os2wb_rt_tmp_23_8)};
-              if (count > 27) out_words[27] = #{read_debug_signal_expr(state_info.fetch(:signals), :os2wb_rt_tmp_24_64)};
-              if (count > 28) out_words[28] = #{read_debug_signal_expr(state_info.fetch(:signals), :os2wb_rt_tmp_25_64)};
-              if (count > 29) out_words[29] = #{read_debug_signal_expr(state_info.fetch(:signals), :os2wb_rt_tmp_26_124)};
-              if (count > 30) out_words[30] = #{read_debug_signal_word_expr(state_info.fetch(:signals), :os2wb_rt_tmp_26_124, 1)};
-              if (count > 31) out_words[31] = #{read_debug_signal_expr(state_info.fetch(:signals), :os2wb_rt_tmp_38_1)};
-              if (count > 32) out_words[32] = #{read_debug_signal_expr(state_info.fetch(:signals), :os2wb_fifo_rd_ptr)};
-              if (count > 33) out_words[33] = #{read_debug_signal_expr(state_info.fetch(:signals), :os2wb_fifo_wr_ptr)};
-              if (count > 34) out_words[34] = #{read_debug_signal_expr(state_info.fetch(:signals), :os2wb_fifo_slot0_meta)};
-              if (count > 35) out_words[35] = #{read_debug_signal_expr(state_info.fetch(:signals), :os2wb_fifo_slot0_payload)};
-              if (count > 36) out_words[36] = #{read_debug_signal_word_expr(state_info.fetch(:signals), :os2wb_fifo_slot0_payload, 1)};
-              if (count > 37) out_words[37] = #{read_debug_signal_expr(state_info.fetch(:signals), :os2wb_fifo_slot1_meta)};
-              if (count > 38) out_words[38] = #{read_debug_signal_expr(state_info.fetch(:signals), :os2wb_fifo_slot1_payload)};
-              if (count > 39) out_words[39] = #{read_debug_signal_word_expr(state_info.fetch(:signals), :os2wb_fifo_slot1_payload, 1)};
-              if (count > 40) out_words[40] = #{read_debug_signal_word_expr(state_info.fetch(:signals), :os2wb_fifo_slot1_payload, 2)};
-              if (count > 41) out_words[41] = #{read_debug_signal_expr(state_info.fetch(:signals), :core0_stb_cam_rdata_q)};
-              if (count > 42) out_words[42] = #{read_debug_signal_expr(state_info.fetch(:signals), :core0_stb_cam_r0_data)};
-              if (count > 43) out_words[43] = #{read_debug_signal_expr(state_info.fetch(:signals), :core0_stb_data_local_dout)};
-              if (count > 44) out_words[44] = #{read_debug_signal_word_expr(state_info.fetch(:signals), :core0_stb_data_local_dout, 1)};
-              if (count > 45) out_words[45] = #{read_debug_signal_expr(state_info.fetch(:signals), :core0_stb_cam_wptr_vld_q)};
-              if (count > 46) out_words[46] = #{read_debug_signal_expr(state_info.fetch(:signals), :core0_stb_cam_rptr_vld_q)};
-              if (count > 47) out_words[47] = #{read_debug_signal_expr(state_info.fetch(:signals), :core0_stb_cam_rw_tid_q)};
-              if (count > 48) out_words[48] = #{read_debug_signal_expr(state_info.fetch(:signals), :core0_stb_cam_rw_addr_q)};
-              if (count > 49) out_words[49] = #{read_debug_signal_expr(state_info.fetch(:signals), :core0_stb_cam_r0_addr)};
-              if (count > 50) out_words[50] = #{read_debug_signal_expr(state_info.fetch(:signals), :core0_stb_cam_wr_data_hi30_q)};
-              if (count > 51) out_words[51] = #{read_debug_signal_expr(state_info.fetch(:signals), :core0_stb_cam_wr_data_lo15_q)};
-              if (count > 52) out_words[52] = #{read_debug_signal_expr(state_info.fetch(:signals), :core0_stb_cam_alt_wsel_q)};
-              if (count > 53) out_words[53] = #{read_debug_signal_expr(state_info.fetch(:signals), :core0_dtlb_bypass_e)};
-              if (count > 54) out_words[54] = #{read_debug_signal_expr(state_info.fetch(:signals), :core0_dtlb_bypass_va)};
-              if (count > 55) out_words[55] = #{read_debug_signal_expr(state_info.fetch(:signals), :core0_dtlb_cam_key)};
-              if (count > 56) out_words[56] = #{read_debug_signal_expr(state_info.fetch(:signals), :core0_dtlb_va_tag_plus)};
-              if (count > 57) out_words[57] = #{read_debug_signal_expr(state_info.fetch(:signals), :core0_dtlb_vrtl_pgnum_m)};
-              if (count > 58) out_words[58] = #{read_debug_signal_expr(state_info.fetch(:signals), :core0_dtlb_bypass_d)};
-              if (count > 59) out_words[59] = #{read_debug_signal_expr(state_info.fetch(:signals), :core0_dtlb_pgnum_m)};
-              if (count > 60) out_words[60] = #{read_debug_signal_expr(state_info.fetch(:signals), :core0_dtlb_pgnum_crit)};
-              if (count > 61) out_words[61] = #{read_debug_signal_expr(state_info.fetch(:signals), :core0_store_pkt_d1)};
-              if (count > 62) out_words[62] = #{read_debug_signal_word_expr(state_info.fetch(:signals), :core0_store_pkt_d1, 1)};
-              if (count > 63) out_words[63] = #{read_debug_signal_word_expr(state_info.fetch(:signals), :core0_store_pkt_d1, 2)};
-              if (count > 64) out_words[64] = #{read_debug_signal_expr(state_info.fetch(:signals), :core0_dctldp_va_stgm)};
-              if (count > 65) out_words[65] = #{read_debug_signal_expr(state_info.fetch(:signals), :core0_exu_rs1_data_dff)};
-              if (count > 66) out_words[66] = #{read_debug_signal_expr(state_info.fetch(:signals), :core0_exu_rs2_data_dff)};
-              if (count > 67) out_words[67] = #{read_debug_signal_expr(state_info.fetch(:signals), :core0_exu_c_used_dff)};
-              if (count > 68) out_words[68] = #{read_debug_signal_expr(state_info.fetch(:signals), :core0_exu_sub_dff)};
-              if (count > 69) out_words[69] = #{read_debug_signal_expr(state_info.fetch(:signals), :core0_exu_rd_data_e2m)};
-              if (count > 70) out_words[70] = #{read_debug_signal_expr(state_info.fetch(:signals), :core0_exu_rd_data_m2w)};
-              if (count > 71) out_words[71] = #{read_debug_signal_expr(state_info.fetch(:signals), :core0_exu_rd_data_g2w)};
-              if (count > 72) out_words[72] = #{read_debug_signal_expr(state_info.fetch(:signals), :core0_exu_dfill_data_dff)};
-              if (count > 73) out_words[73] = #{read_debug_signal_expr(state_info.fetch(:signals), :core0_tlu_stgg_eldxa)};
-              if (count > 74) out_words[74] = #{read_debug_signal_expr(state_info.fetch(:signals), :core0_irf_active_win_thr_rd_w_neg)};
-              if (count > 75) out_words[75] = #{read_debug_signal_expr(state_info.fetch(:signals), :core0_irf_thr_rd_w_neg)};
-              if (count > 76) out_words[76] = #{read_debug_signal_expr(state_info.fetch(:signals), :core0_irf_active_win_thr_rd_w2_neg)};
-              if (count > 77) out_words[77] = #{read_debug_signal_expr(state_info.fetch(:signals), :core0_irf_thr_rd_w2_neg)};
-              if (count > 78) out_words[78] = #{read_debug_signal_expr(state_info.fetch(:signals), :core0_ifq_thrrdy_ctr)};
-              if (count > 79) out_words[79] = #{read_debug_signal_expr(state_info.fetch(:signals), :core0_ifq_imsf_ff)};
-              if (count > 80) out_words[80] = #{read_debug_signal_expr(state_info.fetch(:signals), :core0_ifq_pcxreqvd_ff)};
-              if (count > 81) out_words[81] = #{read_debug_signal_expr(state_info.fetch(:signals), :core0_ifq_pcxreqve_ff)};
-              if (count > 82) out_words[82] = #{read_debug_signal_expr(state_info.fetch(:signals), :core0_ifq_pcxreq_reg)};
-              if (count > 83) out_words[83] = #{read_debug_signal_expr(state_info.fetch(:signals), :core0_ifqop_reg)};
-              if (count > 84) out_words[84] = #{read_debug_signal_word_expr(state_info.fetch(:signals), :core0_ifqop_reg, 1)};
-              if (count > 85) out_words[85] = #{read_debug_signal_word_expr(state_info.fetch(:signals), :core0_ifqop_reg, 2)};
-              if (count > 86) out_words[86] = #{read_debug_signal_expr(state_info.fetch(:signals), :core0_ifq_cpxreq_reg)};
-              if (count > 87) out_words[87] = #{read_debug_signal_expr(state_info.fetch(:signals), :core0_ifq_qadv_ff)};
-              if (count > 88) out_words[88] = #{read_debug_signal_word_expr(state_info.fetch(:signals), :core0_ifq_ibuf, 2)};
-              if (count > 89) out_words[89] = #{read_debug_signal_word_expr(state_info.fetch(:signals), :core0_ff_cpx_data_cx3, 2)};
-              if (count > 90) out_words[90] = #{read_debug_signal_expr(state_info.fetch(:signals), :core0_qctl2_ifill_pkt_fwd_done_ff)};
-              if (count > 91) out_words[91] = #{read_debug_signal_expr(state_info.fetch(:signals), :core0_qctl2_dfq_wptr_ff)};
-              if (count > 92) out_words[92] = #{read_debug_signal_expr(state_info.fetch(:signals), :core0_qctl2_dfq_vld)};
-              if (count > 93) out_words[93] = #{read_debug_signal_expr(state_info.fetch(:signals), :core0_qctl2_dfq_inv)};
-              if (count > 94) out_words[94] = #{read_debug_signal_expr(state_info.fetch(:signals), :core0_qctl2_rvld_stgd1)};
-              if (count > 95) out_words[95] = #{read_debug_signal_expr(state_info.fetch(:signals), :core0_qctl2_rvld_stgd1_new)};
-              if (count > 96) out_words[96] = #{read_debug_signal_expr(state_info.fetch(:signals), :core0_qdp2_dfq_data_stg)};
-              if (count > 97) out_words[97] = #{read_debug_signal_word_expr(state_info.fetch(:signals), :core0_qdp2_dfq_data_stg, 1)};
-              if (count > 98) out_words[98] = #{read_debug_signal_word_expr(state_info.fetch(:signals), :core0_qdp2_dfq_data_stg, 2)};
-              return count;
-            }
-          CPP
+            void sim_eval(void* sim) { #{module_name}_eval(static_cast<SimContext*>(sim)->state); }
 
-          wrapper = SharedRuntimeSupport.build_wrapper_cpp(
-            includes: includes,
-            context_fields: "std::uint8_t state[STATE_SIZE];\nPendingResponse deferred_request{};",
-            backend_helpers: backend_helpers,
-            sim_create_impl: sim_create_impl,
-            sim_destroy_impl: sim_destroy_impl,
-            sim_reset_impl: sim_reset_impl,
-            include_debug_snapshot: true,
-            debug_words: DEBUG_WORDS,
-            debug_copy_impl: debug_copy_impl
-          )
-          wrapper << jit_runtime_main_cpp(module_name: module_name, signals: state_info.fetch(:signals)) if include_jit_main
-
-          write_file_if_changed(path, wrapper)
-        end
-
-        def jit_runtime_main_cpp(module_name:, signals:)
-          smoke_output_format = (['%u', '%llu'] + Array.new(6, '%llu')).join(' ')
-          smoke_output_exprs = %i[wbm_cycle_o wbm_strobe_o wbm_we_o wbm_addr_o wbm_data_o wbm_sel_o].map do |key|
-            macro = sanitize_macro(key)
-            "static_cast<unsigned long long>(read_bits(ctx->state, OFF_#{macro}, BITS_#{macro}))"
-          end.join(', ')
-
-          <<~CPP
-            #ifdef ARCI_JIT_MAIN
-            namespace {
-            static void write_hex_bytes(FILE* out, const unsigned char* bytes, size_t len) {
-              static const char* kHex = "0123456789abcdef";
-              for (size_t i = 0; i < len; ++i) {
-                unsigned char byte = bytes[i];
-                fputc(kHex[(byte >> 4) & 0xF], out);
-                fputc(kHex[byte & 0xF], out);
-              }
+            void sim_poke(void* sim, const char* n, unsigned int v) {
+              SimContext* ctx = static_cast<SimContext*>(sim);
+              if (!std::strcmp(n,"sys_clock_i")) write_all_SYS_CLOCK_I(ctx->state, v);
+              else if (!std::strcmp(n,"sys_reset_i")) write_all_SYS_RESET_I(ctx->state, v);
+              else if (!std::strcmp(n,"eth_irq_i")) write_all_ETH_IRQ_I(ctx->state, v);
+              else if (!std::strcmp(n,"wbm_ack_i")) write_all_WBM_ACK_I(ctx->state, v);
+              else if (!std::strcmp(n,"wbm_data_i")) write_all_WBM_DATA_I(ctx->state, (std::uint64_t)v);
             }
 
-            static bool hex_nibble(char ch, unsigned char* out) {
-              if (ch >= '0' && ch <= '9') {
-                *out = static_cast<unsigned char>(ch - '0');
-                return true;
-              }
-              if (ch >= 'a' && ch <= 'f') {
-                *out = static_cast<unsigned char>(10 + (ch - 'a'));
-                return true;
-              }
-              if (ch >= 'A' && ch <= 'F') {
-                *out = static_cast<unsigned char>(10 + (ch - 'A'));
-                return true;
-              }
-              return false;
-            }
-
-            static bool decode_hex_payload(const char* hex, std::vector<unsigned char>* out) {
-              out->clear();
-              if (!hex) {
-                return true;
-              }
-              while (*hex == ' ') {
-                ++hex;
-              }
-              size_t len = strlen(hex);
-              if ((len & 1u) != 0u) {
-                return false;
-              }
-              out->reserve(len / 2u);
-              for (size_t i = 0; i < len; i += 2u) {
-                unsigned char hi = 0u;
-                unsigned char lo = 0u;
-                if (!hex_nibble(hex[i], &hi) || !hex_nibble(hex[i + 1u], &lo)) {
-                  return false;
-                }
-                out->push_back(static_cast<unsigned char>((hi << 4) | lo));
-              }
-              return true;
-            }
-
-            static const char* skip_spaces(const char* text) {
-              while (text && *text == ' ') {
-                ++text;
-              }
-              return text;
-            }
-
-            static bool parse_u64_token(const char** cursor, unsigned long long* out) {
-              if (!cursor || !*cursor) {
-                return false;
-              }
-              const char* start = skip_spaces(*cursor);
-              if (!start || *start == '\\0') {
-                return false;
-              }
-              char* end = nullptr;
-              *out = strtoull(start, &end, 0);
-              if (end == start) {
-                return false;
-              }
-              *cursor = skip_spaces(end);
-              return true;
-            }
-            }  // namespace
-
-            int main(int argc, char** argv) {
-              (void)argc;
-              (void)argv;
-              SimContext* ctx = static_cast<SimContext*>(sim_create());
-              if (!ctx) {
-                return 1;
-              }
-
-              fprintf(stdout, "READY\\n");
-              fflush(stdout);
-
-              char* line = nullptr;
-              size_t cap = 0u;
-              while (getline(&line, &cap, stdin) != -1) {
-                size_t len = strlen(line);
-                while (len > 0u && (line[len - 1u] == '\\n' || line[len - 1u] == '\\r')) {
-                  line[--len] = '\\0';
-                }
-
-                if (strcmp(line, "RESET") == 0) {
-                  sim_reset(ctx);
-                  fprintf(stdout, "OK\\n");
-                  fflush(stdout);
-                  continue;
-                }
-
-                if (strcmp(line, "CLEAR_MEMORY") == 0) {
-                  sim_clear_memory(ctx);
-                  fprintf(stdout, "OK\\n");
-                  fflush(stdout);
-                  continue;
-                }
-
-                if (strncmp(line, "LOAD_FLASH ", 11) == 0) {
-                  const char* cursor = line + 11;
-                  unsigned long long base = 0ULL;
-                  std::vector<unsigned char> payload;
-                  if (!parse_u64_token(&cursor, &base) || !decode_hex_payload(cursor, &payload)) {
-                    fprintf(stdout, "ERR LOAD_FLASH\\n");
-                    fflush(stdout);
-                    continue;
-                  }
-                  sim_load_flash(ctx, payload.data(), base, static_cast<unsigned int>(payload.size()));
-                  fprintf(stdout, "OK %zu\\n", payload.size());
-                  fflush(stdout);
-                  continue;
-                }
-
-                if (strncmp(line, "LOAD_MEMORY ", 12) == 0) {
-                  const char* cursor = line + 12;
-                  unsigned long long base = 0ULL;
-                  std::vector<unsigned char> payload;
-                  if (!parse_u64_token(&cursor, &base) || !decode_hex_payload(cursor, &payload)) {
-                    fprintf(stdout, "ERR LOAD_MEMORY\\n");
-                    fflush(stdout);
-                    continue;
-                  }
-                  sim_load_memory(ctx, payload.data(), base, static_cast<unsigned int>(payload.size()));
-                  fprintf(stdout, "OK %zu\\n", payload.size());
-                  fflush(stdout);
-                  continue;
-                }
-
-                if (strncmp(line, "READ_MEMORY ", 12) == 0) {
-                  const char* cursor = line + 12;
-                  unsigned long long addr = 0ULL;
-                  unsigned long long length = 0ULL;
-                  if (!parse_u64_token(&cursor, &addr) || !parse_u64_token(&cursor, &length)) {
-                    fprintf(stdout, "ERR READ_MEMORY\\n");
-                    fflush(stdout);
-                    continue;
-                  }
-                  std::vector<unsigned char> buffer(static_cast<size_t>(length), 0u);
-                  unsigned int copied = sim_read_memory(ctx, addr, buffer.data(), static_cast<unsigned int>(buffer.size()));
-                  fputs("BYTES ", stdout);
-                  write_hex_bytes(stdout, buffer.data(), copied);
-                  fputc('\\n', stdout);
-                  fflush(stdout);
-                  continue;
-                }
-
-                if (strncmp(line, "WRITE_MEMORY ", 13) == 0) {
-                  const char* cursor = line + 13;
-                  unsigned long long addr = 0ULL;
-                  std::vector<unsigned char> payload;
-                  if (!parse_u64_token(&cursor, &addr) || !decode_hex_payload(cursor, &payload)) {
-                    fprintf(stdout, "ERR WRITE_MEMORY\\n");
-                    fflush(stdout);
-                    continue;
-                  }
-                  unsigned int written = sim_write_memory(ctx, addr, payload.data(), static_cast<unsigned int>(payload.size()));
-                  fprintf(stdout, "WROTE %u\\n", written);
-                  fflush(stdout);
-                  continue;
-                }
-
-                if (strncmp(line, "RUN ", 4) == 0) {
-                  unsigned long requested = strtoul(line + 4, nullptr, 10);
-                  unsigned int ran = sim_run_cycles(ctx, static_cast<unsigned int>(requested));
-                  fprintf(stdout, "RUN %u\\n", ran);
-                  fflush(stdout);
-                  continue;
-                }
-
-                if (strcmp(line, "TRACE") == 0) {
-                  unsigned int count = sim_wishbone_trace_count(ctx);
-                  std::vector<unsigned long long> words(static_cast<size_t>(count) * #{SharedRuntimeSupport::TRACE_WORDS}, 0ULL);
-                  unsigned int copied = sim_copy_wishbone_trace(ctx, words.data(), count);
-                  fprintf(stdout, "TRACE %u ", copied);
-                  write_hex_bytes(stdout, reinterpret_cast<const unsigned char*>(words.data()), static_cast<size_t>(copied) * #{SharedRuntimeSupport::TRACE_WORDS} * sizeof(unsigned long long));
-                  fputc('\\n', stdout);
-                  fflush(stdout);
-                  continue;
-                }
-
-                if (strcmp(line, "DEBUG") == 0) {
-                  unsigned long long words[kDebugWords];
-                  unsigned int copied = sim_copy_debug_snapshot(ctx, words, kDebugWords);
-                  fprintf(stdout, "DEBUG %u ", copied);
-                  write_hex_bytes(stdout, reinterpret_cast<const unsigned char*>(words), static_cast<size_t>(copied) * sizeof(unsigned long long));
-                  fputc('\\n', stdout);
-                  fflush(stdout);
-                  continue;
-                }
-
-                if (strcmp(line, "FAULTS") == 0) {
-                  unsigned int count = sim_unmapped_access_count(ctx);
-                  std::vector<unsigned long long> words(static_cast<size_t>(count) * #{SharedRuntimeSupport::FAULT_WORDS}, 0ULL);
-                  unsigned int copied = sim_copy_unmapped_accesses(ctx, words.data(), count);
-                  fprintf(stdout, "FAULTS %u ", copied);
-                  write_hex_bytes(stdout, reinterpret_cast<const unsigned char*>(words.data()), static_cast<size_t>(copied) * #{SharedRuntimeSupport::FAULT_WORDS} * sizeof(unsigned long long));
-                  fputc('\\n', stdout);
-                  fflush(stdout);
-                  continue;
-                }
-
-                if (strncmp(line, "SMOKE ", 6) == 0) {
-                  const char* cursor = line + 6;
-                  unsigned long long cycles = 0ULL;
-                  unsigned long long reset_cycles = 0ULL;
-                  if (!parse_u64_token(&cursor, &cycles) || !parse_u64_token(&cursor, &reset_cycles)) {
-                    fprintf(stdout, "ERR SMOKE\\n");
-                    fflush(stdout);
-                    continue;
-                  }
-                  sim_reset(ctx);
-                  ctx->reset_cycles_remaining = static_cast<size_t>(reset_cycles);
-                  unsigned int ran = sim_run_cycles(ctx, static_cast<unsigned int>(cycles));
-                  fprintf(stdout, "#{smoke_output_format}\\n", ran, reset_cycles, #{smoke_output_exprs});
-                  fflush(stdout);
-                  continue;
-                }
-
-                if (strcmp(line, "QUIT") == 0) {
-                  fprintf(stdout, "OK\\n");
-                  fflush(stdout);
-                  break;
-                }
-
-                fprintf(stdout, "ERR UNKNOWN\\n");
-                fflush(stdout);
-              }
-
-              free(line);
-              sim_destroy(ctx);
+            unsigned int sim_peek(void* sim, const char* n) {
+              SimContext* ctx = static_cast<SimContext*>(sim);
+              if (!std::strcmp(n,"wbm_cycle_o"))  return (unsigned int)read_bits(ctx->state, OFF_WBM_CYCLE_O, BITS_WBM_CYCLE_O);
+              if (!std::strcmp(n,"wbm_strobe_o")) return (unsigned int)read_bits(ctx->state, OFF_WBM_STROBE_O, BITS_WBM_STROBE_O);
+              if (!std::strcmp(n,"wbm_we_o"))     return (unsigned int)read_bits(ctx->state, OFF_WBM_WE_O, BITS_WBM_WE_O);
+              if (!std::strcmp(n,"wbm_sel_o"))    return (unsigned int)(read_bits(ctx->state, OFF_WBM_SEL_O, BITS_WBM_SEL_O) & 0xFFu);
+              if (!std::strcmp(n,"wbm_addr_o"))   return (unsigned int)(read_bits(ctx->state, OFF_WBM_ADDR_O, BITS_WBM_ADDR_O) & 0xFFFFFFFFu);
+              if (!std::strcmp(n,"wbm_data_o"))   return (unsigned int)(read_bits(ctx->state, OFF_WBM_DATA_O, BITS_WBM_DATA_O) & 0xFFFFFFFFu);
               return 0;
             }
-            #endif
+
+            int sim_get_caps(const void* sim, unsigned int* caps_out) { (void)sim; if (!caps_out) return 0; *caps_out = SIM_CAP_SIGNAL_INDEX | SIM_CAP_RUNNER; return 1; }
+
+            int sim_signal(void* sim, unsigned int op, const char* name, unsigned int idx, unsigned long value, unsigned long* out_value) {
+              int resolved_idx = (name && name[0]) ? signal_index_from_name(name) : (int)idx;
+              const char* resolved_name = (name && name[0]) ? name : signal_name_from_index(idx);
+              switch (op) {
+              case SIM_SIGNAL_HAS: write_out_ulong(out_value, resolved_idx >= 0 ? 1ul : 0ul); return resolved_idx >= 0 ? 1 : 0;
+              case SIM_SIGNAL_GET_INDEX: if (resolved_idx < 0) { write_out_ulong(out_value, 0ul); return 0; } write_out_ulong(out_value, (unsigned long)resolved_idx); return 1;
+              case SIM_SIGNAL_PEEK: case SIM_SIGNAL_PEEK_INDEX: if (resolved_idx < 0 || !resolved_name) { write_out_ulong(out_value, 0ul); return 0; } write_out_ulong(out_value, (unsigned long)sim_peek(sim, resolved_name)); return 1;
+              case SIM_SIGNAL_POKE: case SIM_SIGNAL_POKE_INDEX: if (resolved_idx < 0 || !resolved_name) { write_out_ulong(out_value, 0ul); return 0; } sim_poke(sim, resolved_name, (unsigned int)value); write_out_ulong(out_value, 1ul); return 1;
+              default: write_out_ulong(out_value, 0ul); return 0;
+              }
+            }
+
+            int sim_exec(void* sim, unsigned int op, unsigned long arg0, unsigned long arg1, unsigned long* out_value, void* error_out) {
+              (void)arg1; (void)error_out;
+              SimContext* ctx = static_cast<SimContext*>(sim);
+              switch (op) {
+              case SIM_EXEC_EVALUATE: #{module_name}_eval(ctx->state); write_out_ulong(out_value, 0ul); return 1;
+              case SIM_EXEC_TICK: case SIM_EXEC_TICK_FORCED: step_cycle(ctx); write_out_ulong(out_value, 0ul); return 1;
+              case SIM_EXEC_RESET: sim_reset(sim); write_out_ulong(out_value, 0ul); return 1;
+              case SIM_EXEC_RUN_TICKS: for (unsigned long i = 0; i < arg0; ++i) step_cycle(ctx); write_out_ulong(out_value, 0ul); return 1;
+              case SIM_EXEC_SIGNAL_COUNT: write_out_ulong(out_value, (unsigned long)total_signal_count()); return 1;
+              case SIM_EXEC_REG_COUNT: write_out_ulong(out_value, 0ul); return 1;
+              default: write_out_ulong(out_value, 0ul); return 0;
+              }
+            }
+
+            int sim_trace(void* sim, unsigned int op, const char* str_arg, unsigned long* out_value) {
+              (void)sim; (void)str_arg; write_out_ulong(out_value, 0ul); return (op == SIM_TRACE_ENABLED) ? 1 : 0;
+            }
+
+            unsigned long sim_blob(void* sim, unsigned int op, unsigned char* out_ptr, unsigned long out_len) {
+              SimContext* ctx = static_cast<SimContext*>(sim);
+              switch (op) {
+              case SIM_BLOB_INPUT_NAMES: return copy_blob(out_ptr, out_len, k_input_names_csv, sizeof(k_input_names_csv)-1);
+              case SIM_BLOB_OUTPUT_NAMES: return copy_blob(out_ptr, out_len, k_output_names_csv, sizeof(k_output_names_csv)-1);
+              case SIM_BLOB_SPARC64_WISHBONE_TRACE: ensure_trace_json(ctx); return copy_blob(out_ptr, out_len, ctx->trace_json.c_str(), ctx->trace_json.size());
+              case SIM_BLOB_SPARC64_UNMAPPED_ACCESSES: ensure_faults_json(ctx); return copy_blob(out_ptr, out_len, ctx->faults_json.c_str(), ctx->faults_json.size());
+              default: return 0u;
+              }
+            }
+
+            int runner_get_caps(const void* sim, unsigned int* caps_out) {
+              (void)sim; if (!caps_out) return 0;
+              RunnerCaps* caps = reinterpret_cast<RunnerCaps*>(caps_out);
+              caps->kind = RUNNER_KIND_SPARC64;
+              caps->mem_spaces = (1u << RUNNER_MEM_SPACE_MAIN) | (1u << RUNNER_MEM_SPACE_ROM);
+              caps->control_ops = 0u;
+              caps->probe_ops = (1u << RUNNER_PROBE_KIND) | (1u << RUNNER_PROBE_IS_MODE) | (1u << RUNNER_PROBE_SIGNAL);
+              return 1;
+            }
+
+            unsigned long runner_mem(void* sim, unsigned int op, unsigned int space, unsigned long offset,
+                                     unsigned char* data, unsigned long len, unsigned int flags) {
+              SimContext* ctx = static_cast<SimContext*>(sim);
+              if (!ctx || !data || len == 0u) return 0u;
+              (void)flags;
+              if (op == RUNNER_MEM_OP_LOAD) {
+                if (space == RUNNER_MEM_SPACE_ROM) { for (unsigned long i = 0; i < len; ++i) ctx->flash[canonical_bus_addr(offset+i)] = data[i]; return len; }
+                if (space == RUNNER_MEM_SPACE_MAIN) {
+                  for (unsigned long i = 0; i < len; ++i) ctx->dram[canonical_bus_addr(offset+i)] = data[i];
+                  if (canonical_bus_addr(offset) == 0ULL) ctx->protected_dram_limit = std::max<std::uint64_t>(ctx->protected_dram_limit, len);
+                  return len;
+                }
+                return 0u;
+              }
+              if (op == RUNNER_MEM_OP_READ) {
+                for (unsigned long i = 0; i < len; ++i) { std::uint8_t byte = 0; read_mapped_byte(ctx, offset+i, &byte); data[i] = byte; }
+                return len;
+              }
+              if (op == RUNNER_MEM_OP_WRITE) {
+                if (space == RUNNER_MEM_SPACE_MAIN) { for (unsigned long i = 0; i < len; ++i) ctx->dram[offset+i] = data[i]; return len; }
+                return 0u;
+              }
+              return 0u;
+            }
+
+            int runner_run(void* sim, unsigned int cycles, unsigned char key_data, int key_ready, unsigned int mode, void* result_out) {
+              SimContext* ctx = static_cast<SimContext*>(sim); if (!ctx) return 0;
+              (void)key_data; (void)key_ready; (void)mode;
+              for (unsigned int i = 0; i < cycles; ++i) step_cycle(ctx);
+              RunnerRunResult* result = static_cast<RunnerRunResult*>(result_out);
+              if (result) { result->text_dirty = 0; result->key_cleared = 0; result->cycles_run = cycles; result->speaker_toggles = 0; result->frames_completed = 0; }
+              return 1;
+            }
+
+            int runner_control(void* sim, unsigned int op, unsigned int arg0, unsigned int arg1) { (void)sim; (void)op; (void)arg0; (void)arg1; return 0; }
+
+            unsigned long long runner_probe(void* sim, unsigned int op, unsigned int arg0) {
+              if (!sim) return 0ull;
+              if (op == RUNNER_PROBE_KIND) return (unsigned long long)RUNNER_KIND_SPARC64;
+              if (op == RUNNER_PROBE_IS_MODE) return 1ull;
+              if (op == RUNNER_PROBE_SIGNAL) { const char* name = signal_name_from_index(arg0); return name ? (unsigned long long)sim_peek(sim, name) : 0ull; }
+              return 0ull;
+            }
+
+            }  // extern "C"
           CPP
-        end
 
-        def compile_wrapper_llvm_ir!(wrapper_path:, wrapper_ll_path:, jit_main: false)
-          cmd = ['clang++', '-std=c++17', '-O0', '-S', '-emit-llvm']
-          cmd << '-DARCI_JIT_MAIN' if jit_main
-          cmd += [wrapper_path, '-o', wrapper_ll_path]
-          stdout, stderr, status = Open3.capture3(*cmd)
-          append_log(log_path, stdout, stderr)
-          return if status.success?
-
-          raise "SPARC64 Arcilator JIT wrapper compilation failed:\n#{stdout}\n#{stderr}"
-        end
-
-        def start_runtime_process(cmd)
-          @jit_stdin, @jit_stdout, @jit_stderr, @jit_wait_thr = Open3.popen3(*cmd)
-          @jit_stdin.sync = true
-          @jit_stdout.sync = true
-          @jit_stderr.sync = true
-          @jit_log_thread = Thread.new do
-            begin
-              File.open(log_path, 'a') do |file|
-                @jit_stderr.each_line do |line|
-                  file.write(line)
-                  file.flush
-                end
-              end
-            rescue IOError
-              nil
-            end
-          end
-
-          ready = @jit_stdout.gets
-          return if ready&.strip == 'READY'
-
-          close_jit_process
-          raise "SPARC64 Arcilator runtime process failed to start#{ready ? ": #{ready.strip}" : ''}"
-        end
-
-        def send_jit_command(command)
-          raise 'SPARC64 Arcilator JIT runner is not active' unless @jit_stdin && @jit_stdout
-
-          @jit_stdin.puts(command)
-          response = @jit_stdout.gets
-          raise 'SPARC64 Arcilator JIT runner exited unexpectedly' unless response
-
-          response = response.strip
-          raise "SPARC64 Arcilator JIT command failed: #{response}" if response.start_with?('ERR')
-
-          response
-        end
-
-        def send_jit_payload_command(prefix, bytes)
-          payload = pack_bytes(bytes).unpack1('H*')
-          send_jit_command("#{prefix} #{payload}")
-        end
-
-        def parse_jit_hex_bytes(hex)
-          return [] if hex.nil? || hex.empty?
-
-          [hex].pack('H*').bytes
-        end
-
-        def parse_jit_u64_words(hex, expected_words)
-          return [] if hex.nil? || hex.empty? || expected_words <= 0
-
-          words = [hex].pack('H*').unpack('Q<*')
-          words.first(expected_words)
-        end
-
-        def close_jit_process
-          return false unless @jit_wait_thr
-
-          begin
-            send_jit_command('QUIT') if @jit_stdin && !@jit_stdin.closed?
-          rescue StandardError
-            nil
-          end
-
-          @jit_stdin&.close unless @jit_stdin&.closed?
-          @jit_stdout&.close unless @jit_stdout&.closed?
-          @jit_stderr&.close unless @jit_stderr&.closed?
-          @jit_wait_thr.value
-          @jit_log_thread&.join(1)
-          @jit_stdin = nil
-          @jit_stdout = nil
-          @jit_stderr = nil
-          @jit_wait_thr = nil
-          @jit_log_thread = nil
-          true
-        end
-
-        def link_jit_bitcode!(ll_path:, wrapper_ll_path:, jit_bc_path:)
-          cmd = ['llvm-link', ll_path, wrapper_ll_path, '-o', jit_bc_path]
-          stdout, stderr, status = Open3.capture3(*cmd)
-          append_log(log_path, stdout, stderr)
-          return if status.success?
-
-          raise "SPARC64 Arcilator JIT bitcode link failed:\n#{stdout}\n#{stderr}"
-        end
-
-        def compile_llvm_ir_object!(ll_path:, obj_path:)
-          cmd = ['llc', '-filetype=obj', '-O0', '-relocation-model=pic']
-          # AArch64 O0 GlobalISel miscompiled the SPARC64 ARC runtime and
-          # reintroduced the old cycle-938 packet divergence. Force the
-          # SelectionDAG path for native compile mode.
-          if RbConfig::CONFIG['host_cpu'] =~ /(arm64|aarch64)/i
-            cmd << '--aarch64-enable-global-isel-at-O=-1'
-          end
-          cmd += [ll_path, '-o', obj_path]
-          stdout, stderr, status = Open3.capture3(*cmd)
-          append_log(log_path, stdout, stderr)
-          return if status.success?
-
-          raise "SPARC64 Arcilator object compilation failed:\n#{stdout}\n#{stderr}"
-        end
-
-        def link_shared_library!(obj_path:, lib_path:)
-          cxx = if RbConfig::CONFIG['host_os'] =~ /darwin/ && command_available?('clang++')
-                  'clang++'
-                elsif command_available?('g++')
-                  'g++'
-                else
-                  'c++'
-                end
-          cmd = if RbConfig::CONFIG['host_os'] =~ /darwin/
-                  [cxx, '-shared', '-dynamiclib', '-fPIC', '-O2', '-o', lib_path, obj_path]
-                else
-                  [cxx, '-shared', '-fPIC', '-O2', '-o', lib_path, obj_path]
-                end
-          stdout, stderr, status = Open3.capture3(*cmd)
-          append_log(log_path, stdout, stderr)
-          return if status.success?
-
-          raise "SPARC64 Arcilator shared library link failed:\n#{stdout}\n#{stderr}"
-        end
-
-        def link_runtime_executable!(obj_path:, exe_path:)
-          cxx = if RbConfig::CONFIG['host_os'] =~ /darwin/ && command_available?('clang++')
-                  'clang++'
-                elsif command_available?('g++')
-                  'g++'
-                else
-                  'c++'
-                end
-          cmd = [cxx, '-O0', '-o', exe_path, obj_path]
-          stdout, stderr, status = Open3.capture3(*cmd)
-          append_log(log_path, stdout, stderr)
-          return if status.success?
-
-          raise "SPARC64 Arcilator runtime executable link failed:\n#{stdout}\n#{stderr}"
-        end
-
-        def append_log(path, stdout, stderr)
-          File.write(path, "#{stdout}#{stderr}", mode: 'a')
-        end
-
-        def jit_compile_threads
-          [Etc.nprocessors, 8].compact.min
-        end
-
-        def shared_library_suffix
-          RbConfig::CONFIG['host_os'] =~ /darwin/ ? 'dylib' : 'so'
-        end
-
-        def command_available?(tool)
-          ENV.fetch('PATH', '').split(File::PATH_SEPARATOR).any? do |path|
-            exe = File.join(path, tool)
-            File.executable?(exe) && !File.directory?(exe)
-          end
-        end
-
-        def monotonic_time
-          Process.clock_gettime(Process::CLOCK_MONOTONIC)
-        end
-
-        def elapsed_ms_since(start_time)
-          ((monotonic_time - start_time) * 1000).round(1)
-        end
-
-        def shell_join(cmd)
-          cmd.map { |arg| Shellwords.escape(arg.to_s) }.join(' ')
-        end
-
-        def runtime_artifact_ready?
-          if jit?
-            build_result[:jit_bitcode_path].to_s != '' && File.exist?(build_result[:jit_bitcode_path])
-          else
-            build_result[:runtime_executable_path].to_s != '' && File.exist?(build_result[:runtime_executable_path])
-          end
-        end
-
-        def completion_result(timeout: false)
-          trace = Integration.normalize_wishbone_trace(wishbone_trace)
-          faults = unmapped_accesses
-          {
-            completed: completed?,
-            timeout: timeout,
-            cycles: clock_count,
-            boot_handoff_seen: trace.any? do |event|
-              event.op == :read &&
-                event.addr.to_i >= Integration::PROGRAM_BASE &&
-                event.addr.to_i < Integration::FLASH_BOOT_BASE
-            end,
-            secondary_core_parked: faults.empty?,
-            mailbox_status: mailbox_status,
-            mailbox_value: mailbox_value,
-            unmapped_accesses: faults,
-            wishbone_trace: trace
-          }
+          File.write(path, cpp)
         end
       end
     end

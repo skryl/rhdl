@@ -31,6 +31,8 @@ module RHDL
           @floppy_slots = {}
           @active_floppy_slot = nil
           @active_floppy_geometry = nil
+          @hdd_image = nil
+          @hdd_geometry = nil
           @mounted_disk_size = 0
           @cycles_run = 0
           @last_io = nil
@@ -61,7 +63,15 @@ module RHDL
         end
 
         def dos_path
-          software_path('bin', 'fdboot.img')
+          software_path('bin', 'msdos4_disk1.img')
+        end
+
+        def dos_disk2_path
+          software_path('bin', 'msdos4_disk2.img')
+        end
+
+        def hdd_path
+          software_path('bin', 'fs.img')
         end
 
         def load_bios(boot0: bios_paths.fetch(:boot0), boot1: bios_paths.fetch(:boot1))
@@ -160,6 +170,19 @@ module RHDL
           !@active_floppy_slot.nil?
         end
 
+        def load_hdd(path: hdd_path)
+          hdd_image_path = File.expand_path(path)
+          ensure_file!(hdd_image_path, 'AO486 HDD image')
+          bytes = File.binread(hdd_image_path)
+          @hdd_image = bytes
+          @hdd_geometry = infer_hdd_geometry(bytes)
+          { path: hdd_image_path, size: bytes.bytesize, geometry: @hdd_geometry }
+        end
+
+        def hdd_loaded?
+          !@hdd_image.nil?
+        end
+
         def native?
           true
         end
@@ -234,6 +257,7 @@ module RHDL
             native: native?,
             bios_loaded: bios_loaded?,
             dos_loaded: dos_loaded?,
+            hdd_loaded: hdd_loaded?,
             cycles_run: @cycles_run,
             floppy_image_size: @floppy_image&.bytesize || 0,
             active_floppy_slot: @active_floppy_slot,
@@ -341,13 +365,6 @@ module RHDL
           metadata.merge(slot: slot_index, active: true)
         end
 
-        def dos_shortcut_enabled_for?(metadata = nil)
-          active = metadata || (@active_floppy_slot.nil? ? nil : @floppy_slots[@active_floppy_slot])
-          return false if active.nil?
-
-          active.fetch(:path) == File.expand_path(dos_path) && (@active_floppy_slot || 0).zero?
-        end
-
         def sync_active_dos_image!(_metadata)
           nil
         end
@@ -385,6 +402,30 @@ module RHDL
             geometry[:cylinders] = cylinders if cylinders.positive?
           end
           geometry
+        end
+
+        def infer_hdd_geometry(bytes)
+          raw = bytes.is_a?(String) ? bytes.b : Array(bytes).pack('C*')
+          bytes_per_sector = little_endian_u16(raw, 11)
+          sectors_per_track = little_endian_u16(raw, 24)
+          heads = little_endian_u16(raw, 26)
+          total_sectors = little_endian_u16(raw, 19)
+          total_sectors = little_endian_u32(raw, 32) if total_sectors.zero?
+
+          bytes_per_sector = 512 unless bytes_per_sector.positive?
+          sectors_per_track = 63 unless sectors_per_track.positive?
+          heads = 16 unless heads.positive?
+          total_sectors = raw.bytesize / bytes_per_sector unless total_sectors.positive?
+          cylinders = total_sectors / (sectors_per_track * heads)
+          cylinders = [cylinders, 1].max
+
+          {
+            bytes_per_sector: bytes_per_sector,
+            sectors_per_track: sectors_per_track,
+            heads: heads,
+            cylinders: cylinders,
+            total_sectors: total_sectors
+          }
         end
 
         def geometry_from_size(bytesize)

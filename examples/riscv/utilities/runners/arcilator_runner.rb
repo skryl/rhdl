@@ -1770,18 +1770,19 @@ module RHDL
               top: 'riscv_cpu'
             )
             raise LoadError, "ARC preparation failed for RISC-V CPU: #{prepared.dig(:arc, :stderr)}" unless prepared[:success]
-            RHDL::Codegen::CIRCT::Tooling.finalize_arc_mlir_for_arcilator!(
+            arcilator_mlir_path = RHDL::Codegen::CIRCT::Tooling.finalize_arc_mlir_for_arcilator!(
               arc_mlir_path: prepared.fetch(:arc_mlir_path),
               check_paths: [
                 prepared[:normalized_llhd_mlir_path],
                 prepared[:hwseq_mlir_path],
                 prepared[:flattened_hwseq_mlir_path],
+                prepared[:flattened_cleaned_hwseq_mlir_path],
                 prepared[:arc_mlir_path]
               ]
             )
 
             puts '  Compiling with arcilator...'
-            compile_arcilator(prepared.fetch(:arc_mlir_path), ll_file, state_file)
+            compile_arcilator(arcilator_mlir_path, ll_file, state_file)
 
             puts '  Building shared library...'
             write_arcilator_wrapper(wrapper_file, state_file)

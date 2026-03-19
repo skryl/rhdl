@@ -51,10 +51,19 @@ module RHDL
         DOS_INT13_STUB_SEGMENT = 0xF000
         DOS_INT13_VECTOR_ADDR = 0x13 * 4
         DOS_INT13_SCRATCH_ADDR = 0x0570
-        DOS_INT1A_STUB_OFFSET = 0x1130
+        DOS_INT1A_STUB_OFFSET = 0x1140
         DOS_INT1A_STUB_SEGMENT = 0xF000
         DOS_INT1A_VECTOR_ADDR = 0x1A * 4
-        DOS_INT16_STUB_OFFSET = 0x1100
+        DOS_INT11_STUB_OFFSET = 0x8CA6
+        DOS_INT11_STUB_SEGMENT = 0xF000
+        DOS_INT11_VECTOR_ADDR = 0x11 * 4
+        DOS_INT12_STUB_OFFSET = 0x8CB0
+        DOS_INT12_STUB_SEGMENT = 0xF000
+        DOS_INT12_VECTOR_ADDR = 0x12 * 4
+        DOS_INT15_STUB_OFFSET = 0x8CC0
+        DOS_INT15_STUB_SEGMENT = 0xF000
+        DOS_INT15_VECTOR_ADDR = 0x15 * 4
+        DOS_INT16_STUB_OFFSET = 0x1110
         DOS_INT16_STUB_SEGMENT = 0xF000
         DOS_INT16_VECTOR_ADDR = 0x16 * 4
         DOS_DISKETTE_PARAM_VECTOR_ADDR = 0x1E * 4
@@ -118,8 +127,11 @@ module RHDL
 
         class << self
           def preferred_import_backend
-            return :compiler if RHDL::Sim::Native::IR::COMPILER_AVAILABLE
+            # Prefer JIT for ao486: the compiler backend currently rejects ao486
+            # designs that contain combinational assigns it cannot compile
+            # (fast-path blocker).  JIT handles them without issue.
             return :jit if RHDL::Sim::Native::IR::JIT_AVAILABLE
+            return :compiler if RHDL::Sim::Native::IR::COMPILER_AVAILABLE
 
             nil
           end
@@ -147,7 +159,7 @@ module RHDL
               output_dir: out_dir,
               workspace_dir: workspace_dir,
               keep_workspace: true,
-              patch_profile: :runner,
+              patches_dir: CpuImporter::DEFAULT_PATCHES_ROOT,
               strict: false
             ).run
             raise Array(import_result.diagnostics).join("\n") unless import_result.success?
@@ -186,7 +198,7 @@ module RHDL
           @runtime_loaded = false
           @imported_parity_mode = false
           @parity_sim_factory = nil
-          @dos_bootstrap_mode = :freedos
+          @dos_bootstrap_mode = :generic
           @read_burst = nil
           @delivered_read_beat = false
           @previous_trace_key = nil
@@ -214,19 +226,37 @@ module RHDL
         def load_dos(**kwargs)
           metadata = super
           if metadata[:active]
-            @dos_bootstrap_mode = dos_shortcut_enabled_for?(metadata) ? :freedos : :generic
+            @dos_bootstrap_mode = :generic
             seed_dos_boot_sector_memory!(metadata.fetch(:bytes))
             seed_dos_bootstrap_helper_rom!
             seed_dos_int19_stub_memory!
             seed_dos_int10_stub_rom!
+            seed_dos_int11_stub_rom!
+            seed_dos_int12_stub_rom!
             seed_dos_int13_stub_rom!
+            seed_dos_int15_stub_rom!
             seed_dos_int1a_stub_rom!
             seed_dos_int16_stub_rom!
             seed_dos_post_state_memory!
             seed_floppy_post_state_memory!
             patch_runner_bios_dos_bootstrap!
             sync_active_dos_image!(metadata)
+          elsif metadata[:slot].to_i.positive?
+            seed_dos_int13_stub_rom!
+            seed_dos_post_state_memory!
+            seed_floppy_post_state_memory!
+            sync_secondary_disk_slots! if @sim
           end
+          metadata
+        end
+
+        def load_hdd(**kwargs)
+          metadata = super
+          seed_dos_int13_stub_rom!
+          seed_dos_post_state_memory!
+          seed_dos_bootstrap_helper_rom!
+          seed_dos_int19_stub_memory!
+          sync_hdd_to_sim! if @sim
           metadata
         end
 
@@ -655,6 +685,15 @@ module RHDL
           sync_sparse_store!(memory_store, rom: false)
           sync_disk_image!
           sync_secondary_disk_slots!
+          sync_hdd_to_sim!
+        end
+
+        def sync_hdd_to_sim!
+          return unless @sim && hdd_loaded?
+          return unless @sim.respond_to?(:runner_load_hdd)
+
+          @sim.runner_load_hdd(@hdd_image, 0)
+          @sim.set_hdd_geometry(@hdd_geometry) if @sim.respond_to?(:set_hdd_geometry)
         end
 
         def sync_sparse_store!(store, rom:)
@@ -715,7 +754,6 @@ module RHDL
           return unless @sim
 
           active_metadata = metadata || (@active_floppy_slot.nil? ? nil : @floppy_slots[@active_floppy_slot])
-          @sim.dos_shortcut_enabled = dos_shortcut_enabled_for?(active_metadata) if @sim.respond_to?(:dos_shortcut_enabled=)
           @sim.floppy_geometry = active_metadata[:geometry] if active_metadata && @sim.respond_to?(:floppy_geometry=)
 
           active_bytes =
@@ -805,6 +843,27 @@ module RHDL
           sync_rom_segment(dos_int10_bootstrap_bytes, BOOT0_ADDR + DOS_INT10_STUB_OFFSET)
         end
 
+        def seed_dos_int11_stub_rom!
+          dos_int11_bootstrap_bytes.each_with_index do |byte, idx|
+            rom_store[BOOT0_ADDR + DOS_INT11_STUB_OFFSET + idx] = byte
+          end
+          sync_rom_segment(dos_int11_bootstrap_bytes, BOOT0_ADDR + DOS_INT11_STUB_OFFSET)
+        end
+
+        def seed_dos_int12_stub_rom!
+          dos_int12_bootstrap_bytes.each_with_index do |byte, idx|
+            rom_store[BOOT0_ADDR + DOS_INT12_STUB_OFFSET + idx] = byte
+          end
+          sync_rom_segment(dos_int12_bootstrap_bytes, BOOT0_ADDR + DOS_INT12_STUB_OFFSET)
+        end
+
+        def seed_dos_int15_stub_rom!
+          dos_int15_bootstrap_bytes.each_with_index do |byte, idx|
+            rom_store[BOOT0_ADDR + DOS_INT15_STUB_OFFSET + idx] = byte
+          end
+          sync_rom_segment(dos_int15_bootstrap_bytes, BOOT0_ADDR + DOS_INT15_STUB_OFFSET)
+        end
+
         def seed_dos_int1a_stub_rom!
           dos_int1a_bootstrap_bytes.each_with_index do |byte, idx|
             rom_store[BOOT0_ADDR + DOS_INT1A_STUB_OFFSET + idx] = byte
@@ -824,10 +883,11 @@ module RHDL
         end
 
         def seed_dos_post_state_memory!
+          equipment_word = dos_equipment_word
           load_bytes(BDA_EBDA_SEGMENT_ADDR, [DOS_EBDA_SEGMENT & 0xFF, (DOS_EBDA_SEGMENT >> 8) & 0xFF])
-          load_bytes(BDA_EQUIPMENT_WORD_ADDR, [DOS_EQUIPMENT_WORD & 0xFF, (DOS_EQUIPMENT_WORD >> 8) & 0xFF])
+          load_bytes(BDA_EQUIPMENT_WORD_ADDR, [equipment_word & 0xFF, (equipment_word >> 8) & 0xFF])
           load_bytes(BDA_BASE_MEMORY_WORD_ADDR, [DOS_BASE_MEMORY_KIB & 0xFF, (DOS_BASE_MEMORY_KIB >> 8) & 0xFF])
-          load_bytes(BDA_HARD_DISK_COUNT_ADDR, [0x00])
+          load_bytes(BDA_HARD_DISK_COUNT_ADDR, [hdd_loaded? ? 0x01 : 0x00])
           load_bytes(
             DOS_DISKETTE_PARAM_VECTOR_ADDR,
             [
@@ -841,128 +901,103 @@ module RHDL
 
 
         def dos_bootstrap_bytes
-          return generic_dos_bootstrap_bytes if @dos_bootstrap_mode == :generic
-
-          [
-            0xFA,             # cli
-            0xFC,             # cld
-            0x9C,             # pushf
-            0x58,             # pop ax
-            0x80, 0xE4, 0xFE, # and ah, 0xfe ; clear TF
-            0x50,             # push ax
-            0x9D,             # popf
-            0x31, 0xC0,       # xor ax, ax
-            0x8E, 0xD8,       # mov ds, ax
-            0xBD, 0x00, 0x7C, # mov bp, 0x7c00
-            0xC7, 0x06, 0x40, 0x00, DOS_INT10_STUB_OFFSET & 0xFF, (DOS_INT10_STUB_OFFSET >> 8) & 0xFF, # mov word ptr [0x0040], int10 stub
-            0xC7, 0x06, 0x42, 0x00, DOS_INT10_STUB_SEGMENT & 0xFF, (DOS_INT10_STUB_SEGMENT >> 8) & 0xFF, # mov word ptr [0x0042], 0xf000
-            0xC7, 0x06, 0x58, 0x00, DOS_INT16_STUB_OFFSET & 0xFF, (DOS_INT16_STUB_OFFSET >> 8) & 0xFF, # mov word ptr [0x0058], int16 stub
-            0xC7, 0x06, 0x5A, 0x00, DOS_INT16_STUB_SEGMENT & 0xFF, (DOS_INT16_STUB_SEGMENT >> 8) & 0xFF, # mov word ptr [0x005a], 0xf000
-            0xC7, 0x06, 0x4C, 0x00, DOS_INT13_STUB_OFFSET & 0xFF, (DOS_INT13_STUB_OFFSET >> 8) & 0xFF, # mov word ptr [0x004c], int13 stub
-            0xC7, 0x06, 0x4E, 0x00, DOS_INT13_STUB_SEGMENT & 0xFF, (DOS_INT13_STUB_SEGMENT >> 8) & 0xFF, # mov word ptr [0x004e], 0xf000
-            0xC7, 0x06, 0x68, 0x00, DOS_INT1A_STUB_OFFSET & 0xFF, (DOS_INT1A_STUB_OFFSET >> 8) & 0xFF, # mov word ptr [0x0068], int1a stub
-            0xC7, 0x06, 0x6A, 0x00, DOS_INT1A_STUB_SEGMENT & 0xFF, (DOS_INT1A_STUB_SEGMENT >> 8) & 0xFF, # mov word ptr [0x006a], 0xf000
-            0xC7, 0x06, BDA_EBDA_SEGMENT_ADDR & 0xFF, (BDA_EBDA_SEGMENT_ADDR >> 8) & 0xFF,
-            DOS_EBDA_SEGMENT & 0xFF, (DOS_EBDA_SEGMENT >> 8) & 0xFF, # mov word ptr [0x040e], 0x9fc0
-            0xC7, 0x06, BDA_EQUIPMENT_WORD_ADDR & 0xFF, (BDA_EQUIPMENT_WORD_ADDR >> 8) & 0xFF,
-            DOS_EQUIPMENT_WORD & 0xFF, (DOS_EQUIPMENT_WORD >> 8) & 0xFF, # mov word ptr [0x0410], 0x000d
-            0xC7, 0x06, BDA_BASE_MEMORY_WORD_ADDR & 0xFF, (BDA_BASE_MEMORY_WORD_ADDR >> 8) & 0xFF,
-            DOS_BASE_MEMORY_KIB & 0xFF, (DOS_BASE_MEMORY_KIB >> 8) & 0xFF, # mov word ptr [0x0413], 0x027f
-            0xC6, 0x06, BDA_HARD_DISK_COUNT_ADDR & 0xFF, (BDA_HARD_DISK_COUNT_ADDR >> 8) & 0xFF, 0x00, # mov byte ptr [0x0475], 0x00
-            0xC7, 0x06, DOS_DISKETTE_PARAM_VECTOR_ADDR & 0xFF, (DOS_DISKETTE_PARAM_VECTOR_ADDR >> 8) & 0xFF,
-            DOS_DISKETTE_PARAM_TABLE_OFFSET & 0xFF, (DOS_DISKETTE_PARAM_TABLE_OFFSET >> 8) & 0xFF, # mov word ptr [0x0078], 0xefde
-            0xC7, 0x06, (DOS_DISKETTE_PARAM_VECTOR_ADDR + 2) & 0xFF, ((DOS_DISKETTE_PARAM_VECTOR_ADDR + 2) >> 8) & 0xFF,
-            POST_INIT_IVT_DEFAULT_SEGMENT & 0xFF, (POST_INIT_IVT_DEFAULT_SEGMENT >> 8) & 0xFF, # mov word ptr [0x007a], 0xf000
-            0xB2, 0x00,       # mov dl, 0x00
-            0xB8, 0xE0, 0x1F, # mov ax, 0x1fe0
-            0x8E, 0xC0,       # mov es, ax
-            0xEA, 0x5E, 0x7C, 0xE0, 0x1F # jmp 0x1fe0:0x7c5e
-          ]
+          generic_dos_bootstrap_bytes
         end
 
         def generic_dos_bootstrap_bytes
+          equipment_word = dos_equipment_word
           [
-            0xFA,             # cli
-            0xFC,             # cld
-            0x9C,             # pushf
-            0x58,             # pop ax
-            0x80, 0xE4, 0xFE, # and ah, 0xfe ; clear TF
-            0x50,             # push ax
-            0x9D,             # popf
-            0x31, 0xC0,       # xor ax, ax
-            0x8E, 0xD8,       # mov ds, ax
+            0xFA,                   # 1080: cli
+            0xFC,                   # 1081: cld
+            0x9C,                   # 1082: pushf
+            0x58,                   # 1083: pop ax
+            0x80, 0xE4, 0xFE,       # 1084: and ah, 0xfe ; clear TF
+            0x50,                   # 1087: push ax
+            0x9D,                   # 1088: popf
+            0x31, 0xC0,             # 1089: xor ax, ax
+            0x8E, 0xD8,             # 108B: mov ds, ax
+            0xEB, 0x01,             # 108D: jmp 1090
+            0x90,                   # 108F: nop
+
             0xC7, 0x06, 0x40, 0x00, DOS_INT10_STUB_OFFSET & 0xFF, (DOS_INT10_STUB_OFFSET >> 8) & 0xFF,
             0xC7, 0x06, 0x42, 0x00, DOS_INT10_STUB_SEGMENT & 0xFF, (DOS_INT10_STUB_SEGMENT >> 8) & 0xFF,
+            0xEB, 0x02, 0x90, 0x90, # 109C: jmp 10A0
+
             0xC7, 0x06, 0x4C, 0x00, DOS_INT13_STUB_OFFSET & 0xFF, (DOS_INT13_STUB_OFFSET >> 8) & 0xFF,
             0xC7, 0x06, 0x4E, 0x00, DOS_INT13_STUB_SEGMENT & 0xFF, (DOS_INT13_STUB_SEGMENT >> 8) & 0xFF,
+            0xEB, 0x02, 0x90, 0x90, # 10AC: jmp 10B0
+
             0xC7, 0x06, 0x58, 0x00, DOS_INT16_STUB_OFFSET & 0xFF, (DOS_INT16_STUB_OFFSET >> 8) & 0xFF,
             0xC7, 0x06, 0x5A, 0x00, DOS_INT16_STUB_SEGMENT & 0xFF, (DOS_INT16_STUB_SEGMENT >> 8) & 0xFF,
+            0xEB, 0x02, 0x90, 0x90, # 10BC: jmp 10C0
+
             0xC7, 0x06, 0x68, 0x00, DOS_INT1A_STUB_OFFSET & 0xFF, (DOS_INT1A_STUB_OFFSET >> 8) & 0xFF,
             0xC7, 0x06, 0x6A, 0x00, DOS_INT1A_STUB_SEGMENT & 0xFF, (DOS_INT1A_STUB_SEGMENT >> 8) & 0xFF,
+            0xEB, 0x02, 0x90, 0x90, # 10CC: jmp 10D0
+
             0xC7, 0x06, BDA_EBDA_SEGMENT_ADDR & 0xFF, (BDA_EBDA_SEGMENT_ADDR >> 8) & 0xFF,
             DOS_EBDA_SEGMENT & 0xFF, (DOS_EBDA_SEGMENT >> 8) & 0xFF,
             0xC7, 0x06, BDA_EQUIPMENT_WORD_ADDR & 0xFF, (BDA_EQUIPMENT_WORD_ADDR >> 8) & 0xFF,
-            DOS_EQUIPMENT_WORD & 0xFF, (DOS_EQUIPMENT_WORD >> 8) & 0xFF,
+            equipment_word & 0xFF, (equipment_word >> 8) & 0xFF,
+            0xEB, 0x02, 0x90, 0x90, # 10DC: jmp 10E0
+
             0xC7, 0x06, BDA_BASE_MEMORY_WORD_ADDR & 0xFF, (BDA_BASE_MEMORY_WORD_ADDR >> 8) & 0xFF,
             DOS_BASE_MEMORY_KIB & 0xFF, (DOS_BASE_MEMORY_KIB >> 8) & 0xFF,
-            0xC6, 0x06, BDA_HARD_DISK_COUNT_ADDR & 0xFF, (BDA_HARD_DISK_COUNT_ADDR >> 8) & 0xFF, 0x00,
+            0xC6, 0x06, BDA_HARD_DISK_COUNT_ADDR & 0xFF, (BDA_HARD_DISK_COUNT_ADDR >> 8) & 0xFF, hdd_loaded? ? 0x01 : 0x00,
+            0xEB, 0x03, 0x90, 0x90, 0x90, # 10EB: jmp 10F0
+
             0xC7, 0x06, DOS_DISKETTE_PARAM_VECTOR_ADDR & 0xFF, (DOS_DISKETTE_PARAM_VECTOR_ADDR >> 8) & 0xFF,
             DOS_DISKETTE_PARAM_TABLE_OFFSET & 0xFF, (DOS_DISKETTE_PARAM_TABLE_OFFSET >> 8) & 0xFF,
             0xC7, 0x06, (DOS_DISKETTE_PARAM_VECTOR_ADDR + 2) & 0xFF, ((DOS_DISKETTE_PARAM_VECTOR_ADDR + 2) >> 8) & 0xFF,
             POST_INIT_IVT_DEFAULT_SEGMENT & 0xFF, (POST_INIT_IVT_DEFAULT_SEGMENT >> 8) & 0xFF,
-            0x31, 0xC0,       # xor ax, ax
-            0x8E, 0xC0,       # mov es, ax
-            0x8E, 0xD0,       # mov ss, ax
-            0xBC, 0x00, 0x7C, # mov sp, 0x7c00
-            0xB2, 0x00,       # mov dl, 0x00
-            0xEA, 0x00, 0x7C, 0x00, 0x00 # jmp 0x0000:0x7c00
+            0xEB, 0x02, 0x90, 0x90, # 10FC: jmp 1100
+
+            0x31, 0xC0,             # 1100: xor ax, ax
+            0x8E, 0xC0,             # 1102: mov es, ax
+            0x8E, 0xD0,             # 1104: mov ss, ax
+            0xBC, 0x00, 0x7C,       # 1106: mov sp, 0x7c00
+            0xB2, 0x00,             # 1109: mov dl, 0x00
+            0xEA, 0x00, 0x7C, 0x00, 0x00 # 110B: jmp 0x0000:0x7c00
           ]
         end
 
         def dos_int13_bootstrap_bytes
-          [
-            0x80, 0xFC, 0x08,       # cmp ah, 0x08
-            0x75, 0x1B,             # jne generic
+          geometry = @active_floppy_geometry || geometry_from_size(@floppy_image&.bytesize.to_i)
+          drive_type = geometry.fetch(:drive_type).to_i & 0xFF
+          max_cylinder = [geometry.fetch(:cylinders).to_i - 1, 0].max
+          sectors_per_track = geometry.fetch(:sectors_per_track).to_i & 0x3F
+          result_cx = ((max_cylinder & 0x00FF) << 8) | (((max_cylinder >> 2) & 0x00C0) | sectors_per_track)
+          result_dx = (((geometry.fetch(:heads).to_i - 1) & 0xFF) << 8) | mounted_floppy_drive_count_for_stub
+
+          generic_body = [
             0x55,                   # push bp
             0x89, 0xE5,             # mov bp, sp
-            0x8B, 0x46, 0x06,       # mov ax, [bp+6] ; interrupt flags
-            0x24, 0xFE,             # and al, 0xfe
-            0x80, 0xE4, 0xFA,       # and ah, 0xfa ; clear TF/DF
-            0x89, 0x46, 0x06,       # mov [bp+6], ax
-            0x31, 0xC0,             # xor ax, ax
-            0xBB, 0x00, 0x04,       # mov bx, 0x0400
-            0xB9, 0x12, 0x4F,       # mov cx, 0x4f12
-            0xBA, 0x02, 0x01,       # mov dx, 0x0102
-            0x5D,                   # pop bp
-            0xCF,                   # iret
-            0x55,                   # push bp
-            0x89, 0xE5,             # mov bp, sp
+            0x50,                   # push ax
             0x53,                   # push bx
             0x51,                   # push cx
             0x52,                   # push dx
             0x06,                   # push es
+            0x8B, 0x46, 0xFE,       # mov ax, [bp-2]
             0xBA, 0xD0, 0x0E,       # mov dx, 0x0ed0
             0xEF,                   # out dx, ax
-            0x93,                   # xchg ax, bx
+            0x8B, 0x46, 0xFC,       # mov ax, [bp-4]
             0xBA, 0xD2, 0x0E,       # mov dx, 0x0ed2
             0xEF,                   # out dx, ax
-            0x93,                   # xchg ax, bx
-            0x91,                   # xchg ax, cx
+            0x8B, 0x46, 0xFA,       # mov ax, [bp-6]
             0xBA, 0xD4, 0x0E,       # mov dx, 0x0ed4
             0xEF,                   # out dx, ax
-            0x91,                   # xchg ax, cx
-            0x8C, 0xC0,             # mov ax, es
-            0xBA, 0xD8, 0x0E,       # mov dx, 0x0ed8
-            0xEF,                   # out dx, ax
-            0x8B, 0x46, 0xFA,       # mov ax, [bp-6] ; original DX
+            0x8B, 0x46, 0xF8,       # mov ax, [bp-8]
             0xBA, 0xD6, 0x0E,       # mov dx, 0x0ed6
+            0xEF,                   # out dx, ax
+            0x8B, 0x46, 0xF6,       # mov ax, [bp-10]
+            0xBA, 0xD8, 0x0E,       # mov dx, 0x0ed8
             0xEF,                   # out dx, ax
             0xBA, 0xDA, 0x0E,       # mov dx, 0x0eda
             0x30, 0xC0,             # xor al, al
             0xEE,                   # out dx, al
             0xBA, 0xDC, 0x0E,       # mov dx, 0x0edc
             0xED,                   # in ax, dx
-            0x93,                   # xchg ax, bx ; save result ax in BX
+            0x89, 0x46, 0xFE,       # mov [bp-2], ax ; result_ax only
             0xBA, 0x16, 0x0F,       # mov dx, 0x0f16
             0xEC,                   # in al, dx
             0x24, 0x01,             # and al, 0x01
@@ -972,14 +1007,38 @@ module RHDL
             0x80, 0xE4, 0xFA,       # and ah, 0xfa ; clear TF/DF
             0x08, 0xC8,             # or al, cl
             0x89, 0x46, 0x06,       # mov [bp+6], ax
-            0x93,                   # xchg ax, bx ; restore result ax
             0x07,                   # pop es
             0x5A,                   # pop dx
             0x59,                   # pop cx
             0x5B,                   # pop bx
+            0x58,                   # pop ax
             0x5D,                   # pop bp
             0xCF                    # iret
           ]
+
+          ah08_body = [
+            0x55,                   # push bp
+            0x89, 0xE5,             # mov bp, sp
+            0x8B, 0x46, 0x06,       # mov ax, [bp+6]
+            0x24, 0xFE,             # and al, 0xfe
+            0x80, 0xE4, 0xFA,       # and ah, 0xfa ; clear TF/DF
+            0x89, 0x46, 0x06,       # mov [bp+6], ax
+            0xBB, drive_type, 0x00, # mov bx, drive_type
+            0xB9, result_cx & 0xFF, (result_cx >> 8) & 0xFF, # mov cx, geometry
+            0xBA, result_dx & 0xFF, (result_dx >> 8) & 0xFF, # mov dx, max_head/drive_count
+            0xBF, DOS_DISKETTE_PARAM_TABLE_OFFSET & 0xFF, (DOS_DISKETTE_PARAM_TABLE_OFFSET >> 8) & 0xFF, # mov di, diskette params
+            0xB8, DOS_INT13_STUB_SEGMENT & 0xFF, (DOS_INT13_STUB_SEGMENT >> 8) & 0xFF, # mov ax, 0xf000
+            0x8E, 0xC0,             # mov es, ax
+            0x5D,                   # pop bp
+            0xCF                    # iret
+          ]
+
+          [0x80, 0xFC, 0x08, 0x75, ah08_body.length, *ah08_body, *generic_body]
+        end
+
+        def mounted_floppy_drive_count_for_stub
+          count = @floppy_slots.count { |_slot, metadata| metadata && !metadata.fetch(:bytes, '').empty? }
+          count.positive? ? count : 1
         end
 
         def dos_int10_bootstrap_bytes
@@ -1075,6 +1134,38 @@ module RHDL
             0x83, 0xC4, 0x06,
             0x5D,
             0xCF
+          ]
+        end
+
+        def dos_int11_bootstrap_bytes
+          equipment_word = dos_equipment_word
+          [
+            0xB8, equipment_word & 0xFF, (equipment_word >> 8) & 0xFF, # mov ax, equipment_word
+            0xCF                                                        # iret
+          ]
+        end
+
+        def dos_int12_bootstrap_bytes
+          [
+            0xB8, DOS_BASE_MEMORY_KIB & 0xFF, (DOS_BASE_MEMORY_KIB >> 8) & 0xFF, # mov ax, 639
+            0xF8,                                                                   # clc
+            0xCF                                                                    # iret
+          ]
+        end
+
+        def dos_int15_bootstrap_bytes
+          [
+            0x80, 0xFC, 0x88,       # cmp ah, 0x88 (get extended memory)
+            0x75, 0x04,             # jne other
+            0x31, 0xC0,             # xor ax, ax (0 KB extended)
+            0xF8,                   # clc
+            0xCF,                   # iret
+            0x80, 0xFC, 0xC0,       # cmp ah, 0xC0 (get system config)
+            0x75, 0x02,             # jne unsupported
+            0xF9,                   # stc (not supported)
+            0xCF,                   # iret
+            0xF9,                   # stc (unsupported function)
+            0xCF                    # iret
           ]
         end
 
@@ -1177,6 +1268,12 @@ module RHDL
               starting_state: 0x07
             }
           end
+        end
+
+        def dos_equipment_word
+          floppy_count = [@floppy_slots.length, 1].max
+          drive_bits = ([[floppy_count, 1].max, 4].min - 1) << 6
+          (DOS_EQUIPMENT_WORD & ~0x00C0) | drive_bits
         end
 
         def write_interrupt_vector!(image, vector, segment, offset)

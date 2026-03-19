@@ -63,7 +63,7 @@ RSpec.describe RHDL::Examples::AO486::Import::CpuImporter do
   end
 
   it 'applies an opt-in patch series against the staged CPU source tree only' do
-    skip 'git not available' unless HdlToolchain.which('git')
+    skip 'patch not available' unless HdlToolchain.which('patch')
 
     Dir.mktmpdir('ao486_cpu_import_patch_root') do |root|
       rtl_root = File.join(root, 'rtl', 'ao486')
@@ -99,48 +99,7 @@ RSpec.describe RHDL::Examples::AO486::Import::CpuImporter do
       expect(File.read(source_path)).to eq("module ao486;\nendmodule\n")
       expect(File.read(prepared[:staged_system_path])).to include('patched_cpu')
       expect(prepared[:module_source_relpaths]).to include('ao486' => 'ao486/ao486.v')
-      expect(command_log.any? { |cmd| cmd.include?('git apply') }).to be(true)
-    end
-  end
-
-  it 'passes named patch profiles through the CPU importer staging path' do
-    skip 'git not available' unless HdlToolchain.which('git')
-
-    Dir.mktmpdir('ao486_cpu_patch_profile_root') do |root|
-      rtl_root = File.join(root, 'rtl', 'ao486')
-      FileUtils.mkdir_p(rtl_root)
-
-      source_path = File.join(rtl_root, 'ao486.v')
-      File.write(source_path, "module ao486;\nendmodule\n")
-
-      patches_root = File.join(root, 'patch_profiles')
-      runner_dir = File.join(patches_root, 'runner')
-      FileUtils.mkdir_p(runner_dir)
-      write_unified_patch(
-        File.join(runner_dir, '0001-ao486.patch'),
-        relpath: 'ao486/ao486.v',
-        removal: 'module ao486;',
-        addition: 'module ao486; wire runner_profile;'
-      )
-
-      workspace = File.join(root, 'workspace')
-      importer = described_class.new(
-        source_path: source_path,
-        output_dir: File.join(root, 'out'),
-        workspace_dir: workspace,
-        keep_workspace: true,
-        patch_profile: :runner
-      )
-      allow(importer).to receive(:ao486_patches_root).and_return(patches_root)
-
-      diagnostics = []
-      command_log = []
-      prepared_source = importer.send(:prepare_import_source_tree, workspace, diagnostics: diagnostics, command_log: command_log)
-      expect(prepared_source[:success]).to be(true), diagnostics.join("\n")
-
-      prepared = importer.send(:prepare_workspace, workspace, strategy: :stubbed)
-      expect(File.read(prepared[:staged_system_path])).to include('runner_profile')
-      expect(command_log.any? { |cmd| cmd.include?('0001-ao486.patch') }).to be(true)
+      expect(command_log.any? { |cmd| cmd.include?('patch --batch -p1 -i') }).to be(true)
     end
   end
 

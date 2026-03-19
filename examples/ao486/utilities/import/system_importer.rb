@@ -15,7 +15,8 @@ module RHDL
         # deterministic top-level import baseline.
         class SystemImporter
           DEFAULT_REFERENCE_ROOT = File.expand_path('../../reference', __dir__)
-          DEFAULT_PATCHES_ROOT = File.expand_path('../../patches', __dir__)
+          DEFAULT_COMMON_MEMORIES_ROOT = File.expand_path('../../../common/memories', __dir__)
+          DEFAULT_PATCHES_ROOT = File.expand_path('../../patches/active', __dir__)
           DEFAULT_SOURCE_PATH = File.join(DEFAULT_REFERENCE_ROOT, 'rtl', 'system.v')
           DEFAULT_TOP = 'system'
           DEFAULT_IMPORT_STRATEGY = :stubbed
@@ -202,11 +203,16 @@ module RHDL
             clean_output_dir! if clean_output
 
             emit_progress("raise CIRCT -> RHDL: #{output_dir}")
+            # Tree strategy imports full module trees whose behavior may not be
+            # fully recoverable.  Use non-strict mode for tree so that missing
+            # output assignments produce warnings with placeholders rather than
+            # hard errors.
+            effective_strict = strict && strategy_used != :tree
             raise_result = RHDL::Codegen.raise_circt(
               normalized_core_mlir,
               out_dir: output_dir,
               top: top,
-              strict: strict,
+              strict: effective_strict,
               format: false
             )
             format_result = if format_output
@@ -348,7 +354,7 @@ module RHDL
               candidate = if raw.start_with?('/')
                             raw
                           else
-                            File.expand_path(raw, workspace)
+                            File.expand_path(raw)
                           end
               next unless File.file?(candidate)
 
@@ -388,6 +394,7 @@ module RHDL
               tree_module_files = stage_tree_module_files(workspace, force_stub_modules: force_stub_modules)
               include_paths.concat(tree_module_files)
             end
+            include_paths.concat(stage_common_memory_files(workspace))
 
             include_paths.each do |path|
               merge_stub_ports!(stub_ports, extract_stub_ports(File.read(path)))
@@ -465,6 +472,7 @@ module RHDL
             dirs = [source_root]
             helper_root = helper_include_source_root(source_root)
             dirs << helper_root if Dir.exist?(helper_root)
+            dirs << common_memories_root if Dir.exist?(common_memories_root)
             dirs.map { |dir| File.expand_path(dir) }.uniq.select { |dir| Dir.exist?(dir) }.freeze
           end
 
@@ -474,6 +482,8 @@ module RHDL
             dirs << stage_root if Dir.exist?(stage_root)
             helper_root = helper_include_source_root(stage_root)
             dirs << helper_root if Dir.exist?(helper_root)
+            staged_common_root = staged_common_memories_root(workspace)
+            dirs << staged_common_root if Dir.exist?(staged_common_root)
             dirs.map { |dir| File.expand_path(dir) }.uniq.select { |dir| Dir.exist?(dir) }.freeze
           end
 
@@ -536,8 +546,23 @@ module RHDL
           def normalize_system_source!(path)
             lines = File.readlines(path)
 
+            added_timescale = false
             unless lines.any? { |line| line.match?(/^\s*`timescale\b/) }
               lines.unshift("`timescale 1ns/1ps\n")
+              added_timescale = true
+            end
+
+            # Strip inline initializers from block-scoped reg declarations inside
+            # always blocks.  Moore/circt-verilog does not support the
+            # `reg <name> = <value>;` shorthand inside procedural blocks.
+            # The reset logic in the enclosing always block already provides the
+            # correct initial value, so dropping `= <value>` is safe.
+            lines.map! do |line|
+              if line.match?(/^\t+reg\b/)
+                strip_reg_inline_initializers(line)
+              else
+                line
+              end
             end
 
             moved = []
@@ -550,7 +575,10 @@ module RHDL
               end
             end
 
-            return if moved.empty?
+            if moved.empty?
+              File.write(path, lines.join)
+              return
+            end
 
             insert_idx = remaining.index { |line| line.match?(/^\s*reg\s+sysctl_cs\s*;\s*$/) }
             insert_idx ||= remaining.index { |line| line.match?(/^\s*reg\b/) }
@@ -562,6 +590,17 @@ module RHDL
 
           def normalize_staged_source!(path)
             normalize_system_source!(path)
+          end
+
+          # Strip `= <value>` initializers from a tab-indented reg declaration
+          # line.  Handles single and multi-variable declarations such as:
+          #   reg in_reset = 1;          -> reg in_reset;
+          #   reg old_wr = 0, rd_req = 0; -> reg old_wr, rd_req;
+          #   reg [31:0] pixcnt = 32'd0, pix60; -> reg [31:0] pixcnt, pix60;
+          def strip_reg_inline_initializers(line)
+            return line unless line.include?('=')
+
+            line.gsub(/\s*=\s*[^,;]+/, '')
           end
 
           def extract_stub_ports(source)
@@ -781,6 +820,12 @@ module RHDL
               "`include \"#{File.join(autogen_root, Regexp.last_match(1))}\""
             end
 
+            # Strip inline initializers from block-scoped reg declarations
+            # (tab-indented, inside always blocks) that Moore does not support.
+            normalized.gsub!(/^(\t+reg\b.*)$/) do |line|
+              strip_reg_inline_initializers(line)
+            end
+
             return normalized if normalized.match?(/^\s*`timescale\b/m)
 
             "`timescale 1ns/1ps\n#{normalized}"
@@ -940,8 +985,8 @@ module RHDL
             patch_roots = resolved_patch_roots
             return { success: true, patch_files: [] } if patch_roots.empty?
 
-            unless tool_available?('git')
-              diagnostics << 'Required tool not found: git'
+            unless tool_available?('patch')
+              diagnostics << 'Required tool not found: patch'
               return { success: false, patch_files: [] }
             end
 
@@ -954,13 +999,13 @@ module RHDL
             patch_files.each do |patch_path|
               emit_progress("apply patch #{File.basename(patch_path)}")
 
-              check_cmd = ['git', 'apply', '--check', patch_path]
+              check_cmd = ['patch', '--dry-run', '--batch', '-p1', '-i', patch_path]
               check_result = run_command(check_cmd, chdir: staged_root)
               command_log << check_result[:command]
               append_diagnostics(diagnostics, check_result[:stderr], max_lines: 60)
               return { success: false, patch_files: patch_files } unless check_result[:success]
 
-              apply_cmd = ['git', 'apply', patch_path]
+              apply_cmd = ['patch', '--batch', '-p1', '-i', patch_path]
               apply_result = run_command(apply_cmd, chdir: staged_root)
               command_log << apply_result[:command]
               append_diagnostics(diagnostics, apply_result[:stderr], max_lines: 60)
@@ -1038,6 +1083,26 @@ module RHDL
             return root if File.file?(File.join(root, 'defines.v'))
 
             ao486_root
+          end
+
+          def common_memories_root
+            DEFAULT_COMMON_MEMORIES_ROOT
+          end
+
+          def staged_common_memories_root(workspace)
+            File.join(workspace, 'tree', 'common', 'memories')
+          end
+
+          def stage_common_memory_files(workspace)
+            return [] unless Dir.exist?(common_memories_root)
+
+            destination_root = staged_common_memories_root(workspace)
+            Dir.glob(File.join(common_memories_root, '*.v')).sort.map do |src|
+              dst = File.join(destination_root, File.basename(src))
+              FileUtils.mkdir_p(File.dirname(dst))
+              FileUtils.cp(src, dst)
+              dst
+            end
           end
 
           def underscore_module_name(name)

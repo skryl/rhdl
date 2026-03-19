@@ -4,113 +4,130 @@ require 'spec_helper'
 
 require_relative '../../../../examples/sparc64/utilities/runners/verilator_runner'
 
-RSpec.describe RHDL::Examples::SPARC64::VerilogRunner do
-  tagged_mailbox_addr =
-    RHDL::Examples::SPARC64::Integration::MAILBOX_STATUS |
-    (1 << RHDL::Examples::SPARC64::Integration::REQUESTER_TAG_SHIFT)
-
-  let(:adapter) do
+RSpec.describe RHDL::Examples::SPARC64::VerilatorRunner do
+  let(:mock_sim) do
     Class.new do
-      define_method(:initialize) do |tagged_addr|
-        @tagged_addr = tagged_addr
+      attr_reader :rom_loads, :memory_loads, :memory_writes
+
+      def initialize
         @memory = Hash.new(0)
-        @loaded = nil
+        @rom_loads = []
+        @memory_loads = []
+        @memory_writes = []
       end
 
-      attr_reader :loaded
-
-      def simulator_type
-        :hdl_verilator
-      end
-
-      def reset!
+      def runner_supported?
         true
       end
 
-      def run_cycles(n)
-        n
+      def runner_kind
+        :sparc64
       end
 
-      def load_images(boot_image:, program_image:)
-        @loaded = [boot_image, program_image]
+      def reset
+        true
       end
 
-      def read_memory(addr, length)
-        Array.new(length) { |index| @memory[addr + index] || 0 }
+      def close; end
+
+      def runner_run_cycles(n)
+        { cycles_run: n }
       end
 
-      def write_memory(addr, bytes)
-        Array(bytes).each_with_index { |byte, index| @memory[addr + index] = byte & 0xFF }
+      def runner_load_rom(data, offset)
+        bytes = data.is_a?(String) ? data.bytes : Array(data)
+        @rom_loads << [offset, bytes]
+        true
       end
 
-      def mailbox_status
-        0
+      def runner_load_memory(data, offset, _is_rom)
+        bytes = data.is_a?(String) ? data.bytes : Array(data)
+        bytes.each_with_index { |byte, index| @memory[offset + index] = byte & 0xFF }
+        @memory_loads << [offset, bytes]
+        true
       end
 
-      def mailbox_value
-        0
+      def runner_read_memory(offset, length, mapped:)
+        Array.new(length) { |index| @memory[offset + index] || 0 }
       end
 
-      def wishbone_trace
-        [
-          {
-            cycle: 7,
-            op: :write,
-            addr: @tagged_addr,
-            sel: 0x0F,
-            write_data: 0xA0,
-            read_data: nil
-          }
-        ]
+      def runner_write_memory(offset, data, mapped:)
+        bytes = data.is_a?(String) ? data.bytes : Array(data)
+        bytes.each_with_index { |byte, index| @memory[offset + index] = byte & 0xFF }
+        @memory_writes << [offset, bytes]
+        bytes.length
       end
 
-      def unmapped_accesses
+      def runner_sparc64_wishbone_trace
         []
       end
 
-      def debug_snapshot
-        { reset: { cycle_counter: 12 }, bridge: { state: 7 } }
+      def runner_sparc64_unmapped_accesses
+        []
       end
-    end.new(tagged_mailbox_addr)
+    end.new
   end
 
-  it 'delegates load and run methods to the adapter' do
-    runner = described_class.new(adapter: adapter)
+  def build_runner_with_mock_sim(sim)
+    runner = described_class.allocate
+    runner.instance_variable_set(:@source_bundle, nil)
+    runner.instance_variable_set(:@top_module, 's1_top')
+    runner.instance_variable_set(:@verilator_prefix, 'Vs1_top')
+    runner.instance_variable_set(:@clock_count, 0)
+    runner.instance_variable_set(:@sim, sim)
+    runner
+  end
+
+  it 'exposes the standard-ABI public metadata' do
+    runner = build_runner_with_mock_sim(mock_sim)
+
+    expect(runner.native?).to eq(true)
+    expect(runner.simulator_type).to eq(:hdl_verilator)
+    expect(runner.backend).to eq(:verilator)
+  end
+
+  it 'delegates run_cycles and load_images through the standard-ABI sim' do
+    runner = build_runner_with_mock_sim(mock_sim)
     runner.load_images(boot_image: [0xAA], program_image: [0xBB, 0xCC])
 
-    expect(adapter.loaded).to eq([[0xAA], [0xBB, 0xCC]])
-    expect(runner.run_cycles(12)).to eq(12)
-    expect(runner.clock_count).to eq(12)
-    expect(runner.simulator_type).to eq(:hdl_verilator)
-    expect(runner.backend).to eq(:verilator)
-    expect(runner.wishbone_trace).to eq(
-      [
-        RHDL::Examples::SPARC64::Integration::WishboneEvent.new(
-          cycle: 7,
-          op: :write,
-          addr: RHDL::Examples::SPARC64::Integration::MAILBOX_STATUS,
-          sel: 0x0F,
-          write_data: 0xA0,
-          read_data: nil
-        )
-      ]
+    expect(mock_sim.rom_loads).to eq([[RHDL::Examples::SPARC64::Integration::FLASH_BOOT_BASE, [0xAA]]])
+    expect(mock_sim.memory_loads).to include(
+      [0, [0xAA]],
+      [RHDL::Examples::SPARC64::Integration::BOOT_PROM_ALIAS_BASE, [0xAA]],
+      [RHDL::Examples::SPARC64::Integration::PROGRAM_BASE, [0xBB, 0xCC]]
     )
 
-    result = runner.run_until_complete(max_cycles: 12, batch_cycles: 6)
-    expect(result[:cycles]).to eq(12)
-    expect(result[:boot_handoff_seen]).to be(false)
-    expect(result[:secondary_core_parked]).to be(true)
-    expect(runner.debug_snapshot).to eq(reset: { cycle_counter: 12 }, bridge: { state: 7 })
+    result = runner.run_cycles(12)
+    expect(result).to be_a(Hash)
+    expect(result[:cycles_run]).to eq(12)
+    expect(runner.clock_count).to eq(12)
   end
 
-  it 'accepts an adapter factory without requiring the concrete default path' do
-    runner = described_class.new(adapter_factory: -> { adapter })
+  it 'can prepare RHDL-generated Verilog sources without compiling immediately' do
+    component_class = Class.new do
+      def self.verilog_module_name
+        's1_top'
+      end
 
-    expect(runner.simulator_type).to eq(:hdl_verilator)
-    expect(runner.backend).to eq(:verilator)
+      def self.to_verilog_hierarchy(top_name: nil)
+        "module #{top_name || 's1_top'};\nendmodule\n"
+      end
+    end
+
+    runner = described_class.new(
+      source_kind: :rhdl_verilog,
+      component_class: component_class,
+      compile_now: false
+    )
+    source_bundle = runner.instance_variable_get(:@source_bundle)
+
+    expect(runner.source_kind).to eq(:rhdl_verilog)
+    expect(source_bundle.top_module).to eq('s1_top')
+    expect(File).to exist(source_bundle.top_file)
+    expect(File.read(source_bundle.top_file)).to include('module s1_top;')
   end
 
-  it 'aliases VerilatorRunner to VerilogRunner' do
+  it 'exposes VerilatorRunner as the primary class' do
     expect(RHDL::Examples::SPARC64::VerilatorRunner).to eq(described_class)
   end
 end

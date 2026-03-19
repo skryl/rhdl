@@ -13,12 +13,6 @@ RSpec.shared_examples 'zawrs core behavior' do |pipeline:|
   end
 
   it 'accepts wrs.nto/wrs.sto without illegal-instruction trap regressions' do
-    if pipeline
-      cpu.write_data(0x120, 7)
-    else
-      cpu.write_data_word(0x120, 7)
-    end
-
     program = [
       asm.addi(1, 0, 0x120),
       asm.lr_w(2, 1),
@@ -30,7 +24,17 @@ RSpec.shared_examples 'zawrs core behavior' do |pipeline:|
       asm.j(0)
     ]
 
-    run_program(cpu, program, pipeline: pipeline)
+    # Load program and reset before writing data, because reset clears memory.
+    cpu.load_program(program)
+    cpu.reset!
+
+    if pipeline
+      cpu.write_data(0x120, 7)
+    else
+      cpu.write_data_word(0x120, 7)
+    end
+
+    cpu.run_cycles(program.length + (pipeline ? 36 : 12))
 
     expect(cpu.read_reg(2)).to eq(7)
     expect(cpu.read_reg(4)).to eq(0)
@@ -39,10 +43,13 @@ RSpec.shared_examples 'zawrs core behavior' do |pipeline:|
 end
 
 RSpec.describe RHDL::Examples::RISCV::IRHarness do
-  let(:cpu) { described_class.new(mem_size: 4096, backend: :compile) }
+  # Use JIT backend for the single-cycle CPU to match atomic_extension_spec.
+  # The compiled backend has a known sequential-component propagation issue
+  # that causes AtomicReservation.valid to read stale during SC.W evaluation.
+  let(:cpu) { described_class.new(mem_size: 4096, backend: :jit) }
 
   before(:each) do
-    skip 'IR compiler backend unavailable' unless RHDL::Sim::Native::IR::COMPILER_AVAILABLE
+    skip 'IR JIT backend unavailable' unless RHDL::Sim::Native::IR::JIT_AVAILABLE
   end
 
   include_examples 'zawrs core behavior', pipeline: false

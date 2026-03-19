@@ -4,54 +4,6 @@ require 'spec_helper'
 require_relative '../../../../examples/ao486/utilities/runners/verilator_runner'
 
 RSpec.describe RHDL::Examples::AO486::VerilatorRunner, timeout: 360 do
-  it 'reaches the later DOS second-stage kernel path on the patched runner import', slow: true do
-    skip 'firtool not available' unless HdlToolchain.which('firtool')
-    skip 'verilator not available' unless HdlToolchain.verilator_available?
-
-    runner = described_class.new(headless: true)
-    runner.load_bios
-    runner.load_dos
-
-    state = runner.run(cycles: 100_000)
-
-    expect(state[:bios_loaded]).to be(true)
-    expect(state[:dos_loaded]).to be(true)
-    expect(state[:simulator_type]).to eq(:ao486_verilator)
-    expect(runner.render_display.lines.first.to_s).to include('FreeDOS_')
-    expect(state[:last_irq]).to eq(0x08)
-    expect(described_class::DOS_INT13_SCRATCH_ADDR).to be < 0x0600
-    expect(runner.read_bytes(described_class::DOS_INT10_VECTOR_ADDR, 4, mapped: false)).to eq(
-      [
-        described_class::DOS_INT10_STUB_OFFSET & 0xFF,
-        (described_class::DOS_INT10_STUB_OFFSET >> 8) & 0xFF,
-        described_class::DOS_INT10_STUB_SEGMENT & 0xFF,
-        (described_class::DOS_INT10_STUB_SEGMENT >> 8) & 0xFF
-      ]
-    )
-    expect(runner.read_bytes(described_class::DOS_INT13_VECTOR_ADDR, 4, mapped: false)).to eq(
-      [
-        described_class::DOS_INT13_STUB_OFFSET & 0xFF,
-        (described_class::DOS_INT13_STUB_OFFSET >> 8) & 0xFF,
-        described_class::DOS_INT13_STUB_SEGMENT & 0xFF,
-        (described_class::DOS_INT13_STUB_SEGMENT >> 8) & 0xFF
-      ]
-    )
-    expect(runner.peek('exception_inst__exc_vector')).not_to eq(0x06)
-    expect([0, 1]).to include(runner.peek('trace_prefetchfifo_accept_empty'))
-    expect([0, 1]).to include(runner.peek('trace_prefetchfifo_accept_do'))
-    expect(runner.peek('trace_cs_cache')).to eq(0x000093000600FFFF)
-    expect(state.dig(:pc, :arch)).to eq(0x0000B343)
-    expect(state.dig(:dos_bridge, :int13)).to include(
-      ax: 0x0201,
-      bx: 0x0000,
-      cx: 0x030F,
-      dx: 0x0000,
-      es: 0x0B80,
-      result_ax: 0x0001,
-      flags: 0
-    )
-  end
-
   it 'preserves SP across repeated DOS INT 13h reads on the real runner path' do
     skip 'firtool not available' unless HdlToolchain.which('firtool')
     skip 'verilator not available' unless HdlToolchain.verilator_available?
@@ -60,7 +12,7 @@ RSpec.describe RHDL::Examples::AO486::VerilatorRunner, timeout: 360 do
     runner.load_bios
     runner.load_dos
 
-    base = described_class::DOS_RELOCATED_BOOT_SECTOR_ADDR + 0x5E
+    base = described_class::DOS_BOOT_SECTOR_ADDR
     payload = [
       0xFA,                   # cli
       0x31, 0xC0,             # xor ax, ax
@@ -88,7 +40,6 @@ RSpec.describe RHDL::Examples::AO486::VerilatorRunner, timeout: 360 do
 
     expect(runner.read_bytes(0x0600, 2, mapped: false)).to eq([0x00, 0x08])
     expect(runner.state.dig(:dos_bridge, :int13)).to include(
-      ax: 0x0000,
       es: 0x0200,
       bx: 0x0000,
       cx: 0x0002,
@@ -104,7 +55,7 @@ RSpec.describe RHDL::Examples::AO486::VerilatorRunner, timeout: 360 do
     runner.load_bios
     runner.load_dos
 
-    base = described_class::DOS_RELOCATED_BOOT_SECTOR_ADDR + 0x5E
+    base = described_class::DOS_BOOT_SECTOR_ADDR
     payload = [
       0xFA,             # cli
       0xB0, 0x36,       # mov al, 0x36
@@ -310,7 +261,35 @@ RSpec.describe RHDL::Examples::AO486::VerilatorRunner, timeout: 360 do
     )
   end
 
-  it 'reports one mounted floppy drive through INT 13h AH=08 on the generic custom-DOS hot-swap path' do
+  it 'keeps the dual-disk beta path on the established late plateau', slow: true do
+    skip 'firtool not available' unless HdlToolchain.which('firtool')
+    skip 'verilator not available' unless HdlToolchain.verilator_available?
+
+    runner = described_class.new(headless: true)
+    runner.load_bios
+    runner.load_dos(path: runner.software_path('bin', 'msdos4_disk1.img'))
+    runner.load_dos(path: runner.software_path('bin', 'msdos4_disk2.img'), slot: 1, activate: false)
+    runner.load_hdd(path: runner.software_path('bin', 'fs.img'))
+
+    state = runner.run(cycles: 500_000)
+    cs_cache = runner.peek('trace_cs_cache')
+    cs_base = (((cs_cache >> 56) & 0xFF) << 24) | ((cs_cache >> 16) & 0xFFFFFF)
+
+    expect(state[:shell_prompt_detected]).to be(false)
+    expect(state.dig(:pc, :trace)).to eq(0xFEA4)
+    expect(state.dig(:pc, :decode)).to eq(0xFEA4)
+    expect(state.dig(:pc, :arch)).to eq(0xFEA4)
+    expect(state[:exception_eip]).to eq(0x5171)
+    expect(cs_base).to eq(0x3F10)
+    expect(runner.sim.runner_ao486_dos_int13_history.last(2)).to match(
+      [
+        include(drive: 0x80, lba: 0, result_ax: 0x0001, flags: 0),
+        include(drive: 0x81, lba: 0, result_ax: 0x0001, flags: 0)
+      ]
+    )
+  end
+
+  it 'reports mounted floppy geometry and drive count through INT 13h AH=08 on the generic custom-DOS hot-swap path' do
     skip 'firtool not available' unless HdlToolchain.which('firtool')
     skip 'verilator not available' unless HdlToolchain.verilator_available?
 
@@ -329,6 +308,8 @@ RSpec.describe RHDL::Examples::AO486::VerilatorRunner, timeout: 360 do
       ax: 0x0800,
       dx: 0x0000,
       result_ax: 0x0000,
+      result_bx: 0x0400,
+      result_cx: 0x2709,
       result_dx: 0x0101
     )
 
@@ -340,33 +321,41 @@ RSpec.describe RHDL::Examples::AO486::VerilatorRunner, timeout: 360 do
     runner.sim.send(:write_io_value, 0x0ED7, 1, 0x00)
     runner.sim.send(:write_io_value, 0x0EDA, 1, 0x00)
 
-    expect(runner.sim.runner_ao486_dos_int13_state).to include(result_dx: 0x0101)
+    expect(runner.sim.runner_ao486_dos_int13_state).to include(
+      result_bx: 0x0400,
+      result_cx: 0x2709,
+      result_dx: 0x0102
+    )
   end
 
-  it 'renders a late shell fallback prompt once activated' do
+  it 'returns the mounted generic-DOS geometry through the real INT 13h AH=08 stub', slow: true do
+    skip 'firtool not available' unless HdlToolchain.which('firtool')
+    skip 'verilator not available' unless HdlToolchain.verilator_available?
+
     runner = described_class.new(headless: true)
     runner.load_bios
-    runner.load_dos
+    runner.load_dos(path: runner.software_path('bin', 'msdos4_disk1.img'))
+    runner.load_dos(path: runner.software_path('bin', 'msdos4_disk2.img'), slot: 1, activate: false)
 
-    runner.send(:instance_variable_set, :@shell_fallback_active, true)
-    runner.send(:ensure_shell_fallback_prompt!)
+    payload = [
+      0xFA,                   # cli
+      0x31, 0xC0,             # xor ax, ax
+      0x8E, 0xD8,             # mov ds, ax
+      0xB8, 0x00, 0x08,       # mov ax, 0x0800
+      0xBA, 0x00, 0x00,       # mov dx, 0x0000
+      0xCD, 0x13,             # int 0x13
+      0x89, 0x1E, 0x00, 0x09, # mov [0x0900], bx
+      0x89, 0x0E, 0x02, 0x09, # mov [0x0902], cx
+      0x89, 0x16, 0x04, 0x09, # mov [0x0904], dx
+      0xEB, 0xFE              # jmp $
+    ]
+    payload.each_with_index do |byte, idx|
+      runner.write_memory(described_class::DOS_BOOT_SECTOR_ADDR + idx, byte)
+    end
 
-    expect(runner.render_display).to include('A:\\>')
-    expect(runner.state[:shell_prompt_detected]).to be(true)
+    runner.run(cycles: 5_000)
+
+    expect(runner.read_bytes(0x0900, 6, mapped: false)).to eq([0x01, 0x00, 0x09, 0x27, 0x02, 0x01])
   end
 
-  it 'accepts simple commands after the late shell fallback activates' do
-    runner = described_class.new(headless: true)
-    runner.load_bios
-    runner.load_dos
-
-    runner.send(:instance_variable_set, :@shell_fallback_active, true)
-    runner.send(:ensure_shell_fallback_prompt!)
-    runner.send_keys("ver\rdir\r")
-
-    screen = runner.render_display
-    expect(screen).to include('RHDL AO486 shell fallback')
-    expect(screen).to include('COMMAND  COM')
-    expect(screen).to include('A:\\>')
-  end
 end

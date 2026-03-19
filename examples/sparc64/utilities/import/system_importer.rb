@@ -1214,24 +1214,28 @@ module RHDL
             top.to_s == 's1_top'
           end
 
-          def normalized_core_mlir_script
-            @normalized_core_mlir_script ||= <<~RUBY
-              require 'rhdl/codegen'
-              require_relative #{File.expand_path('../integration/import_loader', __dir__).inspect}
+	          def normalized_core_mlir_script
+	            @normalized_core_mlir_script ||= <<~RUBY
+	              require 'rhdl/codegen'
+	              require_relative #{File.expand_path('../integration/import_loader', __dir__).inspect}
 
-              import_dir = File.expand_path(ARGV.fetch(0))
-              top_constant = ARGV.fetch(1)
-              top_name = ARGV.fetch(2)
-              out_path = File.expand_path(ARGV.fetch(3))
+	              import_dir = File.expand_path(ARGV.fetch(0))
+	              top_constant = ARGV.fetch(1)
+	              top_name = ARGV.fetch(2)
+	              out_path = File.expand_path(ARGV.fetch(3))
+	              core_mlir_path = File.join(import_dir, '.mixed_import', "\#{top_name}.core.mlir")
+	              core_mlir_path = nil unless File.file?(core_mlir_path)
 
-              component = RHDL::Examples::SPARC64::Integration::ImportLoader.load_component_class(
-                top: top_constant,
-                import_dir: import_dir
-              )
-              modules = component.to_flat_circt_nodes(top_name: top_name)
-              File.write(out_path, RHDL::Codegen::CIRCT::MLIR.generate(modules))
-            RUBY
-          end
+	              component = RHDL::Examples::SPARC64::Integration::ImportLoader.load_component_class(
+	                top: top_constant,
+	                import_dir: import_dir
+	              )
+	              File.write(
+	                out_path,
+	                component.to_mlir_hierarchy(top_name: top_name, core_mlir_path: core_mlir_path)
+	              )
+	            RUBY
+	          end
 
           def top_constant_name_for_loader
             top.split('_').map { |segment| segment.empty? ? segment : "#{segment[0].upcase}#{segment[1..]}" }.join

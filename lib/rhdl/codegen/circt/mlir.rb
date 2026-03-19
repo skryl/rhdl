@@ -140,7 +140,14 @@ module RHDL
 
               clock_name = process.clock ? process.clock.to_s : 'clk'
               clock_value = resolve_clock(clock_name)
-              emit_seq_statements(process.statements, clock_value, shared_reg_tokens: shared_reg_tokens)
+              emit_seq_statements(
+                process.statements, clock_value,
+                shared_reg_tokens: shared_reg_tokens,
+                reset: process.reset,
+                reset_active_low: process.reset_active_low,
+                reset_values: process.reset_values,
+                clock_name: clock_name
+              )
             end
           end
 
@@ -383,7 +390,9 @@ module RHDL
             token
           end
 
-          def emit_seq_statements(statements, clock_value, shared_reg_tokens: nil)
+          def emit_seq_statements(statements, clock_value, shared_reg_tokens: nil,
+                                   reset: nil, reset_active_low: false, reset_values: {},
+                                   clock_name: nil)
             seq_state = {}
             target_order = []
             lower_seq_statements(
@@ -402,6 +411,13 @@ module RHDL
               @values[target.to_s] = reg_tokens[target]
             end
 
+            # Resolve async reset signal once if present.
+            reset_signal = reset ? resolve_signal(reset.to_s, 1) : nil
+            if reset_signal && reset_active_low
+              true_const = emit_const(1, 1)
+              reset_signal = emit_comb('xor', reset_signal, true_const, 1)
+            end
+
             target_order.each do |target|
               next unless seq_state.key?(target)
               expr = seq_state[target]
@@ -410,9 +426,94 @@ module RHDL
               input_raw_width = expr.respond_to?(:width) ? expr.width : find_value_width(input_raw)
               input_value = resize_value(input_raw, input_raw_width, width)
               reg = reg_tokens[target] || fresh(width)
-              @lines << "  #{reg} = seq.compreg #{input_value}, #{clock_value} : #{iwidth(width)}"
+
+              if reset_signal && reset_values&.key?(target)
+                reset_val = reset_values[target].to_i
+                reset_const = emit_const(reset_val, width)
+                @lines << "  #{reg} = seq.firreg #{input_value} clock #{clock_value} reset async #{reset_signal}, #{reset_const} : #{iwidth(width)}"
+              else
+                # Use seq.firreg (not seq.compreg) to preserve register semantics.
+                # seq.compreg with clock-as-data mux patterns gets aggressively
+                # constant-folded by arcilator, breaking async reset behavior.
+                @lines << "  #{reg} = seq.firreg #{input_value} clock #{clock_value} : #{iwidth(width)}"
+              end
               @values[target.to_s] = reg
             end
+          end
+
+          # Detect and unwrap the clock-gated compreg pattern produced by
+          # circt-verilog when lowering `always @(posedge clk or negedge rst)`:
+          #
+          #   Mux(cond=Mux(CLK, enable, 0), when_true=WRITE_VAL, when_false=SELF)
+          #
+          # The enable contains the correct FSM values (including non-zero assignments
+          # like cpx_ready<=1 in WAKEUP state). The outer mux incorrectly uses a
+          # constant as WRITE_VAL instead of the FSM-computed value.
+          #
+          # Returns the unwrapped inner expression (the enable branch which contains
+          # the correct FSM logic), or nil if the pattern doesn't match.
+          # Detect and unwrap the clock-gated async reset pattern:
+          #   Mux(cond=Mux(CLK, Mux(!RST, 1, FSM_enable), 0), 0, SELF)
+          #
+          # Returns a hash with :data_expr (FSM value), :reset_signal, :reset_value
+          # for emission as seq.firreg with async reset, or nil if no match.
+          def unwrap_clock_gated_compreg(expr, reg_name, clock_name)
+            return nil unless expr.is_a?(IR::Mux)
+
+            # Outer: Mux(clock_gate, write_val, self)
+            return nil unless expr.when_false.is_a?(IR::Signal) &&
+                              expr.when_false.name.to_s == reg_name.to_s
+
+            # Clock gate: Mux(CLK, enable_with_reset, 0)
+            cond = expr.condition
+            return nil unless cond.is_a?(IR::Mux)
+            return nil unless cond.when_false.is_a?(IR::Literal) && cond.when_false.value.to_i == 0
+            return nil unless cond.condition.is_a?(IR::Signal) &&
+                              cond.condition.name.to_s == clock_name.to_s
+
+            enable_with_reset = cond.when_true
+
+            # Try to split enable_with_reset into: Mux(reset_cond, 1, FSM_value)
+            # Where reset_cond is typically (!rstn) or (rstn ^ 1)
+            reset_signal = nil
+            reset_active_high = false
+            fsm_value = enable_with_reset
+
+            if enable_with_reset.is_a?(IR::Mux) &&
+               enable_with_reset.when_true.is_a?(IR::Literal) &&
+               enable_with_reset.when_true.value.to_i == 1
+              # Mux(reset_cond, 1, FSM_cascade)
+              reset_cond = enable_with_reset.condition
+              if reset_cond.is_a?(IR::BinaryOp) && reset_cond.op == :^ &&
+                 reset_cond.right.is_a?(IR::Literal) && reset_cond.right.value.to_i == 1
+                # Condition is (rstn ^ 1) = !rstn → active-high reset
+                reset_signal = reset_cond.left
+                reset_active_high = true
+              elsif reset_cond.is_a?(IR::Signal)
+                reset_signal = reset_cond
+                reset_active_high = true
+              end
+              fsm_value = enable_with_reset.when_false if reset_signal
+            end
+
+            # The FSM value: when enable is active AND not reset, this is the
+            # value being written. The write_val from the broken outer mux is 0,
+            # but the FSM cascade in the enable contains the correct values.
+            # Build: Mux(fsm_enable, fsm_value_as_data, self)
+            # where fsm_value IS the enable (1 when the state enables writing).
+            data_expr = IR::Mux.new(
+              condition: fsm_value,
+              when_true: fsm_value,
+              when_false: expr.when_false,
+              width: expr.width
+            )
+
+            {
+              data_expr: data_expr,
+              reset_signal: reset_signal,
+              reset_active_high: reset_active_high,
+              reset_value: 0  # async reset always clears to 0 in this pattern
+            }
           end
 
           def lower_seq_statements(statements, seq_state:, target_order:)

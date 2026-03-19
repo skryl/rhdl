@@ -32,15 +32,17 @@ module RHDL
             keyword_init: true
           )
 
-          attr_reader :cache_root, :reference_root, :top, :top_file, :fast_boot
+          attr_reader :cache_root, :reference_root, :top, :top_file, :fast_boot, :force_stub_hierarchy_sources
 
           def initialize(cache_root: DEFAULT_CACHE_ROOT, reference_root: DEFAULT_REFERENCE_ROOT,
-                         top: DEFAULT_TOP, top_file: DEFAULT_TOP_FILE, fast_boot: true)
+                         top: DEFAULT_TOP, top_file: DEFAULT_TOP_FILE, fast_boot: true,
+                         force_stub_hierarchy_sources: false)
             @cache_root = File.expand_path(cache_root)
             @reference_root = File.expand_path(reference_root)
             @top = top.to_s
             @top_file = File.expand_path(top_file)
             @fast_boot = !!fast_boot
+            @force_stub_hierarchy_sources = !!force_stub_hierarchy_sources
           end
 
           def build
@@ -79,7 +81,7 @@ module RHDL
               clean_output: false,
               strict: false,
               patches_dir: patches_dir,
-              force_stub_hierarchy_sources: false,
+              force_stub_hierarchy_sources: force_stub_hierarchy_sources,
               emit_runtime_json: false,
               progress: ->(_message) {}
             )
@@ -108,6 +110,7 @@ module RHDL
                 top: top,
                 top_file: top_file,
                 fast_boot: fast_boot,
+                force_stub_hierarchy_sources: force_stub_hierarchy_sources,
                 patches_dir: patches_dir,
                 files: digested,
                 importer_sha: Digest::SHA256.file(File.expand_path('../import/system_importer.rb', __dir__)).hexdigest,

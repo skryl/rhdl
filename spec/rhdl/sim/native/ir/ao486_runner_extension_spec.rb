@@ -2013,7 +2013,7 @@ RSpec.describe 'IR compiler AO486 runner extension' do
     expect(sim.runner_read_memory(0x0B00, 16, mapped: false)).to eq(second_sector.first(16))
   end
 
-  it 'ignores CL high cylinder bits on floppy DOS bridge reads used by the FreeDOS loader trace' do
+  it 'ignores CL high cylinder bits on floppy DOS bridge reads used by the DOS loader trace' do
     sim = RHDL::Sim::Native::IR::Simulator.new(
       dos_int13_harness_json(ax: 0x0201, bx: 0x0000, cx: 0x1AC5, es: 0x0080, dx: 0x0100),
       backend: :compiler,

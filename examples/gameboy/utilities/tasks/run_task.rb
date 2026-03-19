@@ -167,6 +167,8 @@ module RHDL
           imported_source_mode = %i[verilog circt arcilator].include?(mode)
           use_staged_verilog = if use_rhdl_source
                                  false
+                               elsif use_normalized_verilog
+                                 false
                                elsif options[:use_staged_source] == true
                                  true
                                elsif imported_source_mode

@@ -215,7 +215,7 @@ RSpec.describe RHDL::Examples::GameBoy::CLI do
       end
       fake_importer_class.const_set(:RESULT_CLASS, result_class)
 
-      status = described_class.run(['import'], out: stdout, err: stderr, importer_class: fake_importer_class)
+      status = described_class.run(['import', '--out', '/tmp/gameboy_import'], out: stdout, err: stderr, importer_class: fake_importer_class)
 
       expect(status).to eq(1)
       expect(stderr.string).to include('missing ghdl')

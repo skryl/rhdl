@@ -4,6 +4,7 @@ require 'json'
 require 'fiddle'
 require 'fiddle/import'
 require 'rbconfig'
+require 'timeout'
 require_relative '../../../codegen/netlist/primitives'
 
 module RHDL
@@ -35,19 +36,30 @@ module RHDL
             [fallback_name, File.join(ext_dir, fallback_name)]
           end
 
-          def sim_backend_available?(lib_path)
+          def sim_backend_available?(lib_path, timeout: 5)
             return false unless lib_path && File.exist?(lib_path)
 
-            lib = Fiddle.dlopen(lib_path)
-            lib['sim_create']
-            lib['sim_destroy']
-            lib['sim_poke_bus']
-            lib['sim_peek_bus']
-            lib['sim_exec']
-            lib['sim_query']
-            lib['sim_blob']
-            true
-          rescue Fiddle::DLError
+            # Use a subprocess with timeout to avoid hanging if dlopen deadlocks
+            rd, wr = IO.pipe
+            pid = Process.spawn(
+              RbConfig.ruby, '-e',
+              "require 'fiddle'; lib = Fiddle.dlopen(#{lib_path.inspect}); " \
+              "%w[sim_create sim_destroy sim_poke_bus sim_peek_bus sim_exec sim_query sim_blob].each { |s| lib[s] }; " \
+              "print 'ok'",
+              out: wr, err: '/dev/null'
+            )
+            wr.close
+            result = nil
+            begin
+              Timeout.timeout(timeout) { result = rd.read }
+            rescue Timeout::Error
+              Process.kill('KILL', pid) rescue nil
+            ensure
+              rd.close
+              Process.wait(pid) rescue nil
+            end
+            result == 'ok'
+          rescue StandardError
             false
           end
         end

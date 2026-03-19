@@ -8,12 +8,15 @@ In Progress - 2026-03-09
 
 The SPARC64 import/unit suite is now broad enough to validate individual imported modules, but it does not yet prove that an imported SPARC64 system behaves correctly at runtime on real programs.
 
-The next gate is higher-level parity on the imported `s1_top` system:
+The next gate is higher-level parity on the imported `s1_top` system across five execution artifacts:
 
 1. staged Verilog executed with Verilator
-2. imported RHDL executed on the native IR compiler backend
+2. staged Verilog lowered through `circt-verilog` and executed with Arcilator
+3. imported RHDL executed on the native IR compiler backend
+4. imported RHDL re-emitted through `to_mlir` and executed with Arcilator
+5. imported RHDL re-emitted through `to_verilog` and executed with Verilator
 
-Unlike the AO486 fetch-only parity harness, this suite must run memory-resident SPARC64 programs through the backend memory ABI rather than a ROM-only stub. The current native runner ABI already supports this pattern for other systems, but `s1_top` does not yet have a SPARC64-specific native extension or runner stack.
+Unlike the AO486 fetch-only parity harness, this suite must run memory-resident SPARC64 programs through the backend memory ABI rather than a ROM-only stub. The current native runner ABI already supports this pattern for other systems, but `s1_top` parity now needs one shared runtime contract exercised through both original staged sources and RHDL re-exported sources.
 
 The integration suite should follow the repository's existing benchmark pattern and run three compact but non-trivial programs:
 
@@ -388,7 +391,7 @@ Each program must live in DRAM, execute through the real `s1_top` Wishbone maste
 2. Add SPARC64 `HeadlessRunner`, `IrRunner`, and `VerilatorRunner` support under `examples/sparc64/utilities/runners`.
 3. Add a real SPARC64 integration benchmark loader that builds separate flash boot and DRAM program images.
 4. Add a new integration suite under `spec/examples/sparc64/integration`.
-5. Compare staged Verilog and imported RHDL on exact acknowledged Wishbone transaction traces and final program outcomes.
+5. Compare all five SPARC64 execution artifacts on exact acknowledged Wishbone transaction traces and final program outcomes.
 6. Keep all development and verification sequential rather than parallel to avoid overwhelming the local machine.
 
 ## Non-Goals
@@ -417,22 +420,28 @@ Each program must live in DRAM, execute through the real `s1_top` Wishbone maste
 ## Runtime Contract
 
 1. Top under test is `s1_top`.
-2. IR backend for parity is compiler-only.
-3. Verilator backend uses the staged importer-emitted `s1_top` closure, not the raw reference tree directly.
-4. The runner memory model exposes:
+2. The native IR parity path is compiler-only.
+3. The complex-program parity matrix is:
+   - staged Verilog -> Verilator
+   - staged Verilog -> `circt-verilog` -> Arcilator
+   - imported RHDL -> native IR compiler
+   - imported RHDL -> `to_mlir` -> Arcilator
+   - imported RHDL -> `to_verilog` -> Verilator
+4. The staged Verilog paths use the importer-emitted staged `s1_top` closure, not the raw reference tree directly.
+5. The runner memory model exposes:
    - sparse byte-addressable DRAM
    - sparse read-only flash
    - exact byte-lane reads/writes using Wishbone `sel`
    - deterministic one-cycle registered ACK timing
    - unmapped-access detection as a hard failure
-5. Benchmarks use:
+6. Benchmarks use:
    - flash boot image at the reset-fetch region
    - DRAM benchmark image at a fixed program base
    - mailbox success/failure reporting in DRAM
-6. Core policy:
+7. Core policy:
    - park core 1
    - run the benchmark on core 0 only
-7. Standard mailbox ABI:
+8. Standard mailbox ABI:
    - `MAILBOX_STATUS = 0x0000_1000`
    - `MAILBOX_VALUE = 0x0000_1008`
    - success writes `1` to status
@@ -537,7 +546,7 @@ Each program must live in DRAM, execute through the real `s1_top` Wishbone maste
    - expected mailbox result
    - no unmapped accesses
    - minimum transaction count
-   - exact acknowledged Wishbone event equality between Verilator and compiler
+   - exact acknowledged Wishbone event equality across the five-artifact matrix
 
 #### Green
 
@@ -548,8 +557,8 @@ Each program must live in DRAM, execute through the real `s1_top` Wishbone maste
    - `sel`
    - `write_data`
    - `read_data`
-2. Run each benchmark on staged Verilog and imported RHDL with identical images and timeout/cycle budgets.
-3. Require exact ordered event-trace equality, including cycle numbers.
+2. Run each benchmark on all five execution artifacts with identical images and timeout/cycle budgets.
+3. Treat staged Verilog -> Verilator as the canonical baseline and require exact ordered event-trace equality, including cycle numbers, for the other four artifact paths.
 4. Require benchmark-specific mailbox values:
    - `prime_sieve => 0xA0`
    - `mandelbrot => 0xFFF0`
@@ -557,7 +566,7 @@ Each program must live in DRAM, execute through the real `s1_top` Wishbone maste
 
 #### Exit Criteria
 
-1. All three benchmarks pass exact Verilator-vs-compiler parity.
+1. All three benchmarks pass exact five-artifact parity.
 2. All three benchmarks pass mailbox correctness checks.
 3. No benchmark performs an unmapped access.
 
@@ -586,7 +595,7 @@ Each program must live in DRAM, execute through the real `s1_top` Wishbone maste
 3. The benchmark builder emits separate flash boot and DRAM program images.
 4. The new `spec/examples/sparc64/integration` suite runs `prime_sieve`, `mandelbrot`, and `game_of_life`.
 5. Each benchmark is DRAM-resident and completes through the mailbox ABI.
-6. Staged Verilog and imported RHDL match on exact acknowledged Wishbone transaction traces for all three programs.
+6. The five execution artifacts match on exact acknowledged Wishbone transaction traces for all three programs.
 7. Sequential SPARC64 regression gates are green.
 
 ## Risks And Mitigations
@@ -772,7 +781,7 @@ Each program must live in DRAM, execute through the real `s1_top` Wishbone maste
 - [ ] Phase 3 green: boot shim and minimal DRAM benchmark flow implemented
 - [ ] Phase 3 exit criteria validated
 - [x] Phase 4 red: benchmark parity/correctness specs added
-- [ ] Phase 4 green: `prime_sieve`, `mandelbrot`, and `game_of_life` parity is green
+- [ ] Phase 4 green: `prime_sieve`, `mandelbrot`, and `game_of_life` five-artifact parity is green
 - [ ] Phase 4 exit criteria validated
 - [ ] Phase 5 red: regression/task-level checks added
 - [ ] Phase 5 green: sequential SPARC64 regression closure complete

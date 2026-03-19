@@ -209,7 +209,7 @@ RSpec.describe RHDL::Examples::AO486::HeadlessRunner do
       }
     )
     runner.instance_variable_set(:@runner, backend)
-    allow(runner).to receive(:read_text_screen).and_return("FreeDOS_\n")
+    allow(runner).to receive(:read_text_screen).and_return("MSDOS_\n")
 
     progress = runner.progress_line
 
@@ -220,7 +220,7 @@ RSpec.describe RHDL::Examples::AO486::HeadlessRunner do
     expect(progress).to include('io=0x0EDA/1=0x00000100')
     expect(progress).to include('dos13=ax=0x0201 es:bx=0x01C0:0x0000 cx=0x000D dx=0x0100')
     expect(progress).to include('shell=0')
-    expect(progress).to include('line0="FreeDOS_"')
+    expect(progress).to include('line0="MSDOS_"')
   end
 
   it 'passes through backend cyc/s benchmark stats in headless state' do

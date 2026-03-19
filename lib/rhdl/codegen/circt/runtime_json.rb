@@ -50,9 +50,7 @@ module RHDL
                     end
 
           Array(modules).map do |mod|
-            assign_map = Array(mod.assigns).each_with_object({}) do |assign, mapping|
-              mapping[assign.target.to_s] ||= assign.expr
-            end
+            assign_map = build_assign_map(mod.assigns)
             inlineable_names = Array(mod.nets).map { |net| net.name.to_s }.to_set
             signal_widths = build_signal_width_map(mod)
             runtime_sensitive_names = runtime_sensitive_signal_names(
@@ -86,9 +84,7 @@ module RHDL
 
         def normalize_modules_for_runtime(modules)
           Array(modules).map do |mod|
-            assign_map = Array(mod.assigns).each_with_object({}) do |assign, mapping|
-              mapping[assign.target.to_s] ||= assign.expr
-            end
+            assign_map = build_assign_map(mod.assigns)
             inlineable_names = Array(mod.nets).map { |net| net.name.to_s }.to_set
             signal_widths = build_signal_width_map(mod)
             runtime_sensitive_names = runtime_sensitive_signal_names(
@@ -128,9 +124,7 @@ module RHDL
           inlineable_names ||= Array(mod.nets).map { |net| net.name.to_s }.to_set
           simplification_needed_cache = needs_cache || {}
           simplification_cache = simplify_cache || {}
-          assign_map ||= Array(mod.assigns).each_with_object({}) do |assign, mapping|
-            mapping[assign.target.to_s] ||= assign.expr
-          end
+          assign_map ||= build_assign_map(mod.assigns)
           signal_widths ||= build_signal_width_map(mod)
           runtime_sensitive_names ||= runtime_sensitive_signal_names(
             assign_map: assign_map,
@@ -1474,6 +1468,79 @@ module RHDL
           IR::Concat.new(parts: [literal_zero(zero_width), lower_part], width: width)
         end
 
+        # Build a mapping from signal name to its effective (chained) expression.
+        #
+        # When the behavior block contains multiple sequential assignments to the
+        # same wire, e.g.:
+        #
+        #   read_to_reg <= lit(0)
+        #   read_to_reg <= mux(is_ld_rr, lit(1), read_to_reg)
+        #   read_to_reg <= mux(is_ld_r_n, lit(1), read_to_reg)
+        #
+        # each subsequent assignment's self-reference (Signal pointing to the
+        # same target) denotes "the value produced by the previous assignment".
+        # This helper folds those chains so that the map entry for the target is
+        # a single composite expression that captures the full priority chain.
+        def build_assign_map(assigns)
+          Array(assigns).each_with_object({}) do |assign, mapping|
+            target = assign.target.to_s
+            prev_expr = mapping[target]
+            if prev_expr.nil?
+              mapping[target] = assign.expr
+            else
+              # Substitute self-references with the previous expression
+              mapping[target] = substitute_self_ref(assign.expr, target, prev_expr)
+            end
+          end
+        end
+
+        # Recursively replace Signal nodes whose name matches +target+ with
+        # +replacement+ inside +expr+.  Returns the original object when no
+        # substitution is needed (to keep object sharing / caching intact).
+        def substitute_self_ref(expr, target, replacement)
+          case expr
+          when IR::Signal
+            return replacement if expr.name.to_s == target
+            expr
+          when IR::Mux
+            c  = substitute_self_ref(expr.condition,  target, replacement)
+            wt = substitute_self_ref(expr.when_true,  target, replacement)
+            wf = substitute_self_ref(expr.when_false, target, replacement)
+            return expr if c.equal?(expr.condition) && wt.equal?(expr.when_true) && wf.equal?(expr.when_false)
+            IR::Mux.new(condition: c, when_true: wt, when_false: wf, width: expr.width.to_i)
+          when IR::BinaryOp
+            l = substitute_self_ref(expr.left,  target, replacement)
+            r = substitute_self_ref(expr.right, target, replacement)
+            return expr if l.equal?(expr.left) && r.equal?(expr.right)
+            IR::BinaryOp.new(op: expr.op, left: l, right: r, width: expr.width.to_i)
+          when IR::UnaryOp
+            o = substitute_self_ref(expr.operand, target, replacement)
+            return expr if o.equal?(expr.operand)
+            IR::UnaryOp.new(op: expr.op, operand: o, width: expr.width.to_i)
+          when IR::Slice
+            b = substitute_self_ref(expr.base, target, replacement)
+            return expr if b.equal?(expr.base)
+            IR::Slice.new(base: b, range: expr.range, width: expr.width.to_i)
+          when IR::Concat
+            parts = expr.parts.map { |p| substitute_self_ref(p, target, replacement) }
+            return expr if parts.each_with_index.all? { |p, i| p.equal?(expr.parts[i]) }
+            IR::Concat.new(parts: parts, width: expr.width.to_i)
+          when IR::Resize
+            inner = substitute_self_ref(expr.expr, target, replacement)
+            return expr if inner.equal?(expr.expr)
+            IR::Resize.new(expr: inner, width: expr.width.to_i)
+          when IR::Case
+            sel = substitute_self_ref(expr.selector, target, replacement)
+            cases = expr.cases.transform_values { |v| substitute_self_ref(v, target, replacement) }
+            dflt = expr.default ? substitute_self_ref(expr.default, target, replacement) : expr.default
+            return expr if sel.equal?(expr.selector) && dflt.equal?(expr.default) &&
+                           cases.each_with_index.all? { |(k, v), _| v.equal?(expr.cases[k]) }
+            IR::Case.new(selector: sel, cases: cases, default: dflt, width: expr.width.to_i)
+          else
+            expr
+          end
+        end
+
         def build_signal_width_map(mod)
           signal_widths = {}
           (Array(mod.ports) + Array(mod.nets) + Array(mod.regs)).each do |entry|
@@ -1700,9 +1767,7 @@ module RHDL
                            .to_set
           live_assign_targets = output_targets | runtime_non_assign_signal_refs(mod)
           processed_targets = Set.new
-          assign_map ||= Array(mod.assigns).each_with_object({}) do |assign, mapping|
-            mapping[assign.target.to_s] ||= assign.expr
-          end
+          assign_map ||= build_assign_map(mod.assigns)
           inlineable_names ||= Array(mod.nets).map { |net| net.name.to_s }.to_set
           signal_widths = build_signal_width_map(mod)
           if runtime_sensitive_names.nil?
@@ -2508,13 +2573,78 @@ module RHDL
         end
 
         def dedupe_assigns_by_target(assigns)
-          seen_targets = Set.new
-          Array(assigns).each_with_object([]) do |assign, deduped|
-            target = assign.target.to_s
-            next if seen_targets.include?(target)
+          # The behavior DSL produces ordered conditional chains such as:
+          #   read_to_acc <= 0                             (default)
+          #   read_to_acc <= mux(cond1, 1, read_to_acc)   (override)
+          #   read_to_acc <= mux(cond2, 1, read_to_acc)   (override)
+          #
+          # Each subsequent assignment references the signal itself in the
+          # else branch of the mux, creating a priority chain.  To emit a
+          # single deterministic assignment we inline the chain:
+          #
+          #   read_to_acc <= mux(cond2, 1, mux(cond1, 1, 0))
+          #
+          # We detect self-referential mux patterns and fold them into one
+          # expression per target.
 
-            seen_targets.add(target)
-            deduped << assign
+          grouped = Array(assigns).group_by { |a| a.target.to_s }
+          grouped.flat_map do |_target, group|
+            next group if group.length == 1
+
+            # Try to fold a self-referential mux chain.
+            # Each element after the first should be mux(cond, val, <self>).
+            first = group.first
+            merged_expr = first.expr
+
+            group[1..].each do |assign|
+              expr = assign.expr
+              if self_referential_mux?(expr, assign.target.to_s)
+                merged_expr = substitute_self_ref(expr, assign.target.to_s, merged_expr)
+              else
+                # Not a self-referential mux; cannot fold further.
+                # Emit what we have merged so far plus the rest as-is.
+                # This is a conservative fallback.
+                merged_expr = expr
+              end
+            end
+
+            [first.class.new(target: first.target, expr: merged_expr)]
+          end
+        end
+
+        # Check whether an expression is a mux whose false-branch is a
+        # direct self-reference to +target_name+.
+        def self_referential_mux?(expr, target_name)
+          return false unless expr.respond_to?(:kind) || expr.is_a?(RHDL::Codegen::CIRCT::IR::Mux)
+
+          if expr.is_a?(RHDL::Codegen::CIRCT::IR::Mux)
+            false_branch = expr.when_false
+            return signal_name_matches?(false_branch, target_name)
+          end
+
+          false
+        end
+
+        def signal_name_matches?(expr, target_name)
+          return false unless expr.is_a?(RHDL::Codegen::CIRCT::IR::Signal)
+
+          expr.name.to_s == target_name
+        end
+
+        # Replace the self-reference in a mux expression with +replacement+.
+        def substitute_self_ref(expr, target_name, replacement)
+          return expr unless expr.is_a?(RHDL::Codegen::CIRCT::IR::Mux)
+
+          false_branch = expr.when_false
+          if signal_name_matches?(false_branch, target_name)
+            RHDL::Codegen::CIRCT::IR::Mux.new(
+              condition: expr.condition,
+              when_true: expr.when_true,
+              when_false: replacement,
+              width: expr.width
+            )
+          else
+            expr
           end
         end
 

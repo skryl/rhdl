@@ -389,7 +389,7 @@ module RHDL
           File.write(File.join(BUILD_DIR, 'apple2_hw.mlir'), mlir)
         end
 
-        def compile_arcilator(mlir_file)
+        def compile_arcilator(mlir_file = File.join(BUILD_DIR, 'apple2_hw.mlir'))
           ll_file = File.join(BUILD_DIR, 'apple2_arc.ll')
           state_file = File.join(BUILD_DIR, 'apple2_state.json')
           obj_file = File.join(BUILD_DIR, 'apple2_arc.o')

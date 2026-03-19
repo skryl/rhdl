@@ -80,6 +80,15 @@ RSpec.describe RHDL::Examples::SPARC64::HeadlessRunner do
 
   let(:fake_verilog_runner_class) do
     Class.new(fake_runner_class) do
+      class << self
+        attr_reader :last_kwargs
+      end
+
+      def initialize(**kwargs)
+        self.class.instance_variable_set(:@last_kwargs, kwargs)
+        super()
+      end
+
       def simulator_type
         :hdl_verilator
       end
@@ -147,6 +156,17 @@ RSpec.describe RHDL::Examples::SPARC64::HeadlessRunner do
     expect(runner.backend).to eq(:verilator)
   end
 
+  it 'forwards RHDL Verilog source selection to the Verilator runner' do
+    described_class.new(
+      mode: :verilog,
+      verilator_runner_class: fake_verilog_runner_class,
+      builder: builder,
+      verilator_source: :rhdl_verilog
+    )
+
+    expect(fake_verilog_runner_class.last_kwargs).to include(fast_boot: true, source_kind: :rhdl_verilog)
+  end
+
   it 'creates an arcilator-backed runner when requested' do
     runner = described_class.new(
       mode: :arcilator,
@@ -168,6 +188,18 @@ RSpec.describe RHDL::Examples::SPARC64::HeadlessRunner do
     )
 
     expect(fake_arcilator_runner_class.last_kwargs).to include(fast_boot: true, jit: true)
+  end
+
+  it 'forwards staged-Verilog source selection to the Arcilator runner' do
+    described_class.new(
+      mode: :arcilator,
+      sim: :compile,
+      arcilator_runner_class: fake_arcilator_runner_class,
+      builder: builder,
+      arcilator_source: :staged_verilog
+    )
+
+    expect(fake_arcilator_runner_class.last_kwargs).to include(fast_boot: true, jit: false, source_kind: :staged_verilog)
   end
 
   it 'forwards fast_boot to the selected runner' do

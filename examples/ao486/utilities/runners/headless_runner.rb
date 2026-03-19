@@ -97,6 +97,21 @@ module RHDL
           software_path('bin', "dos_slot#{slot}.img")
         end
 
+        def dos_disk2_path
+          @runner.dos_disk2_path
+        end
+
+        def hdd_path
+          @runner.hdd_path
+        end
+
+        def load_hdd(path: nil)
+          kwargs = {}
+          kwargs[:path] = path unless path.nil?
+          @runner.load_hdd(**kwargs)
+          self
+        end
+
         def load_bios
           @runner.load_bios
         end
@@ -172,11 +187,15 @@ module RHDL
         end
 
         def read_text_screen
-          @display_adapter.render(
-            memory: @runner.memory,
-            cursor: :auto,
-            debug_lines: debug ? debug_lines_for_runner : []
-          )
+          if $stdout.tty?
+            bordered_text_frame
+          else
+            @display_adapter.render(
+              memory: @runner.memory,
+              cursor: :auto,
+              debug_lines: debug ? debug_lines_for_runner : []
+            )
+          end
         end
 
         def run(max_cycles: nil)
@@ -297,22 +316,34 @@ module RHDL
 
           trap('INT') { running = false }
           trap('TERM') { running = false }
+          trap('WINCH') { @resize_pending = true } if Signal.list.key?('WINCH')
 
+          @resize_pending = false
           stty_state = setup_terminal_input_mode
+          update_terminal_size
           print CLEAR_SCREEN if $stdout.tty?
           print HIDE_CURSOR if $stdout.tty?
 
           while running
+            if @resize_pending
+              @resize_pending = false
+              update_terminal_size
+              print CLEAR_SCREEN if $stdout.tty?
+            end
+
             handle_keyboard_input(running_flag: -> { running = false })
             @runner.run(cycles: cycles, speed: speed, headless: false)
             if $stdout.tty?
-              print MOVE_HOME
               print read_text_screen
+              $stdout.flush
             else
-              puts read_text_screen
+              puts @display_adapter.render(
+                memory: @runner.memory,
+                cursor: :auto,
+                debug_lines: debug ? debug_lines_for_runner : []
+              )
               break
             end
-            $stdout.flush
             sleep(FRAME_INTERVAL_SECONDS)
           end
 
@@ -323,6 +354,73 @@ module RHDL
             print SHOW_CURSOR
             print "\n"
           end
+        end
+
+        def update_terminal_size
+          @term_rows = DisplayAdapter::TEXT_ROWS + 8
+          @term_cols = DisplayAdapter::TEXT_COLUMNS + 2
+          if $stdout.respond_to?(:winsize) && $stdout.tty?
+            begin
+              rows, cols = $stdout.winsize
+              @term_rows = [rows, @term_rows].max
+              @term_cols = [cols, @term_cols].max
+            rescue Errno::ENOTTY
+              # Non-tty; keep defaults.
+            end
+          end
+
+          debug_extra = debug ? 5 : 0
+          display_height = DisplayAdapter::TEXT_ROWS + 2 + debug_extra
+          display_width = DisplayAdapter::TEXT_COLUMNS + 2
+          @pad_top = [(@term_rows - display_height) / 2, 0].max
+          @pad_left = [(@term_cols - display_width) / 2, 0].max
+        end
+
+        def bordered_text_frame
+          update_terminal_size unless @pad_top
+
+          output = String.new
+          screen_cols = DisplayAdapter::TEXT_COLUMNS
+          page = @display_adapter.send(:active_page, @runner.memory)
+          cursor = @display_adapter.cursor_from_bda(@runner.memory, page: page)
+
+          output << move_cursor(@pad_top + 1, @pad_left + 1)
+          output << '+' << ('-' * screen_cols) << '+'
+
+          DisplayAdapter::TEXT_ROWS.times do |row|
+            output << move_cursor(@pad_top + 2 + row, @pad_left + 1)
+            line = @display_adapter.send(:render_row, @runner.memory, row, page)
+            if cursor && cursor[:row] == row && cursor[:col].between?(0, screen_cols - 1)
+              line[cursor[:col]] = '_'
+            end
+            output << '|' << line << '|'
+          end
+
+          output << move_cursor(@pad_top + 2 + DisplayAdapter::TEXT_ROWS, @pad_left + 1)
+          output << '+' << ('-' * screen_cols) << '+'
+
+          if debug
+            output << render_bordered_debug_panel(screen_cols, @pad_top + 3 + DisplayAdapter::TEXT_ROWS, @pad_left + 1)
+          end
+          output
+        end
+
+        def render_bordered_debug_panel(width, row, col)
+          lines = debug_lines_for_runner.map { |line| line.ljust(width)[0, width] }
+          output = String.new
+          output << move_cursor(row, col)
+          output << '+' << ('-' * width) << '+'
+          lines.each_with_index do |line, idx|
+            output << move_cursor(row + idx + 1, col)
+            output << '|' << line << '|'
+          end
+          output << move_cursor(row + lines.length + 1, col)
+          output << '+' << ('-' * width) << '+'
+          output
+        end
+
+        def move_cursor(row, col)
+          "#{ESC}[#{row};#{col}H"
         end
 
         def build_runner
@@ -350,9 +448,10 @@ module RHDL
               format_cycle_limit(speed)
             ),
             format(
-              "BIOS:%-3s DOS:%-3s Floppy:%s Slot:%s KBuf:%s",
+              "BIOS:%-3s DOS:%-3s HDD:%-3s Floppy:%s Slot:%s KBuf:%s",
               format_bool(snapshot[:bios_loaded]),
               format_bool(snapshot[:dos_loaded]),
+              format_bool(snapshot[:hdd_loaded]),
               format_number(snapshot[:floppy_image_size]),
               snapshot[:active_floppy_slot].nil? ? '--' : snapshot[:active_floppy_slot].to_i.to_s,
               format_number(snapshot[:keyboard_buffer_size])

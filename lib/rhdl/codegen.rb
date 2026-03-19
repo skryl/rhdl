@@ -171,13 +171,15 @@ module RHDL
       end
 
       # Parse CIRCT MLIR into CIRCT node IR.
-      def import_circt_mlir(text, strict: false, top: nil, extern_modules: [], resolve_forward_refs: true)
+      def import_circt_mlir(text, strict: false, top: nil, extern_modules: [], resolve_forward_refs: true,
+                            llhd_only: false)
         CIRCT::Import.from_mlir(
           text,
           strict: strict,
           top: top,
           extern_modules: extern_modules,
-          resolve_forward_refs: resolve_forward_refs
+          resolve_forward_refs: resolve_forward_refs,
+          llhd_only: llhd_only
         )
       end
 

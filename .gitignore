@@ -24,6 +24,8 @@
 *.so
 *.bundle
 *.dylib
+.arcilator*
+.verilator*
 /examples/mos6502/utilities/isa_simulator_native/target/
 /examples/mos6502/utilities/isa_simulator_native/lib/
 

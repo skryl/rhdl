@@ -76,6 +76,7 @@ module RHDL
               tree_module_files = stage_tree_module_files(workspace, force_stub_modules: force_stub_modules)
               include_paths.concat(tree_module_files)
             end
+            include_paths.concat(stage_common_memory_files(workspace))
 
             include_paths.each do |path|
               merge_stub_ports!(stub_ports, extract_stub_ports(File.read(path)))

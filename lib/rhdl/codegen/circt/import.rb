@@ -75,7 +75,8 @@ module RHDL
           end
         end
 
-        def from_mlir(text, strict: false, top: nil, extern_modules: [], resolve_forward_refs: true)
+        def from_mlir(text, strict: false, top: nil, extern_modules: [], resolve_forward_refs: true,
+                      llhd_only: false)
           previous_array_elements_cache = Thread.current[:rhdl_circt_import_array_elements_cache]
           previous_literal_cache = Thread.current[:rhdl_circt_import_literal_cache]
           previous_signal_cache = Thread.current[:rhdl_circt_import_signal_cache]
@@ -86,6 +87,7 @@ module RHDL
           previous_expr_equivalent_cache = Thread.current[:rhdl_circt_import_expr_equivalent_cache]
           previous_llhd_block_state_tokens = Thread.current[:rhdl_circt_import_llhd_block_state_tokens]
           previous_forward_refs_seen = Thread.current[:rhdl_circt_import_forward_refs_seen]
+          previous_llhd_only = Thread.current[:rhdl_circt_import_llhd_only]
           Thread.current[:rhdl_circt_import_array_elements_cache] = {}
           Thread.current[:rhdl_circt_import_literal_cache] = {}
           Thread.current[:rhdl_circt_import_signal_cache] = {}
@@ -96,6 +98,7 @@ module RHDL
           Thread.current[:rhdl_circt_import_expr_equivalent_cache] = {}
           Thread.current[:rhdl_circt_import_llhd_block_state_tokens] = {}
           Thread.current[:rhdl_circt_import_forward_refs_seen] = false
+          Thread.current[:rhdl_circt_import_llhd_only] = !!llhd_only
 
           diagnostics = []
           modules = []
@@ -459,8 +462,10 @@ module RHDL
           )
 
           modules = normalize_instance_port_connections(modules)
-          modules = recover_memory_like_registers(modules)
-          modules = recover_packed_shadow_memory_aliases(modules)
+          unless llhd_only_import?
+            modules = recover_memory_like_registers(modules)
+            modules = recover_packed_shadow_memory_aliases(modules)
+          end
 
           ImportResult.new(
             modules: modules,
@@ -484,6 +489,7 @@ module RHDL
           Thread.current[:rhdl_circt_import_expr_equivalent_cache] = previous_expr_equivalent_cache
           Thread.current[:rhdl_circt_import_llhd_block_state_tokens] = previous_llhd_block_state_tokens
           Thread.current[:rhdl_circt_import_forward_refs_seen] = previous_forward_refs_seen
+          Thread.current[:rhdl_circt_import_llhd_only] = previous_llhd_only
         end
 
         def op_census(text)
@@ -570,6 +576,10 @@ module RHDL
           input_ports.each_with_object({}) do |port, map|
             map["%#{port.name}"] = import_signal(name: port.name.to_s, width: port.width.to_i)
           end
+        end
+
+        def llhd_only_import?
+          Thread.current[:rhdl_circt_import_llhd_only] == true
         end
 
         def strip_module_attributes(header)
@@ -826,14 +836,17 @@ module RHDL
             strict: strict
           )
           return false if seq_statements.empty?
-          seq_statements = simplify_seq_statements(seq_statements)
+          seq_statements = simplify_seq_statements(seq_statements) unless llhd_only_import?
 
-          reset_info = infer_llhd_process_reset(
-            wait_term: wait_term,
-            check_block: check_block,
-            value_map: value_map,
-            clock_name: clock_name
-          )
+          reset_info =
+            unless llhd_only_import?
+              infer_llhd_process_reset(
+                wait_term: wait_term,
+                check_block: check_block,
+                value_map: value_map,
+                clock_name: clock_name
+              )
+            end
 
           target_widths = {}
           collect_seq_targets(seq_statements).each do |target_name, expr|
@@ -975,14 +988,17 @@ module RHDL
               strict: strict
             )
             return false if seq_statements.empty?
-            seq_statements = simplify_seq_statements(seq_statements)
+            seq_statements = simplify_seq_statements(seq_statements) unless llhd_only_import?
 
-            reset_info = infer_llhd_process_reset(
-              wait_term: wait_term,
-              check_block: check_block,
-              value_map: value_map,
-              clock_name: clock_name
-            )
+            reset_info =
+              unless llhd_only_import?
+                infer_llhd_process_reset(
+                  wait_term: wait_term,
+                  check_block: check_block,
+                  value_map: value_map,
+                  clock_name: clock_name
+                )
+              end
 
             target_widths = {}
             collect_seq_targets(seq_statements).each do |target_name, expr|
@@ -1099,10 +1115,18 @@ module RHDL
           end
         end
 
+        LLHD_STOP_ENV_MAX_CALLS = 200
+
         def resolve_llhd_stop_env(blocks:, current_label:, stop_label:, stop_block:, value_map:, array_meta:,
-                                  array_element_refs:, diagnostics:, line_no:, strict:, stack:)
+                                  array_element_refs:, diagnostics:, line_no:, strict:, stack:,
+                                  call_counter: nil)
           block = blocks[current_label]
           return {} unless block
+
+          call_counter ||= [0]
+          call_counter[0] += 1
+          return {} if call_counter[0] > LLHD_STOP_ENV_MAX_CALLS
+
           state_key = llhd_block_state_key(current_label: current_label, block: block, value_map: value_map)
           return {} if stack.include?(state_key)
 
@@ -1146,7 +1170,8 @@ module RHDL
                 diagnostics: diagnostics,
                 line_no: line_no,
                 strict: strict,
-                stack: next_stack
+                stack: next_stack,
+                call_counter: call_counter
               )
             end
 
@@ -1162,7 +1187,8 @@ module RHDL
               diagnostics: diagnostics,
               line_no: line_no,
               strict: strict,
-              stack: next_stack
+              stack: next_stack,
+              call_counter: call_counter
             )
             false_env = resolve_llhd_branch_stop_env(
               blocks: blocks,
@@ -1176,7 +1202,8 @@ module RHDL
               diagnostics: diagnostics,
               line_no: line_no,
               strict: strict,
-              stack: next_stack
+              stack: next_stack,
+              call_counter: call_counter
             )
             return merge_expr_envs(cond_expr, true_env, false_env)
           end
@@ -1194,7 +1221,8 @@ module RHDL
               diagnostics: diagnostics,
               line_no: line_no,
               strict: strict,
-              stack: next_stack
+              stack: next_stack,
+              call_counter: call_counter
             )
           end
 
@@ -1202,7 +1230,8 @@ module RHDL
         end
 
         def resolve_llhd_branch_stop_env(blocks:, target_label:, branch_args:, stop_label:, stop_block:, local_map:,
-                                         array_meta:, array_element_refs:, diagnostics:, line_no:, strict:, stack:)
+                                         array_meta:, array_element_refs:, diagnostics:, line_no:, strict:, stack:,
+                                         call_counter: nil)
           if target_label == stop_label
             return stop_env_from_branch_args(
               value_map: local_map,
@@ -1227,7 +1256,8 @@ module RHDL
             diagnostics: diagnostics,
             line_no: line_no,
             strict: strict,
-            stack: stack
+            stack: stack,
+            call_counter: call_counter
           )
         end
 
@@ -2010,6 +2040,14 @@ module RHDL
         end
 
         def llhd_block_state_key(current_label:, block:, value_map:)
+          if llhd_only_import?
+            return [
+              current_label,
+              Array(block[:args]).map { |arg_spec| arg_spec[:name].to_s },
+              value_map.keys.map(&:to_s).sort
+            ]
+          end
+
           arg_names = Array(block[:args]).map { |arg_spec| arg_spec[:name] }
           external_names = llhd_block_external_state_tokens(block).reject { |token| arg_names.include?(token) }
           state_names = (arg_names + external_names).uniq
@@ -2382,6 +2420,35 @@ module RHDL
         end
 
         def build_llhd_drive_statements(parsed_drive:, value_map:, array_element_refs: {}, value_expr: nil, enable_expr: nil)
+          # When the drive target is an array element reference (from llhd.sig.array_get),
+          # rewrite the drive to target the parent array signal instead.
+          if (element_ref = array_element_refs[parsed_drive[:target_token]])
+            statements = []
+            update_array_from_element_drive!(
+              value_map: value_map,
+              target_ref: element_ref,
+              value_token: parsed_drive[:value_token],
+              statements: statements
+            )
+            condition = enable_expr
+            if condition.nil? && parsed_drive[:enable_token]
+              condition = lookup_value(value_map, parsed_drive[:enable_token], width: 1)
+            end
+            return statements if condition.nil?
+
+            condition = ensure_expr_with_width(condition, width: 1)
+            return [] if condition.is_a?(IR::Literal) && condition.value.to_i.zero?
+            return statements if condition.is_a?(IR::Literal) && condition.value.to_i != 0
+
+            return [
+              IR::If.new(
+                condition: condition,
+                then_statements: statements,
+                else_statements: []
+              )
+            ]
+          end
+
           target_expr = lookup_value(value_map, parsed_drive[:target_token], width: parsed_drive[:width])
           target_name = if target_expr.is_a?(IR::Signal)
                           target_expr.name.to_s
@@ -3641,7 +3708,11 @@ module RHDL
             values = split_top_level_csv(m[1])
             output_ports.each_with_index do |port, out_idx|
               next if values[out_idx].nil?
-              assigns << IR::Assign.new(target: port.name.to_s, expr: lookup_value(value_map, values[out_idx], width: port.width))
+              expr = lookup_value(value_map, values[out_idx], width: port.width)
+              # Skip self-referencing assigns (e.g. out <= Signal('out')) that arise
+              # from LLHD signal overlays where llhd.prb feeds directly into hw.output.
+              next if expr.is_a?(IR::Signal) && expr.name.to_s == port.name.to_s
+              assigns << IR::Assign.new(target: port.name.to_s, expr: expr)
             end
             return
           end
@@ -3872,7 +3943,11 @@ module RHDL
           output_ports.each_with_index do |port, out_idx|
             next if values[out_idx].nil?
 
-            assigns << IR::Assign.new(target: port.name.to_s, expr: lookup_value(value_map, values[out_idx], width: port.width))
+            expr = lookup_value(value_map, values[out_idx], width: port.width)
+            # Skip self-referencing assigns (e.g. out <= Signal('out')) that arise
+            # from LLHD signal overlays where llhd.prb feeds directly into hw.output.
+            next if expr.is_a?(IR::Signal) && expr.name.to_s == port.name.to_s
+            assigns << IR::Assign.new(target: port.name.to_s, expr: expr)
           end
           true
         end

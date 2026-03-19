@@ -6,12 +6,32 @@ require_relative '../../../../examples/sparc64/utilities/integration/programs'
 RSpec.describe 'SPARC64 staged-Verilog vs imported-RHDL runtime parity', slow: true do
   include Sparc64IntegrationSupport
 
-  def expect_runner_parity!(program_name:, runner_mode:, runner_sim: nil, compile_mode: :rustc)
+  PARITY_BASELINE_ARTIFACT = :staged_verilog_verilator
+  PARITY_CANDIDATE_ARTIFACTS = [
+    {
+      id: :staged_verilog_arcilator,
+      label: 'staged Verilog -> circt-verilog -> Arcilator'
+    },
+    {
+      id: :imported_ir_compiler,
+      label: 'imported IR -> IR compiler'
+    },
+    {
+      id: :rhdl_mlir_arcilator,
+      label: 'RHDL -> to_mlir -> Arcilator'
+    },
+    {
+      id: :rhdl_verilog_verilator,
+      label: 'RHDL -> to_verilog -> Verilator'
+    }
+  ].freeze
+
+  def expect_runner_parity!(program_name:, artifact:)
     program = RHDL::Examples::SPARC64::Integration::Programs.fetch(program_name)
-    candidate = build_headless_runner(mode: runner_mode, sim: runner_sim, compile_mode: compile_mode)
+    candidate = build_parity_runner(artifact: artifact)
     pending_unless_runner_contract!(candidate)
 
-    baseline = build_headless_runner(mode: :verilog)
+    baseline = build_parity_runner(artifact: PARITY_BASELINE_ARTIFACT)
     pending_unless_runner_contract!(baseline)
 
     candidate.load_benchmark(program_name)
@@ -36,36 +56,14 @@ RSpec.describe 'SPARC64 staged-Verilog vs imported-RHDL runtime parity', slow: t
   end
 
   RHDL::Examples::SPARC64::Integration::Programs.all.map(&:name).each do |program_name|
-    it "matches exact acknowledged Wishbone traces for #{program_name} on IR compile", timeout: 3600 do
-      pending_unless_runner_stack!
-      pending_unless_runtime_backends!
-      skip_unless_ir_compiler!
-      skip_unless_verilator!
-      skip_unless_program_toolchain!
+    PARITY_CANDIDATE_ARTIFACTS.each do |artifact|
+      it "matches exact acknowledged Wishbone traces for #{program_name} on #{artifact.fetch(:label)}", timeout: 3600 do
+        pending_unless_runner_stack!
+        pending_unless_runtime_backends!
+        skip_unless_program_toolchain!
 
-      expect_runner_parity!(program_name: program_name, runner_mode: :ir, runner_sim: :compile, compile_mode: :rustc)
-    end
-
-    it "matches exact acknowledged Wishbone traces for #{program_name} on ARC compile", timeout: 3600 do
-      pending_unless_runner_stack!
-      pending_unless_runtime_backends!
-      pending_unless_arcilator_backends!
-      skip_unless_verilator!
-      skip_unless_arcilator!
-      skip_unless_program_toolchain!
-
-      expect_runner_parity!(program_name: program_name, runner_mode: :arcilator, runner_sim: :compile)
-    end
-
-    it "matches exact acknowledged Wishbone traces for #{program_name} on ARC jit", timeout: 3600 do
-      pending_unless_runner_stack!
-      pending_unless_runtime_backends!
-      pending_unless_arcilator_backends!
-      skip_unless_verilator!
-      skip_unless_arcilator_jit!
-      skip_unless_program_toolchain!
-
-      expect_runner_parity!(program_name: program_name, runner_mode: :arcilator, runner_sim: :jit)
+        expect_runner_parity!(program_name: program_name, artifact: artifact.fetch(:id))
+      end
     end
   end
 end

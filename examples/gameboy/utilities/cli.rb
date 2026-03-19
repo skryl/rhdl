@@ -184,6 +184,7 @@ module RHDL
             headless: false
           }
           source_flag = nil
+          explicit_source_flag = false
 
           parser = OptionParser.new do |opts|
             opts.banner = "Usage: #{program_name} [options] [rom.gb]"
@@ -223,6 +224,7 @@ module RHDL
               options[:use_normalized_source] = false
               options[:use_rhdl_source] = false
               source_flag = :staged
+              explicit_source_flag = true
             end
 
             opts.on('--use-normalized-source', 'Force normalized imported Verilog for Verilator/Arcilator imported runs') do
@@ -234,6 +236,7 @@ module RHDL
               options[:use_normalized_source] = true
               options[:use_rhdl_source] = false
               source_flag = :normalized
+              explicit_source_flag = true
             end
 
             opts.on('--use-rhdl-source', 'Force RHDL top export for Verilator/Arcilator runs') do
@@ -245,6 +248,7 @@ module RHDL
               options[:use_normalized_source] = false
               options[:use_rhdl_source] = true
               source_flag = :rhdl
+              explicit_source_flag = true
             end
 
             opts.on('--color', 'Use color renderer (default)') do
@@ -299,6 +303,12 @@ module RHDL
 
           parser.parse!(args)
           return 0 if options[:help]
+
+          # When no explicit source flag was given, default imported-source modes
+          # (verilog, circt, arcilator) to staged source.
+          if !explicit_source_flag && %i[verilog circt arcilator].include?(options[:mode])
+            options[:use_staged_source] = true
+          end
 
           if options[:source_dir] && !Dir.exist?(options[:source_dir])
             err.puts "Error: Source directory not found: #{options[:source_dir]}"

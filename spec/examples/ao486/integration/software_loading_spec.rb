@@ -10,7 +10,7 @@ RSpec.describe 'AO486 software loading' do
   it 'resolves software helpers under examples/ao486/software' do
     expect(runner.software_root).to end_with('/examples/ao486/software')
     expect(runner.software_path('rom', 'boot0.rom')).to eq(runner.bios_paths.fetch(:boot0))
-    expect(runner.dos_path).to eq(runner.software_path('bin', 'fdboot.img'))
+    expect(runner.dos_path).to eq(runner.software_path('bin', 'msdos4_disk1.img'))
   end
 
   it 'loads the checked-in BIOS ROMs' do
@@ -25,8 +25,8 @@ RSpec.describe 'AO486 software loading' do
   it 'loads the checked-in DOS floppy image' do
     dos = runner.load_dos
 
-    expect(dos).to include(path: runner.dos_path, size: 1_474_560)
-    expect(dos.fetch(:bytes).bytesize).to eq(1_474_560)
+    expect(dos).to include(path: runner.dos_path, size: 368_640)
+    expect(dos.fetch(:bytes).bytesize).to eq(368_640)
     expect(runner.dos_loaded?).to be(true)
   end
 
@@ -79,11 +79,9 @@ RSpec.describe 'AO486 software loading' do
     expect(runner.memory[0x0492]).to eq(0x84)
   end
 
-  it 'builds the generic custom-DOS bootstrap with the same private DOS interrupt vectors' do
-    disk1_path = runner.software_path('bin', 'msdos4_disk1.img')
-
+  it 'builds the DOS bootstrap with the same private DOS interrupt vectors' do
     runner.load_bios
-    runner.load_dos(path: disk1_path, slot: 0)
+    runner.load_dos
 
     expect(runner.instance_variable_get(:@dos_bootstrap_mode)).to eq(:generic)
 
@@ -141,7 +139,7 @@ RSpec.describe 'AO486 software loading' do
   end
 
   it 'fails clearly when a DOS image path is missing' do
-    missing_path = File.join(Dir.tmpdir, "ao486-missing-#{$$}-fdboot.img")
+    missing_path = File.join(Dir.tmpdir, "ao486-missing-#{$$}-msdos4.img")
 
     expect {
       runner.load_dos(path: missing_path)

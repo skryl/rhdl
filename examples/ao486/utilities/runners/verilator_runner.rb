@@ -9,6 +9,7 @@ require 'rhdl/codegen/verilog/sim/verilog_simulator'
 require 'fiddle'
 
 require_relative 'ir_runner'
+require_relative '../import/cpu_importer'
 
 module RHDL
   module Examples
@@ -16,15 +17,6 @@ module RHDL
       class VerilatorRunner < IrRunner
         DEFAULT_MAX_CYCLES = IrRunner::PARITY_DEFAULT_MAX_CYCLES
         BUILD_ROOT = File.expand_path('../../.verilator_build', __dir__)
-        SHELL_FALLBACK_PROMPT = 'A:\\>'.freeze
-        SHELL_FALLBACK_MESSAGE = 'RHDL AO486 shell fallback'.freeze
-        SHELL_FALLBACK_DIR_LINES = [
-          ' Volume in drive A has no label',
-          ' Directory of A:\\',
-          'COMMAND  COM',
-          'FDCONFIG SYS'
-        ].freeze
-
         attr_reader :binary_path
 
         FetchWordEvent = Struct.new(:address, :word, keyword_init: true)
@@ -55,7 +47,7 @@ module RHDL
               output_dir: out_dir,
               workspace_dir: workspace_dir,
               keep_workspace: true,
-              patch_profile: :runner,
+              patches_dir: RHDL::Examples::AO486::Import::CpuImporter::DEFAULT_PATCHES_ROOT,
               strict: false
             ).run
             raise Array(import_result.diagnostics).join("\n") unless import_result.success?
@@ -270,7 +262,15 @@ module RHDL
                 else if (!std::strcmp(name, "pipeline_inst__execute_inst__exe_eip")) return root->ao486__DOT__pipeline_inst__DOT___execute_inst_exe_eip_final;
                 else if (!std::strcmp(name, "memory_inst__prefetch_inst__prefetch_address")) return root->ao486__DOT__memory_inst__DOT___prefetch_control_inst_icacheread_address;
                 else if (!std::strcmp(name, "memory_inst__prefetch_inst__prefetch_length")) return root->ao486__DOT__memory_inst__DOT___prefetch_inst_prefetch_length;
+                else if (!std::strcmp(name, "memory_inst__prefetch_inst__delivered_eip")) return root->ao486__DOT__memory_inst__DOT___prefetch_inst_delivered_eip;
                 else if (!std::strcmp(name, "memory_inst__prefetch_control_inst__prefetchfifo_used")) return root->ao486__DOT__memory_inst__DOT__prefetch_control_inst__DOT__prefetchfifo_used;
+                else if (!std::strcmp(name, "memory_inst__prefetch_control_inst__state")) return root->ao486__DOT__memory_inst__DOT__prefetch_control_inst__DOT__state;
+                else if (!std::strcmp(name, "memory_inst__avalon_mem_inst__state")) return root->ao486__DOT__memory_inst__DOT__avalon_mem_inst__DOT__state;
+                else if (!std::strcmp(name, "memory_inst__prefetch_control_inst__tlbcoderequest_do")) return root->ao486__DOT__memory_inst__DOT___prefetch_control_inst_tlbcoderequest_do;
+                else if (!std::strcmp(name, "memory_inst__prefetch_control_inst__icacheread_do")) return root->ao486__DOT__memory_inst__DOT___prefetch_control_inst_icacheread_do;
+                else if (!std::strcmp(name, "memory_inst__prefetch_control_inst__icacheread_address")) return root->ao486__DOT__memory_inst__DOT___prefetch_control_inst_icacheread_address;
+                else if (!std::strcmp(name, "memory_inst__prefetch_control_inst__icacheread_length")) return root->ao486__DOT__memory_inst__DOT___prefetch_control_inst_icacheread_length;
+                else if (!std::strcmp(name, "memory_inst__prefetch_fifo_inst__prefetchfifo_used")) return root->ao486__DOT__memory_inst__DOT___prefetch_fifo_inst_prefetchfifo_used;
                 else if (!std::strcmp(name, "memory_inst__memory_write_inst__write_do")) return root->ao486__DOT__memory_inst__DOT__memory_write_inst__DOT__write_do;
                 else if (!std::strcmp(name, "memory_inst__memory_write_inst__write_done")) return root->ao486__DOT__memory_inst__DOT__memory_write_inst__DOT__write_done;
                 else if (!std::strcmp(name, "memory_inst__memory_write_inst__write_length")) return root->ao486__DOT__memory_inst__DOT__memory_write_inst__DOT__write_length;
@@ -286,6 +286,15 @@ module RHDL
                 else if (!std::strcmp(name, "memory_inst__icache_inst__prefetched_length")) return root->ao486__DOT__memory_inst__DOT___icache_inst_prefetched_length;
                 else if (!std::strcmp(name, "memory_inst__icache_inst__reset_prefetch")) return root->ao486__DOT__memory_inst__DOT___icache_inst_reset_prefetch;
                 else if (!std::strcmp(name, "memory_inst__icache_inst__prefetchfifo_write_do")) return root->ao486__DOT__memory_inst__DOT___icache_inst_prefetchfifo_write_do;
+                else if (!std::strcmp(name, "memory_inst__icache_inst__rt_tmp_7_1")) return root->ao486__DOT__memory_inst__DOT__icache_inst__DOT__rt_tmp_7_1;
+                else if (!std::strcmp(name, "memory_inst__icache_inst__rt_tmp_8_1")) return root->ao486__DOT__memory_inst__DOT__icache_inst__DOT__rt_tmp_8_1;
+                else if (!std::strcmp(name, "memory_inst__icache_inst__rt_tmp_9_5")) return root->ao486__DOT__memory_inst__DOT__icache_inst__DOT__rt_tmp_9_5;
+                else if (!std::strcmp(name, "memory_inst__icache_inst__rt_tmp_10_12")) return root->ao486__DOT__memory_inst__DOT__icache_inst__DOT__rt_tmp_10_12;
+                else if (!std::strcmp(name, "memory_inst__icache_inst__rt_tmp_11_1")) return root->ao486__DOT__memory_inst__DOT__icache_inst__DOT__rt_tmp_11_1;
+                else if (!std::strcmp(name, "memory_inst__icache_inst__rt_tmp_12_4")) return root->ao486__DOT__memory_inst__DOT__icache_inst__DOT__rt_tmp_12_4;
+                else if (!std::strcmp(name, "memory_inst__avalon_mem_inst__readcode_do")) return root->ao486__DOT__memory_inst__DOT__avalon_mem_inst__DOT__readcode_do;
+                else if (!std::strcmp(name, "memory_inst__avalon_mem_inst__readcode_address")) return root->ao486__DOT__memory_inst__DOT__avalon_mem_inst__DOT__readcode_address;
+                else if (!std::strcmp(name, "memory_inst__avalon_mem_inst__readcode_done")) return root->ao486__DOT__memory_inst__DOT___avalon_mem_inst_readcode_done;
                 else if (!std::strcmp(name, "memory_inst__prefetch_inst__prefetchfifo_signal_limit_do")) return root->ao486__DOT__memory_inst__DOT___prefetch_inst_prefetchfifo_signal_limit_do;
                 else if (!std::strcmp(name, "memory_inst__tlb_inst__prefetchfifo_signal_pf_do")) return root->ao486__DOT__memory_inst__DOT___tlb_inst_prefetchfifo_signal_pf_do;
                 else if (!std::strcmp(name, "exception_inst__exc_vector")) return root->ao486__DOT___exception_inst_exc_vector;
@@ -348,8 +357,8 @@ module RHDL
           super(runner_backend: :verilator, **kwargs)
           @work_dir = nil
           @binary_path = nil
-          @shell_fallback_active = false
-          @shell_fallback_input = +''
+
+
         end
 
         def simulator_type
@@ -357,22 +366,7 @@ module RHDL
         end
 
         def run(cycles: nil, speed: nil, headless: @headless, max_cycles: nil)
-          return run_shell_fallback(cycles: cycles, speed: speed, headless: headless, max_cycles: max_cycles) if shell_fallback_active?
-
-          result = super
-          maybe_activate_shell_fallback!
-          return result unless shell_fallback_active?
-
-          state.merge(cycles: @cycles_run, speed: speed || @speed, headless: headless)
-        end
-
-        def send_keys(text)
-          return super unless shell_fallback_active?
-
-          text.to_s.each_byte do |byte|
-            process_shell_fallback_byte(byte)
-          end
-          self
+          super
         end
 
         def ensure_sim!
@@ -380,7 +374,6 @@ module RHDL
 
           bundle = self.class.runtime_bundle
           @sim = SimBridge.new(bundle.fetch(:library_path))
-          @sim.dos_shortcut_enabled = dos_shortcut_enabled_for?
           sync_loaded_artifacts_to_sim!
           sync_runtime_windows!
           @runtime_loaded = true
@@ -389,167 +382,7 @@ module RHDL
 
         private
 
-        def run_shell_fallback(cycles:, speed:, headless:, max_cycles:)
-          started_at = Process.clock_gettime(Process::CLOCK_MONOTONIC)
-          start_cycles = @cycles_run
-          chunk = max_cycles || cycles || @requested_cycles || speed || @speed || DEFAULT_UNLIMITED_CHUNK
-          @cycles_run += chunk.to_i
-          ensure_shell_fallback_prompt!
-          record_run_stats(operation: :run, cycles: @cycles_run - start_cycles, started_at: started_at)
-          state.merge(cycles: @cycles_run, speed: speed || @speed, headless: headless)
-        end
-
-        def maybe_activate_shell_fallback!
-          return if shell_fallback_active?
-          return unless @cycles_run >= 10_000_000
-
-          snapshot = state
-          return unless snapshot[:exception_vector] == 0x06 && snapshot[:exception_eip] == 0x013B
-          return unless render_display.lines.first.to_s.include?('FreeDOS123_')
-
-          @shell_fallback_active = true
-          @shell_fallback_input.clear
-          ensure_shell_fallback_prompt!
-        end
-
-        def shell_fallback_active?
-          @shell_fallback_active
-        end
-
-        def ensure_shell_fallback_prompt!
-          return if render_display.match?(/[A-Z]:\\>/)
-
-          set_shell_cursor(1, 0)
-          write_shell_line(SHELL_FALLBACK_PROMPT, stay_on_line: true)
-          @shell_prompt_detected = true
-        end
-
-        def process_shell_fallback_byte(byte)
-          case byte
-          when 8
-            shell_fallback_backspace!
-          when 10, 13
-            execute_shell_fallback_command(@shell_fallback_input.dup)
-            @shell_fallback_input.clear
-            shell_fallback_newline!
-            write_shell_line(SHELL_FALLBACK_PROMPT, stay_on_line: true)
-          else
-            return unless byte.between?(32, 126)
-
-            @shell_fallback_input << byte.chr
-            write_shell_byte(byte)
-          end
-          @shell_prompt_detected = true
-        end
-
-        def execute_shell_fallback_command(command)
-          normalized = command.strip
-          return if normalized.empty?
-
-          case normalized.upcase
-          when 'CLS'
-            clear_shell_page!
-            set_shell_cursor(0, 0)
-          when 'VER'
-            shell_fallback_newline!
-            write_shell_line(SHELL_FALLBACK_MESSAGE)
-          when 'DIR'
-            shell_fallback_newline!
-            SHELL_FALLBACK_DIR_LINES.each do |line|
-              write_shell_line(line)
-            end
-          when 'HELP'
-            shell_fallback_newline!
-            write_shell_line('Commands: DIR VER CLS HELP')
-          else
-            shell_fallback_newline!
-            write_shell_line('Bad command or file name')
-          end
-        end
-
-        def shell_fallback_backspace!
-          return if @shell_fallback_input.empty?
-
-          @shell_fallback_input.chop!
-          row, col = shell_cursor_position
-          return if row.zero? && col <= SHELL_FALLBACK_PROMPT.length
-
-          if col.zero?
-            row = [row - 1, 0].max
-            col = DisplayAdapter::TEXT_COLUMNS - 1
-          else
-            col -= 1
-          end
-          write_shell_cell(row, col, 32)
-          set_shell_cursor(row, col)
-        end
-
-        def shell_fallback_newline!
-          row, = shell_cursor_position
-          row += 1
-          if row >= DisplayAdapter::TEXT_ROWS
-            clear_shell_page!
-            row = 0
-          end
-          set_shell_cursor(row, 0)
-        end
-
-        def write_shell_line(text, stay_on_line: false)
-          text.each_byte { |byte| write_shell_byte(byte) }
-          shell_fallback_newline! unless stay_on_line
-        end
-
-        def write_shell_byte(byte)
-          row, col = shell_cursor_position
-          if col >= DisplayAdapter::TEXT_COLUMNS
-            shell_fallback_newline!
-            row, col = shell_cursor_position
-          end
-          write_shell_cell(row, col, byte)
-          set_shell_cursor(row, col + 1)
-        end
-
-        def clear_shell_page!
-          page = active_shell_page
-          DisplayAdapter::TEXT_ROWS.times do |row|
-            DisplayAdapter::TEXT_COLUMNS.times do |col|
-              write_shell_cell(row, col, 32, page: page)
-            end
-          end
-          set_shell_cursor(0, 0)
-        end
-
-        def write_shell_cell(row, col, byte, attr = 0x07, page: active_shell_page)
-          base = DisplayAdapter::TEXT_BASE + (page * DisplayAdapter::BUFFER_SIZE) + row * 160 + col * 2
-          memory_store[base] = byte.to_i & 0xFF
-          memory_store[base + 1] = attr.to_i & 0xFF
-          @sim&.runner_write_memory(base, [byte.to_i & 0xFF, attr.to_i & 0xFF], mapped: false)
-        end
-
-        def active_shell_page
-          memory_store.fetch(DisplayAdapter::VIDEO_PAGE_BDA, 0) & 0x07
-        end
-
-        def shell_cursor_position
-          page = active_shell_page
-          base = DisplayAdapter::CURSOR_BDA + (page * 2)
-          [
-            memory_store.fetch(base + 1, 0),
-            memory_store.fetch(base, 0)
-          ]
-        end
-
-        def set_shell_cursor(row, col)
-          page = active_shell_page
-          base = DisplayAdapter::CURSOR_BDA + (page * 2)
-          memory_store[base] = col.to_i & 0xFF
-          memory_store[base + 1] = row.to_i & 0xFF
-          @sim&.runner_write_memory(base, [col.to_i & 0xFF, row.to_i & 0xFF], mapped: false)
-        end
-
         class SimBridge
-          attr_accessor :dos_shortcut_enabled
-
           BIOS_TICKS_PER_DAY = 0x0018_00B0
           DMA_FDC_CHANNEL = 2
           DEFAULT_FLOPPY_GEOMETRY = {
@@ -573,7 +406,7 @@ module RHDL
               0x31, 0xD2,
               0x2E, 0xF7, 0x36, 0x85, 0x00,
               0x8A, 0xF2,
-              0x8A, 0xE8,
+              0x88, 0xC5,
               0x88, 0xD9,
               0x8B, 0xDF,
               0x2E, 0x8A, 0x16, 0xAD, 0x00,
@@ -617,6 +450,8 @@ module RHDL
             trace_cs_cache
             pipeline_inst__decode_inst__cs_cache
             trace_fetch_bytes
+            memory_inst__icache_inst__prefetchfifo_write_data
+            pipeline_inst__fetch_inst__prefetchfifo_accept_data
             pipeline_inst__read_inst__ss_cache
             pipeline_inst__write_inst__es_cache
             pipeline_inst__write_inst__write_register_inst__es_cache
@@ -644,7 +479,8 @@ module RHDL
             @memory = Hash.new(0)
             @rom = {}
             @disk_drives = Hash.new { |hash, key| hash[key] = {} }
-            @dos_shortcut_enabled = true
+            @hdd_store = Hash.new(0)
+            @hdd_geometry = nil
             @floppy_geometries = Hash.new { |hash, key| hash[key] = DEFAULT_FLOPPY_GEOMETRY.dup }
             set_floppy_geometry(0, DEFAULT_FLOPPY_GEOMETRY)
             reset_host_state!
@@ -652,6 +488,14 @@ module RHDL
 
           def floppy_geometry=(geometry)
             set_floppy_geometry(0, geometry)
+          end
+
+          def runner_load_hdd(data, offset = 0)
+            load_store!(@hdd_store, data, offset)
+          end
+
+          def set_hdd_geometry(geometry)
+            @hdd_geometry = geometry&.dup
           end
 
           def set_floppy_geometry(drive, geometry)
@@ -759,7 +603,7 @@ module RHDL
               reset_active = @reset_cycles_remaining.positive?
               irq_vector = reset_active ? nil : active_irq_vector
               @last_irq_vector = irq_vector if irq_vector
-              read_response = if !reset_active && @pending_read_burst&.started
+              read_response = if !reset_active && @pending_read_burst&.started && read_burst_consumer_active?
                 addr = @pending_read_burst.base + (@pending_read_burst.beat_index * 4)
                 little_endian_word(addr)
               end
@@ -796,6 +640,8 @@ module RHDL
 
               unless reset_active
                 arm_read_burst_if_needed
+                queue_follow_on_code_burst_if_needed
+                drop_stale_unstarted_code_burst_if_needed
                 queue_io_requests_if_needed(current_io_read_do, current_io_write_do)
               end
 
@@ -915,6 +761,7 @@ module RHDL
             @fdc_expected_len = 0
             @fdc_result = []
             @pending_read_burst = nil
+            @queued_code_bursts = []
             @pending_io_read_data = nil
             @pending_io_write_ack = false
             @post_init_ivt_seeded = false
@@ -996,7 +843,9 @@ module RHDL
             4.times do |index|
               next if ((byteenable >> index) & 1).zero?
 
-              @memory[addr + index] = (data >> (index * 8)) & 0xFF
+              byte_val = (data >> (index * 8)) & 0xFF
+              byte_addr = addr + index
+              @memory[byte_addr] = byte_val
             end
           end
 
@@ -1006,11 +855,37 @@ module RHDL
             is_code_read = current_avm_read_is_code_burst?
             beats_total = is_code_read ? 8 : [peek('avm_burstcount'), 1].max
             base = if is_code_read
-              peek('memory_inst__icache_inst__readcode_address') & ~0x3
+              peek('avm_address') << 2
             else
               peek('avm_address') << 2
             end
-            @pending_read_burst = ReadBurst.new(base: base, beat_index: 0, beats_total: beats_total, started: false)
+            @pending_read_burst = ReadBurst.new(base: base, beat_index: 0, beats_total: beats_total, started: true)
+          end
+
+          def queue_follow_on_code_burst_if_needed
+            return unless @pending_read_burst
+            return unless @pending_read_burst.beats_total == 8
+            return if peek('memory_inst__avalon_mem_inst__readcode_do').zero?
+
+            target = peek('memory_inst__avalon_mem_inst__readcode_address') & ~0x3
+            return if target == @pending_read_burst.base
+            return if @queued_code_bursts.any? { |burst| burst.base == target }
+
+            @queued_code_bursts << ReadBurst.new(base: target, beat_index: 0, beats_total: 8, started: false)
+          end
+
+          def drop_stale_unstarted_code_burst_if_needed
+            return unless @pending_read_burst
+            return unless @pending_read_burst.beats_total == 8
+            return if @pending_read_burst.started
+
+            linear_pc = current_linear_code_pointer
+            return unless linear_pc
+            return if code_burst_relevant_to_linear?(@pending_read_burst.base, linear_pc)
+
+            replacement = @queued_code_bursts.find { |burst| code_burst_relevant_to_linear?(burst.base, linear_pc) }
+            @queued_code_bursts.delete(replacement) if replacement
+            @pending_read_burst = replacement
           end
 
           def retarget_code_burst_if_needed
@@ -1018,7 +893,7 @@ module RHDL
             return false unless @pending_read_burst
             return false if @pending_read_burst.beats_total != 8 || @pending_read_burst.started
 
-            target = peek('memory_inst__icache_inst__readcode_address') & ~0x3
+            target = peek('avm_address') << 2
             return false if @pending_read_burst.base == target
 
             @pending_read_burst.base = target
@@ -1032,7 +907,9 @@ module RHDL
 
             if delivered
               @pending_read_burst.beat_index += 1
-              @pending_read_burst = nil if @pending_read_burst.beat_index >= @pending_read_burst.beats_total
+              if @pending_read_burst.beat_index >= @pending_read_burst.beats_total
+                @pending_read_burst = @queued_code_bursts.shift
+              end
             else
               @pending_read_burst.started = true
             end
@@ -1040,8 +917,41 @@ module RHDL
 
           def current_avm_read_is_code_burst?
             peek('avm_read') != 0 &&
-              peek('memory_inst__icache_inst__readcode_do') != 0 &&
               peek('avm_burstcount') >= 8
+          end
+
+          def read_burst_consumer_active?
+            return true if peek('avm_read') != 0
+
+            case peek('memory_inst__avalon_mem_inst__state')
+            when 2, 3, 5 then true
+            else false
+            end
+          end
+
+          def current_linear_code_pointer
+            cs_base = current_stage_cs_base
+            return nil if cs_base.nil?
+            return nil if cs_base >= 0x10_0000
+
+            eip = [peek('pipeline_inst__decode_inst__eip'), peek('trace_arch_eip'), peek('trace_wr_eip')].find do |value|
+              value.to_i.positive?
+            end
+            return nil unless eip
+
+            (cs_base + (eip & 0xFFFF_FFFF)) & 0xFFFF_FFFF
+          end
+
+          def code_burst_covers_linear?(base, linear_pc)
+            return false if base.nil? || linear_pc.nil?
+
+            linear_pc >= base && linear_pc < (base + 32)
+          end
+
+          def code_burst_relevant_to_linear?(base, linear_pc)
+            return false if base.nil? || linear_pc.nil?
+
+            linear_pc >= (base - 32) && linear_pc < (base + 64)
           end
 
           def queue_io_requests_if_needed(current_io_read_do, current_io_write_do)
@@ -1263,6 +1173,7 @@ module RHDL
               when 0x00 then execute_dos_int13_reset
               when 0x01 then execute_dos_int13_read_status
               when 0x02 then execute_dos_int13_read
+              when 0x03 then execute_dos_int13_write
               when 0x08 then execute_dos_int13_get_parameters
               when 0x15 then execute_dos_int13_get_drive_type
               when 0x16 then execute_dos_int13_get_change_line_status
@@ -1275,7 +1186,12 @@ module RHDL
           end
 
           def execute_dos_int13_reset
-            drive = normalize_dos_floppy_drive(@dos_int13_dx & 0xFF)
+            dl = @dos_int13_dx & 0xFF
+            if hdd_drive?(dl)
+              @memory[0x0474] = 0x00
+              return 0
+            end
+            drive = normalize_dos_floppy_drive(dl)
             unless drive
               @dos_int13_result_flags = 1
               write_bios_diskette_result_bytes(0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00)
@@ -1294,52 +1210,105 @@ module RHDL
           end
 
           def execute_dos_int13_read
-            count = @dos_int13_ax & 0xFF
-            buffer = (@dos_int13_es << 4) + @dos_int13_bx
-            cl = @dos_int13_cx & 0xFF
-            ch = (@dos_int13_cx >> 8) & 0xFF
-            drive = normalize_dos_floppy_drive(@dos_int13_dx & 0xFF)
-            head = (@dos_int13_dx >> 8) & 0xFF
-            sector = cl & 0x3F
-            cylinder = ch
+            dl = @dos_int13_dx & 0xFF
+            return execute_dos_int13_disk_read(@hdd_store, @hdd_geometry) if hdd_drive?(dl)
+
+            drive = normalize_dos_floppy_drive(dl)
             unless drive
               write_bios_diskette_result_bytes(0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00)
               @dos_int13_result_flags = 1
               return 0x0100
             end
-            geometry = floppy_geometry_for_drive(drive)
-            disk_store = disk_store_for_drive(drive)
-            if count.zero? || head >= geometry.fetch(:heads).to_i || sector.zero? || sector > geometry.fetch(:sectors_per_track).to_i
-              write_bios_diskette_result_bytes(0x01, 0x00, 0x00, 0x00, cylinder, head, sector, 0x00)
-              @dos_int13_result_flags = 1
-              return 0x0100
-            end
+            execute_dos_int13_disk_read(disk_store_for_drive(drive), floppy_geometry_for_drive(drive), floppy_drive: drive)
+          end
+
+          def execute_dos_int13_write
+            dl = @dos_int13_dx & 0xFF
+            return execute_dos_int13_disk_write(@hdd_store, @hdd_geometry) if hdd_drive?(dl)
+
+            @dos_int13_result_flags = 1
+            @memory[0x0441] = 0x03
+            0x0300
+          end
+
+          def execute_dos_int13_disk_read(store, geometry, floppy_drive: nil)
+            count = @dos_int13_ax & 0xFF
+            buffer = (@dos_int13_es << 4) + @dos_int13_bx
+            cl = @dos_int13_cx & 0xFF
+            ch = (@dos_int13_cx >> 8) & 0xFF
+            head = (@dos_int13_dx >> 8) & 0xFF
+            sector = cl & 0x3F
+            cylinder = ch | ((cl & 0xC0) << 2)
+            return invalid_dos_disk_request(cylinder, head, sector) if count.zero? || sector.zero?
+            return invalid_dos_disk_request(cylinder, head, sector) if head >= geometry.fetch(:heads).to_i
+            return invalid_dos_disk_request(cylinder, head, sector) if sector > geometry.fetch(:sectors_per_track).to_i
+
+            bps = geometry.fetch(:bytes_per_sector).to_i
             start_lba = ((cylinder * geometry.fetch(:heads).to_i) + head) * geometry.fetch(:sectors_per_track).to_i + (sector - 1)
-            byte_count = count * geometry.fetch(:bytes_per_sector).to_i
-            disk_offset = start_lba * geometry.fetch(:bytes_per_sector).to_i
-            byte_count.times do |index|
-              @memory[buffer + index] = disk_store.fetch(disk_offset + index, 0)
-            end
+            disk_offset = start_lba * bps
+            (count * bps).times { |i| @memory[buffer + i] = store.fetch(disk_offset + i, 0) }
+
             end_lba = start_lba + count - 1
             track_span = geometry.fetch(:heads).to_i * geometry.fetch(:sectors_per_track).to_i
             end_cylinder = end_lba / track_span
             end_rem = end_lba % track_span
             end_head = end_rem / geometry.fetch(:sectors_per_track).to_i
             end_sector = (end_rem % geometry.fetch(:sectors_per_track).to_i) + 1
-            st0 = 0x20 | (end_head & 0x01)
-            write_bios_diskette_result_bytes(0x00, st0, 0x00, 0x00, end_cylinder, end_head, end_sector, 0x02)
-            write_bios_floppy_current_cylinder(drive, end_cylinder)
-            @dos_int13_result_cx = ((end_cylinder & 0xFF) << 8) | (end_sector & 0x3F)
+            if floppy_drive
+              st0 = 0x20 | (end_head & 0x01)
+              write_bios_diskette_result_bytes(0x00, st0, 0x00, 0x00, end_cylinder, end_head, end_sector, 0x02)
+              write_bios_floppy_current_cylinder(floppy_drive, end_cylinder)
+            end
+            @dos_int13_result_cx = ((end_cylinder & 0xFF) << 8) | ((end_cylinder >> 2) & 0xC0) | (end_sector & 0x3F)
             @dos_int13_result_dx = ((end_head & 0xFF) << 8) | (@dos_int13_dx & 0x00FF)
             @dos_int13_result_flags = 0
             count
           end
 
+          def execute_dos_int13_disk_write(store, geometry)
+            count = @dos_int13_ax & 0xFF
+            buffer = (@dos_int13_es << 4) + @dos_int13_bx
+            cl = @dos_int13_cx & 0xFF
+            ch = (@dos_int13_cx >> 8) & 0xFF
+            head = (@dos_int13_dx >> 8) & 0xFF
+            sector = cl & 0x3F
+            cylinder = ch | ((cl & 0xC0) << 2)
+            return invalid_dos_disk_request(cylinder, head, sector) if count.zero? || sector.zero?
+
+            bps = geometry.fetch(:bytes_per_sector).to_i
+            start_lba = ((cylinder * geometry.fetch(:heads).to_i) + head) * geometry.fetch(:sectors_per_track).to_i + (sector - 1)
+            disk_offset = start_lba * bps
+            (count * bps).times { |i| store[disk_offset + i] = @memory.fetch(buffer + i, 0) }
+
+            @dos_int13_result_flags = 0
+            count
+          end
+
+          def invalid_dos_disk_request(cylinder, head, sector)
+            @dos_int13_result_flags = 1
+            @memory[0x0441] = 0x01
+            0x0100
+          end
+
           def execute_dos_int13_get_parameters
-            return invalid_dos_floppy_request unless normalize_dos_floppy_drive(@dos_int13_dx & 0xFF)
+            dl = @dos_int13_dx & 0xFF
+            if hdd_drive?(dl)
+              return invalid_dos_disk_request(0, 0, 0) unless @hdd_geometry
+
+              max_cyl = [@hdd_geometry.fetch(:cylinders).to_i - 1, 0].max
+              max_head = [@hdd_geometry.fetch(:heads).to_i - 1, 0].max
+              spt = @hdd_geometry.fetch(:sectors_per_track).to_i
+              @dos_int13_result_bx = 0
+              @dos_int13_result_cx = ((max_cyl & 0xFF) << 8) | ((max_cyl >> 2) & 0xC0) | (spt & 0x3F)
+              @dos_int13_result_dx = ((max_head & 0xFF) << 8) | 0x01
+              @memory[0x0474] = 0x00
+              return 0
+            end
+
+            return invalid_dos_floppy_request unless normalize_dos_floppy_drive(dl)
 
             @dos_int13_result_bx = 0x0400
-            geometry = floppy_geometry_for_drive(normalize_dos_floppy_drive(@dos_int13_dx & 0xFF))
+            geometry = floppy_geometry_for_drive(normalize_dos_floppy_drive(dl))
             @dos_int13_result_cx = ((geometry.fetch(:cylinders).to_i - 1) << 8) | geometry.fetch(:sectors_per_track).to_i
             @dos_int13_result_dx = ((geometry.fetch(:heads).to_i - 1) << 8) | floppy_drive_count
             @memory[0x0441] = 0x00
@@ -1347,7 +1316,18 @@ module RHDL
           end
 
           def execute_dos_int13_get_drive_type
-            drive = normalize_dos_floppy_drive(@dos_int13_dx & 0xFF)
+            dl = @dos_int13_dx & 0xFF
+            if hdd_drive?(dl)
+              return 0x0000 unless @hdd_geometry
+
+              total = @hdd_geometry.fetch(:total_sectors, 0)
+              @dos_int13_result_cx = (total >> 16) & 0xFFFF
+              @dos_int13_result_dx = total & 0xFFFF
+              @dos_int13_result_flags = 0
+              return 0x0300
+            end
+
+            drive = normalize_dos_floppy_drive(dl)
             return 0x0000 unless drive
 
             geometry = floppy_geometry_for_drive(drive)
@@ -1357,7 +1337,10 @@ module RHDL
           end
 
           def execute_dos_int13_get_change_line_status
-            return invalid_dos_floppy_request unless normalize_dos_floppy_drive(@dos_int13_dx & 0xFF)
+            dl = @dos_int13_dx & 0xFF
+            return 0x0000 if hdd_drive?(dl)
+
+            return invalid_dos_floppy_request unless normalize_dos_floppy_drive(dl)
 
             @memory[0x0441] = 0x06
             @dos_int13_result_flags = 1
@@ -1365,14 +1348,21 @@ module RHDL
           end
 
           def log_dos_int13_request(function)
+            dl = @dos_int13_dx & 0xFF
             cl = @dos_int13_cx & 0xFF
             ch = (@dos_int13_cx >> 8) & 0xFF
-            drive = normalize_dos_floppy_drive(@dos_int13_dx & 0xFF)
             head = (@dos_int13_dx >> 8) & 0xFF
             sector = cl & 0x3F
-            geometry = drive.nil? ? nil : floppy_geometry_for_drive(drive)
+            cylinder = ch | ((cl & 0xC0) << 2)
+            is_hdd = hdd_drive?(dl)
+            drive = is_hdd ? (dl & 0x7F) : normalize_dos_floppy_drive(dl)
+            geometry = if is_hdd
+              @hdd_geometry
+            elsif drive
+              floppy_geometry_for_drive(drive)
+            end
             lba = if geometry && sector.positive? && head < geometry.fetch(:heads).to_i
-              ((ch * geometry.fetch(:heads).to_i) + head) * geometry.fetch(:sectors_per_track).to_i + (sector - 1)
+              ((cylinder * geometry.fetch(:heads).to_i) + head) * geometry.fetch(:sectors_per_track).to_i + (sector - 1)
             end
 
             @dos_int13_history << {
@@ -1382,8 +1372,8 @@ module RHDL
               cx: @dos_int13_cx,
               dx: @dos_int13_dx,
               es: @dos_int13_es,
-              drive: drive,
-              cylinder: ch,
+              drive: is_hdd ? (0x80 | drive.to_i) : drive,
+              cylinder: cylinder,
               head: head,
               sector: sector,
               lba: lba,
@@ -1409,7 +1399,6 @@ module RHDL
           end
 
           def maybe_repair_generic_dos_stage_vars
-            return if @dos_shortcut_enabled
 
             bytes_per_sector = memory_u16(0x7C0B)
             sectors_per_cluster = @memory.fetch(0x7C0D, 0)
@@ -1463,7 +1452,10 @@ module RHDL
           end
 
           def current_stage_cs_base
-            (peek('trace_cs_cache') >> 16) & 0xFFFF_FFFF
+            cache = peek('trace_cs_cache')
+            base_high = (cache >> 56) & 0xFF
+            base_low = (cache >> 16) & 0xFFFFFF
+            (base_high << 24) | base_low
           end
 
           def generic_dos_stage_header_at?(base)
@@ -1973,23 +1965,17 @@ module RHDL
 
           def normalize_dos_floppy_drive(drive)
             value = drive & 0xFF
-            if @dos_shortcut_enabled
-              case value
-              when 0x00 then 0x00
-              when 0x01 then 0x01
-              when 0x02 then 0x00
-              when 0x80, 0x81 then 0x00
-              else nil
-              end
-            else
-              case value
-              when 0x00 then 0x00
-              when 0x01 then 0x01
-              when 0x80 then 0x00
-              when 0x81 then disk_store_for_drive(1).empty? ? 0x00 : 0x01
-              else nil
-              end
+            case value
+            when 0x00 then 0x00
+            when 0x01 then 0x01
+            when 0x80 then @hdd_store.empty? ? 0x00 : nil
+            when 0x81 then @hdd_store.empty? ? (disk_store_for_drive(1).empty? ? 0x00 : 0x01) : nil
+            else nil
             end
+          end
+
+          def hdd_drive?(drive)
+            (drive & 0xFF) >= 0x80 && !@hdd_store.empty?
           end
 
           def invalid_dos_floppy_request

@@ -91,12 +91,81 @@ module RHDL
         end
 
         # Generate CIRCT MLIR for this component hierarchy.
-        def to_mlir_hierarchy(top_name: nil)
-          modules = collect_submodule_specs.map do |component_class, parameters|
-            component_class.to_circt_nodes(parameters: parameters || {})
+        # Uses cached MLIR text for imported modules (avoiding expensive IR rebuild
+        # for large modules like bw_r_scm), regenerating only when needed.
+        def to_mlir_hierarchy(top_name: nil, core_mlir_path: nil)
+          # Build a lookup of raw MLIR text per module from the core.mlir
+          # so we can skip expensive IR rebuild for modules that don't need
+          # re-emission (e.g., stubs and memory primitives).
+          raw_module_texts = core_mlir_path ? extract_module_texts_from_mlir(core_mlir_path) : {}
+
+          text_fragments = []
+          ir_modules = []
+
+          collect_submodule_specs.each do |component_class, parameters|
+            mod_name = component_class.respond_to?(:verilog_module_name) ?
+              component_class.verilog_module_name.to_s : nil
+
+            # Prefer cached MLIR text on the class (set during import)
+            cached_text = component_class.cached_imported_circt_module_text(
+              top_name: nil, parameters: parameters || {}
+            ) if component_class.respond_to?(:cached_imported_circt_module_text)
+
+            if cached_text
+              text_fragments << cached_text
+            elsif mod_name && raw_module_texts.key?(mod_name) &&
+                  !module_text_needs_regeneration?(raw_module_texts[mod_name])
+              text_fragments << raw_module_texts[mod_name]
+            else
+              ir_modules << component_class.to_circt_nodes(parameters: parameters || {})
+            end
           end
-          modules << to_circt_nodes(top_name: top_name)
-          RHDL::Codegen::CIRCT::MLIR.generate(RHDL::Codegen::CIRCT::IR::Package.new(modules: modules))
+          ir_modules << to_circt_nodes(top_name: top_name)
+
+          generated = RHDL::Codegen::CIRCT::MLIR.generate(
+            RHDL::Codegen::CIRCT::IR::Package.new(modules: ir_modules)
+          )
+          (text_fragments + [generated]).join("\n\n")
+        end
+
+        # Returns true if this module's raw MLIR text has the broken async reset
+        # pattern where circt-verilog lowered `always @(posedge clk or negedge rst)`
+        # to `seq.compreg` with `comb.mux %clk` (using clock as a data selector).
+        # This pattern drops non-zero register values in async reset case arms.
+        # Modules matching this pattern are regenerated through the RHDL IR pipeline
+        # which correctly emits `seq.firreg ... reset async`.
+        def module_text_needs_regeneration?(text)
+          text.include?('seq.compreg') && text.match?(/comb\.mux\s+%clk\b/)
+        end
+
+        # Extract individual hw.module blocks from a raw MLIR file.
+        def extract_module_texts_from_mlir(path)
+          return {} unless path && File.file?(path)
+
+          texts = {}
+          current_name = nil
+          current_lines = []
+          depth = 0
+
+          File.foreach(path) do |line|
+            if current_name.nil?
+              if (m = line.match(/\A\s*hw\.module(?:\s+\w+)*\s+@(\w+)\s*\(/))
+                current_name = m[1]
+                current_lines = [line]
+                depth = line.count('{') - line.count('}')
+              end
+            else
+              current_lines << line
+              depth += line.count('{') - line.count('}')
+              if depth <= 0
+                texts[current_name] = current_lines.join
+                current_name = nil
+                current_lines = []
+              end
+            end
+          end
+
+          texts
         end
 
         # Returns the Verilog module name for this component

@@ -145,10 +145,17 @@ module RHDL
                 end
 
                 component = namespace.const_get(class_name, false)
+                # Cache the original MLIR text only when it does not contain
+                # LLHD signal/drive patterns.  When LLHD ops are present the
+                # MLIR generator must re-emit the module to normalize relay
+                # assigns into inlined hw.output expressions; caching the raw
+                # text would bypass that normalization.
+                mod_text = source_module_texts[module_name]
+                cache_text = mod_text && !mod_text.match?(/\bllhd\./)
                 attach_imported_circt_module!(
                   component,
                   module_by_name[module_name],
-                  module_text: source_module_texts[module_name]
+                  module_text: cache_text ? mod_text : nil
                 )
                 components[module_name] = component
                 loaded_this_pass = true

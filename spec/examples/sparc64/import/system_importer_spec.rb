@@ -315,7 +315,7 @@ RSpec.describe RHDL::Examples::SPARC64::Import::SystemImporter do
       end.to raise_error(ArgumentError, /patches_dir not found/)
     end
 
-    it 'applies patches_dir before staging mixed-source inputs' do
+    it 'applies patches_dir before staging mixed-source inputs', timeout: 30 do
       Dir.mktmpdir('sparc64_patch_root') do |reference_root|
         Dir.mktmpdir('sparc64_patch_out') do |out_dir|
           Dir.mktmpdir('sparc64_patch_ws') do |workspace|
@@ -382,7 +382,7 @@ RSpec.describe RHDL::Examples::SPARC64::Import::SystemImporter do
       end
     end
 
-    it 'applies patches_dir when the importer workspace lives under the main repo root' do
+    it 'applies patches_dir when the importer workspace lives under the main repo root', timeout: 30 do
       Dir.mktmpdir('sparc64_patch_repo_root') do |reference_root|
         Dir.mktmpdir('sparc64_patch_repo_out') do |out_dir|
           repo_tmp_root = File.expand_path('../../../../tmp', __dir__)
@@ -452,7 +452,7 @@ RSpec.describe RHDL::Examples::SPARC64::Import::SystemImporter do
       end
     end
 
-    it 'keeps a patched top file on its relative path without staging a duplicate basename copy' do
+    it 'keeps a patched top file on its relative path without staging a duplicate basename copy', timeout: 30 do
       Dir.mktmpdir('sparc64_patch_top_root') do |reference_root|
         Dir.mktmpdir('sparc64_patch_top_out') do |out_dir|
           Dir.mktmpdir('sparc64_patch_top_ws') do |workspace|
@@ -718,6 +718,15 @@ RSpec.describe RHDL::Examples::SPARC64::Import::SystemImporter do
         expect(normalized).to include('input	[3:0]	wrens;')
         expect(normalized).to include('output	[71:0]	rd_data;')
       end
+    end
+
+    it 'uses hierarchical MLIR export for normalized core emission' do
+      importer = new_importer(output_dir: Dir.pwd, workspace_dir: Dir.pwd)
+      script = importer.send(:normalized_core_mlir_script)
+
+      expect(script).to include('to_mlir_hierarchy')
+      expect(script).to include('core_mlir_path')
+      expect(script).not_to include('to_flat_circt_nodes')
     end
   end
 end

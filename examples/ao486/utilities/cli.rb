@@ -180,16 +180,11 @@ module RHDL
             opts.on('--bios', 'Load BIOS ROMs from examples/ao486/software/rom') do
               options[:bios] = true
             end
-            opts.on('--dos', 'Load DOS floppy image from examples/ao486/software/bin') do
+            opts.on('--dos', 'Load MS-DOS 4.00 dual-disk setup from examples/ao486/software/bin') do
               options[:dos] = true
             end
-            opts.on('--dos-disk1 FILE', String,
-                    'Load FILE as the primary DOS floppy image in slot 0') do |v|
-              options[:dos_disk1] = v
-            end
-            opts.on('--dos-disk2 FILE', String,
-                    'Preload FILE as the secondary DOS floppy image in slot 1 for hot swapping') do |v|
-              options[:dos_disk2] = v
+            opts.on('--hdd [FILE]', String, 'Mount hard disk image (default: fs.img when --dos is set)') do |v|
+              options[:hdd] = v || true
             end
             opts.on('--headless', 'Run once without the interactive terminal loop') do
               options[:headless] = true

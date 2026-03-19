@@ -34,8 +34,11 @@ module AO486SpecSupport
       return requested if backend_available?(requested)
       return nil if requested
 
-      return :compiler if backend_available?(:compiler)
+      # Prefer JIT for ao486: the compiler backend currently rejects ao486
+      # designs that contain a small number of combinational assigns it cannot
+      # compile (fast-path blocker).  JIT handles them without issue.
       return :jit if backend_available?(:jit)
+      return :compiler if backend_available?(:compiler)
 
       nil
     end
@@ -44,10 +47,11 @@ module AO486SpecSupport
       requested = requested_ir_backend
       return requested if backend_available?(requested)
       return nil if requested
-    
-      return :compiler if backend_available?(:compiler)
+
+      # Same JIT-first preference as preferred_ir_backend (see comment above).
       return :jit if backend_available?(:jit)
-    
+      return :compiler if backend_available?(:compiler)
+
       nil
     end
 

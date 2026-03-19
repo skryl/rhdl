@@ -6,7 +6,7 @@ require 'fileutils'
 
 require_relative '../../../../examples/ao486/utilities/import/cpu_importer'
 
-RSpec.describe 'AO486 parity patch profile' do
+RSpec.describe 'AO486 default patch-series package' do
   def require_import_tool!
     tool = RHDL::Codegen::CIRCT::Tooling::DEFAULT_VERILOG_IMPORT_TOOL
     skip "#{tool} not available" unless HdlToolchain.which(tool)
@@ -18,7 +18,7 @@ RSpec.describe 'AO486 parity patch profile' do
       workspace_dir: workspace,
       keep_workspace: true,
       maintain_directory_structure: false,
-      patch_profile: :parity
+      patches_dir: RHDL::Examples::AO486::Import::CpuImporter::DEFAULT_PATCHES_ROOT
     ).run
   end
 

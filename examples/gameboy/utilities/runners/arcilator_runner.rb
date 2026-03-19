@@ -937,18 +937,19 @@ module RHDL
               top: state_top_name
             )
             raise "ARC preparation failed:\n#{prepared.dig(:arc, :stderr)}" unless prepared[:success]
-            RHDL::Codegen::CIRCT::Tooling.finalize_arc_mlir_for_arcilator!(
+            arcilator_mlir_path = RHDL::Codegen::CIRCT::Tooling.finalize_arc_mlir_for_arcilator!(
               arc_mlir_path: prepared.fetch(:arc_mlir_path),
               check_paths: [
                 prepared[:normalized_llhd_mlir_path],
                 prepared[:hwseq_mlir_path],
                 prepared[:flattened_hwseq_mlir_path],
+                prepared[:flattened_cleaned_hwseq_mlir_path],
                 prepared[:arc_mlir_path]
               ]
             )
 
             run_arcilator!(
-              arc_mlir_path: prepared.fetch(:arc_mlir_path),
+              arc_mlir_path: arcilator_mlir_path,
               state_path: state_path,
               ll_path: ll_path,
               log_path: log_path

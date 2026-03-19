@@ -24,8 +24,7 @@ RSpec.describe RHDL::Examples::AO486::Import::SystemImporter do
   end
 
   def run_importer(out_dir:, workspace:, import_strategy: :stubbed, fallback_to_stubbed: true,
-                   maintain_directory_structure: true, patch_profile: nil, patch_profiles: nil,
-                   patches_dir: nil, progress: nil)
+                   maintain_directory_structure: true, patches_dir: nil, progress: nil)
     described_class.new(
       output_dir: out_dir,
       workspace_dir: workspace,
@@ -33,8 +32,6 @@ RSpec.describe RHDL::Examples::AO486::Import::SystemImporter do
       import_strategy: import_strategy,
       fallback_to_stubbed: fallback_to_stubbed,
       maintain_directory_structure: maintain_directory_structure,
-      patch_profile: patch_profile,
-      patch_profiles: patch_profiles,
       patches_dir: patches_dir,
       progress: progress
     ).run
@@ -106,17 +103,8 @@ RSpec.describe RHDL::Examples::AO486::Import::SystemImporter do
     end.to raise_error(ArgumentError, /patches_dir not found/)
   end
 
-  it 'rejects an unknown named patch profile' do
-    importer = described_class.allocate
-    allow(importer).to receive(:ao486_patches_root).and_return('/tmp/rhdl_missing_ao486_patches')
-
-    expect do
-      importer.send(:normalize_patch_profiles, patch_profile: :runner, patch_profiles: nil)
-    end.to raise_error(ArgumentError, /AO486 patch profile not found: runner/)
-  end
-
   it 'applies an opt-in patch series to a staged source copy only' do
-    skip 'git not available' unless HdlToolchain.which('git')
+    skip 'patch not available' unless HdlToolchain.which('patch')
 
     Dir.mktmpdir('ao486_import_patch_root') do |root|
       rtl_root = File.join(root, 'rtl')
@@ -158,61 +146,8 @@ RSpec.describe RHDL::Examples::AO486::Import::SystemImporter do
       expect(File.read(source_path)).to eq("module system;\nendmodule\n")
       expect(File.read(prepared[:staged_system_path])).to include('patched_system')
       expect(File.read(prepared[:staged_system_path])).to include('patched_again')
-      expect(command_log.any? { |cmd| cmd.include?('git apply --check') }).to be(true)
-      expect(command_log.any? { |cmd| cmd.include?('git apply') && !cmd.include?('--check') }).to be(true)
-    end
-  end
-
-  it 'applies named patch profiles in the requested order before import' do
-    skip 'git not available' unless HdlToolchain.which('git')
-
-    Dir.mktmpdir('ao486_patch_profiles_root') do |root|
-      rtl_root = File.join(root, 'rtl')
-      FileUtils.mkdir_p(rtl_root)
-
-      source_path = File.join(rtl_root, 'system.v')
-      File.write(source_path, "module system;\nendmodule\n")
-
-      patches_root = File.join(root, 'patch_profiles')
-      parity_dir = File.join(patches_root, 'parity')
-      runner_dir = File.join(patches_root, 'runner')
-      FileUtils.mkdir_p(parity_dir)
-      FileUtils.mkdir_p(runner_dir)
-      write_unified_patch(
-        File.join(parity_dir, '0001-parity.patch'),
-        relpath: 'system.v',
-        removal: 'module system;',
-        addition: 'module system; wire parity_patch;'
-      )
-      write_unified_patch(
-        File.join(runner_dir, '0001-runner.patch'),
-        relpath: 'system.v',
-        removal: 'module system; wire parity_patch;',
-        addition: 'module system; wire parity_patch; wire runner_patch;'
-      )
-
-      workspace = File.join(root, 'workspace')
-      importer = described_class.new(
-        source_path: source_path,
-        output_dir: File.join(root, 'out'),
-        workspace_dir: workspace,
-        keep_workspace: true,
-        patch_profiles: %i[parity runner]
-      )
-      allow(importer).to receive(:ao486_patches_root).and_return(patches_root)
-
-      diagnostics = []
-      command_log = []
-      prepared_source = importer.send(:prepare_import_source_tree, workspace, diagnostics: diagnostics, command_log: command_log)
-      expect(prepared_source[:success]).to be(true), diagnostics.join("\n")
-
-      prepared = importer.send(:prepare_workspace, workspace, strategy: :stubbed)
-      staged_text = File.read(prepared[:staged_system_path])
-      expect(staged_text).to include('parity_patch')
-      expect(staged_text).to include('runner_patch')
-      expect(command_log.grep(/0001-parity\.patch/).length).to eq(2)
-      expect(command_log.grep(/0001-runner\.patch/).length).to eq(2)
-      expect(command_log.index { |cmd| cmd.include?('0001-parity.patch') }).to be < command_log.index { |cmd| cmd.include?('0001-runner.patch') }
+      expect(command_log.any? { |cmd| cmd.include?('patch --dry-run --batch -p1 -i') }).to be(true)
+      expect(command_log.any? { |cmd| cmd.include?('patch --batch -p1 -i') && !cmd.include?('--dry-run') }).to be(true)
     end
   end
 

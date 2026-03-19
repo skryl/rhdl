@@ -66,6 +66,18 @@ RSpec.describe RHDL::CLI::Tasks::AO486Task do
       @calls << [:load_dos, kwargs]
     end
 
+    def dos_disk2_path
+      '/fake/dos_disk2.img'
+    end
+
+    def hdd_path
+      '/fake/hdd.img'
+    end
+
+    def load_hdd(**kwargs)
+      @calls << [:load_hdd, kwargs]
+    end
+
     def swap_dos(slot)
       @calls << [:swap_dos, slot]
     end
@@ -106,7 +118,13 @@ RSpec.describe RHDL::CLI::Tasks::AO486Task do
       headless: true,
       cycles: 678
     )
-    expect(FakeHeadlessRunner.instance.calls).to eq([:load_bios, [:load_dos, {}], :run])
+    expect(FakeHeadlessRunner.instance.calls).to eq([
+      :load_bios,
+      [:load_dos, {}],
+      [:load_dos, { path: '/fake/dos_disk2.img', slot: 1, activate: false }],
+      [:load_hdd, { path: '/fake/hdd.img' }],
+      :run
+    ])
   end
 
   it 'does not load optional software artifacts unless requested' do

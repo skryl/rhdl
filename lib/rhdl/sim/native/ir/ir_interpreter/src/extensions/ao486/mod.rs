@@ -1263,12 +1263,12 @@ impl Ao486Extension {
         };
         let head = ((self.dos_int13_dx >> 8) & 0x00FF) as usize;
         let sector = (cl & 0x3F) as usize;
-        // The FreeDOS floppy bootstrap trace on AO486 uses CL[7:6] as don't-care
+        // The DOS floppy bootstrap trace on AO486 uses CL[7:6] as don't-care
         // bits on its private INT 13h path. Matching the existing FDC path and the
         // runner bootstrap requires treating CH as the effective floppy cylinder.
         let cylinder = ch as usize;
 
-        // The staged FreeDOS loader on the AO486 runner path sometimes
+        // The staged DOS loader on the AO486 runner path sometimes
         // reissues later CHS reads with DL=1 even though only one mounted
         // floppy image exists. Treat A: and B: as aliases for the same image
         // on this private DOS bridge so the loader can keep walking the same

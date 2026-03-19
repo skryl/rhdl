@@ -95,6 +95,14 @@ module Sparc64IntegrationSupport
     skip 'arcilator not available' unless HdlToolchain.which('arcilator')
   end
 
+  def skip_unless_circt_verilog!
+    skip 'circt-verilog not available' unless HdlToolchain.which('circt-verilog')
+  end
+
+  def skip_unless_firtool!
+    skip 'firtool not available' unless HdlToolchain.which('firtool')
+  end
+
   def skip_unless_arcilator_jit!
     skip_unless_arcilator!
     skip 'clang++ not available' unless HdlToolchain.which('clang++')
@@ -114,6 +122,32 @@ module Sparc64IntegrationSupport
 
   def expected_benchmark_value(name)
     EXPECTED_BENCHMARK_VALUES.fetch(name.to_sym)
+  end
+
+  def build_parity_runner(artifact:)
+    case artifact.to_sym
+    when :staged_verilog_verilator
+      skip_unless_verilator!
+      build_headless_runner(mode: :verilog, verilator_source: :staged_verilog)
+    when :staged_verilog_arcilator
+      pending_unless_arcilator_backends!
+      skip_unless_arcilator!
+      skip_unless_circt_verilog!
+      build_headless_runner(mode: :arcilator, sim: :compile, arcilator_source: :staged_verilog)
+    when :imported_ir_compiler
+      skip_unless_ir_compiler!
+      build_headless_runner(mode: :ir, sim: :compile, compile_mode: :rustc)
+    when :rhdl_mlir_arcilator
+      pending_unless_arcilator_backends!
+      skip_unless_arcilator!
+      build_headless_runner(mode: :arcilator, sim: :compile, arcilator_source: :rhdl_mlir)
+    when :rhdl_verilog_verilator
+      skip_unless_verilator!
+      skip_unless_firtool!
+      build_headless_runner(mode: :verilog, verilator_source: :rhdl_verilog)
+    else
+      raise ArgumentError, "Unknown SPARC64 parity artifact #{artifact.inspect}"
+    end
   end
 
   def build_headless_runner(mode:, sim: nil, **kwargs)

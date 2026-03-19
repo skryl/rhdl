@@ -8,7 +8,7 @@ require_relative '../../../../examples/ao486/utilities/import/cpu_importer'
 require_relative '../../../../examples/ao486/utilities/import/cpu_parity_programs'
 require_relative '../../../../examples/ao486/utilities/runners/ir_runner'
 
-RSpec.describe 'AO486 parity patch profile trace surface' do
+RSpec.describe 'AO486 default patch-series trace surface' do
   include AO486SpecSupport::HeadlessImportRunnerHelper
 
   def require_import_tool!
@@ -21,13 +21,13 @@ RSpec.describe 'AO486 parity patch profile trace surface' do
     skip 'llvm-objcopy not available' unless HdlToolchain.which('llvm-objcopy')
   end
 
-  def run_importer(out_dir:, workspace:, patch_profile: :parity)
+  def run_importer(out_dir:, workspace:)
     RHDL::Examples::AO486::Import::CpuImporter.new(
       output_dir: out_dir,
       workspace_dir: workspace,
       keep_workspace: true,
       maintain_directory_structure: false,
-      patch_profile: patch_profile
+      patches_dir: RHDL::Examples::AO486::Import::CpuImporter::DEFAULT_PATCHES_ROOT
     ).run
   end
 
@@ -176,7 +176,7 @@ RSpec.describe 'AO486 parity patch profile trace surface' do
 
     Dir.mktmpdir('ao486_cpu_trace_runtime_out') do |out_dir|
       Dir.mktmpdir('ao486_cpu_trace_runtime_ws') do |workspace|
-        result = run_importer(out_dir: out_dir, workspace: workspace, patch_profile: :parity)
+        result = run_importer(out_dir: out_dir, workspace: workspace)
         runtime = build_ao486_import_headless_runner(
           File.read(result.normalized_core_mlir_path),
           mode: :ir,

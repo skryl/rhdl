@@ -597,7 +597,7 @@ impl GameBoyExtension {
         if clk_sys_idx != INVALID_SIGNAL_IDX {
             code.push_str(&format!("        signals[{}] = 0; // clk_sys low\n", clk_sys_idx));
         }
-        code.push_str("        evaluate_inline(signals);\n\n");
+        code.push_str("        evaluate_inline(signals, std::ptr::null(), std::ptr::null());\n\n");
 
         // Force CE signals AFTER evaluate to override speed_ctrl clock divider
         // (speed_ctrl__ce is computed based on a counter, but we want ce=1 every cycle)

@@ -27,7 +27,7 @@ module RHDL
         end
 
         def dos_path
-          software_path('bin', 'fdboot.img')
+          software_path('bin', 'msdos4_disk1.img')
         end
       end
 

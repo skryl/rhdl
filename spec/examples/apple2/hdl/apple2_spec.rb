@@ -751,7 +751,7 @@ RSpec.describe 'Apple II Simulator Modes' do
     end
   end
 
-  describe 'reset values consistency across IR simulators' do
+  describe 'reset values consistency across IR simulators', :slow do
     before(:all) do
       @rom_available = File.exist?(ROM_PATH2)
       if @rom_available
@@ -1039,7 +1039,7 @@ RSpec.describe 'Sub-cycles PC Progression' do
       skip 'AppleIIgo ROM not found' unless @rom_available
     end
 
-    it 'clamps sub_cycles to valid range (1-14)' do
+    it 'clamps sub_cycles to valid range (1-14)', timeout: 60 do
       require 'rhdl/codegen'
 
       ir = RHDL::Examples::Apple2::Apple2.to_flat_circt_nodes

@@ -289,10 +289,16 @@ RSpec.describe RHDL::Codegen::CIRCT::Tooling do
         expect(result.fetch(:unsupported_modules)).to be_empty
         expect(result.fetch(:transformed_modules)).to eq(['dff'])
         expect(result.dig(:flatten, :success)).to be(true), result.dig(:flatten, :stderr).to_s
-        expect(File.basename(result.fetch(:hwseq_mlir_path))).to eq('dff.hwseq.mlir')
-        expect(File.basename(result.fetch(:flattened_hwseq_mlir_path))).to eq('dff.flattened.hwseq.mlir')
+        expect(File.basename(result.fetch(:source_mlir_path))).to eq('01.dff.input.core.mlir')
+        expect(File.basename(result.fetch(:dbg_stripped_mlir_path))).to eq('02.dff.dbg_stripped.core.mlir')
+        expect(File.basename(result.fetch(:normalized_llhd_mlir_path))).to eq('03.dff.prepared.normalized.llhd.mlir')
+        expect(File.basename(result.fetch(:hwseq_mlir_path))).to eq('04.dff.hwseq.mlir')
+        expect(File.basename(result.fetch(:flattened_hwseq_mlir_path))).to eq('05.dff.flattened.hwseq.mlir')
+        expect(File.basename(result.fetch(:flattened_cleaned_hwseq_mlir_path))).to eq('06.dff.flattened.cleaned.hwseq.mlir')
+        expect(File.basename(result.fetch(:arc_mlir_path))).to eq('07.dff.arc.mlir')
         expect(File.read(result.fetch(:hwseq_mlir_path))).not_to include('llhd.')
         expect(File.read(result.fetch(:flattened_hwseq_mlir_path))).not_to include('llhd.')
+        expect(File.read(result.fetch(:flattened_cleaned_hwseq_mlir_path))).not_to include('llhd.')
         expect(File.exist?(result.fetch(:arc_mlir_path))).to be(true)
         expect(File.read(result.fetch(:arc_mlir_path))).not_to include('llhd.')
       end
@@ -316,6 +322,32 @@ RSpec.describe RHDL::Codegen::CIRCT::Tooling do
 
         expect(result[:success]).to be(true), result.dig(:arc, :stderr).to_s
         expect(RHDL::Codegen::CIRCT::ImportCleanup).not_to have_received(:cleanup_imported_core_mlir)
+        expect(File.read(result.fetch(:hwseq_mlir_path))).not_to include('llhd.')
+      end
+    end
+
+    it 'supports llhd-only ARC cleanup through the shallow importer cleanup mode' do
+      skip 'circt-opt not available' unless HdlToolchain.which('circt-opt')
+
+      Dir.mktmpdir('tooling_prepare_arc_circt_llhd_only') do |dir|
+        mlir_path = File.join(dir, 'dff.normalized.llhd.mlir')
+        File.write(mlir_path, simple_dff_llhd)
+
+        called_llhd_only = false
+        allow(RHDL::Codegen::CIRCT::ImportCleanup).to receive(:cleanup_imported_core_mlir).and_wrap_original do |orig, text, **kwargs|
+          called_llhd_only ||= kwargs[:llhd_only] == true
+          orig.call(text, **kwargs)
+        end
+
+        result = described_class.prepare_arc_mlir_from_circt_mlir(
+          mlir_path: mlir_path,
+          work_dir: File.join(dir, 'work'),
+          base_name: 'dff',
+          cleanup_mode: :llhd_only
+        )
+
+        expect(result[:success]).to be(true), result.dig(:arc, :stderr).to_s
+        expect(called_llhd_only).to be(true)
         expect(File.read(result.fetch(:hwseq_mlir_path))).not_to include('llhd.')
       end
     end
@@ -385,10 +417,10 @@ RSpec.describe RHDL::Codegen::CIRCT::Tooling do
           }
         MLIR
 
-        hwseq_path = File.join(work_dir, 'top.hwseq.mlir')
-        flattened_path = File.join(work_dir, 'top.flattened.hwseq.mlir')
-        cleaned_path = File.join(work_dir, 'top.flattened.cleaned.hwseq.mlir')
-        arc_path = File.join(work_dir, 'top.arc.mlir')
+        hwseq_path = File.join(work_dir, '04.top.hwseq.mlir')
+        flattened_path = File.join(work_dir, '05.top.flattened.hwseq.mlir')
+        cleaned_path = File.join(work_dir, '06.top.flattened.cleaned.hwseq.mlir')
+        arc_path = File.join(work_dir, '07.top.arc.mlir')
 
         expect(Open3).to receive(:capture3).with(
           'circt-opt',
@@ -409,7 +441,7 @@ RSpec.describe RHDL::Codegen::CIRCT::Tooling do
 
         expect(Open3).to receive(:capture3).with(
           'circt-opt',
-          flattened_path,
+          cleaned_path,
           '--convert-to-arcs',
           '-o',
           arc_path
@@ -423,6 +455,7 @@ RSpec.describe RHDL::Codegen::CIRCT::Tooling do
 
         expect(result[:success]).to be(true)
         expect(result.dig(:flatten_cleanup, :success)).to be(true)
+        expect(result.fetch(:flattened_cleaned_hwseq_mlir_path)).to eq(cleaned_path)
       end
     end
 
@@ -478,8 +511,27 @@ RSpec.describe RHDL::Codegen::CIRCT::Tooling do
   end
 
   describe '.preferred_arcilator_input_mlir_path' do
-    it 'prefers flattened hwseq output when available' do
+    it 'prefers cleaned flattened hwseq output when available' do
       Dir.mktmpdir('tooling_arcilator_input') do |dir|
+        cleaned = File.join(dir, 'design.flattened.cleaned.hwseq.mlir')
+        flattened = File.join(dir, 'design.flattened.hwseq.mlir')
+        hwseq = File.join(dir, 'design.hwseq.mlir')
+        arc = File.join(dir, 'design.arc.mlir')
+        [cleaned, flattened, hwseq, arc].each { |path| File.write(path, "module {}\n") }
+
+        expect(
+          described_class.preferred_arcilator_input_mlir_path(
+            flattened_cleaned_hwseq_mlir_path: cleaned,
+            flattened_hwseq_mlir_path: flattened,
+            hwseq_mlir_path: hwseq,
+            arc_mlir_path: arc
+          )
+        ).to eq(cleaned)
+      end
+    end
+
+    it 'falls back to the raw flattened artifact when the cleaned one is unavailable' do
+      Dir.mktmpdir('tooling_arcilator_input_fallback') do |dir|
         flattened = File.join(dir, 'design.flattened.hwseq.mlir')
         hwseq = File.join(dir, 'design.hwseq.mlir')
         arc = File.join(dir, 'design.arc.mlir')
@@ -487,6 +539,7 @@ RSpec.describe RHDL::Codegen::CIRCT::Tooling do
 
         expect(
           described_class.preferred_arcilator_input_mlir_path(
+            flattened_cleaned_hwseq_mlir_path: File.join(dir, 'missing.flattened.cleaned.hwseq.mlir'),
             flattened_hwseq_mlir_path: flattened,
             hwseq_mlir_path: hwseq,
             arc_mlir_path: arc
@@ -495,14 +548,15 @@ RSpec.describe RHDL::Codegen::CIRCT::Tooling do
       end
     end
 
-    it 'falls back to the first existing artifact when flattened hwseq is unavailable' do
-      Dir.mktmpdir('tooling_arcilator_input_fallback') do |dir|
+    it 'falls back to the first existing artifact when flattened artifacts are unavailable' do
+      Dir.mktmpdir('tooling_arcilator_input_fallback_hwseq') do |dir|
         hwseq = File.join(dir, 'design.hwseq.mlir')
         arc = File.join(dir, 'design.arc.mlir')
         [hwseq, arc].each { |path| File.write(path, "module {}\n") }
 
         expect(
           described_class.preferred_arcilator_input_mlir_path(
+            flattened_cleaned_hwseq_mlir_path: File.join(dir, 'missing.flattened.cleaned.hwseq.mlir'),
             flattened_hwseq_mlir_path: File.join(dir, 'missing.flattened.hwseq.mlir'),
             hwseq_mlir_path: hwseq,
             arc_mlir_path: arc

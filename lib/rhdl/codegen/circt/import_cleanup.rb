@@ -19,13 +19,15 @@ module RHDL
         # through the existing CIRCT importer and re-emitting structural MLIR.
         # This strips surviving LLHD signal/time overlays from circt-verilog
         # imports before downstream tools such as firtool consume the artifact.
-        def parse_imported_core_mlir(text, strict: true, top: nil, extern_modules: [], resolve_forward_refs: false)
+        def parse_imported_core_mlir(text, strict: true, top: nil, extern_modules: [], resolve_forward_refs: false,
+                                     llhd_only: false)
           RHDL::Codegen.import_circt_mlir(
             text,
             strict: strict,
             top: top,
             extern_modules: extern_modules,
-            resolve_forward_refs: resolve_forward_refs
+            resolve_forward_refs: resolve_forward_refs,
+            llhd_only: llhd_only
           )
         end
 
@@ -33,7 +35,8 @@ module RHDL
           RHDL::Codegen::CIRCT::MLIR.generate(modules)
         end
 
-        def cleanup_imported_core_mlir(text, strict: true, top: nil, extern_modules: [], stub_modules: [])
+        def cleanup_imported_core_mlir(text, strict: true, top: nil, extern_modules: [], stub_modules: [],
+                                       llhd_only: false)
           stub_specs = normalize_stub_modules(stub_modules)
           needs_cleanup = cleanup_markers?(text)
           return success_result(text, stubbed_modules: []) unless needs_cleanup || !stub_specs.empty?
@@ -44,7 +47,8 @@ module RHDL
             strict: strict,
             top: top,
             extern_modules: extern_modules,
-            stub_specs: stub_specs
+            stub_specs: stub_specs,
+            llhd_only: llhd_only
           ) unless package
 
           wrapped = package.fetch(:wrapped)
@@ -70,7 +74,8 @@ module RHDL
               strict: strict,
               top: entry_name || top,
               extern_modules: entry_externs,
-              resolve_forward_refs: true
+              resolve_forward_refs: true,
+              llhd_only: llhd_only
             )
             return failure_result(import_result.diagnostics, stubbed_modules: stubbed_modules) unless import_result.success?
 
@@ -117,13 +122,14 @@ module RHDL
           text.include?('llhd.')
         end
 
-        def cleanup_whole_text(text, strict:, top:, extern_modules:, stub_specs:)
+        def cleanup_whole_text(text, strict:, top:, extern_modules:, stub_specs:, llhd_only:)
           import_result = parse_imported_core_mlir(
             text,
             strict: strict,
             top: top,
             extern_modules: extern_modules,
-            resolve_forward_refs: true
+            resolve_forward_refs: true,
+            llhd_only: llhd_only
           )
           return failure_result(import_result.diagnostics, stubbed_modules: []) unless import_result.success?
 
