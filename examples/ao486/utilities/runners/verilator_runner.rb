@@ -517,6 +517,9 @@ module RHDL
             ] + Array.new(GENERIC_DOS_STAGE_CHS_HELPER_ORIGINAL.length - 24, 0x90)
           ).freeze
           DOS_INT2F_VECTOR = 0x2F
+          DOS_INT2A_LATE_FALLBACK_AFTER_CYCLES = 4_000_000
+          DOS_INT2A_LATE_FALLBACK_SEGMENT = 0x000F
+          DOS_INT2A_LATE_FALLBACK_OFFSET = 0x40D2
           DOS_INT2F_WRAPPER_SEGMENT = 0x7000
           DOS_INT2F_WRAPPER_OFFSET = 0x0000
           DOS_INT2F_BOOTSTRAP_DOS_SEGMENT = 0x0070
@@ -785,6 +788,7 @@ module RHDL
                 commit_memory_write_if_needed(committed_writes)
                 maybe_repair_generic_dos_stage_vars
                 maybe_repair_dos_int12_wrapper_chain
+                maybe_install_late_dos_int2a_fallback
                 maybe_install_late_dos_int2f_fallback
                 handle_interrupt_ack
                 maybe_seed_post_init_ivt
@@ -926,6 +930,7 @@ module RHDL
             @last_irq_vector = nil
             @pc_history = []
             @host_cycles_total = 0
+            @dos_int2a_fallback_installed = false
             @dos_int2f_wrapper_installed = false
             write_bios_tick_count(0)
             @memory[0x0470] = 0
@@ -1676,6 +1681,25 @@ module RHDL
             @dos_int2f_wrapper_installed = true
           end
 
+          def maybe_install_late_dos_int2a_fallback
+            return if @dos_int2a_fallback_installed
+            return unless @host_cycles_total >= DOS_INT2A_LATE_FALLBACK_AFTER_CYCLES
+
+            current_offset = memory_u16(0x2A * 4)
+            current_segment = memory_u16((0x2A * 4) + 2)
+            if current_offset == VerilatorRunner::DOS_INT2A_STUB_OFFSET &&
+               current_segment == VerilatorRunner::DOS_INT2A_STUB_SEGMENT
+              @dos_int2a_fallback_installed = true
+              return
+            end
+
+            return unless current_offset == DOS_INT2A_LATE_FALLBACK_OFFSET
+            return unless current_segment == DOS_INT2A_LATE_FALLBACK_SEGMENT
+
+            write_interrupt_vector(0x2A, VerilatorRunner::DOS_INT2A_STUB_SEGMENT, VerilatorRunner::DOS_INT2A_STUB_OFFSET)
+            @dos_int2a_fallback_installed = true
+          end
+
           def dos_int2f_late_fallback_wrapper_bytes(old_offset, old_segment)
             bytes = []
             DOS_INT2F_LATE_FALLBACK_AX.each do |value|
@@ -1947,7 +1971,6 @@ module RHDL
 
             @keyboard_queue << key
             @keyboard_scan_queue << ((key >> 8) & 0xFF)
-            @pic_master_pending |= (1 << 1)
             true
           end
 

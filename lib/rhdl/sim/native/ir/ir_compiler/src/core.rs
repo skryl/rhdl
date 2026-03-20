@@ -260,6 +260,14 @@ where
 }
 
 fn parse_module_ir(json: &str) -> Result<ModuleIR, String> {
+    if crate::runtime_frontend::looks_like_mlir_payload(json) {
+        let normalized = crate::runtime_frontend::normalize_mlir_payload(json)
+            .map_err(|e| format!("Failed to parse IR MLIR: {}", e))?;
+
+        return serde_json::from_value::<ModuleIR>(normalized)
+            .map_err(|e| format!("Failed to parse normalized MLIR payload: {}", e));
+    }
+
     let value = deserialize_unbounded::<Value>(json)
         .map_err(|e| format!("Failed to parse IR JSON: {}", e))?;
 

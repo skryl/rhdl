@@ -62,6 +62,19 @@ module RHDL
           @width = width
         end
 
+        def memoize_ir(cache)
+          return yield if cache.nil?
+
+          key = ir_cache_key
+          return cache[key] if cache.key?(key)
+
+          cache[key] = yield
+        end
+
+        def ir_cache_key
+          [self.class, object_id]
+        end
+
         # Bitwise operators
         def &(other)
           BehaviorBinaryOp.new(:&, self, wrap(other), width: result_width(other))
@@ -138,13 +151,18 @@ module RHDL
         # Bit selection and slicing
         def [](index)
           if index.is_a?(Range)
-            # Handle both ascending (0..7) and descending (7..0) ranges
             high = [index.begin, index.end].max
             low = [index.begin, index.end].min
             slice_width = high - low + 1
-            BehaviorSlice.new(self, index, width: slice_width)
+            cache_key = [:range, index.begin, index.end, slice_width]
+            expr_access_cache.fetch(cache_key) do
+              expr_access_cache[cache_key] = BehaviorSlice.new(self, index, width: slice_width)
+            end
           else
-            BehaviorBitSelect.new(self, index)
+            cache_key = [:bit, index]
+            expr_access_cache.fetch(cache_key) do
+              expr_access_cache[cache_key] = BehaviorBitSelect.new(self, index)
+            end
           end
         end
 
@@ -181,6 +199,10 @@ module RHDL
           return 1 if value == 0 || value == 1
           value.is_a?(Integer) ? [value.bit_length, 1].max : 1
         end
+
+        def expr_access_cache
+          @expr_access_cache ||= {}
+        end
       end
 
       # Literal value in synthesis mode
@@ -192,8 +214,10 @@ module RHDL
           super(width: width || bit_width(value))
         end
 
-        def to_ir
-          RHDL::Codegen::CIRCT::IR::Literal.new(value: @value, width: @width)
+        def to_ir(cache = nil)
+          memoize_ir(cache) do
+            RHDL::Codegen::CIRCT::IR::Literal.new(value: @value, width: @width)
+          end
         end
 
         def to_dsl_expr
@@ -201,6 +225,10 @@ module RHDL
         end
 
         private
+
+        def ir_cache_key
+          [self.class, @value, @width]
+        end
 
         def bit_width(value)
           return 1 if value == 0 || value == 1
@@ -217,12 +245,20 @@ module RHDL
           super(width: width)
         end
 
-        def to_ir
-          RHDL::Codegen::CIRCT::IR::Signal.new(name: @name, width: @width)
+        def to_ir(cache = nil)
+          memoize_ir(cache) do
+            RHDL::Codegen::CIRCT::IR::Signal.new(name: @name, width: @width)
+          end
         end
 
         def to_dsl_expr
           RHDL::DSL::SignalRef.new(@name, width: @width)
+        end
+
+        private
+
+        def ir_cache_key
+          [self.class, @name, @width]
         end
       end
 
@@ -237,13 +273,15 @@ module RHDL
           super(width: width)
         end
 
-        def to_ir
-          RHDL::Codegen::CIRCT::IR::BinaryOp.new(
-            op: @op,
-            left: @left.to_ir,
-            right: resize_ir(@right.to_ir, @left.width),
-            width: @width
-          )
+        def to_ir(cache = nil)
+          memoize_ir(cache) do
+            RHDL::Codegen::CIRCT::IR::BinaryOp.new(
+              op: @op,
+              left: @left.to_ir(cache),
+              right: resize_ir(@right.to_ir(cache), @left.width),
+              width: @width
+            )
+          end
         end
 
         def to_dsl_expr
@@ -268,8 +306,10 @@ module RHDL
           super(width: width)
         end
 
-        def to_ir
-          RHDL::Codegen::CIRCT::IR::UnaryOp.new(op: @op, operand: @operand.to_ir, width: @width)
+        def to_ir(cache = nil)
+          memoize_ir(cache) do
+            RHDL::Codegen::CIRCT::IR::UnaryOp.new(op: @op, operand: @operand.to_ir(cache), width: @width)
+          end
         end
 
         def to_dsl_expr
@@ -287,12 +327,20 @@ module RHDL
           super(width: 1)
         end
 
-        def to_ir
-          RHDL::Codegen::CIRCT::IR::Slice.new(base: @base.to_ir, range: @index..@index, width: 1)
+        def to_ir(cache = nil)
+          memoize_ir(cache) do
+            RHDL::Codegen::CIRCT::IR::Slice.new(base: @base.to_ir(cache), range: @index..@index, width: 1)
+          end
         end
 
         def to_dsl_expr
           RHDL::DSL::BitSelect.new(@base.to_dsl_expr, @index)
+        end
+
+        private
+
+        def ir_cache_key
+          [self.class, @base.send(:ir_cache_key), @index]
         end
       end
 
@@ -309,12 +357,20 @@ module RHDL
           super(width: width || (high - low + 1))
         end
 
-        def to_ir
-          RHDL::Codegen::CIRCT::IR::Slice.new(base: @base.to_ir, range: @range, width: @width)
+        def to_ir(cache = nil)
+          memoize_ir(cache) do
+            RHDL::Codegen::CIRCT::IR::Slice.new(base: @base.to_ir(cache), range: @range, width: @width)
+          end
         end
 
         def to_dsl_expr
           RHDL::DSL::BitSlice.new(@base.to_dsl_expr, @range)
+        end
+
+        private
+
+        def ir_cache_key
+          [self.class, @base.send(:ir_cache_key), @range.begin, @range.end, @width]
         end
       end
 
@@ -327,8 +383,10 @@ module RHDL
           super(width: width || parts.sum(&:width))
         end
 
-        def to_ir
-          RHDL::Codegen::CIRCT::IR::Concat.new(parts: @parts.map(&:to_ir), width: @width)
+        def to_ir(cache = nil)
+          memoize_ir(cache) do
+            RHDL::Codegen::CIRCT::IR::Concat.new(parts: @parts.map { |part| part.to_ir(cache) }, width: @width)
+          end
         end
 
         def to_dsl_expr
@@ -344,8 +402,10 @@ module RHDL
           super(width: width)
         end
 
-        def to_ir
-          RHDL::Codegen::CIRCT::IR::Resize.new(expr: @expr.to_ir, width: @width)
+        def to_ir(cache = nil)
+          memoize_ir(cache) do
+            RHDL::Codegen::CIRCT::IR::Resize.new(expr: @expr.to_ir(cache), width: @width)
+          end
         end
 
         def to_dsl_expr
@@ -363,9 +423,12 @@ module RHDL
           super(width: width || (expr.width * times))
         end
 
-        def to_ir
-          parts = Array.new(@times) { @expr.to_ir }
-          RHDL::Codegen::CIRCT::IR::Concat.new(parts: parts, width: @width)
+        def to_ir(cache = nil)
+          memoize_ir(cache) do
+            part_ir = @expr.to_ir(cache)
+            parts = Array.new(@times, part_ir)
+            RHDL::Codegen::CIRCT::IR::Concat.new(parts: parts, width: @width)
+          end
         end
 
         def to_dsl_expr
@@ -390,13 +453,15 @@ module RHDL
           self
         end
 
-        def to_ir
-          RHDL::Codegen::CIRCT::IR::Mux.new(
-            condition: @condition.to_ir,
-            when_true: @when_true_expr.to_ir,
-            when_false: @when_false_expr&.to_ir || RHDL::Codegen::CIRCT::IR::Literal.new(value: 0, width: @width),
-            width: @width
-          )
+        def to_ir(cache = nil)
+          memoize_ir(cache) do
+            RHDL::Codegen::CIRCT::IR::Mux.new(
+              condition: @condition.to_ir(cache),
+              when_true: @when_true_expr.to_ir(cache),
+              when_false: @when_false_expr&.to_ir(cache) || RHDL::Codegen::CIRCT::IR::Literal.new(value: 0, width: @width),
+              width: @width
+            )
+          end
         end
       end
 
@@ -418,15 +483,16 @@ module RHDL
           super(width: width)
         end
 
-        def to_ir
-          # Convert to nested muxes or case IR
-          RHDL::Codegen::CIRCT::IR::Case.new(
-            selector: @selector.to_ir,
-            cases: @cases.transform_keys { |k| k.is_a?(Array) ? k : [k] }
-                        .transform_values(&:to_ir),
-            default: @default_val.to_ir,
-            width: @width
-          )
+        def to_ir(cache = nil)
+          memoize_ir(cache) do
+            RHDL::Codegen::CIRCT::IR::Case.new(
+              selector: @selector.to_ir(cache),
+              cases: @cases.transform_keys { |k| k.is_a?(Array) ? k : [k] }
+                          .transform_values { |value| value.to_ir(cache) },
+              default: @default_val.to_ir(cache),
+              width: @width
+            )
+          end
         end
       end
 
@@ -440,17 +506,24 @@ module RHDL
           super(width: width)
         end
 
-        def to_ir
-          # In synthesis, reference the wire
-          RHDL::Codegen::CIRCT::IR::Signal.new(name: @name, width: @width)
+        def to_ir(cache = nil)
+          memoize_ir(cache) do
+            RHDL::Codegen::CIRCT::IR::Signal.new(name: @name, width: @width)
+          end
         end
 
         # Return the assignment that creates this wire
-        def wire_assign_ir
+        def wire_assign_ir(cache = nil)
           RHDL::Codegen::CIRCT::IR::Assign.new(
             target: @name,
-            expr: @expr.to_ir
+            expr: @expr.to_ir(cache)
           )
+        end
+
+        private
+
+        def ir_cache_key
+          [self.class, @name, @width]
         end
       end
 
@@ -463,8 +536,8 @@ module RHDL
           super(width: width)
         end
 
-        def to_ir
-          @ir
+        def to_ir(cache = nil)
+          memoize_ir(cache) { @ir }
         end
       end
 
@@ -478,12 +551,20 @@ module RHDL
           super(width: width)
         end
 
-        def to_ir
-          RHDL::Codegen::CIRCT::IR::MemoryRead.new(
-            memory: @memory_name,
-            addr: @addr.to_ir,
-            width: @width
-          )
+        def to_ir(cache = nil)
+          memoize_ir(cache) do
+            RHDL::Codegen::CIRCT::IR::MemoryRead.new(
+              memory: @memory_name,
+              addr: @addr.to_ir(cache),
+              width: @width
+            )
+          end
+        end
+
+        private
+
+        def ir_cache_key
+          [self.class, @memory_name, @addr.send(:ir_cache_key), @width]
         end
       end
 
@@ -785,14 +866,16 @@ module RHDL
           # Execute the block to collect assignments
           BehaviorEvaluator.new(self, proxies).evaluate(&block)
 
+          ir_cache = {}
+
           # Convert to IR with locals as wires
           {
             wires: @locals.map { |l| RHDL::Codegen::CIRCT::IR::Net.new(name: l.name, width: l.width) },
-            wire_assigns: @locals.map(&:wire_assign_ir),
+            wire_assigns: @locals.map { |local| local.wire_assign_ir(ir_cache) },
             output_assigns: @assignments.map do |assignment|
               RHDL::Codegen::CIRCT::IR::Assign.new(
                 target: assignment.target.name,
-                expr: resize_to_target(assignment.expr.to_ir, assignment.target.width)
+                expr: resize_to_target(assignment.expr.to_ir(ir_cache), assignment.target.width)
               )
             end
           }

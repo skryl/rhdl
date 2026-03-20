@@ -13,15 +13,16 @@ module RHDL
         super(width)
       end
 
-      def to_ir
-        # Handle the :le operator (<=) which we renamed to avoid conflict
-        ir_op = @op == :le ? :<= : @op
-        RHDL::Codegen::CIRCT::IR::BinaryOp.new(
-          op: ir_op,
-          left: @left.to_ir,
-          right: resize_ir(@right.to_ir, @left.width),
-          width: @width
-        )
+      def to_ir(cache = nil)
+        memoize_ir(cache) do
+          ir_op = @op == :le ? :<= : @op
+          RHDL::Codegen::CIRCT::IR::BinaryOp.new(
+            op: ir_op,
+            left: @left.to_ir(cache),
+            right: resize_ir(@right.to_ir(cache), @left.width),
+            width: @width
+          )
+        end
       end
 
       private

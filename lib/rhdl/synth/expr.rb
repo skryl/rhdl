@@ -10,6 +10,19 @@ module RHDL
         @width = width
       end
 
+      def memoize_ir(cache)
+        return yield if cache.nil?
+
+        key = ir_cache_key
+        return cache[key] if cache.key?(key)
+
+        cache[key] = yield
+      end
+
+      def ir_cache_key
+        [self.class, object_id]
+      end
+
       # Bitwise operators
       def &(other)
         BinaryOp.new(:&, self, wrap(other), result_width(other))
@@ -87,13 +100,18 @@ module RHDL
       # Bit selection
       def [](index)
         if index.is_a?(Range)
-          # Handle both ascending (0..7) and descending (7..0) ranges
           high = [index.begin, index.end].max
           low = [index.begin, index.end].min
           slice_width = high - low + 1
-          Slice.new(self, index, slice_width)
+          cache_key = [:range, index.begin, index.end, slice_width]
+          expr_access_cache.fetch(cache_key) do
+            expr_access_cache[cache_key] = Slice.new(self, index, slice_width)
+          end
         else
-          BitSelect.new(self, index)
+          cache_key = [:bit, index]
+          expr_access_cache.fetch(cache_key) do
+            expr_access_cache[cache_key] = BitSelect.new(self, index)
+          end
         end
       end
 
@@ -124,6 +142,10 @@ module RHDL
       def bit_width(value)
         return 1 if value == 0 || value == 1
         value.is_a?(Integer) ? [value.bit_length, 1].max : 1
+      end
+
+      def expr_access_cache
+        @expr_access_cache ||= {}
       end
     end
   end

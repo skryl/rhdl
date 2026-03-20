@@ -223,12 +223,12 @@ module RHDL
           }
         }.freeze
 
-        DEFAULT_INPUT_FORMAT = :circt
-        INPUT_FORMATS = %i[circt].freeze
+        DEFAULT_INPUT_FORMAT = :auto
+        INPUT_FORMATS = %i[auto circt mlir].freeze
         BACKEND_INPUT_FORMAT_DEFAULTS = {
-          interpreter: :circt,
-          jit: :circt,
-          compiler: :circt
+          interpreter: :auto,
+          jit: :auto,
+          compiler: :auto
         }.freeze
 
         class << self
@@ -236,7 +236,7 @@ module RHDL
             value = (format || DEFAULT_INPUT_FORMAT).to_sym
             return value if INPUT_FORMATS.include?(value)
 
-            raise ArgumentError, "Unknown IR input format: #{format.inspect}. Valid: :circt"
+            raise ArgumentError, "Unknown IR input format: #{format.inspect}. Valid: #{INPUT_FORMATS.map { |item| ":#{item}" }.join(', ')}"
           end
 
           def normalize_backend_name(backend)
@@ -266,6 +266,35 @@ module RHDL
             return normalize_input_format(explicit_input_format) if explicit_input_format
 
             input_format_for_backend(backend, env: env)
+          end
+
+          def detect_input_format(payload)
+            return :circt unless payload.is_a?(String)
+
+            parsed = JSON.parse(payload, max_nesting: false)
+            return :circt if valid_circt_runtime_payload?(parsed)
+            return :circt if malformed_circt_runtime_payload?(parsed)
+          rescue JSON::ParserError
+            return :mlir if looks_like_mlir?(payload)
+          end
+
+          def looks_like_mlir?(payload)
+            text = payload.to_s
+            text.match?(/^\s*hw\.module\b/) ||
+              text.match?(/^\s*module\s*\{/i) ||
+              text.match?(/\b(seq\.firreg|seq\.compreg|hw\.instance|comb\.)\b/)
+          end
+
+          def valid_circt_runtime_payload?(payload)
+            return false unless payload.is_a?(Hash)
+            return false unless payload.key?('circt_json_version')
+
+            modules = payload['modules']
+            modules.is_a?(Array) && !modules.empty?
+          end
+
+          def malformed_circt_runtime_payload?(payload)
+            payload.is_a?(Hash) && (payload.key?('circt_json_version') || payload.key?('modules'))
           end
 
           def finalizer_for(ctx_state)
@@ -1213,11 +1242,20 @@ module RHDL
 
         def prepare_ir_json(ir_json, input_format)
           case input_format
+          when :auto
+            detected = self.class.detect_input_format(ir_json)
+            return prepare_ir_json(ir_json, detected) if detected
+
+            raise ArgumentError, 'Unable to autodetect IR input format; expected CIRCT runtime JSON or hw/comb/seq MLIR text'
           when :circt
             json = ir_json.is_a?(String) ? ir_json : JSON.generate(ir_json, max_nesting: false)
             { json: json, effective_format: :circt }
+          when :mlir
+            raise ArgumentError, 'MLIR input must be provided as text' unless ir_json.is_a?(String)
+
+            { json: ir_json, effective_format: :mlir }
           else
-            raise ArgumentError, "Unsupported IR input format: #{input_format.inspect}. Valid: :circt"
+            raise ArgumentError, "Unsupported IR input format: #{input_format.inspect}. Valid: #{self.class::INPUT_FORMATS.map { |item| ":#{item}" }.join(', ')}"
           end
         end
 
@@ -1401,10 +1439,12 @@ module RHDL
         def sim_json(ir_obj, backend: :interpreter, format: nil, env: ENV)
           input_format = format ? Simulator.normalize_input_format(format) : input_format_for_backend(backend, env: env)
           case input_format
-          when :circt
+          when :auto, :circt
             circt_runtime_json(ir_obj)
+          when :mlir
+            raise ArgumentError, 'sim_json only exports CIRCT runtime JSON; use to_mlir_hierarchy for MLIR text'
           else
-            raise ArgumentError, "Unsupported IR input format: #{input_format.inspect}. Valid: :circt"
+            raise ArgumentError, "Unsupported IR input format: #{input_format.inspect}. Valid: #{Simulator::INPUT_FORMATS.map { |item| ":#{item}" }.join(', ')}"
           end
         end
 
@@ -1413,14 +1453,14 @@ module RHDL
         def circt_runtime_json(ir_obj)
           if ir_obj.is_a?(String)
             parsed = parse_json_string(ir_obj)
-            return ir_obj if valid_circt_runtime_payload?(parsed)
-            raise ArgumentError, 'CIRCT runtime JSON must include circt_json_version and non-empty modules' if malformed_circt_runtime_payload?(parsed)
+            return ir_obj if Simulator.valid_circt_runtime_payload?(parsed)
+            raise ArgumentError, 'CIRCT runtime JSON must include circt_json_version and non-empty modules' if Simulator.malformed_circt_runtime_payload?(parsed)
           end
 
           if ir_obj.is_a?(Hash)
             payload = stringify_hash_keys(ir_obj)
-            return JSON.generate(payload, max_nesting: false) if valid_circt_runtime_payload?(payload)
-            raise ArgumentError, 'CIRCT runtime JSON must include circt_json_version and non-empty modules' if malformed_circt_runtime_payload?(payload)
+            return JSON.generate(payload, max_nesting: false) if Simulator.valid_circt_runtime_payload?(payload)
+            raise ArgumentError, 'CIRCT runtime JSON must include circt_json_version and non-empty modules' if Simulator.malformed_circt_runtime_payload?(payload)
           end
 
           require_relative '../../../codegen/circt/runtime_json' unless defined?(RHDL::Codegen::CIRCT::RuntimeJSON)
@@ -1444,18 +1484,6 @@ module RHDL
 
         def stringify_hash_keys(hash)
           hash.each_with_object({}) { |(k, v), out| out[k.to_s] = v }
-        end
-
-        def valid_circt_runtime_payload?(payload)
-          return false unless payload.is_a?(Hash)
-          return false unless payload.key?('circt_json_version')
-
-          modules = payload['modules']
-          modules.is_a?(Array) && !modules.empty?
-        end
-
-        def malformed_circt_runtime_payload?(payload)
-          payload.is_a?(Hash) && (payload.key?('circt_json_version') || payload.key?('modules'))
         end
 
         def circt_ir_object?(ir_obj)

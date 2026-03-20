@@ -1,6 +1,6 @@
 # Status
 
-In Progress - March 19, 2026
+Completed - March 19, 2026
 
 ## Context
 
@@ -48,6 +48,10 @@ The final user revision for this PRD was stricter still:
    - `raise_circt_components`
    - `to_mlir_hierarchy`
 5. Add a real profiler to the SPARC64 `to_mlir_hierarchy` path and capture a timeboxed profile from the actual test flow.
+6. After `to_mlir_hierarchy`, run the exported MLIR through `circt-opt --hw-flatten-modules --canonicalize --cse`.
+7. Record whether that post-export optimized MLIR can be compiled by:
+   - Arcilator compile backend
+   - native IR compiler backend with direct MLIR input
 
 ## Non-Goals
 
@@ -146,6 +150,8 @@ Add a profiler dependency and use it on the real SPARC64 raw-core import -> rais
    - optimized MLIR byte size
 4. No MLIR -> JSON pass is required for this experiment.
 5. The repo can produce a profiler report for the real SPARC64 `to_mlir_hierarchy` path from a slow spec.
+6. The matrix records post-export `circt-opt` results for each successful export variant.
+7. The matrix records Arcilator compile-backend and MLIR-direct IR compiler backend success/failure outcomes for each successful export variant.
 
 ## Risks And Mitigations
 
@@ -153,6 +159,8 @@ Add a profiler dependency and use it on the real SPARC64 raw-core import -> rais
    - Mitigation: measure each stage independently so the bottleneck is obvious.
 2. Some `circt-opt` variants may fail.
    - Mitigation: record failures per variant in the report.
+3. The backend compilers may accept different MLIR subsets than the export path emits.
+   - Mitigation: treat backend compile as an experiment result and record exact failure strings instead of assuming parity.
 
 ## Results
 
@@ -207,6 +215,91 @@ Key findings:
 2. With cache reuse disabled, `to_mlir_hierarchy` is no longer effectively free, but it is still materially cheaper than the import and raise steps.
 3. `--canonicalize --cse` was again the best size reduction path.
 4. On this regenerated input, `--hw-flatten-modules` made no size difference over passthrough, and `--hw-flatten-modules --canonicalize --cse` matched `--canonicalize --cse`.
+
+## Phase 4: Post-Export Optimization And Backend Compile Results
+
+The actual slow spec now also performs, for each successful export variant:
+
+1. post-export `circt-opt --hw-flatten-modules --canonicalize --cse`
+2. Arcilator compile-backend validation on the post-export optimized MLIR
+3. native IR compiler backend validation with `input_format: :mlir`
+
+Spec:
+
+- `spec/examples/sparc64/runners/ir_runner_mlir_opt_matrix_spec.rb`
+
+Measured run:
+
+- `bundle exec rspec spec/examples/sparc64/runners/ir_runner_mlir_opt_matrix_spec.rb --tag slow --format documentation`
+- result: `1 example, 0 failures`
+- wall time: `9 minutes 45 seconds`
+
+Fresh input:
+
+1. fresh importer run: `33.204821999999695s`
+2. raw source MLIR bytes: `21188406`
+
+Per-variant results:
+
+1. `hw_flatten_modules_canonicalize_cse`
+   - pre-export optimized MLIR: `4774335` bytes
+   - `import_circt_mlir`: `7.923423999978695s`
+   - `raise_circt_components`: `53.93235200000345s`
+   - `to_mlir_hierarchy`: `111.10670299999765s`
+   - exported MLIR: `30171993` bytes
+   - post-export optimized MLIR: `4107539` bytes
+   - Arcilator compile backend: `success`
+     - prepare: `4.473055000009481s`
+     - compile: `4.751132000004873s`
+   - IR compiler backend (`input_format: :mlir`): `failure`
+     - error: `Failed to parse IR input: MLIR normalization failed: Missing ':' separator in hw.constant`
+
+2. `canonicalize_cse`
+   - pre-export optimized MLIR: `3165804` bytes
+   - `import_circt_mlir`: `5.282494000013685s`
+   - `raise_circt_components`: `8.529492000001483s`
+   - `to_mlir_hierarchy`: `5.577019999996992s`
+   - exported MLIR: `9547917` bytes
+   - post-export optimized MLIR: `3120871` bytes
+   - Arcilator compile backend: `success`
+     - prepare: `6.6234930000209715s`
+     - compile: `9.5146319999767s`
+   - IR compiler backend (`input_format: :mlir`): `failure`
+     - error: `Failed to parse IR input: MLIR normalization failed: Missing ':' separator in hw.constant`
+
+3. `circt_opt_passthrough`
+   - pre-export optimized MLIR: `16165491` bytes
+   - `import_circt_mlir`: `20.667734999995446s`
+   - `raise_circt_components`: `27.588618000008864s`
+   - `to_mlir_hierarchy`: `7.597479000018211s`
+   - exported MLIR: `23334017` bytes
+   - post-export optimized MLIR: `3094472` bytes
+   - Arcilator compile backend: `success`
+     - prepare: `6.6282869999995455s`
+     - compile: `9.307761999982176s`
+   - IR compiler backend (`input_format: :mlir`): `failure`
+     - error: `Failed to parse IR input: MLIR normalization failed: Missing ':' separator in hw.constant`
+
+4. `hw_flatten_modules`
+   - pre-export optimized MLIR: `18723114` bytes
+   - `import_circt_mlir`: `25.549039999983506s`
+   - `raise_circt_components`: `78.47309499999392s`
+   - `to_mlir_hierarchy`: `126.93940400000429s`
+   - exported MLIR: `50340940` bytes
+   - post-export optimized MLIR: `4083885` bytes
+   - Arcilator compile backend: `success`
+     - prepare: `4.4422129999729805s`
+     - compile: `4.29508199999691s`
+   - IR compiler backend (`input_format: :mlir`): `failure`
+     - error: `Failed to parse IR input: MLIR normalization failed: Missing ':' separator in hw.constant`
+
+Final findings from the expanded matrix:
+
+1. All four successful pre-export variants also succeeded through the post-export `circt-opt --hw-flatten-modules --canonicalize --cse` step.
+2. All four post-export optimized MLIR artifacts compiled successfully with the Arcilator compile backend.
+3. None of the four post-export optimized MLIR artifacts compiled successfully with the native IR compiler backend in direct-MLIR mode.
+4. The IR compiler backend failure is consistent across variants and points to MLIR normalization/parser support, not variant-specific export shape.
+5. The smallest post-export MLIR was the `circt_opt_passthrough` export after post-export optimization at `3094472` bytes, narrowly smaller than `canonicalize_cse` post-export at `3120871` bytes.
 
 ## Phase 3 Profiling Results
 

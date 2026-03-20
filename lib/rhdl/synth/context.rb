@@ -84,16 +84,18 @@ module RHDL
 
       # Convert collected assignments to IR with local wires
       def to_ir_assigns
+        ir_cache = {}
+
         # First, create wire assignments for locals
         wire_assigns = @locals.map do |local_var|
-          ir_expr = local_var.expr.to_ir
+          ir_expr = local_var.expr.to_ir(ir_cache)
           ir_expr = resize_ir(ir_expr, local_var.width) if ir_expr.width != local_var.width
           RHDL::Codegen::CIRCT::IR::Assign.new(target: local_var.name, expr: ir_expr)
         end
 
         # Then, create output assignments
         output_assigns = @assignments.map do |assignment|
-          ir_expr = assignment[:expr].to_ir
+          ir_expr = assignment[:expr].to_ir(ir_cache)
           ir_expr = resize_ir(ir_expr, assignment[:width]) if ir_expr.width != assignment[:width]
           RHDL::Codegen::CIRCT::IR::Assign.new(target: assignment[:target], expr: ir_expr)
         end
@@ -232,9 +234,16 @@ module RHDL
         @expr = expr
       end
 
-      def to_ir
-        # Reference the wire by name
-        RHDL::Codegen::CIRCT::IR::Signal.new(name: @name, width: @width)
+      def to_ir(cache = nil)
+        memoize_ir(cache) do
+          RHDL::Codegen::CIRCT::IR::Signal.new(name: @name, width: @width)
+        end
+      end
+
+      private
+
+      def ir_cache_key
+        [self.class, @name, @width]
       end
     end
 
@@ -285,44 +294,44 @@ module RHDL
         @context = context
       end
 
-      def to_ir
-        # Generate a mux tree for selecting from Vec elements
-        # case_select(index, { 0 => vec_0, 1 => vec_1, ... })
-        count = @vec_def[:count]
-        element_width = @vec_def[:width]
+      def to_ir(cache = nil)
+        memoize_ir(cache) do
+          count = @vec_def[:count]
+          element_width = @vec_def[:width]
 
-        # Build cases for each element
-        # Start with last element as default, then build mux chain backwards
-        result = RHDL::Codegen::CIRCT::IR::Signal.new(
-          name: "#{@vec_name}_#{count - 1}",
-          width: element_width
-        )
-
-        # Build mux chain from second-to-last down to first
-        (count - 2).downto(0) do |i|
-          element_signal = RHDL::Codegen::CIRCT::IR::Signal.new(
-            name: "#{@vec_name}_#{i}",
+          result = RHDL::Codegen::CIRCT::IR::Signal.new(
+            name: "#{@vec_name}_#{count - 1}",
             width: element_width
           )
 
-          # Condition: index == i
-          index_ir = @index.respond_to?(:to_ir) ? @index.to_ir : RHDL::Codegen::CIRCT::IR::Signal.new(name: @index.to_s, width: index_width)
-          condition = RHDL::Codegen::CIRCT::IR::BinaryOp.new(
-            op: :==,
-            left: index_ir,
-            right: RHDL::Codegen::CIRCT::IR::Literal.new(value: i, width: index_width),
-            width: 1
-          )
+          (count - 2).downto(0) do |i|
+            element_signal = RHDL::Codegen::CIRCT::IR::Signal.new(
+              name: "#{@vec_name}_#{i}",
+              width: element_width
+            )
 
-          result = RHDL::Codegen::CIRCT::IR::Mux.new(
-            condition: condition,
-            when_true: element_signal,
-            when_false: result,
-            width: element_width
-          )
+            index_ir = if @index.respond_to?(:to_ir)
+                         @index.to_ir(cache)
+                       else
+                         RHDL::Codegen::CIRCT::IR::Signal.new(name: @index.to_s, width: index_width)
+                       end
+            condition = RHDL::Codegen::CIRCT::IR::BinaryOp.new(
+              op: :==,
+              left: index_ir,
+              right: RHDL::Codegen::CIRCT::IR::Literal.new(value: i, width: index_width),
+              width: 1
+            )
+
+            result = RHDL::Codegen::CIRCT::IR::Mux.new(
+              condition: condition,
+              when_true: element_signal,
+              when_false: result,
+              width: element_width
+            )
+          end
+
+          result
         end
-
-        result
       end
 
       private

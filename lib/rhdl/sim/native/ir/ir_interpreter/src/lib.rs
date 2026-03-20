@@ -16,6 +16,8 @@ pub mod apple2_runner;
 pub mod core;
 #[path = "../../ir_compiler/src/runtime_value.rs"]
 pub mod runtime_value;
+#[path = "../../common/runtime_frontend.rs"]
+pub mod runtime_frontend;
 #[path = "../../common/signal_value.rs"]
 pub mod signal_value;
 mod extensions;

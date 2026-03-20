@@ -461,7 +461,7 @@ RSpec.describe RHDL::Examples::AO486::VerilatorRunner, timeout: 360 do
     runner.load_bios
     runner.load_dos(path: dos622_disk_path)
 
-    state = runner.run(cycles: 6_000_000)
+    state = runner.run(cycles: 8_000_000)
     final_display = runner.render_display
     pc_tail = runner.sim.runner_ao486_pc_history.last(12)
     int13_tail = runner.sim.runner_ao486_dos_int13_history.last(12)
@@ -478,8 +478,30 @@ RSpec.describe RHDL::Examples::AO486::VerilatorRunner, timeout: 360 do
       "vector_2f=#{vector_2f.inspect}",
       final_display
     ].join("\n")
+    expect(vector_2a).to eq([0x00, 0x8D, 0x00, 0xF0])
     expect(final_display).to include('Booting MS-DOS 6.22')
     expect(final_display).to include('A:\\>')
+  end
+
+  it 'accepts keyboard input at the DOS 6.22 shell prompt', slow: true, timeout: 900 do
+    skip 'firtool not available' unless HdlToolchain.which('firtool')
+    skip 'verilator not available' unless HdlToolchain.verilator_available?
+
+    runner = described_class.new(headless: true)
+    runner.load_bios
+    runner.load_dos(path: dos622_disk_path)
+
+    state = runner.run(cycles: 8_000_000)
+    expect(state[:shell_prompt_detected]).to be(true)
+
+    runner.send_keys("VER\r")
+    state = runner.run(cycles: 1_000_000)
+    final_display = runner.render_display
+
+    expect(state[:exception_vector]).not_to eq(0)
+    expect(final_display).to include('A:\\>VER')
+    expect(final_display).to include('MS-DOS Version')
+    expect(final_display).not_to include('Divide overflow')
   end
 
   it 'keeps the single-disk DOS path out of the INT 12h self-loop', slow: true do

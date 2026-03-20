@@ -28,6 +28,11 @@ RSpec.describe 'SPARC64 IR compiler MLIR optimization matrix', slow: true do
       expect(variant.fetch('to_mlir_hierarchy_seconds')).to be >= 0.0
       expect(variant.fetch('exported_mlir_bytes')).to be > 0
       expect(File.file?(variant.fetch('exported_mlir_path'))).to be(true)
+      expect(variant.fetch('post_export_circt_opt').fetch('command')).to include('--hw-flatten-modules')
+      expect(variant.fetch('post_export_circt_opt').fetch('command')).to include('--canonicalize')
+      expect(variant.fetch('post_export_circt_opt').fetch('command')).to include('--cse')
+      expect(variant.fetch('arcilator_compile_backend').fetch('stage')).not_to be_nil
+      expect(variant.fetch('ir_compiler_compile_backend').fetch('stage')).not_to be_nil
     end
     expect(report.dig('best_success_variant', 'id')).not_to be_nil
     expect(report.fetch('importer_run_seconds')).to be >= 0.0

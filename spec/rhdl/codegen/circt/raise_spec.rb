@@ -751,7 +751,7 @@ RSpec.describe RHDL::Codegen::CIRCT::Raise do
       expect(emitted_mlir).to include('hw.module @caps')
     end
 
-    it 'reuses imported CIRCT modules when re-emitting raised components' do
+    it 'rebuilds fresh CIRCT modules when re-emitting raised components' do
       mod = ir::ModuleOp.new(
         name: 'cached_roundtrip',
         ports: [
@@ -773,19 +773,14 @@ RSpec.describe RHDL::Codegen::CIRCT::Raise do
       expect(result.success?).to be(true)
       component = result.components.fetch('cached_roundtrip')
 
-      component.define_singleton_method(:build_circt_module) do |*|
-        raise 'should not rebuild CIRCT from raised DSL'
-      end
+      expect(component).to receive(:build_circt_module).and_call_original
 
-      emitted_mlir = nil
-      expect do
-        emitted_mlir = component.to_ir(top_name: 'cached_roundtrip')
-      end.not_to raise_error
+      emitted_mlir = component.to_ir(top_name: 'cached_roundtrip')
       expect(emitted_mlir).to include('hw.module @cached_roundtrip')
       expect(emitted_mlir).to include('hw.output %a : i8')
     end
 
-    it 'reuses original imported CIRCT text when re-emitting raised components from MLIR input' do
+    it 'regenerates fresh MLIR when re-emitting raised components from MLIR input' do
       mlir = <<~MLIR
         hw.module @cached_text(%a: i8) -> (y: i8) {
           hw.output %a : i8
@@ -796,16 +791,14 @@ RSpec.describe RHDL::Codegen::CIRCT::Raise do
       expect(result.success?).to be(true)
       component = result.components.fetch('cached_text')
 
-      allow(RHDL::Codegen::CIRCT::MLIR).to receive(:generate).and_raise('should not regenerate imported MLIR text')
+      expect(RHDL::Codegen::CIRCT::MLIR).to receive(:generate).and_call_original
 
-      emitted_mlir = nil
-      expect do
-        emitted_mlir = component.to_ir(top_name: 'cached_text')
-      end.not_to raise_error
-      expect(emitted_mlir.strip).to eq(mlir.strip)
+      emitted_mlir = component.to_ir(top_name: 'cached_text')
+      expect(emitted_mlir).to include('hw.module @cached_text')
+      expect(emitted_mlir).to include('hw.output %a : i8')
     end
 
-    it 'renames cached imported CIRCT modules without rebuilding DSL state' do
+    it 'renames fresh CIRCT output without relying on cached imported modules' do
       mod = ir::ModuleOp.new(
         name: 'rename_me',
         ports: [
@@ -827,16 +820,13 @@ RSpec.describe RHDL::Codegen::CIRCT::Raise do
       expect(result.success?).to be(true)
       component = result.components.fetch('rename_me')
 
-      component.define_singleton_method(:build_circt_module) do |*|
-        raise 'should not rebuild CIRCT from raised DSL'
-      end
-
+      expect(component).to receive(:build_circt_module).and_call_original
       emitted_mlir = component.to_ir(top_name: 'renamed_copy')
       expect(emitted_mlir).to include('hw.module @renamed_copy')
       expect(emitted_mlir).not_to include('hw.module @rename_me(')
     end
 
-    it 'renames cached imported CIRCT text without regenerating MLIR' do
+    it 'renames fresh MLIR output without relying on cached imported text' do
       mlir = <<~MLIR
         hw.module @rename_text(%a: i1) -> (y: i1) {
           hw.output %a : i1
@@ -847,8 +837,7 @@ RSpec.describe RHDL::Codegen::CIRCT::Raise do
       expect(result.success?).to be(true)
       component = result.components.fetch('rename_text')
 
-      allow(RHDL::Codegen::CIRCT::MLIR).to receive(:generate).and_raise('should not regenerate imported MLIR text')
-
+      expect(RHDL::Codegen::CIRCT::MLIR).to receive(:generate).and_call_original
       emitted_mlir = component.to_ir(top_name: 'renamed_text_copy')
       expect(emitted_mlir).to include('hw.module @renamed_text_copy')
       expect(emitted_mlir).not_to include('hw.module @rename_text(')

@@ -12,9 +12,12 @@ module RHDL
         super(width)
       end
 
-      def to_ir
-        parts = Array.new(@times) { @expr.to_ir }
-        RHDL::Codegen::CIRCT::IR::Concat.new(parts: parts, width: @width)
+      def to_ir(cache = nil)
+        memoize_ir(cache) do
+          part_ir = @expr.to_ir(cache)
+          parts = Array.new(@times, part_ir)
+          RHDL::Codegen::CIRCT::IR::Concat.new(parts: parts, width: @width)
+        end
       end
     end
   end

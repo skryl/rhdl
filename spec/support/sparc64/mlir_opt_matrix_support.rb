@@ -8,6 +8,9 @@ require 'time'
 require 'tmpdir'
 require 'timeout'
 
+require 'rhdl/codegen/circt/tooling'
+require 'rhdl/sim/native/ir/simulator'
+
 require_relative '../../../examples/sparc64/utilities/integration/import_loader'
 require_relative '../../../examples/sparc64/utilities/integration/import_patch_set'
 require_relative '../../../examples/sparc64/utilities/import/system_importer'
@@ -35,6 +38,12 @@ module Sparc64MlirOptMatrixSupport
       args: ['--hw-flatten-modules']
     }
   ].freeze
+
+  POST_EXPORT_VARIANT = {
+    id: 'post_export_hw_flatten_modules_canonicalize_cse',
+    label: 'post-export hw-flatten-modules + canonicalize + cse',
+    args: ['--hw-flatten-modules', '--canonicalize', '--cse']
+  }.freeze
 
   module_function
 
@@ -513,6 +522,26 @@ module Sparc64MlirOptMatrixSupport
     exported_mlir_path = File.join(work_dir, format('%02d.%s.exported.mlir', index, variant_id))
     File.write(exported_mlir_path, exported_mlir)
 
+    post_export_circt_opt = optimize_post_export_variant(
+      index: index,
+      variant_id: variant_id,
+      exported_mlir_path: exported_mlir_path,
+      exported_mlir_bytes: exported_mlir.bytesize,
+      work_dir: work_dir
+    )
+
+    arcilator_compile_backend = run_arcilator_compile_backend(
+      index: index,
+      variant_id: variant_id,
+      work_dir: work_dir,
+      top_module: top_name,
+      optimized_result: post_export_circt_opt
+    )
+
+    ir_compiler_compile_backend = run_ir_compiler_compile_backend(
+      optimized_result: post_export_circt_opt
+    )
+
     result.merge(
       success: true,
       stage: 'to_mlir_hierarchy',
@@ -526,7 +555,10 @@ module Sparc64MlirOptMatrixSupport
       top_module: top_name,
       to_mlir_hierarchy_seconds: to_mlir_hierarchy_seconds,
       exported_mlir_path: exported_mlir_path,
-      exported_mlir_bytes: exported_mlir.bytesize
+      exported_mlir_bytes: exported_mlir.bytesize,
+      post_export_circt_opt: post_export_circt_opt,
+      arcilator_compile_backend: arcilator_compile_backend,
+      ir_compiler_compile_backend: ir_compiler_compile_backend
     )
   rescue StandardError => e
     result.merge(
@@ -569,6 +601,202 @@ module Sparc64MlirOptMatrixSupport
     )
   end
 
+  def optimize_post_export_variant(index:, variant_id:, exported_mlir_path:, exported_mlir_bytes:, work_dir:)
+    output_mlir_path = File.join(work_dir, format('%02d.%s.%s.mlir', index, variant_id, POST_EXPORT_VARIANT.fetch(:id)))
+    cmd = ['circt-opt', *POST_EXPORT_VARIANT.fetch(:args), exported_mlir_path, '-o', output_mlir_path]
+    stdout, stderr, status = Open3.capture3(*cmd)
+
+    result = {
+      id: POST_EXPORT_VARIANT.fetch(:id),
+      label: POST_EXPORT_VARIANT.fetch(:label),
+      args: POST_EXPORT_VARIANT.fetch(:args),
+      command: Shellwords.join(cmd),
+      optimized_mlir_path: output_mlir_path,
+      success: false
+    }
+
+    return result.merge(stage: 'circt_opt', stdout: stdout, stderr: stderr) unless status.success?
+
+    optimized_mlir_bytes = File.size(output_mlir_path)
+    result.merge(
+      success: true,
+      stage: 'circt_opt',
+      optimized_mlir_bytes: optimized_mlir_bytes,
+      bytes_saved: exported_mlir_bytes - optimized_mlir_bytes,
+      size_ratio: optimized_mlir_bytes.to_f / exported_mlir_bytes.to_f
+    )
+  rescue StandardError => e
+    {
+      id: POST_EXPORT_VARIANT.fetch(:id),
+      label: POST_EXPORT_VARIANT.fetch(:label),
+      args: POST_EXPORT_VARIANT.fetch(:args),
+      command: nil,
+      optimized_mlir_path: output_mlir_path,
+      success: false,
+      stage: 'exception',
+      error_class: e.class.name,
+      error_message: e.message
+    }
+  end
+
+  def run_arcilator_compile_backend(index:, variant_id:, work_dir:, top_module:, optimized_result:)
+    return skipped_backend_result('post_export_circt_opt_failed') unless optimized_result.fetch(:success)
+    return unavailable_backend_result('missing tools: circt-opt/arcilator') unless command_available?('circt-opt') && command_available?('arcilator')
+
+    mlir_path = optimized_result.fetch(:optimized_mlir_path)
+    backend_dir = File.join(work_dir, format('%02d.%s.arcilator_backend', index, variant_id))
+    FileUtils.mkdir_p(backend_dir)
+
+    prepared = nil
+    prepare_seconds = measure_seconds do
+      prepared = RHDL::Codegen::CIRCT::Tooling.prepare_arc_mlir_from_circt_mlir(
+        mlir_path: mlir_path,
+        work_dir: backend_dir,
+        base_name: top_module,
+        top: top_module,
+        cleanup_mode: :syntax_only
+      )
+    end
+
+    unless prepared[:success]
+      return {
+        available: true,
+        success: false,
+        stage: 'prepare_arc_mlir_from_circt_mlir',
+        prepare_seconds: prepare_seconds,
+        stderr: prepared.dig(:arc, :stderr),
+        arc_mlir_path: prepared[:arc_mlir_path]
+      }
+    end
+
+    final_arc_mlir_path = RHDL::Codegen::CIRCT::Tooling.finalize_arc_mlir_for_arcilator!(
+      arc_mlir_path: prepared.fetch(:arc_mlir_path),
+      check_paths: [
+        prepared[:normalized_llhd_mlir_path],
+        prepared[:hwseq_mlir_path],
+        prepared[:flattened_hwseq_mlir_path],
+        prepared[:flattened_cleaned_hwseq_mlir_path],
+        prepared[:arc_mlir_path]
+      ]
+    )
+
+    ll_path = File.join(backend_dir, format('%02d.%s.post_export.arc.ll', index, variant_id))
+    state_file = File.join(backend_dir, format('%02d.%s.post_export.state.json', index, variant_id))
+    cmd = RHDL::Codegen::CIRCT::Tooling.arcilator_command(
+      mlir_path: final_arc_mlir_path,
+      state_file: state_file,
+      out_path: ll_path,
+      extra_args: %w[--observe-ports --observe-wires --observe-registers]
+    )
+    stdout = nil
+    stderr = nil
+    status = nil
+    compile_seconds = measure_seconds do
+      stdout, stderr, status = Open3.capture3(*cmd)
+    end
+
+    {
+      available: true,
+      success: status.success?,
+      stage: 'arcilator',
+      prepare_seconds: prepare_seconds,
+      compile_seconds: compile_seconds,
+      command: Shellwords.join(cmd),
+      stdout: stdout,
+      stderr: stderr,
+      final_arc_mlir_path: final_arc_mlir_path,
+      llvm_ir_path: ll_path,
+      state_file_path: state_file,
+      llvm_ir_bytes: File.file?(ll_path) ? File.size(ll_path) : nil
+    }
+  rescue StandardError => e
+    {
+      available: true,
+      success: false,
+      stage: 'exception',
+      error_class: e.class.name,
+      error_message: e.message
+    }
+  end
+
+  def run_ir_compiler_compile_backend(optimized_result:)
+    return skipped_backend_result('post_export_circt_opt_failed') unless optimized_result.fetch(:success)
+
+    mlir_text = File.read(optimized_result.fetch(:optimized_mlir_path))
+    simulator = nil
+    compile_seconds = nil
+    effective_input_format = nil
+
+    with_compiler_env do
+      compile_seconds = measure_seconds do
+        simulator = RHDL::Sim::Native::IR::Simulator.new(
+          mlir_text,
+          backend: :compiler,
+          input_format: :mlir,
+          skip_signal_widths: true,
+          retain_ir_json: false
+        )
+      end
+      effective_input_format = simulator.effective_input_format
+    end
+
+    {
+      available: RHDL::Sim::Native::IR::COMPILER_AVAILABLE,
+      success: true,
+      stage: 'simulator_compile',
+      compile_seconds: compile_seconds,
+      effective_input_format: effective_input_format.to_s,
+      requested_input_format: 'mlir'
+    }
+  rescue StandardError => e
+    {
+      available: RHDL::Sim::Native::IR::COMPILER_AVAILABLE,
+      success: false,
+      stage: 'exception',
+      error_class: e.class.name,
+      error_message: e.message
+    }
+  ensure
+    simulator&.close
+  end
+
+  def with_compiler_env
+    previous_rustc = ENV['RHDL_IR_COMPILER_FORCE_RUSTC']
+    previous_runtime_only = ENV['RHDL_IR_COMPILER_FORCE_RUNTIME_ONLY']
+    ENV['RHDL_IR_COMPILER_FORCE_RUSTC'] = '1'
+    ENV.delete('RHDL_IR_COMPILER_FORCE_RUNTIME_ONLY')
+    yield
+  ensure
+    if previous_rustc.nil?
+      ENV.delete('RHDL_IR_COMPILER_FORCE_RUSTC')
+    else
+      ENV['RHDL_IR_COMPILER_FORCE_RUSTC'] = previous_rustc
+    end
+    if previous_runtime_only.nil?
+      ENV.delete('RHDL_IR_COMPILER_FORCE_RUNTIME_ONLY')
+    else
+      ENV['RHDL_IR_COMPILER_FORCE_RUNTIME_ONLY'] = previous_runtime_only
+    end
+  end
+
+  def unavailable_backend_result(reason)
+    {
+      available: false,
+      success: false,
+      stage: 'unavailable',
+      reason: reason
+    }
+  end
+
+  def skipped_backend_result(reason)
+    {
+      available: true,
+      success: false,
+      stage: 'skipped',
+      reason: reason
+    }
+  end
+
   def read_import_report(import_dir)
     report_path = File.join(import_dir, 'import_report.json')
     return {} unless File.file?(report_path)
@@ -582,6 +810,10 @@ module Sparc64MlirOptMatrixSupport
     started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
     yield
     Process.clock_gettime(Process::CLOCK_MONOTONIC) - started
+  end
+
+  def command_available?(tool)
+    system("which #{tool} > /dev/null 2>&1")
   end
 
   def format_diagnostics(diagnostics)

@@ -20,12 +20,38 @@ module RHDL
         q <= mux(en, q + 1, q)
       end
     end
+
+    class IrInputFormatWireChild < RHDL::Sim::Component
+      input :a, width: 4
+      output :y, width: 4
+
+      behavior do
+        y <= a + 1
+      end
+    end
+
+    class IrInputFormatHierTop < RHDL::Sim::Component
+      input :a, width: 4
+      output :y, width: 4
+
+      instance :u, IrInputFormatWireChild
+      port :a => %i[u a]
+      port %i[u y] => :y
+    end
   end
 end
 
 RSpec.describe 'IR simulator input formats' do
   def counter_ir
     RHDL::SpecFixtures::IrInputFormatCounter.to_flat_circt_nodes(top_name: 'ir_input_format_counter')
+  end
+
+  def counter_mlir
+    RHDL::SpecFixtures::IrInputFormatCounter.to_mlir_hierarchy(top_name: 'ir_input_format_counter')
+  end
+
+  def hierarchical_mlir
+    RHDL::SpecFixtures::IrInputFormatHierTop.to_mlir_hierarchy(top_name: 'ir_input_format_top')
   end
 
   def step(sim, rst:, en:)
@@ -38,16 +64,16 @@ RSpec.describe 'IR simulator input formats' do
   end
 
   describe 'backend input format resolution' do
-    it 'defaults interpreter to circt format' do
-      expect(RHDL::Sim::Native::IR.input_format_for_backend(:interpreter, env: {})).to eq(:circt)
+    it 'defaults interpreter to auto format' do
+      expect(RHDL::Sim::Native::IR.input_format_for_backend(:interpreter, env: {})).to eq(:auto)
     end
 
-    it 'defaults jit to circt format' do
-      expect(RHDL::Sim::Native::IR.input_format_for_backend(:jit, env: {})).to eq(:circt)
+    it 'defaults jit to auto format' do
+      expect(RHDL::Sim::Native::IR.input_format_for_backend(:jit, env: {})).to eq(:auto)
     end
 
-    it 'defaults compiler to circt format' do
-      expect(RHDL::Sim::Native::IR.input_format_for_backend(:compiler, env: {})).to eq(:circt)
+    it 'defaults compiler to auto format' do
+      expect(RHDL::Sim::Native::IR.input_format_for_backend(:compiler, env: {})).to eq(:auto)
     end
 
     it 'uses backend-specific env override before global override' do
@@ -75,7 +101,7 @@ RSpec.describe 'IR simulator input formats' do
 
       expect do
         RHDL::Sim::Native::IR.input_format_for_backend(:interpreter, env: env)
-      end.to raise_error(ArgumentError, /Valid: :circt/)
+      end.to raise_error(ArgumentError, /Valid: :auto, :circt, :mlir/)
     end
   end
 
@@ -188,7 +214,7 @@ RSpec.describe 'IR simulator input formats' do
       end
     end
 
-    it 'uses circt path by default for available native backends' do
+    it 'uses JSON export plus circt autodetection by default for available native backends' do
       ir = counter_ir
 
       [
@@ -206,7 +232,7 @@ RSpec.describe 'IR simulator input formats' do
           backend_json,
           backend: backend
         )
-        expect(sim.input_format).to eq(:circt)
+        expect(sim.input_format).to eq(:auto)
         expect(sim.effective_input_format).to eq(:circt)
       end
     end
@@ -225,6 +251,87 @@ RSpec.describe 'IR simulator input formats' do
 
         backend_json = RHDL::Sim::Native::IR.sim_json(ir, backend: backend)
         expect(backend_json).to eq(expected.string)
+      end
+    end
+  end
+
+  describe 'mlir frontend input and backend parity' do
+    it 'runs expected counter behavior with MLIR input format per backend' do
+      mlir = counter_mlir
+      sequence = [
+        { rst: true, en: false },
+        { rst: false, en: true },
+        { rst: false, en: true },
+        { rst: false, en: false },
+        { rst: false, en: true }
+      ]
+      expected_q = [0, 1, 2, 2, 3]
+
+      [
+        [:interpreter, RHDL::Sim::Native::IR::INTERPRETER_AVAILABLE],
+        [:jit, RHDL::Sim::Native::IR::JIT_AVAILABLE],
+        [:compiler, RHDL::Sim::Native::IR::COMPILER_AVAILABLE]
+      ].each do |backend, available|
+        next unless available
+
+        sim = RHDL::Sim::Native::IR::Simulator.new(
+          mlir,
+          backend: backend,
+          input_format: :mlir
+        )
+        sim.reset
+
+        expect(sim.input_format).to eq(:mlir)
+        expect(sim.effective_input_format).to eq(:mlir)
+
+        sequence.each_with_index do |inputs, idx|
+          step(sim, **inputs)
+          expect(sim.peek('q')).to eq(expected_q[idx])
+        end
+      end
+    end
+
+    it 'autodetects MLIR payloads when no input format override is provided' do
+      mlir = counter_mlir
+
+      [
+        [:interpreter, RHDL::Sim::Native::IR::INTERPRETER_AVAILABLE],
+        [:jit, RHDL::Sim::Native::IR::JIT_AVAILABLE],
+        [:compiler, RHDL::Sim::Native::IR::COMPILER_AVAILABLE]
+      ].each do |backend, available|
+        next unless available
+
+        sim = RHDL::Sim::Native::IR::Simulator.new(
+          mlir,
+          backend: backend
+        )
+
+        expect(sim.input_format).to eq(:auto)
+        expect(sim.effective_input_format).to eq(:mlir)
+      end
+    end
+
+    it 'flattens hierarchical MLIR instance outputs for available native backends' do
+      mlir = hierarchical_mlir
+
+      [
+        [:interpreter, RHDL::Sim::Native::IR::INTERPRETER_AVAILABLE],
+        [:jit, RHDL::Sim::Native::IR::JIT_AVAILABLE],
+        [:compiler, RHDL::Sim::Native::IR::COMPILER_AVAILABLE]
+      ].each do |backend, available|
+        next unless available
+
+        sim = RHDL::Sim::Native::IR::Simulator.new(
+          mlir,
+          backend: backend,
+          input_format: :mlir
+        )
+
+        sim.poke('a', 2)
+        sim.evaluate
+        expect(sim.peek('y')).to eq(3)
+        expect(sim.has_signal?('u__y')).to be(true)
+        expect(sim.peek('u__y')).to eq(3)
       end
     end
   end

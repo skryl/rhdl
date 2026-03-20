@@ -18,6 +18,8 @@ mod aot_generated;
 mod extensions;
 mod ffi;
 mod runtime_value;
+#[path = "../../common/runtime_frontend.rs"]
+mod runtime_frontend;
 #[path = "../../common/signal_value.rs"]
 mod signal_value;
 mod vcd;

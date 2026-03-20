@@ -193,6 +193,7 @@ module RHDL
           proxies = create_proxies
           evaluator = SequentialEvaluator.new(self, proxies)
           evaluator.evaluate(&block)
+          ir_cache = {}
 
           SequentialIR.new(
             clock: @clock,
@@ -201,7 +202,7 @@ module RHDL
             assignments: @assignments.map do |a|
               SequentialAssign.new(
                 target: a.target.name,
-                expr: a.expr.to_ir
+                expr: a.expr.to_ir(ir_cache)
               )
             end
           )

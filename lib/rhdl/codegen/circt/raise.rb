@@ -654,7 +654,65 @@ module RHDL
           counts
         end
 
-        def hoist_shared_behavior_expr(expr, prefix:)
+        def shared_simple_behavior_expr_key(expr)
+          return nil unless expr.is_a?(IR::Slice)
+          return nil unless expr.base.is_a?(IR::Signal)
+
+          [
+            :slice,
+            sanitize_name(expr.base.name),
+            expr.base.width.to_i,
+            expr.range.begin,
+            expr.range.end,
+            expr.width.to_i
+          ]
+        end
+
+        def shared_simple_expr_occurrence_counts(roots)
+          counts = Hash.new(0)
+          stack = Array(roots).compact.dup
+          seen = Set.new
+
+          until stack.empty?
+            expr = stack.pop
+            oid = expr.object_id
+            next if seen.include?(oid)
+
+            seen << oid
+            if (key = shared_simple_behavior_expr_key(expr))
+              counts[key] += 1
+            end
+            expr_children(expr).each do |child|
+              stack << child unless child.nil?
+            end
+          end
+
+          counts
+        end
+
+        def expr_depth_exceeds?(root, max_depth:)
+          stack = [[root, 1]]
+          seen = Set.new
+
+          until stack.empty?
+            expr, depth = stack.pop
+            next if expr.nil?
+            return true if depth > max_depth
+
+            oid = expr.object_id
+            next if seen.include?(oid)
+
+            seen << oid
+            expr_children(expr).each do |child|
+              stack << [child, depth + 1] unless child.nil?
+            end
+          end
+
+          false
+        end
+
+        def hoist_shared_behavior_expr(expr, prefix:, shared_simple_counts: nil, shared_simple_hoisted: nil,
+                                       shared_simple_locals: nil, shared_simple_prefix: nil)
           counts = shared_expr_parent_counts(expr)
           hoisted = {}
           locals = []
@@ -663,13 +721,25 @@ module RHDL
             counts: counts,
             hoisted: hoisted,
             locals: locals,
-            prefix: sanitize_name(prefix)
+            prefix: sanitize_name(prefix),
+            shared_simple_counts: shared_simple_counts,
+            shared_simple_hoisted: shared_simple_hoisted,
+            shared_simple_locals: shared_simple_locals,
+            shared_simple_prefix: shared_simple_prefix
           )
           [rewritten, locals]
         end
 
-        def rewrite_expr_with_behavior_locals(expr, counts:, hoisted:, locals:, prefix:)
+        def rewrite_expr_with_behavior_locals(expr, counts:, hoisted:, locals:, prefix:, shared_simple_counts: nil,
+                                              shared_simple_hoisted: nil, shared_simple_locals: nil, shared_simple_prefix: nil)
           return expr if expr.nil? || expr.is_a?(IR::Literal) || expr.is_a?(IR::Signal)
+
+          shared_key = shared_simple_behavior_expr_key(expr)
+          if shared_key && shared_simple_counts && shared_simple_counts[shared_key].to_i > 1
+            if shared_simple_hoisted&.key?(shared_key)
+              return IR::Signal.new(name: shared_simple_hoisted.fetch(shared_key), width: expr.width.to_i)
+            end
+          end
 
           oid = expr.object_id
           if hoisted.key?(oid)
@@ -682,10 +752,21 @@ module RHDL
               counts: counts,
               hoisted: hoisted,
               locals: locals,
-              prefix: prefix
+              prefix: prefix,
+              shared_simple_counts: shared_simple_counts,
+              shared_simple_hoisted: shared_simple_hoisted,
+              shared_simple_locals: shared_simple_locals,
+              shared_simple_prefix: shared_simple_prefix
             )
           end
           rewritten = rebuild_expr_with_children(expr, rewritten_children)
+
+          if shared_key && shared_simple_counts && shared_simple_counts[shared_key].to_i > 1
+            name = sanitize_name("#{shared_simple_prefix}_local_#{shared_simple_locals.length}")
+            shared_simple_locals << { name: name, expr: rewritten, width: rewritten.width.to_i }
+            shared_simple_hoisted[shared_key] = name
+            return IR::Signal.new(name: name, width: rewritten.width.to_i)
+          end
 
           if hoistable_behavior_expr?(expr, counts)
             name = sanitize_name("#{prefix}_local_#{locals.length}")
@@ -870,39 +951,30 @@ module RHDL
             reset_values = process_reset_values_for(process, mod, target_order)
             lines << sequential_header_for_process(process, mod, target_order, reset_values: reset_values)
 
-            target_order.each do |target|
+            seq_assignments = target_order.filter_map do |target|
               expr = seq_state[target.to_s]
-              next unless expr
-              expr = normalize_sequential_expr(
-                expr,
-                process: process,
-                target: target,
-                reset_value: reset_values[target.to_s]
-              )
+              next if expr.nil?
 
-              rewritten_expr, locals = hoist_shared_behavior_expr(
-                expr,
-                prefix: "#{sanitize_name(target)}_seq_#{process_idx}"
-              )
-              Array(locals).each do |local|
-                emit_local_binding(
-                  lines,
-                  name: local[:name],
-                  expr: local[:expr],
-                  width: local[:width],
-                  diagnostics: diagnostics,
-                  strict: strict,
-                  indent: 4
-                )
-              end
-
-              emit_assignment(
-                lines,
+              {
                 target: signal_ref(target),
-                expr: rewritten_expr,
+                local_prefix: "#{sanitize_name(target)}_seq_#{process_idx}",
+                expr: normalize_sequential_expr(
+                  expr,
+                  process: process,
+                  target: target,
+                  reset_value: reset_values[target.to_s]
+                )
+              }
+            end
+
+            unless seq_assignments.empty?
+              emit_behavior_assignment_group(
+                lines,
+                assignments: seq_assignments,
                 diagnostics: diagnostics,
                 strict: strict,
-                indent: 4
+                indent: 4,
+                shared_local_prefix: "#{sanitize_name(mod.name)}_seq_#{process_idx}_shared"
               )
             end
 
@@ -1234,36 +1306,40 @@ module RHDL
           return unless behavior_plan[:emit]
 
           lines << '  behavior do'
-          bridge_count = Array(bridge_assignments).length
-
-          Array(bridge_assignments).each_with_index do |assign, idx|
-            target = sanitize_name(assign.target)
-            emit_behavior_assignment(
-              lines,
-              target: signal_ref(target),
-              expr: assign.expr,
-              diagnostics: diagnostics,
-              strict: strict,
-              indent: 4,
-              local_prefix: "#{target}_bridge_#{idx}"
-            )
-          end
+          behavior_assignments = []
 
           assign_counts = Hash.new(0)
           Array(mod.assigns).each { |assign| assign_counts[sanitize_name(assign.target)] += 1 }
 
+          Array(bridge_assignments).each_with_index do |assign, idx|
+            target = sanitize_name(assign.target)
+            behavior_assignments << {
+              target: signal_ref(target),
+              expr: assign.expr,
+              local_prefix: "#{target}_bridge_#{idx}"
+            }
+          end
+
+          bridge_count = Array(bridge_assignments).length
           Array(mod.assigns).each_with_index do |assign, idx|
             original_target = sanitize_name(assign.target)
             next if redundant_self_assign?(assign, original_target, assign_counts)
 
-            emit_behavior_assignment(
-              lines,
+            behavior_assignments << {
               target: signal_ref(original_target),
               expr: assign.expr,
+              local_prefix: "#{original_target}_expr_#{idx + bridge_count}"
+            }
+          end
+
+          unless behavior_assignments.empty?
+            emit_behavior_assignment_group(
+              lines,
+              assignments: behavior_assignments,
               diagnostics: diagnostics,
               strict: strict,
               indent: 4,
-              local_prefix: "#{original_target}_expr_#{idx + bridge_count}"
+              shared_local_prefix: "#{sanitize_name(mod.name)}_behavior_shared"
             )
           end
 
@@ -1295,9 +1371,35 @@ module RHDL
           lines << '  end'
         end
 
-        def emit_behavior_assignment(lines, target:, expr:, diagnostics:, strict:, indent:, local_prefix:)
-          rewritten_expr, locals = hoist_shared_behavior_expr(expr, prefix: local_prefix)
-          Array(locals).each do |local|
+        def emit_behavior_assignment_group(lines, assignments:, diagnostics:, strict:, indent:, shared_local_prefix:)
+          shared_simple_counts = shared_simple_expr_occurrence_counts(
+            Array(assignments).map { |assignment| assignment[:expr] }
+          )
+          shared_simple_hoisted = {}
+          shared_simple_locals = []
+          rewritten_assignments = Array(assignments).map do |assignment|
+            if expr_depth_exceeds?(assignment[:expr], max_depth: 2048)
+              rewritten_expr = assignment[:expr]
+              locals = []
+            else
+              rewritten_expr, locals = hoist_shared_behavior_expr(
+                assignment[:expr],
+                prefix: assignment[:local_prefix],
+                shared_simple_counts: shared_simple_counts,
+                shared_simple_hoisted: shared_simple_hoisted,
+                shared_simple_locals: shared_simple_locals,
+                shared_simple_prefix: shared_local_prefix
+              )
+            end
+
+            {
+              target: assignment[:target],
+              expr: rewritten_expr,
+              locals: locals
+            }
+          end
+
+          Array(shared_simple_locals).each do |local|
             emit_local_binding(
               lines,
               name: local[:name],
@@ -1309,14 +1411,28 @@ module RHDL
             )
           end
 
-          emit_assignment(
-            lines,
-            target: target,
-            expr: rewritten_expr,
-            diagnostics: diagnostics,
-            strict: strict,
-            indent: indent
-          )
+          Array(rewritten_assignments).each do |assignment|
+            Array(assignment[:locals]).each do |local|
+              emit_local_binding(
+                lines,
+                name: local[:name],
+                expr: local[:expr],
+                width: local[:width],
+                diagnostics: diagnostics,
+                strict: strict,
+                indent: indent
+              )
+            end
+
+            emit_assignment(
+              lines,
+              target: assignment[:target],
+              expr: assignment[:expr],
+              diagnostics: diagnostics,
+              strict: strict,
+              indent: indent
+            )
+          end
         end
 
         def emit_assignment(lines, target:, expr:, diagnostics:, strict:, indent:)
