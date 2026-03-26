@@ -64,6 +64,11 @@ RSpec.describe RHDL::Examples::GameBoy::Tasks::RunTask do
       task = described_class.new
       expect(task.options).to eq({})
     end
+
+    it 'accepts an hdl_dir override path' do
+      task = described_class.new(mode: :ir, sim: :compile, hdl_dir: '/tmp/gameboy_import')
+      expect(task.options[:hdl_dir]).to eq('/tmp/gameboy_import')
+    end
   end
 
   describe '#run with headless mode' do
@@ -137,6 +142,74 @@ RSpec.describe RHDL::Examples::GameBoy::Tasks::RunTask do
     end
   end
 
+  describe 'debug defaults' do
+    it 'enables debug by default for interactive terminal state' do
+      task = described_class.new
+
+      task.send(:initialize_terminal_state)
+
+      expect(task.instance_variable_get(:@debug)).to eq(true)
+    end
+
+    it 'honors explicit debug disable for interactive terminal state' do
+      task = described_class.new(debug: false)
+
+      task.send(:initialize_terminal_state)
+
+      expect(task.instance_variable_get(:@debug)).to eq(false)
+    end
+
+    it 'defaults the interactive speed to 1000 cycles per frame' do
+      task = described_class.new
+
+      task.send(:initialize_terminal_state)
+
+      expect(task.instance_variable_get(:@cycles_per_frame)).to eq(1000)
+    end
+  end
+
+  describe 'debug overlay' do
+    it 'reports mode, sim, and source on a dedicated row after cycle and speed info' do
+      backend_runner = instance_double('BackendRunner', speaker: nil)
+      headless_runner = instance_double(
+        'RHDL::Examples::GameBoy::HeadlessRunner',
+        mode: :circt,
+        backend: :jit,
+        simulator_type: :hdl_arcilator,
+        use_rhdl_source: false,
+        use_normalized_verilog: true,
+        use_staged_verilog: false,
+        runner: backend_runner
+      )
+
+      task = described_class.new
+      task.instance_variable_set(:@runner, headless_runner)
+      task.instance_variable_set(:@keyboard_mode, :command)
+      task.instance_variable_set(:@audio_enabled, false)
+      task.instance_variable_set(:@renderer_type, :color)
+      task.instance_variable_set(:@current_hz, 123_456.0)
+      task.instance_variable_set(:@fps, 59.9)
+      task.instance_variable_set(:@cycles_per_frame, 1000)
+      task.instance_variable_set(:@last_key, nil)
+      task.instance_variable_set(:@last_key_time, nil)
+
+      lines = task.send(
+        :debug_overlay_lines,
+        state: { pc: 0x1234, a: 0x56, bc: 0x1111, de: 0x2222, hl: 0x3333, sp: 0x4444, cycles: 12_345 }
+      )
+
+      expect(lines.length).to eq(5)
+      expect(lines[0]).to include('PC:1234')
+      expect(lines[1]).to include('Cyc:12.3K')
+      expect(lines[1]).to include('Spd:1000')
+      expect(lines[2]).to include('Mode:circt')
+      expect(lines[2]).to include('Sim:jit')
+      expect(lines[2]).to include('Source:normalized')
+      expect(lines[3]).to include('Key:---')
+      expect(lines[4]).to include('ESC:cmd')
+    end
+  end
+
   describe 'HeadlessRunner integration' do
     let(:task) { described_class.new(headless: true, demo: true, mode: :ruby, sim: :ruby, cycles: 50) }
 
@@ -161,6 +234,256 @@ RSpec.describe RHDL::Examples::GameBoy::Tasks::RunTask do
     it 'provides access to CPU state' do
       state = task.runner.cpu_state
       expect(state).to include(:pc, :a, :f)
+    end
+
+    it 'passes hdl_dir override to HeadlessRunner' do
+      custom = described_class.new(
+        headless: true,
+        demo: true,
+        mode: :ruby,
+        sim: :ruby,
+        cycles: 1,
+        hdl_dir: '/tmp/gameboy_import'
+      )
+      custom.run
+      expect(custom.runner.hdl_dir).to eq('/tmp/gameboy_import')
+    end
+
+    it 'routes source_dir through direct Verilator mode for imported Verilog runs' do
+      require_relative '../../../../../examples/gameboy/utilities/runners/headless_runner'
+
+      Dir.mktmpdir('rhdl_gameboy_import') do |dir|
+        FileUtils.mkdir_p(File.join(dir, '.mixed_import'))
+
+        fake_headless_runner = instance_double(
+          'RHDL::Examples::GameBoy::HeadlessRunner',
+          load_rom: nil,
+          reset: nil,
+          run_steps: nil,
+          cpu_state: { pc: 0x1234, a: 0x56, cycles: 1 }
+        )
+        allow(RHDL::Examples::GameBoy::HeadlessRunner).to receive(:new).and_return(fake_headless_runner)
+
+        custom = described_class.new(
+          headless: true,
+          demo: true,
+          mode: :verilog,
+          cycles: 1,
+          source_dir: dir,
+          top: 'Gameboy',
+          use_staged_source: true
+        )
+
+        custom.run
+
+        expect(RHDL::Examples::GameBoy::HeadlessRunner).to have_received(:new).with(
+        mode: :verilog,
+        sim: :ruby,
+        hdl_dir: nil,
+        verilog_dir: dir,
+        top: 'Gameboy',
+        use_staged_verilog: true,
+        use_normalized_verilog: false,
+        use_rhdl_source: false,
+        jit: nil
+      )
+      end
+    end
+
+    it 'passes jit through to HeadlessRunner for arcilator runs' do
+      require_relative '../../../../../examples/gameboy/utilities/runners/headless_runner'
+
+      Dir.mktmpdir('rhdl_gameboy_import') do |dir|
+        FileUtils.mkdir_p(File.join(dir, '.mixed_import'))
+
+        fake_headless_runner = instance_double(
+          'RHDL::Examples::GameBoy::HeadlessRunner',
+          load_rom: nil,
+          reset: nil,
+          run_steps: nil,
+          cpu_state: { pc: 0x1234, a: 0x56, cycles: 1 }
+        )
+        allow(RHDL::Examples::GameBoy::HeadlessRunner).to receive(:new).and_return(fake_headless_runner)
+
+        custom = described_class.new(
+        headless: true,
+        demo: true,
+        mode: :arcilator,
+        sim: :jit,
+        cycles: 1,
+        source_dir: dir,
+        top: 'Gameboy',
+      )
+
+        custom.run
+
+        expect(RHDL::Examples::GameBoy::HeadlessRunner).to have_received(:new).with(
+        mode: :arcilator,
+        sim: :jit,
+        hdl_dir: dir,
+        verilog_dir: nil,
+        top: 'Gameboy',
+        use_staged_verilog: true,
+        use_normalized_verilog: false,
+        use_rhdl_source: false,
+        jit: nil
+      )
+      end
+    end
+
+    it 'passes normalized imported-source selection to HeadlessRunner' do
+      require_relative '../../../../../examples/gameboy/utilities/runners/headless_runner'
+
+      Dir.mktmpdir('rhdl_gameboy_import') do |dir|
+        FileUtils.mkdir_p(File.join(dir, '.mixed_import'))
+
+        fake_headless_runner = instance_double(
+          'RHDL::Examples::GameBoy::HeadlessRunner',
+          load_rom: nil,
+          reset: nil,
+          run_steps: nil,
+          cpu_state: { pc: 0x1234, a: 0x56, cycles: 1 }
+        )
+        allow(RHDL::Examples::GameBoy::HeadlessRunner).to receive(:new).and_return(fake_headless_runner)
+
+        custom = described_class.new(
+          headless: true,
+          demo: true,
+          mode: :verilog,
+          cycles: 1,
+          source_dir: dir,
+          top: 'Gameboy',
+          use_normalized_source: true
+        )
+
+        custom.run
+
+        expect(RHDL::Examples::GameBoy::HeadlessRunner).to have_received(:new).with(
+        mode: :verilog,
+        sim: :ruby,
+        hdl_dir: nil,
+        verilog_dir: dir,
+        top: 'Gameboy',
+        use_staged_verilog: false,
+        use_normalized_verilog: true,
+        use_rhdl_source: false,
+        jit: nil
+      )
+      end
+    end
+
+    it 'passes rhdl source selection to HeadlessRunner' do
+      require_relative '../../../../../examples/gameboy/utilities/runners/headless_runner'
+
+      fake_headless_runner = instance_double(
+        'RHDL::Examples::GameBoy::HeadlessRunner',
+        load_rom: nil,
+        reset: nil,
+        run_steps: nil,
+        cpu_state: { pc: 0x1234, a: 0x56, cycles: 1 }
+      )
+      allow(RHDL::Examples::GameBoy::HeadlessRunner).to receive(:new).and_return(fake_headless_runner)
+
+      custom = described_class.new(
+        headless: true,
+        demo: true,
+        mode: :arcilator,
+        sim: :jit,
+        cycles: 1,
+        source_dir: '/tmp/gameboy_import',
+        top: 'Gameboy',
+        use_rhdl_source: true
+      )
+
+      custom.run
+
+      expect(RHDL::Examples::GameBoy::HeadlessRunner).to have_received(:new).with(
+        mode: :arcilator,
+        sim: :jit,
+        hdl_dir: '/tmp/gameboy_import',
+        verilog_dir: nil,
+        top: 'Gameboy',
+        use_staged_verilog: false,
+        use_normalized_verilog: false,
+        use_rhdl_source: true,
+        jit: nil
+      )
+    end
+
+    it 'raises when imported-artifact-dependent source modes are requested without .mixed_import' do
+      Dir.mktmpdir('rhdl_gameboy_missing_mixed') do |dir|
+        File.write(File.join(dir, 'import_report.json'), '{}')
+
+        task = described_class.new(
+          headless: true,
+          demo: true,
+          mode: :verilog,
+          cycles: 1,
+          source_dir: dir,
+          use_staged_source: true
+        )
+
+        expect { task.send(:initialize_runner) }.to raise_error(ArgumentError, /\.mixed_import/)
+      end
+    end
+
+    it 'defaults verilog mode to staged imported source even when CLI-style false flags are present' do
+      Dir.mktmpdir('rhdl_gameboy_cli_style_flags') do |dir|
+        File.write(File.join(dir, 'import_report.json'), '{}')
+
+        task = described_class.new(
+          headless: true,
+          demo: true,
+          mode: :verilog,
+          cycles: 1,
+          source_dir: dir,
+          use_staged_source: false,
+          use_normalized_source: false,
+          use_rhdl_source: false
+        )
+
+        expect { task.send(:initialize_runner) }.to raise_error(ArgumentError, /\.mixed_import/)
+      end
+    end
+
+    it 'does not default ir mode to imported staged source' do
+      require_relative '../../../../../examples/gameboy/utilities/runners/headless_runner'
+
+      fake_headless_runner = instance_double(
+        'RHDL::Examples::GameBoy::HeadlessRunner',
+        load_rom: nil,
+        reset: nil,
+        run_steps: nil,
+        cpu_state: { pc: 0x1234, a: 0x56, cycles: 1 }
+      )
+      allow(RHDL::Examples::GameBoy::HeadlessRunner).to receive(:new).and_return(fake_headless_runner)
+
+      Dir.mktmpdir('rhdl_gameboy_ir_source_dir') do |dir|
+        task = described_class.new(
+          headless: true,
+          demo: true,
+          mode: :ir,
+          cycles: 1,
+          source_dir: dir,
+          use_staged_source: false,
+          use_normalized_source: false,
+          use_rhdl_source: false
+        )
+
+        expect { task.run }.not_to raise_error
+
+        expect(RHDL::Examples::GameBoy::HeadlessRunner).to have_received(:new).with(
+          mode: :ir,
+          sim: :compile,
+          hdl_dir: dir,
+          verilog_dir: nil,
+          top: nil,
+          use_staged_verilog: false,
+          use_normalized_verilog: false,
+          use_rhdl_source: false,
+          jit: nil
+        )
+      end
     end
   end
 
@@ -239,6 +562,110 @@ RSpec.describe RHDL::Examples::GameBoy::Tasks::RunTask do
       expect(described_class::CLEAR_SCREEN).to include("\e[")
       expect(described_class::HIDE_CURSOR).to include("\e[")
       expect(described_class::SHOW_CURSOR).to include("\e[")
+    end
+  end
+
+  describe 'interactive key release' do
+    let(:native_runner) { instance_double('GameBoyRunner') }
+    let(:headless_runner) { instance_double('HeadlessRunner', runner: native_runner) }
+    let(:task) { described_class.new }
+
+    before do
+      task.instance_variable_set(:@runner, headless_runner)
+      task.instance_variable_set(:@pressed_buttons, {})
+      allow(native_runner).to receive(:inject_key)
+      allow(native_runner).to receive(:release_key)
+    end
+
+    it 'releases a pressed key after the hold timeout' do
+      start_time = Time.at(1000)
+      allow(Time).to receive(:now).and_return(start_time)
+
+      task.send(:inject_key, 4)
+      expect(native_runner).to have_received(:inject_key).with(4)
+
+      allow(Time).to receive(:now).and_return(start_time + described_class::KEY_HOLD_SECONDS + 0.01)
+      task.send(:release_expired_keys)
+
+      expect(native_runner).to have_received(:release_key).with(4)
+      expect(task.instance_variable_get(:@pressed_buttons)).to be_empty
+    end
+
+    it 'extends the hold window when the same key is pressed again' do
+      start_time = Time.at(2000)
+      allow(Time).to receive(:now).and_return(start_time)
+      task.send(:inject_key, 4)
+
+      allow(Time).to receive(:now).and_return(start_time + (described_class::KEY_HOLD_SECONDS / 2.0))
+      task.send(:inject_key, 4)
+      task.send(:release_expired_keys)
+
+      expect(native_runner).not_to have_received(:release_key)
+
+      allow(Time).to receive(:now).and_return(start_time + described_class::KEY_HOLD_SECONDS + 0.06)
+      task.send(:release_expired_keys)
+
+      expect(native_runner).to have_received(:release_key).with(4).once
+    end
+  end
+
+  describe 'interactive input mapping' do
+    let(:native_runner) { instance_double('GameBoyRunner') }
+    let(:headless_runner) { instance_double('HeadlessRunner', runner: native_runner) }
+    let(:console) { instance_double(IO) }
+    let(:task) { described_class.new }
+
+    before do
+      task.instance_variable_set(:@runner, headless_runner)
+      task.instance_variable_set(:@pressed_buttons, {})
+      task.instance_variable_set(:@keyboard_mode, :normal)
+      task.instance_variable_set(:@debug, false)
+      allow(native_runner).to receive(:inject_key)
+      allow(native_runner).to receive(:release_key)
+      allow(IO).to receive(:console).and_return(console)
+    end
+
+    it 'maps A/Z to the Game Boy A button bit' do
+      allow(console).to receive(:read_nonblock).with(1).and_return('a')
+      allow(Time).to receive(:now).and_return(Time.at(3000))
+
+      task.send(:handle_keyboard_input)
+
+      expect(native_runner).to have_received(:inject_key).with(described_class::BUTTON_A)
+    end
+
+    it 'maps S/X to the Game Boy B button bit' do
+      allow(console).to receive(:read_nonblock).with(1).and_return('x')
+      allow(Time).to receive(:now).and_return(Time.at(3001))
+
+      task.send(:handle_keyboard_input)
+
+      expect(native_runner).to have_received(:inject_key).with(described_class::BUTTON_B)
+    end
+
+    it 'maps Enter to Start and Backspace to Select' do
+      allow(Time).to receive(:now).and_return(Time.at(3002))
+      allow(console).to receive(:read_nonblock).with(1).and_return("\r", "\b")
+
+      task.send(:handle_keyboard_input)
+      task.send(:handle_keyboard_input)
+
+      expect(native_runner).to have_received(:inject_key).with(described_class::BUTTON_START)
+      expect(native_runner).to have_received(:inject_key).with(described_class::BUTTON_SELECT)
+    end
+
+    it 'maps arrow escape sequences to directional button bits' do
+      allow(Time).to receive(:now).and_return(Time.at(3003))
+      allow(console).to receive(:read_nonblock).with(1).and_return("\e", "\e", "\e", "\e")
+      allow(IO).to receive(:select).and_return([[], [], []])
+      allow(console).to receive(:read_nonblock).with(2).and_return('[A', '[B', '[C', '[D')
+
+      4.times { task.send(:handle_keyboard_input) }
+
+      expect(native_runner).to have_received(:inject_key).with(described_class::BUTTON_UP)
+      expect(native_runner).to have_received(:inject_key).with(described_class::BUTTON_DOWN)
+      expect(native_runner).to have_received(:inject_key).with(described_class::BUTTON_RIGHT)
+      expect(native_runner).to have_received(:inject_key).with(described_class::BUTTON_LEFT)
     end
   end
 end

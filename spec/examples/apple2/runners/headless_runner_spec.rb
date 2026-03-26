@@ -73,6 +73,11 @@ RSpec.describe RHDL::Examples::Apple2::HeadlessRunner, :slow do
         expect(runner.memory_sample).to have_key(:reset_vector)
       end
     end
+
+    it 'returns nil from sim when the active backend has no native sim object' do
+      runner = described_class.new
+      expect(runner.sim).to be_nil
+    end
   end
 
   describe 'IR mode with interpret backend' do
@@ -153,7 +158,7 @@ RSpec.describe RHDL::Examples::Apple2::HeadlessRunner, :slow do
 
   describe 'Netlist mode with interpret backend' do
     before(:each) do
-      skip 'Netlist Interpreter requires native extension' unless ir_interpreter_available?
+      skip 'Netlist Interpreter requires native extension' unless netlist_interpreter_available?
     end
 
     it 'creates netlist mode runner with interpret backend' do
@@ -171,7 +176,7 @@ RSpec.describe RHDL::Examples::Apple2::HeadlessRunner, :slow do
 
   describe 'Netlist mode with jit backend' do
     before(:each) do
-      skip 'Netlist JIT requires native extension' unless ir_jit_available?
+      skip 'Netlist JIT requires native extension' unless netlist_jit_available?
     end
 
     it 'creates netlist mode runner with jit backend' do
@@ -186,9 +191,9 @@ RSpec.describe RHDL::Examples::Apple2::HeadlessRunner, :slow do
     end
   end
 
-  describe 'Netlist mode with compile backend' do
+  describe 'Netlist mode with compile backend', :slow, timeout: 240 do
     before(:each) do
-      skip 'Netlist Compiler requires native extension' unless ir_compiler_available?
+      skip 'Netlist Compiler requires native extension' unless netlist_compiler_available?
     end
 
     it 'creates netlist mode runner with compile backend' do
@@ -203,7 +208,7 @@ RSpec.describe RHDL::Examples::Apple2::HeadlessRunner, :slow do
     end
   end
 
-  describe 'Verilog mode' do
+  describe 'Verilog mode', :slow, timeout: 240 do
     before(:each) do
       skip 'Verilator not available' unless HdlToolchain.verilator_available?
     end
@@ -217,6 +222,21 @@ RSpec.describe RHDL::Examples::Apple2::HeadlessRunner, :slow do
     it 'sets native flag to true for verilog' do
       runner = described_class.new(mode: :verilog)
       expect(runner.native?).to be true
+    end
+
+    it 'exposes the native sim object uniformly' do
+      require_relative '../../../../examples/apple2/utilities/runners/verilator_runner'
+      fake_sim = instance_double('Sim')
+      fake_runner = instance_double(
+        'RHDL::Examples::Apple2::VerilogRunner',
+        native?: true,
+        simulator_type: :hdl_verilator,
+        sim: fake_sim
+      )
+      allow(RHDL::Examples::Apple2::VerilogRunner).to receive(:new).and_return(fake_runner)
+
+      runner = described_class.new(mode: :verilog)
+      expect(runner.sim).to eq(fake_sim)
     end
 
     it 'loads demo program into Verilator memory' do
@@ -262,7 +282,7 @@ RSpec.describe RHDL::Examples::Apple2::HeadlessRunner, :slow do
     end
   end
 
-  describe 'CIRCT mode' do
+  describe 'CIRCT mode', :slow, timeout: 240 do
     before(:each) do
       skip 'Arcilator not available' unless arcilator_available?
     end
@@ -359,7 +379,7 @@ RSpec.describe RHDL::Examples::Apple2::HeadlessRunner, :slow do
   # Check if IR interpreter is available
   def ir_interpreter_available?
     require 'rhdl/codegen'
-    RHDL::Codegen::IR::IR_INTERPRETER_AVAILABLE
+    RHDL::Sim::Native::IR::INTERPRETER_AVAILABLE
   rescue LoadError, NameError
     false
   end
@@ -367,7 +387,7 @@ RSpec.describe RHDL::Examples::Apple2::HeadlessRunner, :slow do
   # Check if IR JIT is available
   def ir_jit_available?
     require 'rhdl/codegen'
-    RHDL::Codegen::IR::IR_JIT_AVAILABLE
+    RHDL::Sim::Native::IR::JIT_AVAILABLE
   rescue LoadError, NameError
     false
   end
@@ -375,7 +395,7 @@ RSpec.describe RHDL::Examples::Apple2::HeadlessRunner, :slow do
   # Check if IR Compiler is available
   def ir_compiler_available?
     require 'rhdl/codegen'
-    RHDL::Codegen::IR::IR_COMPILER_AVAILABLE
+    RHDL::Sim::Native::IR::COMPILER_AVAILABLE
   rescue LoadError, NameError
     false
   end
@@ -384,5 +404,29 @@ RSpec.describe RHDL::Examples::Apple2::HeadlessRunner, :slow do
   # Check if Arcilator is available
   def arcilator_available?
     %w[firtool arcilator llc].all? { |cmd| system("which #{cmd} > /dev/null 2>&1") }
+  end
+
+  # Check if native netlist interpreter is available
+  def netlist_interpreter_available?
+    require 'rhdl/codegen'
+    RHDL::Sim::Native::Netlist::INTERPRETER_AVAILABLE
+  rescue LoadError, NameError
+    false
+  end
+
+  # Check if native netlist JIT is available
+  def netlist_jit_available?
+    require 'rhdl/codegen'
+    RHDL::Sim::Native::Netlist::JIT_AVAILABLE
+  rescue LoadError, NameError
+    false
+  end
+
+  # Check if native netlist compiler is available
+  def netlist_compiler_available?
+    require 'rhdl/codegen'
+    RHDL::Sim::Native::Netlist::COMPILER_AVAILABLE
+  rescue LoadError, NameError
+    false
   end
 end

@@ -88,6 +88,16 @@ RSpec.describe RHDL::HDL::ALU do
       expect(alu.get_output(:result)).to eq(0)
       expect(alu.get_output(:zero)).to eq(1)
     end
+
+    it 'sets negative flag from the selected result' do
+      alu.set_input(:a, 0x0F)
+      alu.set_input(:b, 0)
+      alu.set_input(:op, RHDL::HDL::ALU::OP_NOT)
+      alu.propagate
+
+      expect(alu.get_output(:result)).to eq(0xF0)
+      expect(alu.get_output(:negative)).to eq(1)
+    end
   end
 
   describe 'synthesis' do
@@ -96,8 +106,8 @@ RSpec.describe RHDL::HDL::ALU do
     end
 
     it 'generates valid IR' do
-      ir = RHDL::HDL::ALU.to_ir
-      expect(ir).to be_a(RHDL::Export::IR::ModuleDef)
+      ir = RHDL::HDL::ALU.to_flat_circt_nodes
+      expect(ir).to be_a(RHDL::Codegen::CIRCT::IR::ModuleOp)
       expect(ir.ports.length).to eq(9)  # a, b, op, cin, result, cout, zero, negative, overflow
     end
 
@@ -109,13 +119,13 @@ RSpec.describe RHDL::HDL::ALU do
       expect(verilog).to include('output [7:0] result')
     end
 
-    it 'generates valid FIRRTL' do
-      firrtl = RHDL::HDL::ALU.to_circt
-      expect(firrtl).to include('FIRRTL version')
-      expect(firrtl).to include('circuit alu')
-      expect(firrtl).to include('input a')
-      expect(firrtl).to include('input b')
-      expect(firrtl).to include('output result')
+    it 'generates valid CIRCT MLIR' do
+      mlir = RHDL::HDL::ALU.to_circt
+      expect(mlir).to include('hw.output')
+      expect(mlir).to include('hw.module @alu')
+      expect(mlir).to include('%a:')
+      expect(mlir).to include('%b:')
+      expect(mlir).to include('result:')
     end
 
     context 'CIRCT firtool validation', if: HdlToolchain.firtool_available? && HdlToolchain.iverilog_available? do
@@ -129,6 +139,7 @@ RSpec.describe RHDL::HDL::ALU do
           { a: 0xF0, b: 0x0F, op: RHDL::HDL::ALU::OP_AND, cin: 0 },  # AND
           { a: 0xF0, b: 0x0F, op: RHDL::HDL::ALU::OP_OR, cin: 0 },   # OR
           { a: 0xF0, b: 0xAA, op: RHDL::HDL::ALU::OP_XOR, cin: 0 },  # XOR
+          { a: 0x0F, b: 0, op: RHDL::HDL::ALU::OP_NOT, cin: 0 },     # negative flag test
           { a: 5, b: 5, op: RHDL::HDL::ALU::OP_SUB, cin: 0 },    # zero flag test
         ]
 
@@ -142,7 +153,8 @@ RSpec.describe RHDL::HDL::ALU do
             inputs: tc,
             expected: {
               result: behavior.get_output(:result),
-              zero: behavior.get_output(:zero)
+              zero: behavior.get_output(:zero),
+              negative: behavior.get_output(:negative)
             }
           }
         end
@@ -175,7 +187,11 @@ RSpec.describe RHDL::HDL::ALU do
         behavior.propagate
         vectors << {
           inputs: { a: 10, b: 5, op: RHDL::HDL::ALU::OP_ADD, cin: 0 },
-          expected: { result: behavior.get_output(:result), zero: behavior.get_output(:zero) }
+          expected: {
+            result: behavior.get_output(:result),
+            zero: behavior.get_output(:zero),
+            negative: behavior.get_output(:negative)
+          }
         }
 
         # Test SUB
@@ -185,7 +201,11 @@ RSpec.describe RHDL::HDL::ALU do
         behavior.propagate
         vectors << {
           inputs: { a: 10, b: 5, op: RHDL::HDL::ALU::OP_SUB, cin: 0 },
-          expected: { result: behavior.get_output(:result), zero: behavior.get_output(:zero) }
+          expected: {
+            result: behavior.get_output(:result),
+            zero: behavior.get_output(:zero),
+            negative: behavior.get_output(:negative)
+          }
         }
 
         # Test AND
@@ -195,7 +215,26 @@ RSpec.describe RHDL::HDL::ALU do
         behavior.propagate
         vectors << {
           inputs: { a: 0xF0, b: 0x0F, op: RHDL::HDL::ALU::OP_AND, cin: 0 },
-          expected: { result: behavior.get_output(:result), zero: behavior.get_output(:zero) }
+          expected: {
+            result: behavior.get_output(:result),
+            zero: behavior.get_output(:zero),
+            negative: behavior.get_output(:negative)
+          }
+        }
+
+        # Test NOT / negative flag
+        behavior.set_input(:a, 0x0F)
+        behavior.set_input(:b, 0)
+        behavior.set_input(:op, RHDL::HDL::ALU::OP_NOT)
+        behavior.set_input(:cin, 0)
+        behavior.propagate
+        vectors << {
+          inputs: { a: 0x0F, b: 0, op: RHDL::HDL::ALU::OP_NOT, cin: 0 },
+          expected: {
+            result: behavior.get_output(:result),
+            zero: behavior.get_output(:zero),
+            negative: behavior.get_output(:negative)
+          }
         }
 
         result = NetlistHelper.run_behavior_simulation(
@@ -219,7 +258,7 @@ RSpec.describe RHDL::HDL::ALU do
 
   describe 'gate-level netlist' do
     let(:component) { RHDL::HDL::ALU.new('alu', width: 8) }
-    let(:ir) { RHDL::Export::Structure::Lower.from_components([component], name: 'alu') }
+    let(:ir) { RHDL::Codegen::Netlist::Lower.from_components([component], name: 'alu') }
 
     it 'generates correct IR structure' do
       expect(ir.inputs.keys).to include('alu.a', 'alu.b', 'alu.op', 'alu.cin')
@@ -253,6 +292,7 @@ RSpec.describe RHDL::HDL::ALU do
           { a: 0b11110000, b: 0b10101010, op: RHDL::HDL::ALU::OP_AND, cin: 0 },  # AND
           { a: 0b11110000, b: 0b00001111, op: RHDL::HDL::ALU::OP_OR, cin: 0 },   # OR
           { a: 0b11110000, b: 0b10101010, op: RHDL::HDL::ALU::OP_XOR, cin: 0 },  # XOR
+          { a: 0x0F, b: 0, op: RHDL::HDL::ALU::OP_NOT, cin: 0 },    # negative flag test
           { a: 5, b: 5, op: RHDL::HDL::ALU::OP_SUB, cin: 0 },    # zero flag test
         ]
 
@@ -267,7 +307,8 @@ RSpec.describe RHDL::HDL::ALU do
           test_vectors << { inputs: tc }
           expected_outputs << {
             result: behavior.get_output(:result),
-            zero: behavior.get_output(:zero)
+            zero: behavior.get_output(:zero),
+            negative: behavior.get_output(:negative)
           }
         end
 
@@ -281,6 +322,8 @@ RSpec.describe RHDL::HDL::ALU do
             "Cycle #{idx}: expected result=#{expected[:result]}, got #{result[:results][idx][:result]}"
           expect(result[:results][idx][:zero]).to eq(expected[:zero]),
             "Cycle #{idx}: expected zero=#{expected[:zero]}, got #{result[:results][idx][:zero]}"
+          expect(result[:results][idx][:negative]).to eq(expected[:negative]),
+            "Cycle #{idx}: expected negative=#{expected[:negative]}, got #{result[:results][idx][:negative]}"
         end
       end
     end

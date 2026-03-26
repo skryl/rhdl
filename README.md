@@ -192,7 +192,7 @@ require 'rhdl'
 
 # Export a component to Verilog
 component = MyComponent.new
-verilog_code = RHDL::Export.verilog(component)
+verilog_code = RHDL::Codegen.verilog(component)
 
 # Or use the class method
 verilog_code = MyComponent.to_verilog
@@ -357,7 +357,9 @@ Nintendo Game Boy emulation based on MiSTer reference, supporting DMG, GBC, and 
 rhdl examples gameboy cpu_instrs.gb            # Run test ROM
 rhdl examples gameboy --demo                   # Run demo display
 rhdl examples gameboy --pop                    # Load Prince of Persia ROM
+rhdl examples gameboy --mode verilog --verilog-dir examples/gameboy/import --top Gameboy --pop
 rhdl examples gameboy game.gb --audio          # Enable audio
+rhdl examples gameboy import                   # Regenerate examples/gameboy/import from the reference HDL
 ```
 
 ### RISC-V RV32I
@@ -401,7 +403,7 @@ Modern 32-bit RISC-V processor with single-cycle and 5-stage pipelined implement
 ```ruby
 require_relative 'examples/riscv/hdl/ir_harness'
 
-harness = RHDL::Examples::RISCV::IRHarness.new(backend: :jit, allow_fallback: false)
+harness = RHDL::Examples::RISCV::IRHarness.new(backend: :jit)
 harness.load_program([
   0x00500093,  # addi x1, x0, 5
   0x00A00113,  # addi x2, x0, 10
@@ -429,6 +431,7 @@ rhdl examples riscv --core single path/to/program.bin
 rhdl examples riscv -d --io uart path/to/program.bin
 
 # Launch xv6 (forces UART mode automatically)
+git submodule update --init --recursive examples/riscv/software/xv6
 ./examples/riscv/software/build_xv6.sh
 rhdl examples riscv --xv6 -d
 rhdl examples riscv --xv6 --mode verilog
@@ -438,6 +441,9 @@ rhdl examples riscv --xv6 --mode circt
 git submodule update --init --recursive examples/riscv/software/linux
 ./examples/riscv/software/build_linux.sh
 # Buildroot for prebuilt toolchain defaults to linux/amd64 Buildroot host images.
+
+# AO486 import sources
+git submodule update --init --recursive examples/ao486/reference
 
 # Run Linux via the top-level CLI (forces UART mode automatically)
 rhdl examples riscv --linux
@@ -501,6 +507,14 @@ rhdl diagram RHDL::HDL::ALU --format svg # Single component diagram
 # Verilog export
 rhdl export --all                        # Export all components
 rhdl export --lang verilog --out ./out RHDL::HDL::Counter
+rhdl export --lang verilog --tool firtool --out ./out RHDL::HDL::Counter  # requires firtool or circt-translate
+
+# CIRCT import/raise
+rhdl import --mode verilog --input ./cpu.v --out ./generated   # requires circt-verilog
+rhdl import --mode mixed --manifest ./import.yml --out ./generated # requires ghdl + circt-verilog
+rhdl import --mode mixed --input ./rtl/top.sv --top top --out ./generated # mixed autoscan fallback when manifest omitted
+rhdl import --mode circt --input ./cpu.mlir --out ./generated
+rhdl import --mode circt --input ./soc.mlir --out ./generated --top soc_top --extern pll --report ./generated/import_report.json
 
 # Gate-level synthesis
 rhdl gates --export                      # Export to JSON netlists
@@ -509,6 +523,7 @@ rhdl gates --stats                       # Show synthesis statistics
 # Example emulators
 rhdl examples apple2 --demo              # Run Apple II demo mode
 rhdl examples gameboy --demo             # Run Game Boy demo mode
+rhdl examples gameboy import             # Regenerate Game Boy imported HDL tree
 rhdl examples riscv --xv6 -d             # Run RISC-V xv6 with debug panel
 ```
 
@@ -529,20 +544,18 @@ sim.run(100)  # 100 clock cycles
 
 ### Gate-Level (Netlist) Simulation
 
-Simulates primitive gate netlists (AND, OR, XOR, NOT, MUX, DFF). Four backend options:
+Simulates primitive gate netlists (AND, OR, XOR, NOT, MUX, DFF) via `RHDL::Sim.gate_level`.
 
 | Backend | Speed | Startup | Use Case |
 |---------|-------|---------|----------|
-| Ruby SimCPU | 22K iter/s | Immediate | Development, small circuits |
-| Rust Interpreter | 427K iter/s (20x) | Immediate | Functional verification |
-| Rust JIT (Cranelift) | 50-100M gates/s | 0.1-0.5s | Fast interactive simulation |
-| Rust Compiler (SIMD) | 100M+ gates/s | 1-2s | Maximum throughput, batch testing |
+| Interpreter | 427K iter/s | Immediate | Functional verification |
+| JIT (Cranelift) | 50-100M gates/s | 0.1-0.5s | Fast interactive simulation |
+| Compiler (SIMD) | 100M+ gates/s | 1-2s | Maximum throughput, batch testing |
 
 The compiler supports AVX2/AVX512 for 256-512 parallel test vectors.
 
 ```ruby
-ir = RHDL::Codegen::Netlist::Lower.from_components([alu])
-sim = RHDL::Codegen::Netlist::NetlistSimulator.new(ir, backend: :interpreter, lanes: 64)
+sim = RHDL::Sim.gate_level([alu], backend: :interpreter, lanes: 64, name: 'alu')
 sim.poke('a', 0xFF)
 sim.evaluate
 result = sim.peek('y')
@@ -559,7 +572,7 @@ Word-level bytecode simulation for complex designs like CPUs:
 | AOT Compiler | 2.3M cycles/s (38x) | 0.5-2s | Long simulations, games |
 
 ```ruby
-sim = RHDL::Codegen::IR::IrSimulator.new(ir_json, backend: :jit)
+sim = RHDL::Sim::Native::IR::Simulator.new(ir_json, backend: :jit)
 sim.compile
 sim.run_ticks(1_000_000)
 ```
@@ -603,7 +616,7 @@ rake native:build    # Build all Rust extensions
 rake native:check    # Check availability
 ```
 
-All backends include automatic fallback to Ruby when native extensions aren't available.
+IR and netlist runtime backends now require native extensions (no runtime fallback path). Use explicit Ruby simulators when you need pure-Ruby execution.
 
 See [Simulation](docs/simulation.md) and [Gate-Level Backend](docs/gate_level_backend.md) for complete details.
 
@@ -642,14 +655,20 @@ See [Performance Guide](docs/performance.md) for detailed benchmarks and optimiz
 ```bash
 # Testing
 bundle exec rake spec                  # Run all tests
+bundle exec rake spec[ao486]          # Run AO486 import/parity specs
+bundle exec rake spec[gameboy]        # Run Game Boy specs (including import specs)
 bundle exec rake spec[riscv]           # Run RISC-V specs
 bundle exec rake pspec                 # Run tests in parallel
+bundle exec rake pspec[ao486]         # Run AO486 specs in parallel
+bundle exec rake pspec[gameboy]       # Run Game Boy specs in parallel
 bundle exec rake pspec[riscv]          # Run RISC-V specs in parallel
 
 # Test and simulation benchmarks
 bundle exec rake spec:bench[riscv,20]  # Benchmark 20 RISC-V spec files
-bundle exec rake bench:native[ir,5000000]     # Benchmark IR runners
-bundle exec rake bench:native[gates]          # Benchmark gate-level simulation
+bundle exec rake spec:bench[ao486,20] # Benchmark 20 AO486 spec files
+bundle exec rake spec:bench[gameboy,20] # Benchmark 20 Game Boy spec files
+bundle exec rake bench:native[ir,5000000]      # Benchmark IR runners
+bundle exec rake bench:native[gates]           # Benchmark gate-level simulation
 bundle exec rake bench:native[cpu8bit,5000000] # Benchmark 8-bit CPU compiler vs arcilator_gpu
 bundle exec rake bench:web[apple2]     # Benchmark Apple II web compiler vs arcilator vs verilator
 bundle exec rake bench:web[riscv]      # Benchmark RISC-V web compiler vs arcilator vs verilator
@@ -662,6 +681,28 @@ RHDL_ENABLE_ARCILATOR_GPU=1 bundle exec rspec spec/examples/8bit/hdl/cpu/arcilat
 # Native backends
 bundle exec rake native:build          # Build native extensions
 bundle exec rake native:check          # Check extension availability
+
+# AO486 import/parity workflow (CLI)
+bundle exec rhdl examples ao486 -m verilog --bios --dos --headless --cycles 100000 # Run AO486 on the Verilator-backed path using the shared mode naming
+bundle exec rhdl examples ao486 -m circt --bios --dos -d -s 5000 # Run AO486 on the Arcilator-backed path with boxed debug output
+bundle exec rhdl examples ao486 -m verilog --bios --dos-disk1 examples/ao486/software/bin/msdos622_boot.img --headless --cycles 100000 # Run the patched verbose MS-DOS 6.22 boot disk explicitly
+bundle exec rhdl examples ao486 import --out examples/ao486/import # Import rtl/ao486/ao486.v via CIRCT and regenerate examples/ao486/import
+bundle exec rhdl examples ao486 import --out examples/ao486/import --strategy stubbed # Force a stubbed CPU-top baseline import
+bundle exec rhdl examples ao486 import --out examples/ao486/import --report tmp/ao486_import_report.json # Emit AO486 import report JSON for the default CPU-top tree import
+bundle exec rhdl examples ao486 import --out examples/ao486/import --no-keep-structure # Keep flat output layout
+bundle exec rhdl examples ao486 import --out examples/ao486/import --strict # Require the AO486 strict gate to pass
+bundle exec rhdl examples ao486 parity # Run bounded Verilog (Verilator) vs raised RHDL (IR) parity harness
+bundle exec rhdl examples ao486 verify # Run AO486 importer + parity + import-path verification specs
+
+# SPARC64 import workflow (CLI)
+bundle exec rhdl examples sparc64 import # Import the SPARC64 top-level baseline and regenerate examples/sparc64/import
+bundle exec rhdl examples sparc64 import --workspace tmp/sparc64_ws --keep-workspace # Keep staged import artifacts for debugging
+bundle exec rhdl examples sparc64 import --top sparc --top-file examples/sparc64/reference/T1-CPU/rtl/sparc.v # Import the core top instead of the default board-level W1 top
+
+# Game Boy import workflow
+bundle exec rhdl examples gameboy import # Import the Game Boy reference HDL and regenerate examples/gameboy/import
+bundle exec rhdl examples gameboy import --auto-stub-modules # Import with simulation-safe stubs for wrapper-disabled subsystems
+bundle exec ruby examples/gameboy/bin/gb import --workspace tmp/gameboy_ws --keep-workspace --no-strict # Keep import artifacts for debugging and allow non-strict import
 
 # Web simulator
 bundle exec rake web:build             # Generate web simulator WASM artifacts

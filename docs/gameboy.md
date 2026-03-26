@@ -28,7 +28,60 @@ rhdl examples gameboy --demo
 rhdl examples gameboy --rom game.gb --audio
 ```
 
-### Command Line Options
+### Importing the Reference Design
+
+```bash
+# Regenerate the canonical import tree
+bundle exec rhdl examples gameboy import
+
+# Same import via the local bin wrapper
+bundle exec ruby examples/gameboy/bin/gb import
+
+# Flatten the raised DSL instead of preserving the reference tree layout
+bundle exec ruby examples/gameboy/bin/gb import --no-keep-structure
+
+# Keep the import workspace for debugging
+bundle exec ruby examples/gameboy/bin/gb import --workspace tmp/gameboy_ws --keep-workspace
+
+# Import with the simulation-safe stub profile used by runtime parity flows
+bundle exec ruby examples/gameboy/bin/gb import --auto-stub-modules
+
+# Allow the importer to write output/report artifacts without strict failure
+bundle exec ruby examples/gameboy/bin/gb import --no-strict
+```
+
+The import command regenerates `examples/gameboy/import` by default and writes an import report to `examples/gameboy/import/import_report.json`.
+By default it preserves the original source directory structure in the raised RHDL output; use `--no-keep-structure` to keep the raised files flat.
+`--auto-stub-modules` opt-ins to the simulation-safe stub profile for wrapper-disabled subsystems (`gb_savestates`, `gb_statemanager`, `sprites_extra`). Leave it off for raw import/equivalence workflows.
+
+To run the imported Game Boy design through the same staged Verilator path used by the parity tests:
+
+```bash
+bundle exec ruby examples/gameboy/bin/gb import \
+  --out examples/gameboy/import \
+  --workspace examples/gameboy/tmp/import_workspace \
+  --keep-workspace
+bundle exec ruby examples/gameboy/bin/gb \
+  --mode verilog \
+  --source examples/gameboy/import \
+  --top Gameboy \
+  --pop
+
+bundle exec ruby examples/gameboy/bin/gb \
+  --mode verilog \
+  --source examples/gameboy/import \
+  --top Gameboy \
+  --use-normalized-source \
+  --pop
+
+bundle exec ruby examples/gameboy/bin/gb \
+  --mode verilog \
+  --source examples/gameboy/import \
+  --use-rhdl-source \
+  --pop
+```
+
+### Emulator Command Line Options
 
 ```
 Usage: rhdl examples gameboy [options] [rom.gb]
@@ -43,6 +96,8 @@ Options:
   --sim BACKEND         Simulation backend: ruby, jit, compile
   --dry-run             Initialize but don't run
 ```
+
+For importer options, run `rhdl examples gameboy import --help` or `bin/gb import --help`.
 
 ## Architecture
 
@@ -474,6 +529,7 @@ examples/gameboy/
 |   +-- dma/
 |   |   +-- hdma.rb             # DMA engines
 |   +-- gb.rb                   # Top-level GB core
+|   +-- gameboy.rb              # Handwritten top-level wrapper
 |   +-- timer.rb                # Timer/counter
 |   +-- link.rb                 # Serial link
 |   +-- speedcontrol.rb         # GBC speed control
@@ -485,7 +541,6 @@ examples/gameboy/
 |   +-- speaker.rb              # Audio output
 +-- software/
 |   +-- roms/                   # Test ROMs
-+-- gameboy.rb                  # Main loader
 +-- demo_display.rb             # Demo program
 ```
 

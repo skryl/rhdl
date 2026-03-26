@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 require 'spec_helper'
-require_relative '../../../../examples/gameboy/gameboy'
+require_relative '../../../../examples/gameboy/hdl/gameboy'
 
 # Game Boy Top-Level (GB) Unit Tests
 # Tests the main Game Boy system integration module
@@ -31,7 +31,7 @@ RSpec.describe 'GameBoy GB Top-Level Module' do
 
   describe 'GB Component Structure' do
     let(:gb) { RHDL::Examples::GameBoy::GB.new('gb') }
-    let(:ir) { gb.class.to_ir }
+    let(:ir) { gb.class.to_flat_circt_nodes }
     let(:port_names) { ir.ports.map { |p| p.name.to_sym } }
 
     describe 'Clock and Reset Inputs (via IR)' do
@@ -158,7 +158,7 @@ RSpec.describe 'GameBoy GB Top-Level Module' do
         # This may fail if there are issues in subcomponents (e.g., SM83)
         # Skip gracefully in that case
         begin
-          flat_ir = gb.class.to_flat_ir
+          flat_ir = gb.class.to_flat_circt_nodes
           expect(flat_ir).not_to be_nil
         rescue NameError => e
           skip "Flattened IR generation failed: #{e.message}"
@@ -176,7 +176,7 @@ RSpec.describe 'GameBoy GB Top-Level Module' do
     before(:all) do
       begin
         require_relative '../../../../examples/gameboy/utilities/runners/ir_runner'
-        @ir_available = RHDL::Codegen::IR::COMPILER_AVAILABLE rescue false
+        @ir_available = RHDL::Sim::Native::IR::COMPILER_AVAILABLE rescue false
         # Try to actually initialize a runner to verify it works
         if @ir_available
           test_runner = RHDL::Examples::GameBoy::IrRunner.new(backend: :compile)

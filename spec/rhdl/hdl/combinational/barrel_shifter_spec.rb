@@ -68,8 +68,8 @@ RSpec.describe RHDL::HDL::BarrelShifter do
     end
 
     it 'generates valid IR' do
-      ir = RHDL::HDL::BarrelShifter.to_ir
-      expect(ir).to be_a(RHDL::Export::IR::ModuleDef)
+      ir = RHDL::HDL::BarrelShifter.to_flat_circt_nodes
+      expect(ir).to be_a(RHDL::Codegen::CIRCT::IR::ModuleOp)
       expect(ir.ports.length).to eq(6)  # a, shift, dir, arith, rotate, y
     end
 
@@ -80,12 +80,12 @@ RSpec.describe RHDL::HDL::BarrelShifter do
       expect(verilog).to include('output [7:0] y')
     end
 
-    it 'generates valid FIRRTL' do
-      firrtl = RHDL::HDL::BarrelShifter.to_circt
-      expect(firrtl).to include('FIRRTL version')
-      expect(firrtl).to include('circuit barrel_shifter')
-      expect(firrtl).to include('input a')
-      expect(firrtl).to include('output y')
+    it 'generates valid CIRCT MLIR' do
+      mlir = RHDL::HDL::BarrelShifter.to_circt
+      expect(mlir).to include('hw.output')
+      expect(mlir).to include('hw.module @barrel_shifter')
+      expect(mlir).to include('%a:')
+      expect(mlir).to include('y:')
     end
 
     context 'CIRCT firtool validation', if: HdlToolchain.firtool_available? do
@@ -102,7 +102,7 @@ RSpec.describe RHDL::HDL::BarrelShifter do
 
   describe 'gate-level netlist' do
     let(:component) { RHDL::HDL::BarrelShifter.new('bshifter') }
-    let(:ir) { RHDL::Export::Structure::Lower.from_components([component], name: 'bshifter') }
+    let(:ir) { RHDL::Codegen::Netlist::Lower.from_components([component], name: 'bshifter') }
 
     it 'generates correct IR structure' do
       expect(ir.inputs.keys).to include('bshifter.a', 'bshifter.shift', 'bshifter.dir', 'bshifter.arith', 'bshifter.rotate')

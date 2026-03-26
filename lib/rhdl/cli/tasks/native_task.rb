@@ -25,59 +25,59 @@ module RHDL
           # Gate-level netlist simulators (netlist backend)
           netlist_interpreter: {
             name: 'Netlist Interpreter (Gate-Level)',
-            ext_dir: File.expand_path('lib/rhdl/codegen/netlist/sim/netlist_interpreter', Config.project_root),
+            ext_dir: File.expand_path('lib/rhdl/sim/native/netlist/netlist_interpreter', Config.project_root),
             crate_name: 'netlist_interpreter',
             load_path: 'lib',
-            require_path: 'rhdl/codegen/netlist/sim/netlist_simulator',
+            require_path: 'rhdl/sim/native/netlist/simulator',
             artifact: :fiddle_lib,
-            check_const: 'RHDL::Codegen::Netlist::NETLIST_INTERPRETER_AVAILABLE'
+            check_const: 'RHDL::Sim::Native::Netlist::INTERPRETER_AVAILABLE'
           },
           netlist_jit: {
             name: 'Netlist JIT (Gate-Level Cranelift)',
-            ext_dir: File.expand_path('lib/rhdl/codegen/netlist/sim/netlist_jit', Config.project_root),
+            ext_dir: File.expand_path('lib/rhdl/sim/native/netlist/netlist_jit', Config.project_root),
             crate_name: 'netlist_jit',
             load_path: 'lib',
-            require_path: 'rhdl/codegen/netlist/sim/netlist_simulator',
+            require_path: 'rhdl/sim/native/netlist/simulator',
             artifact: :fiddle_lib,
-            check_const: 'RHDL::Codegen::Netlist::NETLIST_JIT_AVAILABLE'
+            check_const: 'RHDL::Sim::Native::Netlist::JIT_AVAILABLE'
           },
           netlist_compiler: {
             name: 'Netlist Compiler (Gate-Level SIMD)',
-            ext_dir: File.expand_path('lib/rhdl/codegen/netlist/sim/netlist_compiler', Config.project_root),
+            ext_dir: File.expand_path('lib/rhdl/sim/native/netlist/netlist_compiler', Config.project_root),
             crate_name: 'netlist_compiler',
             load_path: 'lib',
-            require_path: 'rhdl/codegen/netlist/sim/netlist_simulator',
+            require_path: 'rhdl/sim/native/netlist/simulator',
             artifact: :fiddle_lib,
-            check_const: 'RHDL::Codegen::Netlist::NETLIST_COMPILER_AVAILABLE'
+            check_const: 'RHDL::Sim::Native::Netlist::COMPILER_AVAILABLE'
           },
 
           # IR-level simulators (Behavior IR backend)
           ir_interpreter: {
             name: 'IR Interpreter',
-            ext_dir: File.expand_path('lib/rhdl/codegen/ir/sim/ir_interpreter', Config.project_root),
+            ext_dir: File.expand_path('lib/rhdl/sim/native/ir/ir_interpreter', Config.project_root),
             crate_name: 'ir_interpreter',
             load_path: 'lib',
-            require_path: 'rhdl/codegen/ir/sim/ir_simulator',
+            require_path: 'rhdl/sim/native/ir/simulator',
             artifact: :fiddle_lib,
-            check_const: 'RHDL::Codegen::IR::IR_INTERPRETER_AVAILABLE'
+            check_const: 'RHDL::Sim::Native::IR::INTERPRETER_AVAILABLE'
           },
           ir_jit: {
             name: 'IR JIT (Cranelift)',
-            ext_dir: File.expand_path('lib/rhdl/codegen/ir/sim/ir_jit', Config.project_root),
+            ext_dir: File.expand_path('lib/rhdl/sim/native/ir/ir_jit', Config.project_root),
             crate_name: 'ir_jit',
             load_path: 'lib',
-            require_path: 'rhdl/codegen/ir/sim/ir_simulator',
+            require_path: 'rhdl/sim/native/ir/simulator',
             artifact: :fiddle_lib,
-            check_const: 'RHDL::Codegen::IR::IR_JIT_AVAILABLE'
+            check_const: 'RHDL::Sim::Native::IR::JIT_AVAILABLE'
           },
           ir_compiler: {
             name: 'IR Compiler (AOT)',
-            ext_dir: File.expand_path('lib/rhdl/codegen/ir/sim/ir_compiler', Config.project_root),
+            ext_dir: File.expand_path('lib/rhdl/sim/native/ir/ir_compiler', Config.project_root),
             crate_name: 'ir_compiler',
             load_path: 'lib',
-            require_path: 'rhdl/codegen/ir/sim/ir_simulator',
+            require_path: 'rhdl/sim/native/ir/simulator',
             artifact: :fiddle_lib,
-            check_const: 'RHDL::Codegen::IR::IR_COMPILER_AVAILABLE'
+            check_const: 'RHDL::Sim::Native::IR::COMPILER_AVAILABLE'
           }
         }.freeze
 
@@ -170,7 +170,7 @@ module RHDL
             raise "Built library not found at #{src_path}"
           end
 
-          FileUtils.cp(src_path, dst_path)
+          FileUtils.cp(src_path, dst_path) unless same_file_path?(src_path, dst_path)
 
           puts "  Built: #{dst_path}"
         end
@@ -219,6 +219,14 @@ module RHDL
           const_parts = ext[:check_const].split('::')
           const_parts.reduce(Object) { |mod, name| mod.const_get(name) }
         rescue LoadError, NameError
+          false
+        end
+
+        def same_file_path?(src_path, dst_path)
+          return false unless File.exist?(src_path) && File.exist?(dst_path)
+
+          File.identical?(src_path, dst_path)
+        rescue Errno::ENOENT
           false
         end
 

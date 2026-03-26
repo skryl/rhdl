@@ -29,6 +29,11 @@ RSpec.describe RHDL::Examples::GameBoy::HeadlessRunner, :slow do
       runner = described_class.with_test_rom
       expect { runner.reset }.not_to raise_error
     end
+
+    it 'returns nil from sim when the active backend has no native sim object' do
+      runner = described_class.new
+      expect(runner.sim).to be_nil
+    end
   end
 
   describe 'IR mode with interpret backend' do
@@ -112,6 +117,183 @@ RSpec.describe RHDL::Examples::GameBoy::HeadlessRunner, :slow do
       runner = described_class.with_test_rom(mode: :verilog)
       expect(runner.rom_size).to be > 0
     end
+
+    it 'exposes the native sim object uniformly' do
+      require_relative '../../../examples/gameboy/utilities/runners/verilator_runner'
+      fake_sim = instance_double('Sim')
+      fake_runner = instance_double(
+        'RHDL::Examples::GameBoy::VerilogRunner',
+        native?: true,
+        simulator_type: :hdl_verilator,
+        sim: fake_sim
+      )
+      allow(RHDL::Examples::GameBoy::VerilogRunner).to receive(:new).and_return(fake_runner)
+
+      runner = described_class.new(mode: :verilog)
+      expect(runner.sim).to eq(fake_sim)
+    end
+
+    it 'passes direct verilog and staged-verilog options to VerilogRunner' do
+      require_relative '../../../examples/gameboy/utilities/runners/verilator_runner'
+      fake_runner = instance_double(
+        'RHDL::Examples::GameBoy::VerilogRunner',
+        native?: true,
+        simulator_type: :hdl_verilator
+      )
+      allow(RHDL::Examples::GameBoy::VerilogRunner).to receive(:new).and_return(fake_runner)
+
+      runner = described_class.new(
+        mode: :verilog,
+        verilog_dir: '/tmp/gameboy_import',
+        top: 'Gameboy',
+        use_staged_verilog: true
+      )
+
+      expect(RHDL::Examples::GameBoy::VerilogRunner).to have_received(:new).with(
+        hdl_dir: nil,
+        verilog_dir: '/tmp/gameboy_import',
+        top: 'Gameboy',
+        use_staged_verilog: true,
+        use_normalized_verilog: false,
+        use_rhdl_source: false
+      )
+      expect(runner.verilog_dir).to eq('/tmp/gameboy_import')
+      expect(runner.top).to eq('Gameboy')
+      expect(runner.use_staged_verilog).to eq(true)
+    end
+  end
+
+  describe 'CIRCT mode' do
+    it 'passes imported HDL options to ArcilatorRunner' do
+      require_relative '../../../examples/gameboy/utilities/runners/arcilator_runner'
+      fake_runner = instance_double(
+        'RHDL::Examples::GameBoy::ArcilatorRunner',
+        native?: true,
+        simulator_type: :hdl_arcilator
+      )
+      allow(RHDL::Examples::GameBoy::ArcilatorRunner).to receive(:new).and_return(fake_runner)
+
+      runner = described_class.new(
+        mode: :circt,
+        hdl_dir: '/tmp/gameboy_import',
+        top: 'Gameboy'
+      )
+
+      expect(RHDL::Examples::GameBoy::ArcilatorRunner).to have_received(:new).with(
+        hdl_dir: '/tmp/gameboy_import',
+        top: 'Gameboy',
+        use_staged_verilog: true,
+        use_normalized_verilog: false,
+        use_rhdl_source: false,
+        jit: false
+      )
+      expect(runner.mode).to eq(:circt)
+      expect(runner.backend).to eq(:compile)
+      expect(runner.simulator_type).to eq(:hdl_arcilator)
+    end
+
+    it 'accepts :arcilator as an alias for :circt' do
+      require_relative '../../../examples/gameboy/utilities/runners/arcilator_runner'
+      fake_runner = instance_double(
+        'RHDL::Examples::GameBoy::ArcilatorRunner',
+        native?: true,
+        simulator_type: :hdl_arcilator
+      )
+      allow(RHDL::Examples::GameBoy::ArcilatorRunner).to receive(:new).and_return(fake_runner)
+
+      runner = described_class.new(mode: :arcilator)
+
+      expect(RHDL::Examples::GameBoy::ArcilatorRunner).to have_received(:new).with(
+        hdl_dir: nil,
+        top: nil,
+        use_staged_verilog: true,
+        use_normalized_verilog: false,
+        use_rhdl_source: false,
+        jit: false
+      )
+      expect(runner.mode).to eq(:arcilator)
+      expect(runner.backend).to eq(:compile)
+      expect(runner.simulator_type).to eq(:hdl_arcilator)
+    end
+
+    it 'uses --sim style jit backend selection for ArcilatorRunner' do
+      require_relative '../../../examples/gameboy/utilities/runners/arcilator_runner'
+      fake_runner = instance_double(
+        'RHDL::Examples::GameBoy::ArcilatorRunner',
+        native?: true,
+        simulator_type: :hdl_arcilator
+      )
+      allow(RHDL::Examples::GameBoy::ArcilatorRunner).to receive(:new).and_return(fake_runner)
+
+      runner = described_class.new(mode: :circt, sim: :jit)
+
+      expect(RHDL::Examples::GameBoy::ArcilatorRunner).to have_received(:new).with(
+        hdl_dir: nil,
+        top: nil,
+        use_staged_verilog: true,
+        use_normalized_verilog: false,
+        use_rhdl_source: false,
+        jit: true
+      )
+      expect(runner.backend).to eq(:jit)
+    end
+
+    it 'exposes the native sim object uniformly' do
+      require_relative '../../../examples/gameboy/utilities/runners/arcilator_runner'
+      fake_sim = instance_double('Sim')
+      fake_runner = instance_double(
+        'RHDL::Examples::GameBoy::ArcilatorRunner',
+        native?: true,
+        simulator_type: :hdl_arcilator,
+        sim: fake_sim
+      )
+      allow(RHDL::Examples::GameBoy::ArcilatorRunner).to receive(:new).and_return(fake_runner)
+
+      runner = described_class.new(mode: :circt)
+      expect(runner.sim).to eq(fake_sim)
+    end
+
+    it 'forwards the normalized imported-source selection to ArcilatorRunner' do
+      require_relative '../../../examples/gameboy/utilities/runners/arcilator_runner'
+      fake_runner = instance_double(
+        'RHDL::Examples::GameBoy::ArcilatorRunner',
+        native?: true,
+        simulator_type: :hdl_arcilator
+      )
+      allow(RHDL::Examples::GameBoy::ArcilatorRunner).to receive(:new).and_return(fake_runner)
+
+      described_class.new(mode: :circt, use_staged_verilog: false, use_normalized_verilog: true)
+
+      expect(RHDL::Examples::GameBoy::ArcilatorRunner).to have_received(:new).with(
+        hdl_dir: nil,
+        top: nil,
+        use_staged_verilog: false,
+        use_normalized_verilog: true,
+        use_rhdl_source: false,
+        jit: false
+      )
+    end
+
+    it 'forwards the rhdl source selection to ArcilatorRunner' do
+      require_relative '../../../examples/gameboy/utilities/runners/arcilator_runner'
+      fake_runner = instance_double(
+        'RHDL::Examples::GameBoy::ArcilatorRunner',
+        native?: true,
+        simulator_type: :hdl_arcilator
+      )
+      allow(RHDL::Examples::GameBoy::ArcilatorRunner).to receive(:new).and_return(fake_runner)
+
+      described_class.new(mode: :circt, use_rhdl_source: true)
+
+      expect(RHDL::Examples::GameBoy::ArcilatorRunner).to have_received(:new).with(
+        hdl_dir: nil,
+        top: nil,
+        use_staged_verilog: false,
+        use_normalized_verilog: false,
+        use_rhdl_source: true,
+        jit: false
+      )
+    end
   end
 
   describe 'runner interface' do
@@ -173,7 +355,7 @@ RSpec.describe RHDL::Examples::GameBoy::HeadlessRunner, :slow do
   # Check if IR interpreter is available
   def ir_interpreter_available?
     require 'rhdl/codegen'
-    RHDL::Codegen::IR::IR_INTERPRETER_AVAILABLE
+    RHDL::Sim::Native::IR::INTERPRETER_AVAILABLE
   rescue LoadError, NameError
     false
   end
@@ -181,7 +363,7 @@ RSpec.describe RHDL::Examples::GameBoy::HeadlessRunner, :slow do
   # Check if IR JIT is available
   def ir_jit_available?
     require 'rhdl/codegen'
-    RHDL::Codegen::IR::IR_JIT_AVAILABLE
+    RHDL::Sim::Native::IR::JIT_AVAILABLE
   rescue LoadError, NameError
     false
   end
@@ -189,7 +371,7 @@ RSpec.describe RHDL::Examples::GameBoy::HeadlessRunner, :slow do
   # Check if IR Compiler is available
   def ir_compiler_available?
     require 'rhdl/codegen'
-    RHDL::Codegen::IR::IR_COMPILER_AVAILABLE
+    RHDL::Sim::Native::IR::COMPILER_AVAILABLE
   rescue LoadError, NameError
     false
   end

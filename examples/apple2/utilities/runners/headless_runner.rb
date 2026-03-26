@@ -7,21 +7,24 @@
 # but without any terminal/display dependencies.
 
 require_relative 'ruby_runner'
+require 'rhdl/sim/native/headless_trace'
 
 module RHDL
   module Examples
     module Apple2
       class HeadlessRunner
+      include RHDL::Sim::Native::HeadlessTrace
       attr_reader :runner, :mode, :sim_backend
 
       # Create a headless runner with the specified options
       # @param mode [Symbol] Simulation mode: :ruby, :ir, :netlist, :verilog, :circt
       # @param sim [Symbol] Simulator backend for :ir/:netlist: :interpret, :jit, :compile
       # @param sub_cycles [Integer] Sub-cycles per CPU cycle (for IR backends)
-      def initialize(mode: :ruby, sim: nil, sub_cycles: 14)
+      def initialize(mode: :ruby, sim: nil, sub_cycles: 14, threads: 1)
         @mode = mode
         @sim_backend = sim || default_backend(mode)
         @sub_cycles = sub_cycles
+        @threads = RHDL::Codegen::Verilog::VerilogSimulator.normalize_threads(threads)
 
         # Create runner based on mode and sim backend
         @runner = case mode
@@ -35,7 +38,7 @@ module RHDL
                     RHDL::Examples::Apple2::NetlistRunner.new(backend: normalize_native_backend(@sim_backend))
                   when :verilog
                     require_relative 'verilator_runner'
-                    RHDL::Examples::Apple2::VerilogRunner.new(sub_cycles: sub_cycles)
+                    RHDL::Examples::Apple2::VerilogRunner.new(sub_cycles: sub_cycles, threads: @threads)
                   when :circt
                     require_relative 'arcilator_runner'
                     RHDL::Examples::Apple2::ArcilatorRunner.new(sub_cycles: sub_cycles)
@@ -113,6 +116,12 @@ module RHDL
       # Check if using native implementation
       def native?
         @runner.native?
+      end
+
+      def sim
+        return nil unless @runner.respond_to?(:sim)
+
+        @runner.sim
       end
 
       # Get simulator type

@@ -82,6 +82,17 @@ RSpec.describe RHDL::Examples::Apple2::CPU6502 do
     end
   end
 
+  context 'CIRCT firtool validation', if: HdlToolchain.firtool_available? do
+    it 'compiles FIRRTL to Verilog without width mismatches' do
+      result = CirctHelper.validate_firrtl_syntax(
+        described_class,
+        base_dir: 'tmp/circt_test/apple2_cpu6502'
+      )
+
+      expect(result[:success]).to be(true), result[:error]
+    end
+  end
+
   describe 'reset behavior' do
     before do
       set_reset_vector(0x0200)

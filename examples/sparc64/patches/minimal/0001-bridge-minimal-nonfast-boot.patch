@@ -1,0 +1,15 @@
+diff --git a/os2wb/os2wb_dual.v b/os2wb/os2wb_dual.v
+--- a/os2wb/os2wb_dual.v
++++ b/os2wb/os2wb_dual.v
+@@ -108,9 +108,9 @@ wire [1:0] wayval1;
+ `define CPX_INT_VEC_DIS  5'b11110
+ `define PCX_REQ_CAS_COMPARE 5'b11111
+ 
+-`define MEM_SIZE         64'h00000000_10000000
++`define MEM_SIZE         64'h00000000_00000020
+ 
+-`define TEST_DRAM        1
++`define TEST_DRAM        0
+ `define DEBUGGING        1
+ 
+ reg        cache_init;

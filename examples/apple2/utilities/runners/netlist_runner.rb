@@ -111,18 +111,16 @@ module RHDL
         # Generate gate-level IR
         @ir = Apple2Netlist.gate_ir
 
-        # allow_fallback: false ensures we get an error if the native extension is missing
-        @sim = RHDL::Codegen::Netlist::NetlistSimulator.new(
+        @sim = RHDL::Sim::Native::Netlist::Simulator.new(
           @ir,
           backend: backend,
           lanes: 1,
-          simd: simd,
-          allow_fallback: false
+          simd: simd
         )
 
         elapsed = Time.now - start_time
         puts "  Netlist loaded in #{elapsed.round(2)}s"
-        puts "  Native backend: #{@sim.native? ? 'Rust' : 'Ruby (fallback)'}"
+        puts "  Native backend: Rust"
         puts "  Gates: #{@ir.gates.length}, DFFs: #{@ir.dffs.length}"
         if backend == :compile && @sim.respond_to?(:simd_mode)
           puts "  SIMD mode: #{@sim.simd_mode}"

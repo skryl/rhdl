@@ -1,6 +1,7 @@
 module RHDL
   module ExportFixtures
     class Mux2 < RHDL::Component
+      include RHDL::DSL::Codegen
       self._ports = []
       self._signals = []
       self._constants = []
@@ -30,6 +31,7 @@ module RHDL
     end
 
     class Adder8 < RHDL::Component
+      include RHDL::DSL::Codegen
       self._ports = []
       self._signals = []
       self._constants = []
@@ -50,6 +52,7 @@ module RHDL
     end
 
     class Reg8 < RHDL::Component
+      include RHDL::DSL::Codegen
       self._ports = []
       self._signals = []
       self._constants = []

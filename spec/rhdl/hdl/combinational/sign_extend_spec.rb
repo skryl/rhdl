@@ -25,8 +25,8 @@ RSpec.describe RHDL::HDL::SignExtend do
     end
 
     it 'generates valid IR' do
-      ir = RHDL::HDL::SignExtend.to_ir
-      expect(ir).to be_a(RHDL::Export::IR::ModuleDef)
+      ir = RHDL::HDL::SignExtend.to_flat_circt_nodes
+      expect(ir).to be_a(RHDL::Codegen::CIRCT::IR::ModuleOp)
       expect(ir.ports.length).to eq(2)  # a, y
     end
 
@@ -37,12 +37,12 @@ RSpec.describe RHDL::HDL::SignExtend do
       expect(verilog).to include('output [15:0] y')
     end
 
-    it 'generates valid FIRRTL' do
-      firrtl = RHDL::HDL::SignExtend.to_circt
-      expect(firrtl).to include('FIRRTL version')
-      expect(firrtl).to include('circuit sign_extend')
-      expect(firrtl).to include('input a')
-      expect(firrtl).to include('output y')
+    it 'generates valid CIRCT MLIR' do
+      mlir = RHDL::HDL::SignExtend.to_circt
+      expect(mlir).to include('hw.output')
+      expect(mlir).to include('hw.module @sign_extend')
+      expect(mlir).to include('%a:')
+      expect(mlir).to include('y:')
     end
 
     context 'CIRCT firtool validation', if: HdlToolchain.firtool_available? do
@@ -59,7 +59,7 @@ RSpec.describe RHDL::HDL::SignExtend do
 
   describe 'gate-level netlist' do
     let(:component) { RHDL::HDL::SignExtend.new('sign_extend', in_width: 4, out_width: 8) }
-    let(:ir) { RHDL::Export::Structure::Lower.from_components([component], name: 'sign_extend') }
+    let(:ir) { RHDL::Codegen::Netlist::Lower.from_components([component], name: 'sign_extend') }
 
     it 'generates correct IR structure' do
       expect(ir.inputs.keys).to include('sign_extend.a')

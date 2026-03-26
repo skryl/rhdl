@@ -117,26 +117,8 @@ RSpec.describe 'MOS6502 Verilog Program Execution', :slow, if: HdlToolchain.iver
   end
 
   def write_verilog_modules(base_dir)
-    # All 6502 CPU components - use class names for filenames to match module names
-    components = {
-      'mos6502_cpu.v' => RHDL::Examples::MOS6502::CPU.to_verilog,
-      'mos6502_registers.v' => RHDL::Examples::MOS6502::Registers.to_verilog,
-      'mos6502_status_register.v' => RHDL::Examples::MOS6502::StatusRegister.to_verilog,
-      'mos6502_program_counter.v' => RHDL::Examples::MOS6502::ProgramCounter.to_verilog,
-      'mos6502_stack_pointer.v' => RHDL::Examples::MOS6502::StackPointer.to_verilog,
-      'mos6502_instruction_register.v' => RHDL::Examples::MOS6502::InstructionRegister.to_verilog,
-      'mos6502_address_latch.v' => RHDL::Examples::MOS6502::AddressLatch.to_verilog,
-      'mos6502_data_latch.v' => RHDL::Examples::MOS6502::DataLatch.to_verilog,
-      'mos6502_control_unit.v' => RHDL::Examples::MOS6502::ControlUnit.to_verilog,
-      'mos6502_alu.v' => RHDL::Examples::MOS6502::ALU.to_verilog,
-      'mos6502_instruction_decoder.v' => RHDL::Examples::MOS6502::InstructionDecoder.to_verilog,
-      'mos6502_address_generator.v' => RHDL::Examples::MOS6502::AddressGenerator.to_verilog,
-      'mos6502_indirect_address_calc.v' => RHDL::Examples::MOS6502::IndirectAddressCalc.to_verilog
-    }
-
-    components.each do |filename, content|
-      File.write(File.join(base_dir, filename), content)
-    end
+    # `CPU.to_verilog` is hierarchical and already contains submodule definitions.
+    File.write(File.join(base_dir, 'mos6502_cpu.v'), RHDL::Examples::MOS6502::CPU.to_verilog)
   end
 
   def write_testbench(base_dir, program:, initial_memory:, check_addrs:, max_cycles:)

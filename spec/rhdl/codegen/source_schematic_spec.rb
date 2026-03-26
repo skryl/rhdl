@@ -32,10 +32,17 @@ RSpec.describe 'RHDL source/schematic exports' do
   end
 
   describe RHDL::Codegen::Schematic do
+    it 'uses flattened CIRCT nodes for class-level schematic default IR' do
+      expect(RHDL::HDL::AndGate).to receive(:to_flat_circt_nodes).and_call_original
+
+      bundle = RHDL::HDL::AndGate.to_schematic(runner: 'and-gate')
+      expect(bundle[:format]).to eq('rhdl.web.schematic.v1')
+    end
+
     it 'exports a schematic bundle for a component hierarchy' do
       bundle = described_class.bundle(
         top_class: RHDL::HDL::AndGate,
-        sim_ir: RHDL::HDL::AndGate.to_flat_ir,
+        sim_ir: RHDL::HDL::AndGate.to_circt_runtime_json,
         runner: 'and-gate'
       )
 
@@ -48,8 +55,20 @@ RSpec.describe 'RHDL source/schematic exports' do
       expect(top).not_to be_nil
       expect(top[:name]).to eq('top')
       expect(top[:schematic][:symbols].map { |symbol| symbol[:type] }).to include('focus', 'io', 'op')
+      expect(top[:schematic][:wires].map { |wire| wire[:kind] }).to include('assign_source')
+      expect(top[:schematic][:nets].find { |net| net[:name] == 'a0' }[:live_name]).to eq('a0')
       expect(top[:schematic][:wires]).not_to be_empty
       expect(top[:schematic][:nets]).not_to be_empty
+    end
+
+    it 'rejects malformed CIRCT runtime wrapper payloads' do
+      expect do
+        described_class.bundle(
+          top_class: RHDL::HDL::AndGate,
+          sim_ir: { 'circt_json_version' => 1 },
+          runner: 'and-gate'
+        )
+      end.to raise_error(ArgumentError, /circt_json_version and non-empty modules/)
     end
   end
 end

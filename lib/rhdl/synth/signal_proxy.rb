@@ -18,8 +18,16 @@ module RHDL
         self
       end
 
-      def to_ir
-        RHDL::Codegen::IR::Signal.new(name: @name, width: @width)
+      def to_ir(cache = nil)
+        memoize_ir(cache) do
+          RHDL::Codegen::CIRCT::IR::Signal.new(name: @name, width: @width)
+        end
+      end
+
+      private
+
+      def ir_cache_key
+        [self.class, @name, @width]
       end
     end
   end

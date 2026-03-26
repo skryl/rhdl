@@ -2,13 +2,14 @@
 
 require 'json'
 require 'fileutils'
+require 'rhdl/codegen/circt/tooling'
 
 module RHDL
   module CLI
     module Tasks
       # Builds an arcilator-compiled Apple II WASM module for the web simulator.
       #
-      # Pipeline: RHDL → FIRRTL → firtool (HW MLIR) → arcilator (LLVM IR) →
+      # Pipeline: RHDL → CIRCT MLIR → arcilator (LLVM IR) →
       #           clang --target=wasm32 + wasm-ld → apple2_arcilator.wasm
       #
       # The generated WASM module implements the WasmIrSimulator API and Apple II
@@ -28,7 +29,7 @@ module RHDL
         PKG_DIR = File.join(PROJECT_ROOT, 'web', 'assets', 'pkg')
         PKG_OUTPUT = File.join(PKG_DIR, 'apple2_arcilator.wasm')
 
-        REQUIRED_TOOLS = %w[firtool arcilator clang wasm-ld].freeze
+        REQUIRED_TOOLS = %w[arcilator circt-opt clang wasm-ld].freeze
 
         # State buffer size — generous allocation for Apple II design.
         # Arcilator packs all registers into a flat byte array; typical Apple II
@@ -79,39 +80,38 @@ module RHDL
           missing_tools.empty?
         end
 
-        # Export Apple II HDL to FIRRTL format.
+        # Export Apple II HDL to CIRCT MLIR.
         def export_firrtl
-          puts '  Exporting Apple2 to FIRRTL...'
+          puts '  Exporting Apple2 to CIRCT MLIR...'
           require File.join(PROJECT_ROOT, 'examples/apple2/hdl/apple2')
           require 'rhdl/codegen'
 
-          components = [
-            RHDL::Examples::Apple2::TimingGenerator,
-            RHDL::Examples::Apple2::VideoGenerator,
-            RHDL::Examples::Apple2::CharacterROM,
-            RHDL::Examples::Apple2::SpeakerToggle,
-            RHDL::Examples::Apple2::CPU6502,
-            RHDL::Examples::Apple2::DiskII,
-            RHDL::Examples::Apple2::DiskIIROM,
-            RHDL::Examples::Apple2::Keyboard,
-            RHDL::Examples::Apple2::PS2Controller,
-            RHDL::Examples::Apple2::Apple2
-          ]
-          module_defs = components.map(&:to_ir)
-          firrtl = RHDL::Codegen::CIRCT::FIRRTL.generate_hierarchy(module_defs, top_name: 'apple2_apple2')
-          File.write(FIRRTL_FILE, firrtl)
+          mlir = RHDL::Examples::Apple2::Apple2.to_mlir_hierarchy(top_name: 'apple2_apple2')
+          File.write(MLIR_FILE, mlir)
         end
 
-        # FIRRTL → HW+Comb+Seq MLIR via firtool.
+        # MLIR export step is now direct from DSL lowering.
         def compile_firrtl_to_mlir
-          puts '  Compiling FIRRTL → MLIR (firtool)...'
-          run_tool!('firtool', FIRRTL_FILE, '--ir-hw', '-o', MLIR_FILE)
+          puts '  CIRCT MLIR already emitted; skipping FIRRTL lowering step.'
         end
 
         # MLIR → LLVM IR via arcilator.
         def compile_mlir_to_llvm_ir
+          puts '  Preparing ARC MLIR...'
+          prepared = RHDL::Codegen::CIRCT::Tooling.prepare_arcilator_input_from_circt_mlir(
+            mlir_path: MLIR_FILE,
+            work_dir: File.join(BUILD_DIR, 'arc'),
+            base_name: 'apple2',
+            top: 'apple2_apple2'
+          )
+          raise "ARC preparation failed:\n#{prepared.dig(:arc, :stderr)}" unless prepared[:success]
+
           puts '  Compiling MLIR → LLVM IR (arcilator)...'
-          run_tool!('arcilator', MLIR_FILE, "--state-file=#{STATE_FILE}", '-o', LL_FILE)
+          run_tool!(*RHDL::Codegen::CIRCT::Tooling.arcilator_command(
+            mlir_path: prepared.fetch(:arcilator_input_mlir_path),
+            state_file: STATE_FILE,
+            out_path: LL_FILE
+          ))
         end
 
         # Parse arcilator state JSON to extract signal name→offset mappings.

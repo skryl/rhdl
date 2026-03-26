@@ -1159,6 +1159,12 @@ end
 # Single module
 verilog = MyComponent.to_verilog
 
+# Optional: export via CIRCT tooling path (requires circt-translate/firtool stack)
+verilog = MyComponent.to_verilog_via_circt
+
+# Optional: use firtool explicitly for MLIR -> Verilog export
+verilog = MyComponent.to_verilog_via_circt(tool: "firtool")
+
 # With custom module name
 verilog = MyComponent.to_verilog(top_name: 'custom_name')
 
@@ -1179,24 +1185,66 @@ MOS6502::InstructionDecoder # => "mos6502_instruction_decoder"
 ### Intermediate Representation
 
 ```ruby
-# Generate IR for custom processing
-ir = MyComponent.to_ir
+# Generate CIRCT MLIR (hw/comb/seq)
+mlir = MyComponent.to_ir
+mlir = MyComponent.to_mlir
 
-ir.ports       # Port definitions
-ir.nets        # Wire declarations
-ir.regs        # Register declarations
-ir.assigns     # Continuous assignments
-ir.instances   # Sub-component instances
-ir.processes   # Sequential processes
-ir.memories    # Memory definitions
+# Build CIRCT nodes in memory
+circt_nodes = MyComponent.to_circt_nodes
+
+# Build flattened CIRCT nodes for runtime/schematic export
+flat_circt_nodes = MyComponent.to_flat_circt_nodes
+
+# Serialize runtime payload from flattened CIRCT nodes
+runtime_json = MyComponent.to_circt_runtime_json
 ```
 
-### FIRRTL Export
+### CIRCT/FIRRTL Export
 
 ```ruby
-# CIRCT FIRRTL format
+# CIRCT MLIR
+mlir = MyComponent.to_ir
+mlir = MyComponent.to_ir_hierarchy
+mlir = MyComponent.to_mlir_hierarchy
+
+# Compatibility aliases (still MLIR output)
+mlir = MyComponent.to_circt
+mlir = MyComponent.to_circt_hierarchy
+mlir = MyComponent.to_ir_heirarchy # compatibility misspelling alias
+
+# FIRRTL text
 firrtl = MyComponent.to_firrtl
 firrtl = MyComponent.to_firrtl_hierarchy
+```
+
+### CIRCT Import and Raise APIs
+
+```ruby
+# CIRCT MLIR -> CIRCT nodes
+import_result = RHDL::Codegen.import_circt_mlir(File.read("design.mlir"))
+nodes = import_result.modules
+
+# CIRCT nodes/MLIR -> Ruby DSL source strings (in-memory)
+source_result = RHDL::Codegen.raise_circt_sources(nodes, top: "top_module")
+ruby_source = source_result.sources["top_module"]
+
+# CIRCT nodes/MLIR -> Ruby DSL files (on disk)
+raise_result = RHDL::Codegen.raise_circt(File.read("design.mlir"), out_dir: "./generated", top: "top_module")
+
+# CIRCT nodes/MLIR -> loaded Ruby DSL component classes
+component_result = RHDL::Codegen.raise_circt_components(
+  File.read("design.mlir"),
+  namespace: Module.new,
+  top: "top_module"
+)
+top_component_class = component_result.components["top_module"]
+
+# Optional: CIRCT MLIR -> Verilog via external CIRCT tooling
+verilog = RHDL::Codegen.verilog_from_mlir(File.read("design.mlir"))
+verilog = RHDL::Codegen.verilog_from_mlir(File.read("design.mlir"), tool: "firtool")
+
+# Optional: RHDL DSL -> CIRCT MLIR -> Verilog via external CIRCT tooling
+verilog = RHDL::Codegen.verilog_via_circt(MyComponent)
 ```
 
 ---

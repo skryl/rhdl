@@ -156,6 +156,19 @@ RSpec.describe 'Rakefile interface' do
       Rake::Task['spec:bench'].invoke('hdl')
     end
 
+    it 'spec:bench scope ao486 invokes BenchmarkTask with ao486 pattern' do
+      task_instance = instance_double(RHDL::CLI::Tasks::BenchmarkTask)
+      allow(task_instance).to receive(:run)
+
+      expect(RHDL::CLI::Tasks::BenchmarkTask).to receive(:new) do |opts|
+        expect(opts[:type]).to eq(:tests)
+        expect(opts[:pattern]).to eq('spec/examples/ao486/')
+        task_instance
+      end
+
+      Rake::Task['spec:bench'].invoke('ao486')
+    end
+
     it 'spec:bench scope mos6502 invokes BenchmarkTask with mos6502 pattern' do
       task_instance = instance_double(RHDL::CLI::Tasks::BenchmarkTask)
       allow(task_instance).to receive(:run)
@@ -193,6 +206,19 @@ RSpec.describe 'Rakefile interface' do
       end
 
       Rake::Task['spec:bench'].invoke('riscv')
+    end
+
+    it 'spec:bench scope sparc64 invokes BenchmarkTask with sparc64 pattern' do
+      task_instance = instance_double(RHDL::CLI::Tasks::BenchmarkTask)
+      allow(task_instance).to receive(:run)
+
+      expect(RHDL::CLI::Tasks::BenchmarkTask).to receive(:new) do |opts|
+        expect(opts[:type]).to eq(:tests)
+        expect(opts[:pattern]).to eq('spec/examples/sparc64/')
+        task_instance
+      end
+
+      Rake::Task['spec:bench'].invoke('sparc64')
     end
   end
 
@@ -334,8 +360,61 @@ RSpec.describe 'Rakefile interface' do
       expect(SPEC_PATHS[:all]).to eq('spec/')
       expect(SPEC_PATHS[:lib]).to eq('spec/rhdl/')
       expect(SPEC_PATHS[:hdl]).to eq('spec/rhdl/hdl/')
+      expect(SPEC_PATHS[:ao486]).to eq('spec/examples/ao486/')
       expect(SPEC_PATHS[:mos6502]).to eq('spec/examples/mos6502/')
       expect(SPEC_PATHS[:apple2]).to eq('spec/examples/apple2/')
+      expect(SPEC_PATHS[:riscv]).to eq('spec/examples/riscv/')
+      expect(SPEC_PATHS[:sparc64]).to eq('spec/examples/sparc64/')
+    end
+  end
+
+  describe 'wrapped spec runner' do
+    after do
+      WRAPPED_SPEC_RESULTS.clear
+    end
+
+    it 'expands scope directories into spec files' do
+      files = spec_files_for_pattern('spec/rhdl/cli/')
+
+      expect(files).to include('spec/rhdl/cli/rakefile_interface_spec.rb')
+      expect(files).to all(end_with('_spec.rb'))
+    end
+
+    it 'spec task uses wrapped rspec execution for the requested scope' do
+      result = {
+        scope: :lib,
+        pattern: 'spec/rhdl/',
+        files: ['spec/rhdl/cli/rakefile_interface_spec.rb'],
+        failed_files: [],
+        crashed_files: []
+      }
+
+      expect_any_instance_of(Object).to receive(:run_wrapped_rspec).with(:lib, 'spec/rhdl/').and_return(result)
+
+      Rake::Task['spec'].invoke('lib')
+
+      expect(WRAPPED_SPEC_RESULTS.last).to eq(result)
+    end
+  end
+
+  describe 'legacy ao486 rake tasks' do
+    %w[ao486:import ao486:parity ao486:verify].each do |task_name|
+      it "does not define #{task_name}" do
+        expect(Rake::Task.task_defined?(task_name)).to be(false),
+          "Expected ao486 rake task '#{task_name}' to be undefined"
+      end
+    end
+  end
+
+  describe 'legacy scoped task aliases' do
+    %w[
+      spec:lib spec:hdl spec:ao486 spec:gameboy spec:mos6502 spec:apple2 spec:riscv spec:sparc64
+      pspec:lib pspec:hdl pspec:ao486 pspec:gameboy pspec:mos6502 pspec:apple2 pspec:riscv pspec:sparc64
+    ].each do |task_name|
+      it "does not define #{task_name}" do
+        expect(Rake::Task.task_defined?(task_name)).to be(false),
+          "Expected legacy rake task '#{task_name}' to be undefined"
+      end
     end
   end
 

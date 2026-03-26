@@ -13,12 +13,14 @@ module RHDL
         @addr = addr
       end
 
-      def to_ir
-        RHDL::Codegen::IR::MemoryRead.new(
-          memory: @memory_name,
-          addr: @addr.to_ir,
-          width: @width
-        )
+      def to_ir(cache = nil)
+        memoize_ir(cache) do
+          RHDL::Codegen::CIRCT::IR::MemoryRead.new(
+            memory: @memory_name,
+            addr: @addr.to_ir(cache),
+            width: @width
+          )
+        end
       end
     end
   end

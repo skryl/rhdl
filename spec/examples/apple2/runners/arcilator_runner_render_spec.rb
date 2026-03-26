@@ -9,8 +9,7 @@ RSpec.describe RHDL::Examples::Apple2::ArcilatorRunner do
   describe '#render_hires_color' do
     it 'uses live simulator RAM when native read hooks are available' do
       allow(runner).to receive(:instance_variable_get).and_call_original
-      runner.instance_variable_set(:@sim_read_ram_fn, Object.new)
-      runner.instance_variable_set(:@sim_ctx, Object.new)
+      runner.instance_variable_set(:@sim, Object.new)
 
       allow(runner).to receive(:read_ram_byte) { |addr| addr & 0xFF }
 

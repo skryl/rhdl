@@ -25,7 +25,6 @@ end
 # Load DSL codegen mixins for Sim::Component / Sim::SequentialComponent. These
 # are safe to load in minimal runtime as long as codegen methods are not called.
 require_relative "rhdl/dsl/codegen"
-require_relative "rhdl/dsl/sequential_codegen"
 
 module RHDL
   class Component

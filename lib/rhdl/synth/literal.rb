@@ -11,8 +11,16 @@ module RHDL
         super(width)
       end
 
-      def to_ir
-        RHDL::Codegen::IR::Literal.new(value: @value, width: @width)
+      def to_ir(cache = nil)
+        memoize_ir(cache) do
+          RHDL::Codegen::CIRCT::IR::Literal.new(value: @value, width: @width)
+        end
+      end
+
+      private
+
+      def ir_cache_key
+        [self.class, @value, @width]
       end
     end
   end

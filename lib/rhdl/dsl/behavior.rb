@@ -62,6 +62,19 @@ module RHDL
           @width = width
         end
 
+        def memoize_ir(cache)
+          return yield if cache.nil?
+
+          key = ir_cache_key
+          return cache[key] if cache.key?(key)
+
+          cache[key] = yield
+        end
+
+        def ir_cache_key
+          [self.class, object_id]
+        end
+
         # Bitwise operators
         def &(other)
           BehaviorBinaryOp.new(:&, self, wrap(other), width: result_width(other))
@@ -138,13 +151,18 @@ module RHDL
         # Bit selection and slicing
         def [](index)
           if index.is_a?(Range)
-            # Handle both ascending (0..7) and descending (7..0) ranges
             high = [index.begin, index.end].max
             low = [index.begin, index.end].min
             slice_width = high - low + 1
-            BehaviorSlice.new(self, index, width: slice_width)
+            cache_key = [:range, index.begin, index.end, slice_width]
+            expr_access_cache.fetch(cache_key) do
+              expr_access_cache[cache_key] = BehaviorSlice.new(self, index, width: slice_width)
+            end
           else
-            BehaviorBitSelect.new(self, index)
+            cache_key = [:bit, index]
+            expr_access_cache.fetch(cache_key) do
+              expr_access_cache[cache_key] = BehaviorBitSelect.new(self, index)
+            end
           end
         end
 
@@ -181,6 +199,10 @@ module RHDL
           return 1 if value == 0 || value == 1
           value.is_a?(Integer) ? [value.bit_length, 1].max : 1
         end
+
+        def expr_access_cache
+          @expr_access_cache ||= {}
+        end
       end
 
       # Literal value in synthesis mode
@@ -192,8 +214,10 @@ module RHDL
           super(width: width || bit_width(value))
         end
 
-        def to_ir
-          RHDL::Export::IR::Literal.new(value: @value, width: @width)
+        def to_ir(cache = nil)
+          memoize_ir(cache) do
+            RHDL::Codegen::CIRCT::IR::Literal.new(value: @value, width: @width)
+          end
         end
 
         def to_dsl_expr
@@ -201,6 +225,10 @@ module RHDL
         end
 
         private
+
+        def ir_cache_key
+          [self.class, @value, @width]
+        end
 
         def bit_width(value)
           return 1 if value == 0 || value == 1
@@ -217,12 +245,20 @@ module RHDL
           super(width: width)
         end
 
-        def to_ir
-          RHDL::Export::IR::Signal.new(name: @name, width: @width)
+        def to_ir(cache = nil)
+          memoize_ir(cache) do
+            RHDL::Codegen::CIRCT::IR::Signal.new(name: @name, width: @width)
+          end
         end
 
         def to_dsl_expr
           RHDL::DSL::SignalRef.new(@name, width: @width)
+        end
+
+        private
+
+        def ir_cache_key
+          [self.class, @name, @width]
         end
       end
 
@@ -237,13 +273,15 @@ module RHDL
           super(width: width)
         end
 
-        def to_ir
-          RHDL::Export::IR::BinaryOp.new(
-            op: @op,
-            left: @left.to_ir,
-            right: resize_ir(@right.to_ir, @left.width),
-            width: @width
-          )
+        def to_ir(cache = nil)
+          memoize_ir(cache) do
+            RHDL::Codegen::CIRCT::IR::BinaryOp.new(
+              op: @op,
+              left: @left.to_ir(cache),
+              right: resize_ir(@right.to_ir(cache), @left.width),
+              width: @width
+            )
+          end
         end
 
         def to_dsl_expr
@@ -254,7 +292,7 @@ module RHDL
 
         def resize_ir(expr, target_width)
           return expr if expr.width == target_width
-          RHDL::Export::IR::Resize.new(expr: expr, width: target_width)
+          RHDL::Codegen::CIRCT::IR::Resize.new(expr: expr, width: target_width)
         end
       end
 
@@ -268,8 +306,10 @@ module RHDL
           super(width: width)
         end
 
-        def to_ir
-          RHDL::Export::IR::UnaryOp.new(op: @op, operand: @operand.to_ir, width: @width)
+        def to_ir(cache = nil)
+          memoize_ir(cache) do
+            RHDL::Codegen::CIRCT::IR::UnaryOp.new(op: @op, operand: @operand.to_ir(cache), width: @width)
+          end
         end
 
         def to_dsl_expr
@@ -287,12 +327,20 @@ module RHDL
           super(width: 1)
         end
 
-        def to_ir
-          RHDL::Export::IR::Slice.new(base: @base.to_ir, range: @index..@index, width: 1)
+        def to_ir(cache = nil)
+          memoize_ir(cache) do
+            RHDL::Codegen::CIRCT::IR::Slice.new(base: @base.to_ir(cache), range: @index..@index, width: 1)
+          end
         end
 
         def to_dsl_expr
           RHDL::DSL::BitSelect.new(@base.to_dsl_expr, @index)
+        end
+
+        private
+
+        def ir_cache_key
+          [self.class, @base.send(:ir_cache_key), @index]
         end
       end
 
@@ -309,12 +357,20 @@ module RHDL
           super(width: width || (high - low + 1))
         end
 
-        def to_ir
-          RHDL::Export::IR::Slice.new(base: @base.to_ir, range: @range, width: @width)
+        def to_ir(cache = nil)
+          memoize_ir(cache) do
+            RHDL::Codegen::CIRCT::IR::Slice.new(base: @base.to_ir(cache), range: @range, width: @width)
+          end
         end
 
         def to_dsl_expr
           RHDL::DSL::BitSlice.new(@base.to_dsl_expr, @range)
+        end
+
+        private
+
+        def ir_cache_key
+          [self.class, @base.send(:ir_cache_key), @range.begin, @range.end, @width]
         end
       end
 
@@ -327,12 +383,33 @@ module RHDL
           super(width: width || parts.sum(&:width))
         end
 
-        def to_ir
-          RHDL::Export::IR::Concat.new(parts: @parts.map(&:to_ir), width: @width)
+        def to_ir(cache = nil)
+          memoize_ir(cache) do
+            RHDL::Codegen::CIRCT::IR::Concat.new(parts: @parts.map { |part| part.to_ir(cache) }, width: @width)
+          end
         end
 
         def to_dsl_expr
           RHDL::DSL::Concatenation.new(@parts.map(&:to_dsl_expr))
+        end
+      end
+
+      class BehaviorResize < BehaviorExpr
+        attr_reader :expr
+
+        def initialize(expr, width:)
+          @expr = expr.is_a?(BehaviorExpr) ? expr : BehaviorLiteral.new(expr, width: width)
+          super(width: width)
+        end
+
+        def to_ir(cache = nil)
+          memoize_ir(cache) do
+            RHDL::Codegen::CIRCT::IR::Resize.new(expr: @expr.to_ir(cache), width: @width)
+          end
+        end
+
+        def to_dsl_expr
+          @expr.to_dsl_expr
         end
       end
 
@@ -346,9 +423,12 @@ module RHDL
           super(width: width || (expr.width * times))
         end
 
-        def to_ir
-          parts = Array.new(@times) { @expr.to_ir }
-          RHDL::Export::IR::Concat.new(parts: parts, width: @width)
+        def to_ir(cache = nil)
+          memoize_ir(cache) do
+            part_ir = @expr.to_ir(cache)
+            parts = Array.new(@times, part_ir)
+            RHDL::Codegen::CIRCT::IR::Concat.new(parts: parts, width: @width)
+          end
         end
 
         def to_dsl_expr
@@ -373,13 +453,15 @@ module RHDL
           self
         end
 
-        def to_ir
-          RHDL::Export::IR::Mux.new(
-            condition: @condition.to_ir,
-            when_true: @when_true_expr.to_ir,
-            when_false: @when_false_expr&.to_ir || RHDL::Export::IR::Literal.new(value: 0, width: @width),
-            width: @width
-          )
+        def to_ir(cache = nil)
+          memoize_ir(cache) do
+            RHDL::Codegen::CIRCT::IR::Mux.new(
+              condition: @condition.to_ir(cache),
+              when_true: @when_true_expr.to_ir(cache),
+              when_false: @when_false_expr&.to_ir(cache) || RHDL::Codegen::CIRCT::IR::Literal.new(value: 0, width: @width),
+              width: @width
+            )
+          end
         end
       end
 
@@ -401,15 +483,16 @@ module RHDL
           super(width: width)
         end
 
-        def to_ir
-          # Convert to nested muxes or case IR
-          RHDL::Export::IR::Case.new(
-            selector: @selector.to_ir,
-            cases: @cases.transform_keys { |k| k.is_a?(Array) ? k : [k] }
-                        .transform_values(&:to_ir),
-            default: @default_val.to_ir,
-            width: @width
-          )
+        def to_ir(cache = nil)
+          memoize_ir(cache) do
+            RHDL::Codegen::CIRCT::IR::Case.new(
+              selector: @selector.to_ir(cache),
+              cases: @cases.transform_keys { |k| k.is_a?(Array) ? k : [k] }
+                          .transform_values { |value| value.to_ir(cache) },
+              default: @default_val.to_ir(cache),
+              width: @width
+            )
+          end
         end
       end
 
@@ -423,17 +506,24 @@ module RHDL
           super(width: width)
         end
 
-        def to_ir
-          # In synthesis, reference the wire
-          RHDL::Export::IR::Signal.new(name: @name, width: @width)
+        def to_ir(cache = nil)
+          memoize_ir(cache) do
+            RHDL::Codegen::CIRCT::IR::Signal.new(name: @name, width: @width)
+          end
         end
 
         # Return the assignment that creates this wire
-        def wire_assign_ir
-          RHDL::Export::IR::Assign.new(
+        def wire_assign_ir(cache = nil)
+          RHDL::Codegen::CIRCT::IR::Assign.new(
             target: @name,
-            expr: @expr.to_ir
+            expr: @expr.to_ir(cache)
           )
+        end
+
+        private
+
+        def ir_cache_key
+          [self.class, @name, @width]
         end
       end
 
@@ -446,8 +536,8 @@ module RHDL
           super(width: width)
         end
 
-        def to_ir
-          @ir
+        def to_ir(cache = nil)
+          memoize_ir(cache) { @ir }
         end
       end
 
@@ -461,12 +551,20 @@ module RHDL
           super(width: width)
         end
 
-        def to_ir
-          RHDL::Export::IR::MemoryRead.new(
-            memory: @memory_name,
-            addr: @addr.to_ir,
-            width: @width
-          )
+        def to_ir(cache = nil)
+          memoize_ir(cache) do
+            RHDL::Codegen::CIRCT::IR::MemoryRead.new(
+              memory: @memory_name,
+              addr: @addr.to_ir(cache),
+              width: @width
+            )
+          end
+        end
+
+        private
+
+        def ir_cache_key
+          [self.class, @memory_name, @addr.send(:ir_cache_key), @width]
         end
       end
 
@@ -527,7 +625,7 @@ module RHDL
           ir_cases = cases.transform_keys { |k| [k] }
                          .transform_values { |v| to_ir_expr(v, width) }
 
-          RHDL::Export::IR::Case.new(
+          RHDL::Codegen::CIRCT::IR::Case.new(
             selector: to_ir_expr(@selector, @selector.width),
             cases: ir_cases,
             default: default ? to_ir_expr(default, width) : nil,
@@ -537,7 +635,7 @@ module RHDL
 
         def to_ir_expr(expr, width)
           return expr.to_ir if expr.respond_to?(:to_ir)
-          RHDL::Export::IR::Literal.new(value: expr.to_i, width: width)
+          RHDL::Codegen::CIRCT::IR::Literal.new(value: expr.to_i, width: width)
         end
       end
 
@@ -768,44 +866,42 @@ module RHDL
           # Execute the block to collect assignments
           BehaviorEvaluator.new(self, proxies).evaluate(&block)
 
+          ir_cache = {}
+
           # Convert to IR with locals as wires
           {
-            wires: @locals.map { |l| RHDL::Export::IR::Net.new(name: l.name, width: l.width) },
-            wire_assigns: @locals.map(&:wire_assign_ir),
+            wires: @locals.map { |l| RHDL::Codegen::CIRCT::IR::Net.new(name: l.name, width: l.width) },
+            wire_assigns: @locals.map { |local| local.wire_assign_ir(ir_cache) },
             output_assigns: @assignments.map do |assignment|
-              RHDL::Export::IR::Assign.new(
+              RHDL::Codegen::CIRCT::IR::Assign.new(
                 target: assignment.target.name,
-                expr: resize_to_target(assignment.expr.to_ir, assignment.target.width)
+                expr: resize_to_target(assignment.expr.to_ir(ir_cache), assignment.target.width)
               )
             end
           }
-        end
-
-        # Simple version for backwards compatibility - returns flat list of assigns
-        def evaluate_for_synthesis_flat(&block)
-          result = evaluate_for_synthesis(&block)
-          result[:wire_assigns] + result[:output_assigns]
         end
 
         private
 
         def resize_to_target(ir_expr, target_width)
           return ir_expr if ir_expr.width == target_width
-          RHDL::Export::IR::Resize.new(expr: ir_expr, width: target_width)
+          RHDL::Codegen::CIRCT::IR::Resize.new(expr: ir_expr, width: target_width)
         end
 
         # Compute the actual value of an expression during simulation
         def compute_value(expr)
           case expr
           when BehaviorLiteral
-            expr.value
+            mask_value(expr.value, expr.width)
           when BehaviorLocal
             # Evaluate the underlying expression
-            compute_value(expr.expr)
+            mask_value(compute_value(expr.expr), expr.width)
+          when BehaviorResize
+            mask_value(compute_value(expr.expr), expr.width)
           when BehaviorSignalRef
             # Check output_values first so that values computed earlier in this
             # behavior block execution are visible to later assignments
-            @output_values[expr.name] || @input_values[expr.name] || 0
+            mask_value(@output_values[expr.name] || @input_values[expr.name] || 0, expr.width)
           when BehaviorBinaryOp
             compute_binary(expr.op, compute_value(expr.left), compute_value(expr.right), expr.width)
           when BehaviorUnaryOp
@@ -823,40 +919,40 @@ module RHDL
             result = 0
             offset = 0
             expr.parts.reverse.each do |part|
-              result |= (compute_value(part) << offset)
+              result |= (mask_value(compute_value(part), part.width) << offset)
               offset += part.width
             end
-            result
+            mask_value(result, expr.width)
           when BehaviorReplicate
-            base_val = compute_value(expr.expr)
+            base_val = mask_value(compute_value(expr.expr), expr.expr.width)
             result = 0
             offset = 0
             expr.times.times do
               result |= (base_val << offset)
               offset += expr.expr.width
             end
-            result
+            mask_value(result, expr.width)
           when BehaviorConditional
             cond_val = compute_value(expr.condition)
             if cond_val != 0
-              compute_value(expr.when_true_expr)
+              mask_value(compute_value(expr.when_true_expr), expr.width)
             else
-              expr.when_false_expr ? compute_value(expr.when_false_expr) : 0
+              mask_value(expr.when_false_expr ? compute_value(expr.when_false_expr) : 0, expr.width)
             end
           when BehaviorCaseSelect
             selector_val = compute_value(expr.selector)
             if expr.cases.key?(selector_val)
-              compute_value(expr.cases[selector_val])
+              mask_value(compute_value(expr.cases[selector_val]), expr.width)
             else
-              compute_value(expr.default_val)
+              mask_value(compute_value(expr.default_val), expr.width)
             end
           when BehaviorCaseExpr
-            compute_case_value(expr.ir)
+            mask_value(compute_case_value(expr.ir), expr.width)
           when BehaviorMemoryRead
             # For simulation, need component reference with memory arrays
             if @component && @component.respond_to?(:mem_read)
               addr_val = compute_value(expr.addr)
-              @component.mem_read(expr.memory_name, addr_val)
+              mask_value(@component.mem_read(expr.memory_name, addr_val), expr.width)
             else
               0  # No component reference or mem_read not available
             end
@@ -883,32 +979,32 @@ module RHDL
         # Compute IR expression value during simulation
         def compute_value_from_ir(ir)
           case ir
-          when RHDL::Export::IR::Literal
-            ir.value
-          when RHDL::Export::IR::Signal
-            @input_values[ir.name.to_sym] || @output_values[ir.name.to_sym] || 0
-          when RHDL::Export::IR::BinaryOp
+          when RHDL::Codegen::CIRCT::IR::Literal
+            mask_value(ir.value, ir.width)
+          when RHDL::Codegen::CIRCT::IR::Signal
+            mask_value(@input_values[ir.name.to_sym] || @output_values[ir.name.to_sym] || 0, ir.width)
+          when RHDL::Codegen::CIRCT::IR::BinaryOp
             left = compute_value_from_ir(ir.left)
             right = compute_value_from_ir(ir.right)
             compute_binary(ir.op, left, right, ir.width)
-          when RHDL::Export::IR::UnaryOp
+          when RHDL::Codegen::CIRCT::IR::UnaryOp
             operand = compute_value_from_ir(ir.operand)
             compute_unary(ir.op, operand, ir.width)
-          when RHDL::Export::IR::Slice
+          when RHDL::Codegen::CIRCT::IR::Slice
             base = compute_value_from_ir(ir.base)
             low = [ir.range.begin, ir.range.end].min
             (base >> low) & ((1 << ir.width) - 1)
-          when RHDL::Export::IR::Mux
+          when RHDL::Codegen::CIRCT::IR::Mux
             cond = compute_value_from_ir(ir.condition)
             if cond != 0
-              compute_value_from_ir(ir.when_true)
+              mask_value(compute_value_from_ir(ir.when_true), ir.width)
             else
-              compute_value_from_ir(ir.when_false)
+              mask_value(compute_value_from_ir(ir.when_false), ir.width)
             end
-          when RHDL::Export::IR::Case
-            compute_case_value(ir)
-          when RHDL::Export::IR::Resize
-            compute_value_from_ir(ir.expr)
+          when RHDL::Codegen::CIRCT::IR::Case
+            mask_value(compute_case_value(ir), ir.width)
+          when RHDL::Codegen::CIRCT::IR::Resize
+            mask_value(compute_value_from_ir(ir.expr), ir.width)
           else
             0
           end
@@ -1028,6 +1124,11 @@ module RHDL
           end
         end
 
+        # Case expression for a single selected value
+        def case_expr(selector, cases, default: nil, width:)
+          BehaviorCaseSelect.new(selector, cases, default_val: default, width: width)
+        end
+
         # If-elsif-else chain with multiple outputs
         def if_chain(&block)
           builder = BehaviorIfChain.new(@context_wrapper)
@@ -1098,109 +1199,17 @@ module RHDL
           # Define propagate method if this is a Component
           # BUT only if sequential is NOT defined (sequential handles its own propagate
           # and will call execute_behavior_for_simulation itself)
-          sequential_block_defined = respond_to?(:_sequential_block) && !_sequential_block.nil?
+          sequential_block_defined = respond_to?(:sequential_defined?) && sequential_defined?
           if ancestors.include?(RHDL::Sim::Component) && !sequential_block_defined
             define_method(:propagate) do
-              # Two-phase propagation to handle feedback between behavior and subcomponents:
-              #
-              # Phase 1: Stabilize combinational logic
-              # - Behavior computes control signals (alu_b_sel, etc.)
-              # - Combinational subcomponents (ALU) propagate with new inputs
-              # - Repeat until stable
-              #
-              # Phase 2: Sequential components capture
-              # - With stabilized combinational values, sequential components capture
-              #
-              # This ensures registers capture the correct final value, not intermediate.
-              max_iterations = 10
-              iterations = 0
+              # Delegate hierarchical scheduling to Component#propagate_subcomponents
+              # so sibling sequential descendants sample together across module
+              # boundaries. Standalone behavior-only components still execute here.
+              super()
 
-              # Separate subcomponents into three categories:
-              # 1. combinational - no clock, pure combinational logic
-              # 2. sequential_subs - sequential with no subcomponents (simple registers)
-              # 3. hierarchical_sequential - sequential with their own subcomponents (need full propagate)
-              sequential_subs = []
-              hierarchical_sequential_subs = []
-              combinational_subs = []
-              @subcomponents&.each do |name, sub|
-                # Check class-level _sequential_block (set by sequential DSL)
-                is_sequential = sub.class.respond_to?(:_sequential_block) && sub.class._sequential_block
-                if is_sequential
-                  # Check if this sequential component has its own subcomponents
-                  has_subcomponents = sub.instance_variable_defined?(:@subcomponents) &&
-                                     sub.instance_variable_get(:@subcomponents)&.any?
-                  if has_subcomponents
-                    hierarchical_sequential_subs << [name, sub]
-                  else
-                    sequential_subs << [name, sub]
-                  end
-                else
-                  combinational_subs << [name, sub]
-                end
-              end
-
-              # Phase 1: Iterate to stabilize combinational logic
-              # Also propagate hierarchical sequential components as they need full propagate()
-              while iterations < max_iterations
-                old_values = {}
-                @internal_signals&.each do |name, wire|
-                  old_values[name] = wire.get
-                end
-
-                # Execute behavior (computes control signals like alu_b_sel)
+              if @subcomponents.empty?
                 self.class.execute_behavior_for_simulation(self)
-
-                # Propagate combinational subcomponents
-                combinational_subs.each do |name, sub|
-                  sub.propagate
-                end
-
-                # Propagate hierarchical sequential subcomponents (they handle their own internals)
-                hierarchical_sequential_subs.each do |name, sub|
-                  sub.propagate
-                end
-
-                # Execute behavior AGAIN to use fresh subcomponent outputs
-                self.class.execute_behavior_for_simulation(self)
-
-                # Check if stabilized
-                changed = false
-                @internal_signals&.each do |name, wire|
-                  if wire.get != old_values[name]
-                    changed = true
-                    break
-                  end
-                end
-
-                iterations += 1
-                break unless changed
               end
-
-              # Phase 2: Simple sequential components using Verilog-style two-phase semantics
-              # (Hierarchical sequential components already handled their internals in Phase 1)
-              # Phase 2a: ALL simple sequential components SAMPLE inputs (don't update outputs yet)
-              rising_edge_subs = []
-              sequential_subs.each do |name, sub|
-                if sub.respond_to?(:sample_inputs)
-                  is_rising = sub.sample_inputs
-                  rising_edge_subs << [name, sub] if is_rising
-                end
-              end
-
-              # Phase 2b: ALL simple sequential components UPDATE outputs (for those with rising edge)
-              rising_edge_subs.each do |name, sub|
-                sub.update_outputs if sub.respond_to?(:update_outputs)
-              end
-
-              # For simple sequential components that didn't have a rising edge, execute behavior if present
-              (sequential_subs - rising_edge_subs).each do |name, sub|
-                if sub.class.respond_to?(:behavior_defined?) && sub.class.behavior_defined?
-                  sub.execute_behavior if sub.respond_to?(:execute_behavior)
-                end
-              end
-
-              # Final behavior pass to update any signals that depend on register outputs
-              self.class.execute_behavior_for_simulation(self)
             end
           end
         end

@@ -140,7 +140,12 @@ module RHDL
       def input(name, width: 1)
         wire = Wire.new("#{@name}.#{name}", width: width)
         @inputs[name] = wire
-        wire.on_change { |_| propagate }
+        wire.on_change do |_|
+          next if self.class.respond_to?(:sequential_defined?) && self.class.sequential_defined?
+          next if @subcomponents && !@subcomponents.empty?
+
+          propagate
+        end
         wire
       end
 
@@ -181,190 +186,74 @@ module RHDL
       # 4. All sequential components update their outputs
       # 5. Repeat until stable (but behavior only runs when there's a rising edge)
       def propagate_subcomponents
-        # Separate combinational, simple sequential, and hierarchical sequential components
-        # Hierarchical sequential components (those with subcomponents) need full propagate()
-        # called to handle their internal hierarchy
-        combinational = []
-        sequential = []
-        hierarchical_sequential = []
-
-        @subcomponents.each_value do |comp|
-          if comp.is_a?(SequentialComponent)
-            # Check if this sequential component has its own subcomponents
-            if comp.instance_variable_defined?(:@subcomponents) &&
-               comp.instance_variable_get(:@subcomponents)&.any?
-              hierarchical_sequential << comp
-            else
-              sequential << comp
-            end
-          else
-            combinational << comp
-          end
-        end
-
-        # Check if any sequential component will see a rising edge
-        # This determines if behavior should run to set up latch wires
-        # We only want to run behavior ONCE when there's a rising edge
-        has_pending_edge = sequential.any? do |comp|
-          clk_wire = comp.inputs[:clk]
-          prev_clk = comp.instance_variable_get(:@prev_clk) || 0
-          clk_wire && prev_clk == 0 && clk_wire.get == 1
-        end
-
-        # Track whether we've already executed behavior while clk=1
-        # This prevents multiple propagate calls from overwriting latch wire values
-        # Once we've run behavior on a rising edge, don't run again until clk goes low
-        @_last_behavior_clk ||= nil
-        current_clk = @inputs[:clk]&.get
-
-        # If clk went 0->1 (rising edge), we need to run behavior
-        # If clk is still 1 and we already ran behavior, don't run again
-        # If clk went back to 0, reset tracking
-        if current_clk == 0
-          @_behavior_ran_this_high = false
-        end
-        behavior_already_ran = current_clk == 1 && @_behavior_ran_this_high
-
         max_iterations = 100
+
+        stabilize_component_hierarchy(self, max_iterations: max_iterations)
+
+        rising_edges = []
+        collect_component_rising_edges(self, rising_edges)
+        rising_edges.each(&:update_outputs)
+
+        stabilize_component_hierarchy(self, max_iterations: max_iterations)
+      end
+
+      def sequential_component_node?(component)
+        component.respond_to?(:sample_inputs) &&
+          component.class.respond_to?(:sequential_defined?) &&
+          component.class.sequential_defined?
+      end
+
+      def component_state_snapshot(component)
+        snapshot = {}
+
+        component.outputs.each do |name, wire|
+          snapshot[[:out, name]] = wire.get
+        end
+
+        component.internal_signals.each do |name, wire|
+          snapshot[[:sig, name]] = wire.get
+        end
+
+        snapshot
+      end
+
+      def stabilize_component_hierarchy(component, max_iterations:)
         iterations = 0
 
-        loop do
-          changed = false
+        while iterations < max_iterations
+          old_values = component_state_snapshot(component)
 
-          # Phase 1: Propagate all combinational and hierarchical sequential components until stable
-          # Hierarchical sequential components need their full propagate() called to handle
-          # their internal subcomponents (e.g., Apple2 contains TimingGenerator)
-          comb_iterations = 0
-          loop do
-            comb_changed = false
+          component.execute_behavior if component.class.respond_to?(:behavior_defined?) && component.class.behavior_defined?
 
-            # Propagate combinational components
-            combinational.each do |component|
-              old_outputs = component.outputs.transform_values(&:get)
-              component.propagate
-
-              component.outputs.each do |_port_name, wire|
-                if wire.get != old_outputs[_port_name]
-                  comb_changed = true
-                  changed = true
-                end
-              end
-            end
-
-            # Also propagate hierarchical sequential components
-            hierarchical_sequential.each do |component|
-              old_outputs = component.outputs.transform_values(&:get)
-              component.propagate
-
-              component.outputs.each do |_port_name, wire|
-                if wire.get != old_outputs[_port_name]
-                  comb_changed = true
-                  changed = true
-                end
-              end
-            end
-
-            comb_iterations += 1
-            break unless comb_changed && comb_iterations < max_iterations
-          end
-
-          # Phase 2: Execute parent's behavior block
-          # Only run on first iteration when there's a pending rising edge
-          # This ensures latch wires are set based on values BEFORE registers update
-          # On subsequent propagates (same clock value), behavior doesn't run
-          # to prevent overwriting latch wires with post-update values
-          should_run_behavior = self.class.behavior_defined? &&
-                                !behavior_already_ran &&
-                                (has_pending_edge ? iterations == 0 : true)
-          if should_run_behavior
-            execute_behavior
-            @_behavior_ran_this_high = true if current_clk == 1
-
-            # Phase 2b: Re-propagate combinational and hierarchical sequential components after behavior
-            # This is critical for components like hazard_unit that depend on
-            # behavior outputs (e.g., take_branch). Without this, hazard_unit
-            # would see stale values and generate wrong flush signals.
-            comb_iterations = 0
-            loop do
-              comb_changed = false
-
-              combinational.each do |component|
-                old_outputs = component.outputs.transform_values(&:get)
-                component.propagate
-
-                component.outputs.each do |port_name, wire|
-                  if wire.get != old_outputs[port_name]
-                    comb_changed = true
-                    changed = true
-                  end
-                end
-              end
-
-              hierarchical_sequential.each do |component|
-                old_outputs = component.outputs.transform_values(&:get)
-                component.propagate
-
-                component.outputs.each do |port_name, wire|
-                  if wire.get != old_outputs[port_name]
-                    comb_changed = true
-                    changed = true
-                  end
-                end
-              end
-
-              comb_iterations += 1
-              break unless comb_changed && comb_iterations < max_iterations
+          component.instance_variable_get(:@subcomponents)&.each_value do |sub|
+            if sequential_component_node?(sub)
+              # Sequential descendants hold their current state during the
+              # settle phase. If they also expose combinational behavior,
+              # refresh that behavior without advancing the clocked state.
+              sub.execute_behavior if sub.class.respond_to?(:behavior_defined?) && sub.class.behavior_defined?
+            elsif sub.instance_variable_defined?(:@subcomponents) &&
+                  sub.instance_variable_get(:@subcomponents)&.any?
+              stabilize_component_hierarchy(sub, max_iterations: max_iterations)
+            else
+              sub.propagate
             end
           end
 
-          # Phase 3: All sequential components SAMPLE inputs (don't update outputs yet)
-          rising_edges = []
-          # DEBUG: Show phase start
-          puts "  [PHASE 3] iter=#{iterations} Sequential SAMPLE start" if ENV['DEBUG_PHASES']
-          sequential.each do |component|
-            if component.respond_to?(:sample_inputs)
-              puts "    [PHASE 3] Calling sample_inputs on #{component.name}" if ENV['DEBUG_PHASES']
-              is_rising = component.sample_inputs
-              rising_edges << component if is_rising
-            end
-          end
-          puts "  [PHASE 3] iter=#{iterations} done, rising_edges=#{rising_edges.map(&:name)}" if ENV['DEBUG_PHASES']
-
-          # Phase 4: All sequential components UPDATE outputs (for those with rising edge)
-          puts "  [PHASE 4] iter=#{iterations} Sequential UPDATE start" if ENV['DEBUG_PHASES']
-          rising_edges.each do |component|
-            puts "    [PHASE 4] Calling update_outputs on #{component.name}" if ENV['DEBUG_PHASES']
-            old_outputs = component.outputs.transform_values(&:get)
-            component.update_outputs
-
-            component.outputs.each do |_port_name, wire|
-              if wire.get != old_outputs[_port_name]
-                changed = true
-              end
-            end
-          end
-
-          # For sequential components that didn't have a rising edge, we still need
-          # to give them a chance to run combinational logic (behavior blocks).
-          # BUT we must NOT call their propagate() method because that would call
-          # sample_inputs and update_outputs together, violating two-phase semantics.
-          # Instead, just call execute_behavior if they have one.
-          (sequential - rising_edges).each do |component|
-            if component.class.respond_to?(:behavior_defined?) && component.class.behavior_defined?
-              puts "    [NO-EDGE] Executing behavior for #{component.name}" if ENV['DEBUG_PHASES']
-              old_outputs = component.outputs.transform_values(&:get)
-              component.execute_behavior if component.respond_to?(:execute_behavior)
-
-              component.outputs.each do |_port_name, wire|
-                if wire.get != old_outputs[_port_name]
-                  changed = true
-                end
-              end
-            end
-          end
+          component.execute_behavior if component.class.respond_to?(:behavior_defined?) && component.class.behavior_defined?
 
           iterations += 1
-          break unless changed && iterations < max_iterations
+          break if component_state_snapshot(component) == old_values
+        end
+      end
+
+      def collect_component_rising_edges(component, rising_edges)
+        component.instance_variable_get(:@subcomponents)&.each_value do |sub|
+          if sequential_component_node?(sub)
+            rising_edges << sub if sub.sample_inputs
+          elsif sub.instance_variable_defined?(:@subcomponents) &&
+                sub.instance_variable_get(:@subcomponents)&.any?
+            collect_component_rising_edges(sub, rising_edges)
+          end
         end
       end
 

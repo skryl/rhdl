@@ -6,11 +6,13 @@
 require_relative '../apple2/harness'
 require_relative 'isa_runner'
 require_relative 'ruby_runner'
+require 'rhdl/sim/native/headless_trace'
 
 module RHDL
   module Examples
     module MOS6502
       class HeadlessRunner
+        include RHDL::Sim::Native::HeadlessTrace
         attr_reader :runner, :mode, :sim_backend
 
         # @param mode [Symbol] :isa, :ruby, :ir, :netlist, :verilog
@@ -19,9 +21,10 @@ module RHDL
         #   :ruby   -> :ruby
         #   :ir     -> :interpret, :jit, :compile
         #   :verilog -> ignored (nil)
-        def initialize(mode: :isa, sim: nil)
+        def initialize(mode: :isa, sim: nil, threads: 1)
           @mode = mode
           @sim_backend = sim || default_backend(mode)
+          @threads = RHDL::Codegen::Verilog::VerilogSimulator.normalize_threads(threads)
 
           @runner = case mode
                     when :isa
@@ -36,7 +39,7 @@ module RHDL
                       raise "Netlist mode not yet implemented for MOS6502"
                     when :verilog
                       require_relative 'verilator_runner'
-                      RHDL::Examples::MOS6502::VerilogRunner.new
+                      RHDL::Examples::MOS6502::VerilogRunner.new(threads: @threads)
                     else
                       raise "Unknown mode: #{mode}. Valid modes: isa, ruby, ir, netlist, verilog"
                     end
@@ -105,6 +108,12 @@ module RHDL
         # Check if using native implementation
         def native?
           @runner.native?
+        end
+
+        def sim
+          return nil unless @runner.respond_to?(:sim)
+
+          @runner.sim
         end
 
         # Get simulator type

@@ -812,9 +812,9 @@ module RHDL
 
         # Index calculation
         idx_val = mux(index_x, x_reg, mux(index_y, y_reg, lit(0, width: 8)))
-        idx_sum = cat(lit(0, width: 1), t_reg) + cat(lit(0, width: 1), idx_val)
+        idx_sum = (cat(lit(0, width: 1), t_reg) + cat(lit(0, width: 1), idx_val))[8..0]
         # For branch, use pc_reg (PC after operand fetch), not addr_reg (operand address)
-        branch_sum = cat(lit(0, width: 1), t_reg) + cat(lit(0, width: 1), pc_reg[7..0])
+        branch_sum = (cat(lit(0, width: 1), t_reg) + cat(lit(0, width: 1), pc_reg[7..0]))[8..0]
         index_out <= mux(branch_bit, branch_sum, idx_sum)
 
         # Next address calculation based on state
@@ -938,7 +938,7 @@ module RHDL
         # Debug: address calculation signals
         dbg_cycle2 = (cpu_state == lit(STATE_CYCLE2, width: 5))
         dbg_second_byte = opc_info[OPC_SECOND_BYTE]
-        dbg_addr_incr = addr_reg + lit(1, width: 16)
+        dbg_addr_incr = (addr_reg + lit(1, width: 16))[15..0]
         dbg_addr_c2 = mux(dbg_second_byte, dbg_addr_incr, addr_reg)
         debug_cycle2 <= dbg_cycle2
         debug_second_byte <= dbg_second_byte
@@ -1136,9 +1136,9 @@ module RHDL
 
         # Index calculation for page crossing
         idx_val = mux(index_x, x_reg, mux(index_y, y_reg, lit(0, width: 8)))
-        idx_sum = cat(lit(0, width: 1), t_reg) + cat(lit(0, width: 1), idx_val)
+        idx_sum = (cat(lit(0, width: 1), t_reg) + cat(lit(0, width: 1), idx_val))[8..0]
         # For branch, use pc_reg (PC after operand fetch), not addr_reg (operand address)
-        branch_sum = cat(lit(0, width: 1), t_reg) + cat(lit(0, width: 1), pc_reg[7..0])
+        branch_sum = (cat(lit(0, width: 1), t_reg) + cat(lit(0, width: 1), pc_reg[7..0]))[8..0]
         page_cross = mux(branch_bit, branch_sum[8] ^ t_reg[7], idx_sum[8])
 
         # State machine

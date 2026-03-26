@@ -28,8 +28,8 @@ RSpec.describe RHDL::HDL::CPU::CPU do
 
   describe 'synthesis' do
     it 'generates valid IR' do
-      ir = RHDL::HDL::CPU::CPU.to_ir
-      expect(ir).to be_a(RHDL::Export::IR::ModuleDef)
+      ir = RHDL::HDL::CPU::CPU.to_flat_circt_nodes
+      expect(ir).to be_a(RHDL::Codegen::CIRCT::IR::ModuleOp)
 
       # Check ports exist (port names are symbols)
       port_names = ir.ports.map(&:name)
@@ -55,7 +55,7 @@ RSpec.describe RHDL::HDL::CPU::CPU do
 
   describe 'gate-level netlist' do
     let(:component) { RHDL::HDL::CPU::CPU.new('cpu') }
-    let(:ir) { RHDL::Export::Structure::Lower.from_components([component], name: 'cpu') }
+    let(:ir) { RHDL::Codegen::Netlist::Lower.from_components([component], name: 'cpu') }
 
     it 'generates correct IR structure' do
       expect(ir.inputs.keys).to include('cpu.clk', 'cpu.rst', 'cpu.mem_data_in')

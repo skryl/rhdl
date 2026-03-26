@@ -204,7 +204,7 @@ module RHDL
         total_width = 0
         signals.reverse.each do |sig|
           val, width = resolve_value_with_width(sig)
-          result |= (val << total_width)
+          result |= ((val & MaskCache.mask(width)) << total_width)
           total_width += width
         end
         LocalProxy.new(nil, result, total_width, self)
@@ -224,6 +224,19 @@ module RHDL
         else
           resolve_value(default)
         end
+      end
+
+      # Case expression helper used by raised imported source. Supports grouped
+      # keys like { [2, 3] => expr } as well as scalar keys.
+      def case_expr(selector, cases, default: 0, width:)
+        sel_val = resolve_value(selector)
+        value =
+          cases.each do |raw_keys, expr|
+            break resolve_value(expr) if Array(raw_keys).include?(sel_val)
+          end
+
+        masked = (value.nil? ? resolve_value(default) : value) & MaskCache.mask(width)
+        LocalProxy.new(nil, masked, width, self)
       end
 
       # Memory read expression - reads from memory array using address expression
@@ -254,6 +267,10 @@ module RHDL
           sig.value
         when Integer
           sig
+        when TrueClass
+          1
+        when FalseClass
+          0
         else
           sig.respond_to?(:value) ? sig.value : sig.to_i
         end
@@ -265,6 +282,10 @@ module RHDL
           [sig.value, sig.width]
         when Integer
           [sig, sig == 0 ? 1 : sig.bit_length]
+        when TrueClass
+          [1, 1]
+        when FalseClass
+          [0, 1]
         else
           # Fallback: check if it has value and width methods
           if sig.respond_to?(:value) && sig.respond_to?(:width)
@@ -348,6 +369,30 @@ module RHDL
       def >>(amount)
         amt = @context.send(:resolve_value, amount)
         LocalProxy.new(nil, @value >> amt, @width, @context)
+      end
+
+      # Replication
+      def replicate(times)
+        result = 0
+        times.times do |i|
+          result |= (@value << (i * @width))
+        end
+        LocalProxy.new(nil, result, @width * times, @context)
+      end
+
+      # Concatenation
+      def concat(*others)
+        result = @value & MaskCache.mask(@width)
+        offset = @width
+        total_width = @width
+        others.each do |other|
+          other_val = @context.send(:resolve_value, other)
+          other_width = other.respond_to?(:width) ? other.width : (other_val == 0 ? 1 : other_val.bit_length)
+          result = ((other_val & MaskCache.mask(other_width)) << offset) | result
+          offset += other_width
+          total_width += other_width
+        end
+        LocalProxy.new(nil, result, total_width, @context)
       end
 
       # Comparison operators

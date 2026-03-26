@@ -1,6 +1,6 @@
 # RHDL Command Line Interface
 
-The `rhdl` command provides a unified interface for working with RHDL components, including interactive debugging, diagram generation, HDL export, gate-level synthesis, and Apple II emulation.
+The `rhdl` command provides a unified interface for working with RHDL components, including interactive debugging, diagram generation, import/export workflows, gate-level synthesis, and example emulators.
 
 ## Installation
 
@@ -24,10 +24,35 @@ bundle exec rhdl --help
 | `tui` | Launch interactive TUI debugger |
 | `diagram` | Generate circuit diagrams |
 | `export` | Export components to Verilog |
+| `import` | Import Verilog, mixed Verilog+VHDL, or CIRCT MLIR and raise to RHDL DSL |
 | `gates` | Gate-level synthesis |
-| `apple2` | Apple II emulator and ROM tools |
+| `examples` | Run MOS6502, Apple2, GameBoy, RISC-V, and AO486 workflows |
+| `disk` | Disk image utilities |
+| `generate` | Generate diagrams and HDL exports |
+| `clean` | Clean generated artifacts and local build temps |
+| `regenerate` | Clean then regenerate outputs |
+| `hygiene` | Run repository hygiene checks |
 
 ---
+
+## Generate/Clean/Hygiene Commands
+
+### Usage
+
+```bash
+rhdl generate
+rhdl clean
+rhdl regenerate
+rhdl hygiene
+```
+
+### Notes
+
+`rhdl clean` removes generated outputs plus local build/temp artifacts, including:
+
+- simulator build dirs (`.verilator_build*`, `.arcilator_build*`, `.hdl_build`)
+- web build outputs (`web/dist`, generated `web/build/*`, `web/test-results`)
+- local temp dirs (`tmp`, `.tmp`)
 
 ## TUI Command
 
@@ -206,6 +231,8 @@ rhdl export [options] [ComponentRef]
 | `--scope SCOPE` | Batch scope: `all`, `lib`, or `examples` |
 | `--clean` | Clean all generated HDL files |
 | `--lang LANG` | Target language: `verilog` |
+| `--tool CMD` | External tool command (default: `circt-translate`; `firtool` also supported for MLIR->Verilog export) |
+| `--tool-arg ARG` | Extra tool arg (repeatable) |
 | `--out DIR` | Output directory |
 | `--top NAME` | Override top module/entity name |
 | `-h, --help` | Show help |
@@ -224,6 +251,12 @@ rhdl export --all --scope examples
 
 # Export a single component
 rhdl export --lang verilog --out ./output RHDL::HDL::Counter
+
+# Export via CIRCT MLIR + external tooling
+rhdl export --lang verilog --out ./output RHDL::HDL::Counter
+
+# Export via firtool explicitly
+rhdl export --lang verilog --tool firtool --out ./output RHDL::HDL::Counter
 
 # Export with custom top module name
 rhdl export --lang verilog --out ./output --top my_counter RHDL::HDL::Counter
@@ -251,6 +284,268 @@ export/verilog/
     ├── mos6502_alu.v
     └── ...
 ```
+
+---
+
+## Import Command
+
+Import Verilog, mixed Verilog+VHDL, or CIRCT MLIR and raise to RHDL DSL source files.
+
+### Usage
+
+```bash
+rhdl import [options]
+```
+
+### Options
+
+| Option | Description |
+|--------|-------------|
+| `--mode MODE` | Import mode: `verilog`, `mixed`, or `circt` |
+| `--input FILE` | Input file (`.v/.sv` for verilog mode, top source file for mixed autoscan mode, `.mlir` for circt mode) |
+| `--manifest FILE` | Mixed mode: YAML/JSON manifest describing source files/top/include/defines |
+| `--out DIR` | Output directory |
+| `--mlir-out FILE` | Verilog/mixed mode: write intermediate CIRCT MLIR path |
+| `--tool-arg ARG` | Verilog/mixed mode: extra `circt-verilog` arg (repeatable) |
+| `--[no-]strict` | Enable strict no-skip import + strict raise checks (default: enabled) |
+| `--extern NAME` | Declare unresolved external module boundary (repeatable) |
+| `--report FILE` | Write import report JSON (default: `<out>/import_report.json`) |
+| `--[no-]raise` | Run CIRCT->RHDL raising step (default: enabled) |
+| `--top NAME` | Optional top module for CIRCT->DSL raise |
+| `-h, --help` | Show help |
+
+### Examples
+
+```bash
+# Verilog -> circt-verilog -> CIRCT MLIR -> RHDL DSL
+rhdl import --mode verilog --input ./cpu.v --out ./generated
+
+# Mixed Verilog+VHDL via manifest -> staged Verilog -> circt-verilog -> CIRCT MLIR -> RHDL DSL
+rhdl import --mode mixed --manifest ./import.yml --out ./generated
+
+# Mixed autoscan fallback (top file required when manifest is omitted)
+rhdl import --mode mixed --input ./rtl/top.sv --top top --out ./generated
+
+# Verilog -> CIRCT MLIR only (skip raising)
+rhdl import --mode verilog --input ./cpu.v --out ./generated --no-raise
+
+# CIRCT MLIR -> RHDL DSL
+rhdl import --mode circt --input ./cpu.mlir --out ./generated
+
+# Strict top-closure import with explicit extern boundary + report
+rhdl import --mode circt --input ./soc.mlir --out ./generated --top soc_top --extern pll --extern ddr_phy --report ./generated/import_report.json
+
+# Note: Verilog import uses circt-verilog in this flow.
+# Mixed mode also requires ghdl for VHDL analyze/synth conversion.
+```
+
+### Mixed Import Manifest (YAML/JSON)
+
+```yaml
+version: 1
+top:
+  name: top
+  language: verilog # verilog|vhdl
+  file: rtl/top.sv
+  library: work      # optional, vhdl only
+files:
+  - path: rtl/top.sv
+    language: verilog
+  - path: rtl/leaf.vhd
+    language: vhdl
+    library: work
+include_dirs:
+  - rtl/include
+defines:
+  WIDTH: "32"
+vhdl:
+  standard: "08" # default
+  workdir: tmp/ghdl_work # optional
+```
+
+Raised DSL output from import flows is auto-formatted with RuboCop when available.
+
+---
+
+## Examples GameBoy Command
+
+Run the Game Boy emulator or regenerate the raised Game Boy import tree from the reference HDL.
+
+### Usage
+
+```bash
+rhdl examples gameboy [options] [rom.gb]
+rhdl examples gameboy import [options]
+```
+
+### Examples
+
+```bash
+# Run the built-in demo
+rhdl examples gameboy --demo
+
+# Import the reference design into examples/gameboy/import
+rhdl examples gameboy import
+
+# Import with the simulation-safe Game Boy stub profile
+rhdl examples gameboy import --auto-stub-modules
+
+# Keep the mixed-import workspace for debugging
+rhdl examples gameboy import --workspace tmp/gameboy_ws --keep-workspace
+
+# Keep output/report artifacts even when import diagnostics are present
+rhdl examples gameboy import --no-strict
+```
+
+### `import` options
+
+| Option | Description |
+|--------|-------------|
+| `--out DIR` | Output directory for raised DSL (default: `examples/gameboy/import`) |
+| `--workspace DIR` | Workspace directory for intermediate artifacts |
+| `--reference-root DIR` | Override the Game Boy reference tree root |
+| `--qip FILE` | Override the Quartus QIP manifest path |
+| `--top NAME` | Top module name override (default: `gb`) |
+| `--top-file FILE` | Override the top source file (default: `examples/gameboy/reference/rtl/gb.v`) |
+| `--strategy STRATEGY` | Import strategy (default: `mixed`) |
+| `--keep-workspace` | Keep workspace artifacts after import |
+| `--[no-]clean` | Clean existing output directory contents before writing (default: enabled) |
+| `--[no-]auto-stub-modules` | Apply the simulation-safe Game Boy stub profile for wrapper-disabled subsystems |
+| `--[no-]strict` | Treat import issues as failures (default: enabled) |
+
+---
+
+## Examples AO486 Command
+
+Run the AO486 CPU-top environment or AO486-specific CIRCT import/parity workflows.
+
+### Usage
+
+```bash
+rhdl examples ao486 [run options]
+rhdl examples ao486 <subcommand> [options]
+```
+
+### Default run options
+
+| Option | Description |
+|--------|-------------|
+| `-m`, `--mode TYPE` | Simulation mode: `ir` (default), `verilog`, `circt` |
+| `--sim TYPE` | IR simulator backend: `compile` (default), `interpret`, `jit` |
+| `--bios` | Load BIOS ROMs from `examples/ao486/software/rom` |
+| `--dos` | Load the patched verbose MS-DOS 6.22 boot disk from `examples/ao486/software/bin` |
+| `--dos-disk1 FILE` | Load `FILE` as the primary floppy image in slot 0 |
+| `--dos-disk2 FILE` | Preload `FILE` as the secondary floppy image in slot 1 for hot swapping |
+| `--headless` | Run once without the interactive terminal loop |
+| `--cycles N` | Headless cycle-count override |
+| `-s`, `--speed CYCLES` | Cycles per frame/chunk |
+| `-d`, `--debug` | Show boxed debug info below the AO486 display |
+
+### Subcommands
+
+| Subcommand | Description |
+|------------|-------------|
+| `import` | Import `examples/ao486/reference/rtl/ao486/ao486.v` via CIRCT and regenerate raised DSL |
+| `parity` | Run bounded Verilog (Verilator) vs raised RHDL parity harness |
+| `verify` | Run importer + parity + CIRCT import-path verification specs |
+
+### Examples
+
+```bash
+# Run the AO486 CPU-top on the Verilator-backed path
+rhdl examples ao486 -m verilog --bios --dos --headless --cycles 100000
+
+# Run the AO486 CPU-top on the Arcilator-backed path with debug output
+rhdl examples ao486 -m circt --bios --dos -d -s 5000
+
+# Preload the patched verbose MS-DOS 6.22 boot disk directly
+rhdl examples ao486 -m verilog --bios --dos-disk1 examples/ao486/software/bin/msdos622_boot.img --headless --cycles 100000
+
+# Regenerate examples/ao486/import from rtl/ao486/ao486.v
+rhdl examples ao486 import --out examples/ao486/import
+
+# Force a stubbed CPU-top baseline import
+rhdl examples ao486 import --out examples/ao486/import --strategy stubbed
+
+# Keep flat output (disable directory mirroring)
+rhdl examples ao486 import --out examples/ao486/import --no-keep-structure
+
+# Keep intermediate CIRCT/import workspace artifacts for debugging
+rhdl examples ao486 import --out examples/ao486/import --workspace tmp/ao486_ws --keep-workspace
+
+# Emit import diagnostics/report JSON for the default CPU-top tree import
+rhdl examples ao486 import --out examples/ao486/import --report tmp/ao486_report.json
+
+# Require the AO486 strict gate to pass
+rhdl examples ao486 import --out examples/ao486/import --strict
+
+# Run bounded parity checks
+rhdl examples ao486 parity
+
+# Run full AO486 verification bundle
+rhdl examples ao486 verify
+```
+
+### `import` options
+
+| Option | Description |
+|--------|-------------|
+| `--source FILE` | Override source Verilog path (default: `examples/ao486/reference/rtl/ao486/ao486.v`) |
+| `--out DIR` | Output directory for raised DSL (required) |
+| `--workspace DIR` | Workspace directory for intermediate artifacts |
+| `--report FILE` | Write AO486 import report JSON to this path |
+| `--top NAME` | Top module name override (default: `ao486`) |
+| `--strategy STRATEGY` | Import strategy: `tree` (default) or `stubbed` (force top-level baseline) |
+| `--[no-]fallback` | For `tree` strategy, fallback to `stubbed` if CIRCT import fails (default: disabled) |
+| `--[no-]keep-structure` | Keep source Verilog directory structure in output DSL paths (default: enabled) |
+| `--[no-]strict` | Treat importer/raise issues as failures and keep AO486 strict gate enabled (default: disabled) |
+| `--keep-workspace` | Keep workspace artifacts after import |
+| `--[no-]clean` | Clean existing output directory contents before writing (default: enabled) |
+
+---
+
+## Examples SPARC64 Command
+
+Run the SPARC64 CIRCT import baseline for the reference core top.
+
+### Usage
+
+```bash
+rhdl examples sparc64 <subcommand> [options]
+```
+
+### Subcommands
+
+| Subcommand | Description |
+|------------|-------------|
+| `import` | Import the SPARC64 reference top and regenerate raised DSL |
+
+### Examples
+
+```bash
+# Regenerate examples/sparc64/import from the default SPARC64 top
+rhdl examples sparc64 import
+
+# Keep staged import workspace artifacts for debugging
+rhdl examples sparc64 import --workspace tmp/sparc64_ws --keep-workspace
+
+# Override the imported top module explicitly
+rhdl examples sparc64 import --top sparc --top-file examples/sparc64/reference/T1-CPU/rtl/sparc.v
+```
+
+### `import` options
+
+| Option | Description |
+|--------|-------------|
+| `--out DIR` | Output directory for raised DSL (default: `examples/sparc64/import`) |
+| `--workspace DIR` | Workspace directory for intermediate artifacts |
+| `--reference-root DIR` | Override the SPARC64 reference tree root |
+| `--top NAME` | Top module name override (default: `W1`) |
+| `--top-file FILE` | Top source file override (default: `examples/sparc64/reference/Top/W1.v`) |
+| `--[no-]keep-structure` | Keep source directory structure in output DSL paths (default: enabled) |
+| `--[no-]strict` | Treat import issues as failures (default: enabled) |
+| `--keep-workspace` | Keep workspace artifacts after import |
+| `--[no-]clean` | Clean existing output directory contents before writing (default: enabled) |
 
 ---
 

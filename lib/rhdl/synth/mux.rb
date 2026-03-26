@@ -13,13 +13,15 @@ module RHDL
         super(width)
       end
 
-      def to_ir
-        RHDL::Codegen::IR::Mux.new(
-          condition: @condition.to_ir,
-          when_true: @when_true.to_ir,
-          when_false: @when_false.to_ir,
-          width: @width
-        )
+      def to_ir(cache = nil)
+        memoize_ir(cache) do
+          RHDL::Codegen::CIRCT::IR::Mux.new(
+            condition: @condition.to_ir(cache),
+            when_true: @when_true.to_ir(cache),
+            when_false: @when_false.to_ir(cache),
+            width: @width
+          )
+        end
       end
     end
   end

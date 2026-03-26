@@ -8,7 +8,7 @@ require 'spec_helper'
 RSpec.describe 'GameBoy DPRAM' do
   before(:all) do
     begin
-      require_relative '../../../../../examples/gameboy/gameboy'
+      require_relative '../../../../../examples/gameboy/hdl/gameboy'
       require_relative '../../../../../examples/gameboy/hdl/memory/dpram'
       @component_available = defined?(RHDL::Examples::GameBoy::DPRAM)
     rescue LoadError => e

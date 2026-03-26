@@ -31,7 +31,7 @@ RSpec.describe 'Behavior DSL' do
 
     it 'generates correct Verilog' do
       verilog = BehaviorAndGate.to_verilog
-      expect(verilog).to include('assign y = (a & b)')
+      expect(verilog).to include('assign y = a & b')
     end
   end
 
@@ -145,8 +145,8 @@ RSpec.describe 'Behavior DSL' do
 
     it 'generates correct Verilog' do
       verilog = BehaviorFullAdder.to_verilog
-      expect(verilog).to include('assign sum = ((a ^ b) ^ cin)')
-      expect(verilog).to include('assign cout = (((a & b) | (a & cin)) | (b & cin))')
+      expect(verilog).to include('assign sum = a ^ b ^ cin')
+      expect(verilog).to include('assign cout = a & b | a & cin | b & cin')
     end
   end
 
@@ -187,6 +187,86 @@ RSpec.describe 'Behavior DSL' do
       expect(verilog).to include('input [7:0] a')
       expect(verilog).to include('input [7:0] b')
       expect(verilog).to include('output [7:0] sum')
+    end
+  end
+
+  describe 'Concatenation masking' do
+    class BehaviorSignedLiteralConcat < RHDL::HDL::Component
+      input :head, width: 3
+      output :y, width: 8
+
+      behavior do
+        y <= cat(head, lit(-16, width: 5))
+      end
+    end
+
+    it 'masks signed literal parts to their declared width before concatenation' do
+      gate = BehaviorSignedLiteralConcat.new('signed_concat')
+
+      gate.set_input(:head, 0)
+      gate.propagate
+      expect(gate.get_output(:y)).to eq(0x10)
+
+      gate.set_input(:head, 0b111)
+      gate.propagate
+      expect(gate.get_output(:y)).to eq(0xF0)
+    end
+  end
+
+  describe 'Sequential local width masking' do
+    class BehaviorSequentialLocalWidth < RHDL::Sim::SequentialComponent
+      include RHDL::DSL::Sequential
+
+      input :clk
+      output :addr, width: 64
+      output :data, width: 64
+
+      sequential clock: :clk do
+        inc = local(:inc, addr[31..0] + lit(8, width: 32), width: 32)
+        addr <= cat(addr[63..32], inc)
+        data <= cat(inc, inc)
+      end
+    end
+
+    def clock_cycle(component)
+      component.set_input(:clk, 0)
+      component.propagate
+      component.set_input(:clk, 1)
+      component.propagate
+    end
+
+    it 'masks sequential locals to the declared width before reuse in wider expressions' do
+      component = BehaviorSequentialLocalWidth.new('seq_local_width')
+      component.write_reg(:addr, 0)
+      component.write_reg(:data, 0)
+
+      clock_cycle(component)
+
+      expect(component.get_output(:addr)).to eq(0x0000000000000008)
+      expect(component.get_output(:data)).to eq(0x0000000800000008)
+    end
+  end
+
+  describe 'Negative literal comparisons' do
+    class BehaviorNegativeLiteralCompare < RHDL::HDL::Component
+      input :sel, width: 4
+      output :y
+
+      behavior do
+        y <= mux((sel == lit(-2, width: 4)), lit(1, width: 1), lit(0, width: 1))
+      end
+    end
+
+    it 'masks negative literals before comparison during simulation' do
+      gate = BehaviorNegativeLiteralCompare.new('negative_compare')
+
+      gate.set_input(:sel, 0b1110)
+      gate.propagate
+      expect(gate.get_output(:y)).to eq(1)
+
+      gate.set_input(:sel, 0b0010)
+      gate.propagate
+      expect(gate.get_output(:y)).to eq(0)
     end
   end
 
@@ -355,6 +435,94 @@ RSpec.describe 'Behavior DSL' do
     end
   end
 
+  describe 'Hierarchical sibling sequencing' do
+    class BehaviorHierarchyLeafReg < RHDL::HDL::Component
+      include RHDL::DSL::Sequential
+
+      input :clk
+      input :din
+      output :q
+
+      sequential clock: :clk do
+        q <= din
+      end
+    end
+
+    class BehaviorHierarchyProducer < RHDL::HDL::Component
+      input :clk
+      input :src
+      output :out
+
+      instance :reg, BehaviorHierarchyLeafReg
+
+      port :clk => [:reg, :clk]
+      port :src => [:reg, :din]
+      port [:reg, :q] => :out
+    end
+
+    class BehaviorHierarchyConsumer < RHDL::HDL::Component
+      input :clk
+      input :src
+      output :out
+
+      instance :reg, BehaviorHierarchyLeafReg
+
+      port :clk => [:reg, :clk]
+      port :src => [:reg, :din]
+      port [:reg, :q] => :out
+    end
+
+    class BehaviorHierarchySiblingTop < RHDL::HDL::Component
+      input :clk
+      input :src
+      output :producer_q
+      output :consumer_q
+
+      wire :producer_wire
+      wire :consumer_wire
+
+      instance :producer, BehaviorHierarchyProducer
+      instance :consumer, BehaviorHierarchyConsumer
+
+      port :clk => [:producer, :clk]
+      port :src => [:producer, :src]
+      port [:producer, :out] => :producer_wire
+
+      port :clk => [:consumer, :clk]
+      port :producer_wire => [:consumer, :src]
+      port [:consumer, :out] => :consumer_wire
+
+      behavior do
+        producer_q <= producer_wire
+        consumer_q <= consumer_wire
+      end
+    end
+
+    def tick_behavior_component(component)
+      component.set_input(:clk, 0)
+      component.propagate
+      component.set_input(:clk, 1)
+      component.propagate
+      component.set_input(:clk, 0)
+      component.propagate
+    end
+
+    it 'samples sequential descendants across sibling composites before any update' do
+      top = BehaviorHierarchySiblingTop.new('hier_top')
+
+      top.set_input(:src, 1)
+      tick_behavior_component(top)
+
+      expect(top.get_output(:producer_q)).to eq(1)
+      expect(top.get_output(:consumer_q)).to eq(0)
+
+      tick_behavior_component(top)
+
+      expect(top.get_output(:producer_q)).to eq(1)
+      expect(top.get_output(:consumer_q)).to eq(1)
+    end
+  end
+
   describe 'Backwards compatibility' do
     # Test that existing components with propagate() still work
     class TraditionalGate < RHDL::HDL::Component
@@ -410,17 +578,17 @@ RSpec.describe 'Behavior DSL' do
 
   describe 'IR generation' do
     it 'generates IR assigns from behavior block' do
-      result = BehaviorAndGate.send(:behavior_to_ir_assigns)
+      result = BehaviorAndGate.send(:behavior_to_circt_assigns)
       ir_assigns = result[:assigns]
       expect(ir_assigns.length).to eq(1)
       expect(ir_assigns[0].target).to eq(:y)
-      expect(ir_assigns[0].expr).to be_a(RHDL::Export::IR::BinaryOp)
+      expect(ir_assigns[0].expr).to be_a(RHDL::Codegen::CIRCT::IR::BinaryOp)
       expect(ir_assigns[0].expr.op).to eq(:&)
     end
 
     it 'generates complete IR module definition' do
-      ir = BehaviorFullAdder.to_ir
-      expect(ir).to be_a(RHDL::Export::IR::ModuleDef)
+      ir = BehaviorFullAdder.to_flat_circt_nodes
+      expect(ir).to be_a(RHDL::Codegen::CIRCT::IR::ModuleOp)
       expect(ir.ports.length).to eq(5)
       expect(ir.assigns.length).to eq(2)
     end

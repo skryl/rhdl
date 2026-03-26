@@ -15,7 +15,7 @@ require 'spec_helper'
 RSpec.describe 'RHDL::Examples::GameBoy::ChannelWave' do
   before(:all) do
     begin
-      require_relative '../../../../../examples/gameboy/gameboy'
+      require_relative '../../../../../examples/gameboy/hdl/gameboy'
       @component_available = true
     rescue LoadError => e
       @component_available = false

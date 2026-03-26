@@ -21,25 +21,25 @@ RSpec.describe 'Headless Runners', :slow do
     end
   end
 
-  describe 'MOS6502::HeadlessRunner' do
+  describe 'RHDL::Examples::MOS6502::HeadlessRunner' do
 
     describe 'ISA mode (default)' do
       it 'creates ISA mode runner by default with demo' do
-        runner = MOS6502::HeadlessRunner.with_demo(mode: :isa)
+        runner = RHDL::Examples::MOS6502::HeadlessRunner.with_demo(mode: :isa)
         expect(runner.mode).to eq(:isa)
         # simulator_type is :ruby when native extensions not available
         expect(runner.simulator_type).to be_a(Symbol)
       end
 
       it 'loads demo program into memory' do
-        runner = MOS6502::HeadlessRunner.with_demo(mode: :isa)
+        runner = RHDL::Examples::MOS6502::HeadlessRunner.with_demo(mode: :isa)
         program_area = runner.memory_sample[:program_area]
         expect(program_area.any? { |b| b != 0 }).to be true
       end
 
       it 'loads binary file' do
         with_temp_program do |path|
-          runner = MOS6502::HeadlessRunner.new(mode: :isa)
+          runner = RHDL::Examples::MOS6502::HeadlessRunner.new(mode: :isa)
           runner.load_program(path, base_addr: 0x0800)
           runner.setup_reset_vector(0x0800)
           program_area = runner.memory_sample[:program_area]
@@ -56,21 +56,21 @@ RSpec.describe 'Headless Runners', :slow do
       end
 
       it 'creates IR mode runner with interpret backend' do
-        runner = MOS6502::HeadlessRunner.new(mode: :ir, sim: :interpret)
+        runner = RHDL::Examples::MOS6502::HeadlessRunner.new(mode: :ir, sim: :interpret)
         expect(runner.mode).to eq(:ir)
         expect(runner.backend).to eq(:interpret)
       end
 
       it 'creates IR mode runner with jit backend' do
         skip 'IR JIT not available' unless ir_jit_available?
-        runner = MOS6502::HeadlessRunner.new(mode: :ir, sim: :jit)
+        runner = RHDL::Examples::MOS6502::HeadlessRunner.new(mode: :ir, sim: :jit)
         expect(runner.mode).to eq(:ir)
         expect(runner.backend).to eq(:jit)
       end
 
       it 'creates IR mode runner with compile backend' do
         skip 'IR Compiler not available' unless ir_compiler_available?
-        runner = MOS6502::HeadlessRunner.new(mode: :ir, sim: :compile)
+        runner = RHDL::Examples::MOS6502::HeadlessRunner.new(mode: :ir, sim: :compile)
         expect(runner.mode).to eq(:ir)
         expect(runner.backend).to eq(:compile)
       end
@@ -78,7 +78,7 @@ RSpec.describe 'Headless Runners', :slow do
 
     describe 'runner interface' do
       it 'returns all required fields' do
-        runner = MOS6502::HeadlessRunner.with_demo(mode: :isa)
+        runner = RHDL::Examples::MOS6502::HeadlessRunner.with_demo(mode: :isa)
         expect(runner.mode).to be_a(Symbol)
         expect(runner.simulator_type).to be_a(Symbol)
         expect([true, false]).to include(runner.native?)
@@ -87,7 +87,7 @@ RSpec.describe 'Headless Runners', :slow do
       end
 
       it 'returns cpu_state with all register fields' do
-        runner = MOS6502::HeadlessRunner.with_demo(mode: :isa)
+        runner = RHDL::Examples::MOS6502::HeadlessRunner.with_demo(mode: :isa)
         cpu_state = runner.cpu_state
         expect(cpu_state).to have_key(:pc)
         expect(cpu_state).to have_key(:a)
@@ -100,7 +100,7 @@ RSpec.describe 'Headless Runners', :slow do
       end
 
       it 'returns memory_sample with all memory regions' do
-        runner = MOS6502::HeadlessRunner.with_demo(mode: :isa)
+        runner = RHDL::Examples::MOS6502::HeadlessRunner.with_demo(mode: :isa)
         memory = runner.memory_sample
         expect(memory).to have_key(:zero_page)
         expect(memory).to have_key(:stack)
@@ -119,7 +119,7 @@ RSpec.describe 'Headless Runners', :slow do
 
     describe 'error handling' do
       it 'raises error for invalid mode' do
-        expect { MOS6502::HeadlessRunner.new(mode: :invalid) }.to raise_error(RuntimeError)
+        expect { RHDL::Examples::MOS6502::HeadlessRunner.new(mode: :invalid) }.to raise_error(RuntimeError)
       end
     end
   end
@@ -201,7 +201,10 @@ RSpec.describe 'Headless Runners', :slow do
 
     describe 'Netlist mode' do
       before(:each) do
-        skip 'Netlist requires native extension' unless ir_interpreter_available?
+        available = RHDL::Sim::Native::Netlist::INTERPRETER_AVAILABLE
+        skip 'Netlist requires native extension' unless available
+      rescue LoadError, NameError
+        skip 'Netlist requires native extension'
       end
 
       it 'creates netlist mode runner' do
@@ -310,6 +313,29 @@ RSpec.describe 'Headless Runners', :slow do
       end
     end
 
+    describe 'CIRCT mode' do
+      it 'routes to ArcilatorRunner and reports hdl_arcilator simulator type' do
+        require_relative '../../../examples/gameboy/utilities/runners/arcilator_runner'
+        fake_runner = instance_double(
+          'RHDL::Examples::GameBoy::ArcilatorRunner',
+          native?: true,
+          simulator_type: :hdl_arcilator
+        )
+        allow(RHDL::Examples::GameBoy::ArcilatorRunner).to receive(:new).and_return(fake_runner)
+
+        runner = RHDL::Examples::GameBoy::HeadlessRunner.new(mode: :circt, hdl_dir: '/tmp/gameboy_import')
+
+        expect(RHDL::Examples::GameBoy::ArcilatorRunner).to have_received(:new).with(
+          hdl_dir: '/tmp/gameboy_import',
+          top: nil,
+          jit: false
+        )
+        expect(runner.mode).to eq(:circt)
+        expect(runner.backend).to be_nil
+        expect(runner.simulator_type).to eq(:hdl_arcilator)
+      end
+    end
+
     describe 'runner interface' do
       it 'returns all required fields' do
         runner = RHDL::Examples::GameBoy::HeadlessRunner.with_test_rom
@@ -331,6 +357,26 @@ RSpec.describe 'Headless Runners', :slow do
         expect(cpu_state).to have_key(:halted)
         expect(cpu_state).to have_key(:simulator_type)
       end
+
+      it 'delegates optional runtime helpers to the underlying runner' do
+        backend = instance_double(
+          'GameBoyBackend',
+          load_boot_rom: nil,
+          read_framebuffer: [[1, 2], [3, 4]],
+          debug_state: { video_scy: 99, frame_count: 3 },
+          frame_count: 7,
+          close: true
+        )
+
+        runner = RHDL::Examples::GameBoy::HeadlessRunner.allocate
+        runner.instance_variable_set(:@runner, backend)
+
+        expect(runner.load_boot_rom).to be(true)
+        expect(runner.read_framebuffer).to eq([[1, 2], [3, 4]])
+        expect(runner.debug_state).to eq(video_scy: 99, frame_count: 3)
+        expect(runner.frame_count).to eq(7)
+        expect(runner.close).to be(true)
+      end
     end
   end
 
@@ -339,7 +385,7 @@ RSpec.describe 'Headless Runners', :slow do
   # Check if IR interpreter is available
   def ir_interpreter_available?
     require 'rhdl/codegen'
-    RHDL::Codegen::IR::IR_INTERPRETER_AVAILABLE
+    RHDL::Sim::Native::IR::INTERPRETER_AVAILABLE
   rescue LoadError, NameError
     false
   end
@@ -347,7 +393,7 @@ RSpec.describe 'Headless Runners', :slow do
   # Check if IR JIT is available
   def ir_jit_available?
     require 'rhdl/codegen'
-    RHDL::Codegen::IR::IR_JIT_AVAILABLE
+    RHDL::Sim::Native::IR::JIT_AVAILABLE
   rescue LoadError, NameError
     false
   end
@@ -355,7 +401,7 @@ RSpec.describe 'Headless Runners', :slow do
   # Check if IR Compiler is available
   def ir_compiler_available?
     require 'rhdl/codegen'
-    RHDL::Codegen::IR::IR_COMPILER_AVAILABLE
+    RHDL::Sim::Native::IR::COMPILER_AVAILABLE
   rescue LoadError, NameError
     false
   end

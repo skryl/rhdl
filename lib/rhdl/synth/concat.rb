@@ -11,8 +11,10 @@ module RHDL
         super(width)
       end
 
-      def to_ir
-        RHDL::Codegen::IR::Concat.new(parts: @parts.map(&:to_ir), width: @width)
+      def to_ir(cache = nil)
+        memoize_ir(cache) do
+          RHDL::Codegen::CIRCT::IR::Concat.new(parts: @parts.map { |part| part.to_ir(cache) }, width: @width)
+        end
       end
     end
   end

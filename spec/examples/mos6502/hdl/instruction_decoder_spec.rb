@@ -70,12 +70,12 @@ RSpec.describe RHDL::Examples::MOS6502::InstructionDecoder do
       expect(verilog).to include('endmodule')
     end
 
-    it 'generates valid FIRRTL' do
-      firrtl = described_class.to_circt
-      expect(firrtl).to include('FIRRTL version')
-      expect(firrtl).to include('circuit mos6502_instruction_decoder')
-      expect(firrtl).to include('input opcode')
-      expect(firrtl).to include('output addr_mode')
+    it 'generates valid CIRCT MLIR' do
+      mlir = described_class.to_circt
+      expect(mlir).to include('hw.output')
+      expect(mlir).to include('hw.module @mos6502_instruction_decoder')
+      expect(mlir).to include('%opcode:')
+      expect(mlir).to include('addr_mode:')
     end
 
     context 'CIRCT firtool validation', if: HdlToolchain.firtool_available? do
@@ -135,7 +135,7 @@ RSpec.describe RHDL::Examples::MOS6502::InstructionDecoder do
 
   describe 'gate-level netlist' do
     let(:component) { described_class.new('mos6502_instruction_decoder') }
-    let(:ir) { RHDL::Export::Structure::Lower.from_components([component], name: 'mos6502_instruction_decoder') }
+    let(:ir) { RHDL::Codegen::Netlist::Lower.from_components([component], name: 'mos6502_instruction_decoder') }
 
     it 'generates correct IR structure' do
       expect(ir.inputs.keys).to include('mos6502_instruction_decoder.opcode')
@@ -183,8 +183,16 @@ RSpec.describe RHDL::Examples::MOS6502::InstructionDecoder do
         expect(result[:success]).to be(true), result[:error]
 
         vectors.each_with_index do |vec, idx|
-          expect(result[:results][idx]).to eq(vec[:expected]),
-            "Opcode 0x#{test_opcodes[idx].to_s(16)}: expected #{vec[:expected]}, got #{result[:results][idx]}"
+          actual = result[:results][idx]
+          comparable = {
+            addr_mode: actual[:addr_mode],
+            alu_op: actual[:alu_op],
+            instr_type: actual[:instr_type],
+            illegal: actual[:illegal]
+          }
+
+          expect(comparable).to eq(vec[:expected]),
+            "Opcode 0x#{test_opcodes[idx].to_s(16)}: expected #{vec[:expected]}, got #{actual}"
         end
       end
     end

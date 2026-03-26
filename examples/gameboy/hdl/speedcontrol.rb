@@ -32,13 +32,13 @@ module RHDL
     wire :clkdiv, width: 3   # Clock divider counter
 
     behavior do
-      # For IR simulation, we run at 4MHz (1 cycle = 1 Game Boy cycle),
-      # so ce should always be 1 (no clock division needed).
-      # The original hardware runs at 32MHz and divides by 8.
-      # Setting ce=1 always makes simulation run at effective 4MHz.
-      ce <= ~pause
-      ce_n <= ~pause
-      ce_2x <= ~pause
+      # Mirror the MiSTer reference speedcontrol.vhd clock enable logic:
+      # ce pulses when clkdiv==0, ce_n when clkdiv==4,
+      # ce_2x on both half-rate phases (clkdiv==0 and clkdiv==4).
+      # All outputs suppressed when paused.
+      ce   <= (~pause) & (clkdiv == lit(0, width: 3))
+      ce_n <= (~pause) & (clkdiv == lit(4, width: 3))
+      ce_2x <= (~pause) & ((clkdiv & lit(3, width: 3)) == lit(0, width: 3))
     end
 
     sequential clock: :clk_sys, reset: :reset, reset_values: {

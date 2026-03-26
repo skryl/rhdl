@@ -93,7 +93,7 @@ RSpec.describe RHDL::CLI::Tasks::GatesTask do
   describe 'gate-level lowering' do
     it 'can lower a single component to gate-level IR' do
       component = RHDL::HDL::NotGate.new('test_not')
-      ir = RHDL::Export::Structure::Lower.from_components([component], name: 'test_not')
+      ir = RHDL::Codegen::Netlist::Lower.from_components([component], name: 'test_not')
 
       expect(ir).not_to be_nil
       expect(ir.gates).not_to be_empty

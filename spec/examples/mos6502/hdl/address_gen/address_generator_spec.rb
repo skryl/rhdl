@@ -75,12 +75,12 @@ RSpec.describe RHDL::Examples::MOS6502::AddressGenerator do
       expect(verilog).to include('eff_addr')
     end
 
-    it 'generates valid FIRRTL' do
-      firrtl = described_class.to_circt
-      expect(firrtl).to include('FIRRTL version')
-      expect(firrtl).to include('circuit mos6502_address_generator')
-      expect(firrtl).to include('input mode')
-      expect(firrtl).to include('output eff_addr')
+    it 'generates valid CIRCT MLIR' do
+      mlir = described_class.to_circt
+      expect(mlir).to include('hw.output')
+      expect(mlir).to include('hw.module @mos6502_address_generator')
+      expect(mlir).to include('%mode:')
+      expect(mlir).to include('eff_addr:')
     end
 
     context 'CIRCT firtool validation', if: HdlToolchain.firtool_available? do
@@ -145,7 +145,7 @@ RSpec.describe RHDL::Examples::MOS6502::AddressGenerator do
 
   describe 'gate-level netlist' do
     let(:component) { described_class.new('mos6502_address_generator') }
-    let(:ir) { RHDL::Export::Structure::Lower.from_components([component], name: 'mos6502_address_generator') }
+    let(:ir) { RHDL::Codegen::Netlist::Lower.from_components([component], name: 'mos6502_address_generator') }
 
     it 'generates correct IR structure' do
       expect(ir.inputs.keys).to include('mos6502_address_generator.mode')

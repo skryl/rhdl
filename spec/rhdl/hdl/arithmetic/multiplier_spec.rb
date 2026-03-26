@@ -18,8 +18,8 @@ RSpec.describe RHDL::HDL::Multiplier do
     end
 
     it 'generates valid IR' do
-      ir = RHDL::HDL::Multiplier.to_ir
-      expect(ir).to be_a(RHDL::Export::IR::ModuleDef)
+      ir = RHDL::HDL::Multiplier.to_flat_circt_nodes
+      expect(ir).to be_a(RHDL::Codegen::CIRCT::IR::ModuleOp)
       expect(ir.ports.length).to eq(3)  # a, b, product
     end
 
@@ -32,13 +32,13 @@ RSpec.describe RHDL::HDL::Multiplier do
       expect(verilog).to include('assign product')
     end
 
-    it 'generates valid FIRRTL' do
-      firrtl = RHDL::HDL::Multiplier.to_circt
-      expect(firrtl).to include('FIRRTL version')
-      expect(firrtl).to include('circuit multiplier')
-      expect(firrtl).to include('input a')
-      expect(firrtl).to include('input b')
-      expect(firrtl).to include('output product')
+    it 'generates valid CIRCT MLIR' do
+      mlir = RHDL::HDL::Multiplier.to_circt
+      expect(mlir).to include('hw.output')
+      expect(mlir).to include('hw.module @multiplier')
+      expect(mlir).to include('%a:')
+      expect(mlir).to include('%b:')
+      expect(mlir).to include('product:')
     end
 
     context 'CIRCT firtool validation', if: HdlToolchain.firtool_available? do
@@ -55,7 +55,7 @@ RSpec.describe RHDL::HDL::Multiplier do
 
   describe 'gate-level netlist' do
     let(:component) { RHDL::HDL::Multiplier.new('mult', width: 8) }
-    let(:ir) { RHDL::Export::Structure::Lower.from_components([component], name: 'mult') }
+    let(:ir) { RHDL::Codegen::Netlist::Lower.from_components([component], name: 'mult') }
 
     it 'generates correct IR structure' do
       expect(ir.inputs.keys).to include('mult.a', 'mult.b')

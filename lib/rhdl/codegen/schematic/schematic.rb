@@ -35,7 +35,7 @@ module RHDL
       end
 
       def hierarchical_ir_hash(top_class:, instance_name:, parameters:, stack:)
-        node = ir_to_hash(top_class.to_ir(parameters: parameters || {}))
+        node = ir_to_hash(top_class.to_circt_nodes(parameters: parameters || {}))
         node['instance_name'] = instance_name.to_s
         node['component_class'] = top_class.name.to_s
 
@@ -46,7 +46,7 @@ module RHDL
         instance_defs = top_class.respond_to?(:_instance_defs) ? Array(top_class._instance_defs) : []
         instance_defs.each do |inst|
           child_class = inst[:component_class]
-          next unless child_class.respond_to?(:to_ir)
+          next unless child_class.respond_to?(:to_circt_nodes)
 
           child_name = inst[:name].to_s
           child_params = inst[:parameters] || {}
@@ -63,6 +63,7 @@ module RHDL
 
       def walk_hierarchy(node, live_names:, components:, path_tokens:, parent_path:)
         path = path_tokens.empty? ? 'top' : path_tokens.join('.')
+        expr_pool = Array(node['exprs'])
 
         ports = Array(node['ports']).map do |port|
           next unless port.is_a?(Hash)
@@ -145,7 +146,29 @@ module RHDL
           target = assign['target'].to_s.strip
           next if target.empty?
           target_ref = signal_ref(target, path_tokens, live_names)
-          sources = collect_expr_signal_names(assign['expr']).to_a.sort.map do |name|
+          fallback_expr_signal_names = lambda do |expr|
+            expr = resolve_expr_ref(expr, expr_pool)
+            case expr
+            when Hash
+              expr.flat_map do |key, value|
+                key_name = key.to_s
+                if %w[name signal source operand left right base cond when_true when_false expr].include?(key_name) && value.is_a?(String)
+                  [value]
+                else
+                  fallback_expr_signal_names.call(value)
+                end
+              end
+            when Array
+              expr.flat_map { |entry| fallback_expr_signal_names.call(entry) }
+            else
+              []
+            end
+          end
+          source_names = collect_expr_signal_names(assign['expr'], expr_pool: expr_pool).to_a
+          if source_names.empty?
+            source_names = fallback_expr_signal_names.call(assign['expr'])
+          end
+          sources = source_names.uniq.sort.map do |name|
             signal_ref(name, path_tokens, live_names)
           end.compact
           {
@@ -156,25 +179,22 @@ module RHDL
         end.compact
 
         write_ports = Array(node['write_ports']).map do |port|
-          clock_ref = signal_ref(port['clock'], path_tokens, live_names)
           {
             memory: port['memory'].to_s,
-            addr_signals: port_signal_refs(port['addr'], path_tokens, live_names),
-            data_signals: port_signal_refs(port['data'], path_tokens, live_names),
-            enable_signals: port_signal_refs(port['enable'], path_tokens, live_names),
-            clock_signals: clock_ref ? [clock_ref] : []
+            addr_signals: port_signal_refs(port['addr'], path_tokens, live_names, expr_pool),
+            data_signals: port_signal_refs(port['data'], path_tokens, live_names, expr_pool),
+            enable_signals: port_signal_refs(port['enable'], path_tokens, live_names, expr_pool),
+            clock_signals: port_signal_refs(port['clock'], path_tokens, live_names, expr_pool)
           }
         end
 
         sync_read_ports = Array(node['sync_read_ports']).map do |port|
-          clock_ref = signal_ref(port['clock'], path_tokens, live_names)
-          data_ref = signal_ref(port['data'], path_tokens, live_names)
           {
             memory: port['memory'].to_s,
-            addr_signals: port_signal_refs(port['addr'], path_tokens, live_names),
-            enable_signals: port_signal_refs(port['enable'], path_tokens, live_names),
-            clock_signals: clock_ref ? [clock_ref] : [],
-            data_signals: data_ref ? [data_ref] : []
+            addr_signals: port_signal_refs(port['addr'], path_tokens, live_names, expr_pool),
+            enable_signals: port_signal_refs(port['enable'], path_tokens, live_names, expr_pool),
+            clock_signals: port_signal_refs(port['clock'], path_tokens, live_names, expr_pool),
+            data_signals: port_signal_refs(port['data'], path_tokens, live_names, expr_pool)
           }
         end
 
@@ -699,22 +719,59 @@ module RHDL
         }
       end
 
-      def collect_expr_signal_names(expr, out = Set.new)
+      def collect_expr_signal_names(expr, out = Set.new, expr_pool: nil, visited_expr_refs: Set.new)
         case expr
         when Hash
-          if expr['type'] == 'signal' && expr['name'].is_a?(String) && !expr['name'].strip.empty?
+          resolved_expr = resolve_expr_ref(expr, expr_pool, visited_expr_refs)
+          unless resolved_expr.equal?(expr)
+            collect_expr_signal_names(
+              resolved_expr,
+              out,
+              expr_pool: expr_pool,
+              visited_expr_refs: visited_expr_refs
+            )
+            return out
+          end
+
+          if expr['kind'].to_s == 'signal' && expr['name'].is_a?(String) && !expr['name'].strip.empty?
             out.add(expr['name'].strip)
           end
-          expr.each_value { |value| collect_expr_signal_names(value, out) }
+          expr.each_value do |value|
+            collect_expr_signal_names(value, out, expr_pool: expr_pool, visited_expr_refs: visited_expr_refs)
+          end
         when Array
-          expr.each { |entry| collect_expr_signal_names(entry, out) }
+          expr.each do |entry|
+            collect_expr_signal_names(entry, out, expr_pool: expr_pool, visited_expr_refs: visited_expr_refs)
+          end
         end
         out
       end
 
-      def port_signal_refs(port_expr, path_tokens, signal_set)
-        names = collect_expr_signal_names(port_expr).to_a
+      def port_signal_refs(port_expr, path_tokens, signal_set, expr_pool = nil)
+        if port_expr.is_a?(String)
+          ref = signal_ref(port_expr, path_tokens, signal_set)
+          return ref ? [ref] : []
+        end
+
+        names = collect_expr_signal_names(port_expr, expr_pool: expr_pool).to_a
         uniq_signal_refs(names.map { |name| signal_ref(name, path_tokens, signal_set) })
+      end
+
+      def resolve_expr_ref(expr, expr_pool, visited_expr_refs = Set.new)
+        return expr unless expr.is_a?(Hash)
+        return expr unless expr['kind'].to_s == 'expr_ref'
+
+        expr_id = expr['id']
+        return expr unless expr_id.is_a?(Integer) || expr_id.to_s.match?(/\A\d+\z/)
+
+        normalized_id = expr_id.to_i
+        return expr if visited_expr_refs.include?(normalized_id)
+
+        resolved_expr = Array(expr_pool)[normalized_id]
+        return expr unless resolved_expr
+
+        visited_expr_refs.add(normalized_id)
+        resolve_expr_ref(resolved_expr, expr_pool, visited_expr_refs)
       end
 
       def uniq_signal_refs(refs)
@@ -801,10 +858,59 @@ module RHDL
       end
 
       def ir_to_hash(ir_obj)
-        return ir_obj if ir_obj.is_a?(Hash)
-        return JSON.parse(ir_obj, max_nesting: false) if ir_obj.is_a?(String)
+        payload = if ir_obj.is_a?(Hash)
+                    deep_stringify_keys(ir_obj)
+                  elsif ir_obj.is_a?(String)
+                    deep_stringify_keys(JSON.parse(ir_obj, max_nesting: false))
+                  else
+                    json = RHDL::Sim::Native::IR.sim_json(ir_obj, format: :circt)
+                    deep_stringify_keys(JSON.parse(json, max_nesting: false))
+                  end
 
-        JSON.parse(RHDL::Codegen::IR::IRToJson.convert(ir_obj), max_nesting: false)
+        normalize_ir_payload(payload)
+      end
+
+      def circt_ir_object?(ir_obj)
+        class_name = ir_obj.class.name.to_s
+        return true if class_name.include?('::CIRCT::IR::')
+
+        ir_obj.respond_to?(:modules) &&
+          Array(ir_obj.modules).all? { |mod| mod.class.name.to_s.include?('::CIRCT::IR::') }
+      end
+
+      def normalize_ir_payload(payload)
+        return payload unless payload.is_a?(Hash)
+
+        if payload.key?('circt_json_version') || payload.key?('modules')
+          unless valid_circt_runtime_payload?(payload)
+            raise ArgumentError, 'CIRCT runtime JSON for schematic must include circt_json_version and non-empty modules'
+          end
+
+          return deep_stringify_keys(payload['modules'].first)
+        end
+
+        payload
+      end
+
+      def valid_circt_runtime_payload?(payload)
+        return false unless payload.is_a?(Hash)
+        return false unless payload.key?('circt_json_version')
+
+        modules = payload['modules']
+        modules.is_a?(Array) && !modules.empty? && modules.first.is_a?(Hash)
+      end
+
+      def deep_stringify_keys(obj)
+        case obj
+        when Hash
+          obj.each_with_object({}) do |(key, value), out|
+            out[key.to_s] = deep_stringify_keys(value)
+          end
+        when Array
+          obj.map { |entry| deep_stringify_keys(entry) }
+        else
+          obj
+        end
       end
     end
   end

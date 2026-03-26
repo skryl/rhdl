@@ -1,0 +1,10 @@
+AllCops:
+  NewCops: enable
+  TargetRubyVersion: 4.0
+  Exclude:
+    - 'bin/**/*'
+    - 'examples/*/reference/**/*'
+    - 'examples/riscv/software/**/*'
+    - 'obj_dir/**/*'
+    - 'pkg/**/*'
+    - 'tmp/**/*'

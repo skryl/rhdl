@@ -62,8 +62,8 @@ RSpec.describe RHDL::HDL::Counter do
     end
 
     it 'generates valid IR' do
-      ir = RHDL::HDL::Counter.to_ir
-      expect(ir).to be_a(RHDL::Export::IR::ModuleDef)
+      ir = RHDL::HDL::Counter.to_flat_circt_nodes
+      expect(ir).to be_a(RHDL::Codegen::CIRCT::IR::ModuleOp)
       expect(ir.ports.length).to eq(9)  # clk, rst, en, up, load, d, q, tc, zero
     end
 
@@ -74,12 +74,12 @@ RSpec.describe RHDL::HDL::Counter do
       expect(verilog).to match(/output.*\[7:0\].*q/)
     end
 
-    it 'generates valid FIRRTL' do
-      firrtl = RHDL::HDL::Counter.to_circt
-      expect(firrtl).to include('FIRRTL version')
-      expect(firrtl).to include('circuit counter')
-      expect(firrtl).to include('input clk')
-      expect(firrtl).to include('output q')
+    it 'generates valid CIRCT MLIR' do
+      mlir = RHDL::HDL::Counter.to_circt
+      expect(mlir).to include('hw.output')
+      expect(mlir).to include('hw.module @counter')
+      expect(mlir).to include('%clk:')
+      expect(mlir).to include('q:')
     end
 
     context 'CIRCT firtool validation', if: HdlToolchain.firtool_available? && HdlToolchain.iverilog_available? do
@@ -193,7 +193,7 @@ RSpec.describe RHDL::HDL::Counter do
 
   describe 'gate-level netlist' do
     let(:component) { RHDL::HDL::Counter.new('counter') }
-    let(:ir) { RHDL::Export::Structure::Lower.from_components([component], name: 'counter') }
+    let(:ir) { RHDL::Codegen::Netlist::Lower.from_components([component], name: 'counter') }
 
     it 'generates correct IR structure' do
       expect(ir.inputs.keys).to include('counter.clk', 'counter.rst', 'counter.en', 'counter.up', 'counter.load', 'counter.d')

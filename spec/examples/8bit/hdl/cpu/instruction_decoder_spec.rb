@@ -127,8 +127,8 @@ RSpec.describe RHDL::HDL::CPU::InstructionDecoder do
     end
 
     it 'generates valid IR' do
-      ir = RHDL::HDL::CPU::InstructionDecoder.to_ir
-      expect(ir).to be_a(RHDL::Export::IR::ModuleDef)
+      ir = RHDL::HDL::CPU::InstructionDecoder.to_flat_circt_nodes
+      expect(ir).to be_a(RHDL::Codegen::CIRCT::IR::ModuleOp)
       # 2 inputs (instruction, zero_flag) + 15 outputs
       expect(ir.ports.length).to eq(17)
     end
@@ -145,7 +145,7 @@ RSpec.describe RHDL::HDL::CPU::InstructionDecoder do
 
   describe 'gate-level netlist' do
     let(:component) { RHDL::HDL::CPU::InstructionDecoder.new('decoder') }
-    let(:ir) { RHDL::Export::Structure::Lower.from_components([component], name: 'decoder') }
+    let(:ir) { RHDL::Codegen::Netlist::Lower.from_components([component], name: 'decoder') }
 
     it 'generates correct IR structure' do
       expect(ir.inputs.keys).to include('decoder.instruction', 'decoder.zero_flag')

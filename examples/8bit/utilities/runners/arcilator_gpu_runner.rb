@@ -7,6 +7,7 @@ require 'open3'
 require 'rbconfig'
 require 'shellwords'
 require 'rhdl/codegen'
+require 'rhdl/codegen/circt/tooling'
 require_relative '../../hdl/cpu/cpu'
 
 module RHDL
@@ -247,7 +248,12 @@ module RHDL
 
           run_or_raise(%W[firtool #{fir_file} --ir-hw -o #{mlir_file}], 'firtool HW lowering', log_file)
 
-          arcilator_cmd = ['arcilator', mlir_file] + @gpu_option_tokens + ["--state-file=#{state_file}", '-o', ll_file]
+          arcilator_cmd = RHDL::Codegen::CIRCT::Tooling.arcilator_command(
+            mlir_path: mlir_file,
+            state_file: state_file,
+            out_path: ll_file,
+            extra_args: @gpu_option_tokens
+          )
           run_or_raise(arcilator_cmd, 'arcilator ArcToGPU lowering', log_file)
 
           if command_available?('clang')

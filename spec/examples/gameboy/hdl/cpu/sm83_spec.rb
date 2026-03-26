@@ -46,10 +46,28 @@ RSpec.describe 'SM83 CPU Instructions' do
     @runner.reset
 
     if skip_boot
-      # Run through boot ROM
-      while @runner.cpu_state[:pc] < 0x0100 && @runner.cycle_count < 500_000
-        @runner.run_steps(1000)
-      end
+      # Directly set CPU to post-boot state instead of running the boot ROM.
+      # This is much faster and avoids depending on the boot ROM completing
+      # within a cycle budget.
+      sim = @runner.sim
+      sim.poke('gb_core__cpu__pc', 0x0100)
+      sim.poke('gb_core__cpu__acc', 0x00)
+      sim.poke('gb_core__cpu__f_reg', 0x00)
+      sim.poke('gb_core__cpu__b_reg', 0x00)
+      sim.poke('gb_core__cpu__c_reg', 0x00)
+      sim.poke('gb_core__cpu__d_reg', 0x00)
+      sim.poke('gb_core__cpu__e_reg', 0x00)
+      sim.poke('gb_core__cpu__h_reg', 0x00)
+      sim.poke('gb_core__cpu__l_reg', 0x00)
+      sim.poke('gb_core__cpu__sp', 0xFFFE)
+      sim.poke('gb_core__cpu__m_cycle', 1)
+      sim.poke('gb_core__cpu__t_state', 1)
+      sim.poke('gb_core__cpu__ir', 0x00)
+      sim.poke('gb_core__cpu__halt_ff', 0)
+      sim.poke('gb_core__cpu__int_cycle', 0)
+      sim.poke('gb_core__cpu__cb_prefix', 0)
+      sim.poke('boot_off', 1)
+      sim.poke('boot_rom_disable', 1)
     end
 
     @runner.run_steps(cycles)
@@ -58,11 +76,11 @@ RSpec.describe 'SM83 CPU Instructions' do
 
   before(:all) do
     begin
-      require_relative '../../../../../examples/gameboy/gameboy'
+      require_relative '../../../../../examples/gameboy/hdl/gameboy'
       require_relative '../../../../../examples/gameboy/utilities/runners/ir_runner'
 
       # Check if IR compiler is available
-      @ir_available = RHDL::Codegen::IR::COMPILER_AVAILABLE rescue false
+      @ir_available = RHDL::Sim::Native::IR::COMPILER_AVAILABLE rescue false
     rescue LoadError => e
       @ir_available = false
     end

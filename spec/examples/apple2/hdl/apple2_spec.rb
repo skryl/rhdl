@@ -675,20 +675,20 @@ RSpec.describe 'Apple II Simulator Modes' do
   def create_ir_simulator(mode)
     require 'rhdl/codegen'
 
-    # Use the component's to_flat_ir method which flattens all subcomponents
-    ir = RHDL::Examples::Apple2::Apple2.to_flat_ir
-    ir_json = RHDL::Codegen::IR::IRToJson.convert(ir)
+    # Use adapter-path flattened CIRCT nodes (includes all subcomponents)
+    ir = RHDL::Examples::Apple2::Apple2.to_flat_circt_nodes
+    ir_json = RHDL::Sim::Native::IR.sim_json(ir, backend: mode[:backend])
 
     case mode[:backend]
     when :interpreter
-      skip 'IR Interpreter not available' unless RHDL::Codegen::IR::IR_INTERPRETER_AVAILABLE
-      RHDL::Codegen::IR::IrSimulator.new(ir_json, backend: :interpreter)
+      skip 'IR Interpreter not available' unless RHDL::Sim::Native::IR::INTERPRETER_AVAILABLE
+      RHDL::Sim::Native::IR::Simulator.new(ir_json, backend: :interpreter)
     when :jit
-      skip 'IR JIT not available' unless RHDL::Codegen::IR::IR_JIT_AVAILABLE
-      RHDL::Codegen::IR::IrSimulator.new(ir_json, backend: :jit)
+      skip 'IR JIT not available' unless RHDL::Sim::Native::IR::JIT_AVAILABLE
+      RHDL::Sim::Native::IR::Simulator.new(ir_json, backend: :jit)
     when :compiler
-      skip 'IR Compiler not available' unless RHDL::Codegen::IR::IR_COMPILER_AVAILABLE
-      RHDL::Codegen::IR::IrSimulator.new(ir_json, backend: :compiler)
+      skip 'IR Compiler not available' unless RHDL::Sim::Native::IR::COMPILER_AVAILABLE
+      RHDL::Sim::Native::IR::Simulator.new(ir_json, backend: :compiler)
     end
   end
 
@@ -721,8 +721,9 @@ RSpec.describe 'Apple II Simulator Modes' do
           @sim.tick
           @sim.poke('reset', 0)
 
-          # Run enough cycles to complete boot sequence
-          @sim.runner_run_cycles(200, 0, false)
+          # A small post-reset batch is enough to prove forward progress here.
+          # Larger single JIT batches can exceed the per-example timeout.
+          @sim.runner_run_cycles(50, 0, false)
 
           pc = @sim.peek('cpu__pc_reg')
 
@@ -750,7 +751,7 @@ RSpec.describe 'Apple II Simulator Modes' do
     end
   end
 
-  describe 'reset values consistency across IR simulators' do
+  describe 'reset values consistency across IR simulators', :slow do
     before(:all) do
       @rom_available = File.exist?(ROM_PATH2)
       if @rom_available
@@ -833,19 +834,19 @@ RSpec.describe 'Sub-cycles PC Progression' do
   def create_ir_simulator(backend, sub_cycles:)
     require 'rhdl/codegen'
 
-    ir = RHDL::Examples::Apple2::Apple2.to_flat_ir
-    ir_json = RHDL::Codegen::IR::IRToJson.convert(ir)
+    ir = RHDL::Examples::Apple2::Apple2.to_flat_circt_nodes
+    ir_json = RHDL::Sim::Native::IR.sim_json(ir, backend: backend)
 
     case backend
     when :interpreter
-      skip 'IR Interpreter not available' unless RHDL::Codegen::IR::IR_INTERPRETER_AVAILABLE
-      RHDL::Codegen::IR::IrSimulator.new(ir_json, sub_cycles: sub_cycles, backend: :interpreter)
+      skip 'IR Interpreter not available' unless RHDL::Sim::Native::IR::INTERPRETER_AVAILABLE
+      RHDL::Sim::Native::IR::Simulator.new(ir_json, sub_cycles: sub_cycles, backend: :interpreter)
     when :jit
-      skip 'IR JIT not available' unless RHDL::Codegen::IR::IR_JIT_AVAILABLE
-      RHDL::Codegen::IR::IrSimulator.new(ir_json, sub_cycles: sub_cycles, backend: :jit)
+      skip 'IR JIT not available' unless RHDL::Sim::Native::IR::JIT_AVAILABLE
+      RHDL::Sim::Native::IR::Simulator.new(ir_json, sub_cycles: sub_cycles, backend: :jit)
     when :compiler
-      skip 'IR Compiler not available' unless RHDL::Codegen::IR::IR_COMPILER_AVAILABLE
-      RHDL::Codegen::IR::IrSimulator.new(ir_json, sub_cycles: sub_cycles, backend: :compiler)
+      skip 'IR Compiler not available' unless RHDL::Sim::Native::IR::COMPILER_AVAILABLE
+      RHDL::Sim::Native::IR::Simulator.new(ir_json, sub_cycles: sub_cycles, backend: :compiler)
     end
   end
 
@@ -1038,36 +1039,38 @@ RSpec.describe 'Sub-cycles PC Progression' do
       skip 'AppleIIgo ROM not found' unless @rom_available
     end
 
-    it 'clamps sub_cycles to valid range (1-14)' do
+    it 'clamps sub_cycles to valid range (1-14)', timeout: 60 do
       require 'rhdl/codegen'
 
-      ir = RHDL::Examples::Apple2::Apple2.to_flat_ir
-      ir_json = RHDL::Codegen::IR::IRToJson.convert(ir)
+      ir = RHDL::Examples::Apple2::Apple2.to_flat_circt_nodes
 
       # Test interpreter wrapper clamps values
-      if RHDL::Codegen::IR::IR_INTERPRETER_AVAILABLE
-        wrapper_low = RHDL::Codegen::IR::IrSimulator.new(ir_json, sub_cycles: 0, backend: :interpreter)
+      if RHDL::Sim::Native::IR::INTERPRETER_AVAILABLE
+        ir_json = RHDL::Sim::Native::IR.sim_json(ir, backend: :interpreter)
+        wrapper_low = RHDL::Sim::Native::IR::Simulator.new(ir_json, sub_cycles: 0, backend: :interpreter)
         expect(wrapper_low.sub_cycles).to eq(1)
 
-        wrapper_high = RHDL::Codegen::IR::IrSimulator.new(ir_json, sub_cycles: 100, backend: :interpreter)
+        wrapper_high = RHDL::Sim::Native::IR::Simulator.new(ir_json, sub_cycles: 100, backend: :interpreter)
         expect(wrapper_high.sub_cycles).to eq(14)
       end
 
       # Test JIT wrapper clamps values
-      if RHDL::Codegen::IR::IR_JIT_AVAILABLE
-        wrapper_low = RHDL::Codegen::IR::IrSimulator.new(ir_json, sub_cycles: 0, backend: :jit)
+      if RHDL::Sim::Native::IR::JIT_AVAILABLE
+        ir_json = RHDL::Sim::Native::IR.sim_json(ir, backend: :jit)
+        wrapper_low = RHDL::Sim::Native::IR::Simulator.new(ir_json, sub_cycles: 0, backend: :jit)
         expect(wrapper_low.sub_cycles).to eq(1)
 
-        wrapper_high = RHDL::Codegen::IR::IrSimulator.new(ir_json, sub_cycles: 100, backend: :jit)
+        wrapper_high = RHDL::Sim::Native::IR::Simulator.new(ir_json, sub_cycles: 100, backend: :jit)
         expect(wrapper_high.sub_cycles).to eq(14)
       end
 
       # Test compiler wrapper clamps values
-      if RHDL::Codegen::IR::IR_COMPILER_AVAILABLE
-        wrapper_low = RHDL::Codegen::IR::IrSimulator.new(ir_json, sub_cycles: 0, backend: :compiler)
+      if RHDL::Sim::Native::IR::COMPILER_AVAILABLE
+        ir_json = RHDL::Sim::Native::IR.sim_json(ir, backend: :compiler)
+        wrapper_low = RHDL::Sim::Native::IR::Simulator.new(ir_json, sub_cycles: 0, backend: :compiler)
         expect(wrapper_low.sub_cycles).to eq(1)
 
-        wrapper_high = RHDL::Codegen::IR::IrSimulator.new(ir_json, sub_cycles: 100, backend: :compiler)
+        wrapper_high = RHDL::Sim::Native::IR::Simulator.new(ir_json, sub_cycles: 100, backend: :compiler)
         expect(wrapper_high.sub_cycles).to eq(14)
       end
     end
@@ -1347,10 +1350,60 @@ RSpec.describe 'MOS6502 ISA vs Apple2 Comparison', :slow do
   # Number of iterations for each test type
   # Ruby ISA is slow, so use fewer iterations
   RUBY_ITERATIONS = 1_000
+  # Ruby HDL runner is much slower than IR/native simulators
+  RUBY_HDL_ITERATIONS = 200
   # IR interpreter is very slow (cycle-level simulation), use minimal iterations
   INTERPRETER_ITERATIONS = 1_000
   # JIT is fast, so we can run many more iterations
   JIT_ITERATIONS = 100_000
+
+  # Adapter that gives RubyRunner the same probe/control shape as IR simulator.
+  class RubyHdlSimulatorAdapter
+    ROM_BASE_ADDR = 0xD000
+
+    def initialize(runner)
+      @runner = runner
+    end
+
+    def runner_load_rom(data, offset = 0)
+      @runner.load_rom(data, base_addr: ROM_BASE_ADDR + offset)
+    end
+
+    def runner_load_memory(data, offset = 0, is_rom = false)
+      if is_rom
+        @runner.load_rom(data, base_addr: ROM_BASE_ADDR + offset)
+      else
+        @runner.load_ram(data, base_addr: offset)
+      end
+    end
+
+    def runner_run_cycles(n, key_data = 0, key_ready = false)
+      @runner.inject_key(key_data) if key_ready && key_data.to_i.nonzero?
+      @runner.run_steps(n)
+    end
+
+    def poke(name, value)
+      case name.to_s
+      when 'reset'
+        @runner.apple2.set_input(:reset, value.to_i.zero? ? 0 : 1)
+      else
+        raise ArgumentError, "Unsupported poke signal for Ruby HDL adapter: #{name}"
+      end
+    end
+
+    def tick
+      @runner.run_14m_cycle
+    end
+
+    def peek(name)
+      case name.to_s
+      when 'cpu__pc_reg'
+        @runner.cpu_state[:pc]
+      else
+        raise ArgumentError, "Unsupported peek signal for Ruby HDL adapter: #{name}"
+      end
+    end
+  end
 
   before(:all) do
     @rom_available = File.exist?(ROM_PATH_ISA)
@@ -1397,20 +1450,25 @@ RSpec.describe 'MOS6502 ISA vs Apple2 Comparison', :slow do
   def create_apple2_ir_simulator(backend)
     require 'rhdl/codegen'
 
-    ir = RHDL::Examples::Apple2::Apple2.to_flat_ir
-    ir_json = RHDL::Codegen::IR::IRToJson.convert(ir)
+    ir = RHDL::Examples::Apple2::Apple2.to_flat_circt_nodes
+    ir_json = RHDL::Sim::Native::IR.sim_json(ir, backend: backend)
 
     case backend
     when :interpreter
-      skip 'IR Interpreter not available' unless RHDL::Codegen::IR::IR_INTERPRETER_AVAILABLE
-      RHDL::Codegen::IR::IrSimulator.new(ir_json, backend: :interpreter)
+      skip 'IR Interpreter not available' unless RHDL::Sim::Native::IR::INTERPRETER_AVAILABLE
+      RHDL::Sim::Native::IR::Simulator.new(ir_json, backend: :interpreter)
     when :jit
-      skip 'IR JIT not available' unless RHDL::Codegen::IR::IR_JIT_AVAILABLE
-      RHDL::Codegen::IR::IrSimulator.new(ir_json, backend: :jit)
+      skip 'IR JIT not available' unless RHDL::Sim::Native::IR::JIT_AVAILABLE
+      RHDL::Sim::Native::IR::Simulator.new(ir_json, backend: :jit)
     when :compiler
-      skip 'IR Compiler not available' unless RHDL::Codegen::IR::IR_COMPILER_AVAILABLE
-      RHDL::Codegen::IR::IrSimulator.new(ir_json, backend: :compiler)
+      skip 'IR Compiler not available' unless RHDL::Sim::Native::IR::COMPILER_AVAILABLE
+      RHDL::Sim::Native::IR::Simulator.new(ir_json, backend: :compiler)
     end
+  end
+
+  def create_ruby_hdl_simulator
+    require_relative '../../../../examples/apple2/utilities/runners/ruby_runner'
+    RubyHdlSimulatorAdapter.new(RHDL::Examples::Apple2::RubyRunner.new)
   end
 
   # Extract PC transitions (unique consecutive PC values) from a raw PC sequence

@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 require 'spec_helper'
-require_relative '../../../../examples/gameboy/gameboy'
+require_relative '../../../../examples/gameboy/hdl/gameboy'
 require_relative '../../../../examples/gameboy/utilities/runners/ruby_runner'
 require_relative '../../../../examples/gameboy/utilities/renderers/lcd_renderer'
 
@@ -341,9 +341,9 @@ RSpec.describe 'Game Boy CLI' do
 
   describe 'CLI Option Defaults' do
     # These tests verify the expected defaults match the requirements
-    it 'defaults mode to :ruby' do
-      # The default mode should be :ruby
-      expect(:ruby).to eq(:ruby)
+    it 'defaults mode to :ir' do
+      # The default mode should be :ir
+      expect(:ir).to eq(:ir)
     end
 
     it 'defaults sim backend to :compile' do

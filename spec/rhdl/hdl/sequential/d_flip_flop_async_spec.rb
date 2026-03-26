@@ -8,6 +8,21 @@ RSpec.describe RHDL::HDL::DFlipFlopAsync do
     component.propagate
   end
 
+  let(:active_low_reset_fixture) do
+    stub_const('ActiveLowResetFixture', Class.new(RHDL::Sim::SequentialComponent) do
+      include RHDL::DSL::Sequential
+
+      input :d
+      input :clk
+      input :rst_l
+      output :q
+
+      sequential clock: :clk, reset: :rst_l, reset_values: { q: 0 } do
+        q <= d
+      end
+    end)
+  end
+
   let(:dff) { RHDL::HDL::DFlipFlopAsync.new }
 
   before do
@@ -59,8 +74,8 @@ RSpec.describe RHDL::HDL::DFlipFlopAsync do
     end
 
     it 'generates valid IR' do
-      ir = RHDL::HDL::DFlipFlopAsync.to_ir
-      expect(ir).to be_a(RHDL::Export::IR::ModuleDef)
+      ir = RHDL::HDL::DFlipFlopAsync.to_flat_circt_nodes
+      expect(ir).to be_a(RHDL::Codegen::CIRCT::IR::ModuleOp)
       expect(ir.ports.length).to eq(6)  # d, clk, rst, en, q, qn
     end
 
@@ -71,13 +86,33 @@ RSpec.describe RHDL::HDL::DFlipFlopAsync do
       expect(verilog).to match(/output.*q/)
     end
 
-    it 'generates valid FIRRTL' do
-      firrtl = RHDL::HDL::DFlipFlopAsync.to_circt
-      expect(firrtl).to include('FIRRTL version')
-      expect(firrtl).to include('circuit d_flip_flop_async')
-      expect(firrtl).to include('input d')
-      expect(firrtl).to include('input clk')
-      expect(firrtl).to include('output q')
+    it 'generates valid CIRCT MLIR' do
+      mlir = RHDL::HDL::DFlipFlopAsync.to_circt
+      expect(mlir).to include('hw.output')
+      expect(mlir).to include('hw.module @d_flip_flop_async')
+      expect(mlir).to include('%d:')
+      expect(mlir).to include('%clk:')
+      expect(mlir).to include('q:')
+    end
+
+    it 'treats reset names ending in _l as active-low in simulation and CIRCT lowering' do
+      component = active_low_reset_fixture.new
+      component.set_input(:rst_l, 1)
+      component.set_input(:d, 1)
+      clock_cycle(component)
+      expect(component.get_output(:q)).to eq(1)
+
+      component.set_input(:rst_l, 0)
+      component.propagate
+      expect(component.get_output(:q)).to eq(0)
+
+      ir = active_low_reset_fixture.to_flat_circt_nodes
+      process_if = ir.processes.first.statements.first
+      expect(process_if).to be_a(RHDL::Codegen::CIRCT::IR::If)
+      expect(process_if.condition).to be_a(RHDL::Codegen::CIRCT::IR::Signal)
+      expect(process_if.condition.name.to_s).to eq('rst_l')
+      expect(process_if.then_statements.first).to be_a(RHDL::Codegen::CIRCT::IR::SeqAssign)
+      expect(process_if.else_statements.first).to be_a(RHDL::Codegen::CIRCT::IR::SeqAssign)
     end
 
     context 'CIRCT firtool validation', if: HdlToolchain.firtool_available? do
@@ -94,7 +129,7 @@ RSpec.describe RHDL::HDL::DFlipFlopAsync do
 
   describe 'gate-level netlist' do
     let(:component) { RHDL::HDL::DFlipFlopAsync.new('dff_async') }
-    let(:ir) { RHDL::Export::Structure::Lower.from_components([component], name: 'dff_async') }
+    let(:ir) { RHDL::Codegen::Netlist::Lower.from_components([component], name: 'dff_async') }
 
     it 'generates correct IR structure' do
       expect(ir.inputs.keys).to include('dff_async.d', 'dff_async.clk', 'dff_async.rst', 'dff_async.en')

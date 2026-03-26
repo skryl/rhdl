@@ -57,7 +57,9 @@ RSpec.describe 'RISC-V Verilog Export' do
       expect(verilog).to include('module riscv_program_counter')
       expect(verilog).to include('input clk')
       expect(verilog).to include('input rst')
-      expect(verilog).to include('output reg [31:0] pc')  # reg for sequential output
+      expect(verilog).to match(/output\s+\[31:0\]\s+pc\b/)
+      expect(verilog).to include('always_ff @(posedge clk)')
+      expect(verilog).to match(/assign\s+pc\s*=/)
       expect(verilog).to include('endmodule')
     end
 
@@ -90,9 +92,11 @@ RSpec.describe 'RISC-V Verilog Export' do
       expect(verilog).to include('input flush')
       expect(verilog).to include('input [31:0] pc_in')
       expect(verilog).to include('input [31:0] inst_in')
-      expect(verilog).to include('output reg [31:0] pc_out')  # reg for sequential output
-      expect(verilog).to include('output reg [31:0] inst_out')
-      expect(verilog).to include('always @(posedge clk)')
+      expect(verilog).to match(/output\s+\[31:0\]\s+pc_out\b/)
+      expect(verilog).to match(/output\s+\[31:0\]\s+inst_out\b/)
+      expect(verilog).to include('always_ff @(posedge clk)')
+      expect(verilog).to match(/assign\s+pc_out\s*=/)
+      expect(verilog).to match(/assign\s+inst_out\s*=/)
       expect(verilog).to include('endmodule')
     end
 
@@ -101,7 +105,9 @@ RSpec.describe 'RISC-V Verilog Export' do
       expect(verilog).to include('module riscv_pipeline_id_ex_reg')
       expect(verilog).to include('input clk')
       expect(verilog).to include('input [31:0] rs1_data_in')
-      expect(verilog).to include('output reg [31:0] rs1_data_out')  # reg for sequential output
+      expect(verilog).to match(/output\s+\[31:0\]\s+rs1_data_out\b/)
+      expect(verilog).to include('always_ff @(posedge clk)')
+      expect(verilog).to match(/assign\s+rs1_data_out\s*=/)
       expect(verilog).to include('endmodule')
     end
 
@@ -110,7 +116,9 @@ RSpec.describe 'RISC-V Verilog Export' do
       expect(verilog).to include('module riscv_pipeline_ex_mem_reg')
       expect(verilog).to include('input clk')
       expect(verilog).to include('input [31:0] alu_result_in')
-      expect(verilog).to include('output reg [31:0] alu_result_out')  # reg for sequential output
+      expect(verilog).to match(/output\s+\[31:0\]\s+alu_result_out\b/)
+      expect(verilog).to include('always_ff @(posedge clk)')
+      expect(verilog).to match(/assign\s+alu_result_out\s*=/)
       expect(verilog).to include('endmodule')
     end
 
@@ -118,8 +126,11 @@ RSpec.describe 'RISC-V Verilog Export' do
       verilog = RHDL::Examples::RISCV::Pipeline::MEM_WB_Reg.to_verilog
       expect(verilog).to include('module riscv_pipeline_mem_wb_reg')
       expect(verilog).to include('input clk')
-      expect(verilog).to include('output reg [31:0] alu_result_out')  # reg for sequential output
-      expect(verilog).to include('output reg [31:0] mem_data_out')
+      expect(verilog).to match(/output\s+\[31:0\]\s+alu_result_out\b/)
+      expect(verilog).to match(/output\s+\[31:0\]\s+mem_data_out\b/)
+      expect(verilog).to include('always_ff @(posedge clk)')
+      expect(verilog).to match(/assign\s+alu_result_out\s*=/)
+      expect(verilog).to match(/assign\s+mem_data_out\s*=/)
       expect(verilog).to include('endmodule')
     end
   end

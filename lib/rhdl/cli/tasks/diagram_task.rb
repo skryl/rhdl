@@ -21,7 +21,7 @@ module RHDL
         # Generate diagrams for all components
         def generate_all
           require 'rhdl/hdl'
-          require 'rhdl/export'
+          require 'rhdl/codegen'
           require 'rhdl/diagram'
 
           mode = options[:mode] || 'all'
@@ -78,9 +78,9 @@ module RHDL
                     when 'netlist'
                       RHDL::Diagram.netlist(component)
                     when 'gate'
-                      require 'rhdl/export'
+                      require 'rhdl/codegen'
                       components = RHDL::Diagram.collect_components(component)
-                      gate_ir = RHDL::Gates::Lower.from_components(components, name: component.name)
+                      gate_ir = RHDL::Codegen::Netlist::Lower.from_components(components, name: component.name)
                       RHDL::Diagram.gate_level(gate_ir, bit_blasted: options[:bit_blasted])
                     else
                       raise ArgumentError, "Unknown level: #{options[:level]}"
@@ -183,7 +183,7 @@ module RHDL
           base_path = File.join(base_dir, name)
 
           # Lower to gate-level IR
-          ir = RHDL::Export::Structure::Lower.from_components([component], name: component.name)
+          ir = RHDL::Codegen::Netlist::Lower.from_components([component], name: component.name)
 
           # Build gate-level diagram
           diagram = RHDL::Diagram.gate_level(ir)

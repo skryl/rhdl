@@ -38,6 +38,7 @@ Gem::Specification.new do |spec|
   # Runtime dependencies
   spec.add_dependency "base64"
   spec.add_dependency "fiddle"
+  spec.add_dependency "syntax_tree"
 
   # Development dependencies (for those developing the gem itself)
   spec.add_development_dependency "benchmark"
@@ -46,6 +47,8 @@ Gem::Specification.new do |spec|
   spec.add_development_dependency "parallel_tests", "~> 4.0"
   spec.add_development_dependency "pry"
   spec.add_development_dependency "rake", "~> 13.0"
+  spec.add_development_dependency "rubocop"
   spec.add_development_dependency "rspec", "~> 3.12"
+  spec.add_development_dependency "stackprof"
   spec.add_development_dependency "webrick"
 end

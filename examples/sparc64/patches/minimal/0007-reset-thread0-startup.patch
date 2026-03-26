@@ -1,0 +1,57 @@
+diff --git a/T1-CPU/ifu/sparc_ifu_swl.v b/T1-CPU/ifu/sparc_ifu_swl.v
+index 8b918cb2..370d58f3 100644
+--- a/T1-CPU/ifu/sparc_ifu_swl.v
++++ b/T1-CPU/ifu/sparc_ifu_swl.v
+@@ -196,10 +196,7 @@ module sparc_ifu_swl(/*AUTOARG*/
+ // Declarations
+ //----------------------------------------------------------
+    // local signals
+-//   wire [3:0]    count_nxt,
+-//	               count;
+-//   wire          proc0;
+-//   wire          start_on_rst;
++   wire [8:0]    count;
+ 
+    wire          ibe_d,
+                  ibe_e;
+@@ -526,22 +523,12 @@ module sparc_ifu_swl(/*AUTOARG*/
+    //---------------------------------------------
+    // Start off thread on reset using this counter
+    //---------------------------------------------
+-//   dffr #(4) thrrdy_ctr(.din (count_nxt),
+-//		                    .clk (clk),
+-//		                    .q   (count),
+-//		                    .rst (dtu_reset),
+-//		                    .se (se), .si(), .so());
+-//
+-//   // count_nxt = count + 1, sticky at 8 = 1111
+-//   assign count_nxt[0] = ~count[0] | count[3];
+-//   assign count_nxt[1] = (count[1] ^ count[0]) | count[3];
+-//   assign count_nxt[2] = (count[2] ^ (count[1] & count[0])) | count[3]; 
+-//   assign count_nxt[3] = (count[3] ^ (count[2] & count[1] & count[0])) |
+-//	                       count[3]; 
+-//
+-//   assign proc0 = (const_cpuid == 4'b0000) ? 1'b1 : 1'b0;
+-//   assign start_on_rst = (~count[3] & count[2] & count[1] & count[0])
+-//                          & proc0;
++   dffr_s #(9) thrrdy_ctr(.din ((count[8:0] == 9'd511) ? 9'd511 :
++		                          (count[8:0] + 9'd1)),
++		                    .clk (clk),
++		                    .q   (count),
++		                    .rst (dtu_reset),
++		                    .se (se), .si(), .so());
+ 
+ //`ifdef IFU_SAT   
+ //   // temporary hack to start threads
+@@ -949,8 +936,9 @@ module sparc_ifu_swl(/*AUTOARG*/
+ //   assign start_thread = {3'b0, start_on_rst} | auto_start | 
+ //                         resum_thread & (~wm_imiss | ifq_dtu_thrrdy);
+ //`else
+-   assign start_thread = resum_thread & (~wm_imiss | ifq_dtu_thrrdy) & 
+-                                          (~wm_stbwait | stb_retry);
++   assign start_thread = {3'b0, (count[8:0] == 9'd320)} |
++                         (resum_thread & (~wm_imiss | ifq_dtu_thrrdy) & 
++                                          (~wm_stbwait | stb_retry));
+    assign thaw_thread = resum_thread & (wm_imiss & ~ifq_dtu_thrrdy |
+                                         wm_stbwait & ~stb_retry);
+    

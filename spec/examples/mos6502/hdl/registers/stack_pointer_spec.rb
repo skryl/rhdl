@@ -93,7 +93,7 @@ RSpec.describe RHDL::Examples::MOS6502::StackPointer do
 
   describe 'gate-level netlist' do
     let(:component) { described_class.new('mos6502_stack_pointer') }
-    let(:ir) { RHDL::Export::Structure::Lower.from_components([component], name: 'mos6502_stack_pointer') }
+    let(:ir) { RHDL::Codegen::Netlist::Lower.from_components([component], name: 'mos6502_stack_pointer') }
 
     it 'generates correct IR structure' do
       expect(ir.inputs.keys).to include('mos6502_stack_pointer.clk', 'mos6502_stack_pointer.rst')

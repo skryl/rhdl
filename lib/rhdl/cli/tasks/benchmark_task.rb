@@ -56,7 +56,7 @@ module RHDL
           RHDL::Sim::Component.connect(dff.outputs[:q], not_gate.inputs[:a])
           RHDL::Sim::Component.connect(not_gate.outputs[:y], dff.inputs[:d])
 
-          sim = RHDL::Export.gate_level([not_gate, dff], backend: :interpreter, lanes: lanes, name: 'bench_toggle')
+          sim = RHDL::Sim.gate_level([not_gate, dff], backend: :interpreter, lanes: lanes, name: 'bench_toggle')
 
           sim.poke('reg.rst', 0)
           sim.poke('reg.en', (1 << lanes) - 1)
@@ -230,7 +230,7 @@ module RHDL
               name: 'Compiler',
               sim: :compile,
               filter_key: :compiler,
-              available: RHDL::Codegen::IR::IR_COMPILER_AVAILABLE
+              available: RHDL::Sim::Native::IR::COMPILER_AVAILABLE
             },
             {
               name: 'ArcilatorGPU',
@@ -334,8 +334,12 @@ module RHDL
           require_relative '../../../../examples/mos6502/utilities/apple2/bus'
 
           ir_start = Process.clock_gettime(Process::CLOCK_MONOTONIC)
-          ir = RHDL::Examples::MOS6502::CPU.to_flat_ir
-          ir_json = RHDL::Codegen::IR::IRToJson.convert(ir)
+          ir = RHDL::Examples::MOS6502::CPU.to_flat_circt_nodes
+          ir_json_by_backend = {
+            interpreter: RHDL::Sim::Native::IR.sim_json(ir, backend: :interpreter),
+            jit: RHDL::Sim::Native::IR.sim_json(ir, backend: :jit),
+            compiler: RHDL::Sim::Native::IR.sim_json(ir, backend: :compiler)
+          }
           ir_elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - ir_start
           puts "done (#{format('%.3f', ir_elapsed)}s)"
 
@@ -345,9 +349,9 @@ module RHDL
 
           # Define runners to benchmark
           runners = [
-            { name: 'Interpreter', backend: :interpreter, available_const: :IR_INTERPRETER_AVAILABLE },
-            { name: 'JIT', backend: :jit, available_const: :IR_JIT_AVAILABLE },
-            { name: 'Compiler', backend: :compiler, available_const: :IR_COMPILER_AVAILABLE },
+            { name: 'Interpreter', backend: :interpreter, available_const: :INTERPRETER_AVAILABLE },
+            { name: 'JIT', backend: :jit, available_const: :JIT_AVAILABLE },
+            { name: 'Compiler', backend: :compiler, available_const: :COMPILER_AVAILABLE },
             { name: 'Verilator', backend: :verilator }
           ]
 
@@ -368,7 +372,7 @@ module RHDL
 
             # Check availability
             if runner[:available_const]
-              available = RHDL::Codegen::IR.const_get(runner[:available_const]) rescue false
+              available = RHDL::Sim::Native::IR.const_get(runner[:available_const]) rescue false
             elsif runner[:backend] == :verilator
               available = verilator_available?
             else
@@ -402,11 +406,11 @@ module RHDL
 
                 sim = case runner[:backend]
                 when :interpreter
-                  RHDL::Codegen::IR::IrSimulator.new(ir_json, backend: :interpreter)
+                  RHDL::Sim::Native::IR::Simulator.new(ir_json_by_backend[:interpreter], backend: :interpreter)
                 when :jit
-                  RHDL::Codegen::IR::IrSimulator.new(ir_json, backend: :jit)
+                  RHDL::Sim::Native::IR::Simulator.new(ir_json_by_backend[:jit], backend: :jit)
                 when :compiler
-                  RHDL::Codegen::IR::IrSimulator.new(ir_json, backend: :compiler)
+                  RHDL::Sim::Native::IR::Simulator.new(ir_json_by_backend[:compiler], backend: :compiler)
                 end
               end
 
@@ -569,16 +573,20 @@ module RHDL
 
           require_relative '../../../../examples/apple2/hdl'
           ir_start = Process.clock_gettime(Process::CLOCK_MONOTONIC)
-          ir = RHDL::Examples::Apple2::Apple2.to_flat_ir
-          ir_json = RHDL::Codegen::IR::IRToJson.convert(ir)
+          ir = RHDL::Examples::Apple2::Apple2.to_flat_circt_nodes
+          ir_json_by_backend = {
+            interpreter: RHDL::Sim::Native::IR.sim_json(ir, backend: :interpreter),
+            jit: RHDL::Sim::Native::IR.sim_json(ir, backend: :jit),
+            compiler: RHDL::Sim::Native::IR.sim_json(ir, backend: :compiler)
+          }
           ir_elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - ir_start
           puts "done (#{format('%.3f', ir_elapsed)}s)"
 
           # Define runners to benchmark
           runners = [
-            { name: 'Interpreter', backend: :interpreter, available_const: :IR_INTERPRETER_AVAILABLE },
-            { name: 'JIT', backend: :jit, available_const: :IR_JIT_AVAILABLE },
-            { name: 'Compiler', backend: :compiler, available_const: :IR_COMPILER_AVAILABLE },
+            { name: 'Interpreter', backend: :interpreter, available_const: :INTERPRETER_AVAILABLE },
+            { name: 'JIT', backend: :jit, available_const: :JIT_AVAILABLE },
+            { name: 'Compiler', backend: :compiler, available_const: :COMPILER_AVAILABLE },
             { name: 'Verilator', backend: :verilator },
             { name: 'Arcilator', backend: :arcilator }
           ]
@@ -596,7 +604,7 @@ module RHDL
 
             # Check availability
             if runner[:available_const]
-              available = RHDL::Codegen::IR.const_get(runner[:available_const]) rescue false
+              available = RHDL::Sim::Native::IR.const_get(runner[:available_const]) rescue false
             elsif runner[:backend] == :verilator
               available = verilator_available?
             elsif runner[:backend] == :arcilator
@@ -624,11 +632,11 @@ module RHDL
 
               sim = case runner[:backend]
               when :interpreter
-                RHDL::Codegen::IR::IrSimulator.new(ir_json, backend: :interpreter)
+                RHDL::Sim::Native::IR::Simulator.new(ir_json_by_backend[:interpreter], backend: :interpreter)
               when :jit
-                RHDL::Codegen::IR::IrSimulator.new(ir_json, backend: :jit)
+                RHDL::Sim::Native::IR::Simulator.new(ir_json_by_backend[:jit], backend: :jit)
               when :compiler
-                RHDL::Codegen::IR::IrSimulator.new(ir_json, backend: :compiler, sub_cycles: compiler_sub_cycles)
+                RHDL::Sim::Native::IR::Simulator.new(ir_json_by_backend[:compiler], backend: :compiler, sub_cycles: compiler_sub_cycles)
               when :verilator
                 require_relative '../../../../examples/apple2/utilities/runners/verilator_runner'
                 RHDL::Examples::Apple2::VerilogRunner.new(sub_cycles: 14)
@@ -746,7 +754,7 @@ module RHDL
             else
               begin
                 require_relative '../../../../examples/gameboy/utilities/runners/ir_runner'
-                unless RHDL::Codegen::IR::COMPILER_AVAILABLE
+                unless RHDL::Sim::Native::IR::COMPILER_AVAILABLE
                   puts "\n#{runner_config[:name]}: SKIPPED (not available)"
                   results << { name: runner_config[:name], status: :skipped }
                   next
@@ -905,7 +913,7 @@ module RHDL
                         when :ir
                           begin
                             require 'rhdl/codegen'
-                            RHDL::Codegen::IR::IR_COMPILER_AVAILABLE
+                            RHDL::Sim::Native::IR::COMPILER_AVAILABLE
                           rescue LoadError, NameError
                             false
                           end
@@ -1381,15 +1389,15 @@ module RHDL
             require 'rhdl/codegen'
 
             require File.join(project_root, 'examples/apple2/hdl')
-            ir = RHDL::Examples::Apple2::Apple2.to_flat_ir
-            ir_data = RHDL::Codegen::IR::IRToJson.convert(ir)
+            ir = RHDL::Examples::Apple2::Apple2.to_flat_circt_nodes
+            ir_data = RHDL::Sim::Native::IR.sim_json(ir, backend: :compiler)
 
             FileUtils.mkdir_p(File.dirname(ir_json_path))
             File.write(ir_json_path, ir_data)
           end
 
           # AOT codegen + cargo build
-          sim_dir = File.join(project_root, 'lib/rhdl/codegen/ir/sim')
+          sim_dir = File.join(project_root, 'lib/rhdl/sim/native/ir')
           compiler_dir = File.join(sim_dir, 'ir_compiler')
           aot_gen_path = File.join(compiler_dir, 'src/aot_generated.rs')
 
@@ -1417,14 +1425,14 @@ module RHDL
             require 'rhdl/codegen'
             require File.join(project_root, 'examples/riscv/hdl/cpu')
 
-            ir = RHDL::Examples::RISCV::CPU.to_flat_ir(top_name: 'riscv_cpu')
-            ir_data = RHDL::Codegen::IR::IRToJson.convert(ir)
+            ir = RHDL::Examples::RISCV::CPU.to_flat_circt_nodes(top_name: 'riscv_cpu')
+            ir_data = RHDL::Sim::Native::IR.sim_json(ir, backend: :compiler)
 
             FileUtils.mkdir_p(File.dirname(ir_json_path))
             File.write(ir_json_path, ir_data)
           end
 
-          sim_dir = File.join(project_root, 'lib/rhdl/codegen/ir/sim')
+          sim_dir = File.join(project_root, 'lib/rhdl/sim/native/ir')
           compiler_dir = File.join(sim_dir, 'ir_compiler')
           aot_gen_path = File.join(compiler_dir, 'src/aot_generated.rs')
 

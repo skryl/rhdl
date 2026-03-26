@@ -11,7 +11,7 @@ RSpec.describe 'Karateka boot from .dsk', :slow do
 
   before do
     skip 'Slow test - set RUN_SLOW_TESTS=1 and run with --tag slow' unless ENV['RUN_SLOW_TESTS']
-    skip 'IR Compiler not available (run `rake native:build[ir_compiler]`)' unless RHDL::Codegen::IR::IR_COMPILER_AVAILABLE
+    skip 'IR Compiler not available (run `rake native:build[ir_compiler]`)' unless RHDL::Sim::Native::IR::COMPILER_AVAILABLE
     skip 'AppleIIgo ROM not found' unless File.exist?(rom_path)
     skip 'Karateka disk image not found' unless File.exist?(disk_path)
     skip 'Karateka memory dump not found (needed for validation)' unless File.exist?(karateka_mem_path)

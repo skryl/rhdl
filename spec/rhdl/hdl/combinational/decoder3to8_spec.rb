@@ -27,8 +27,8 @@ RSpec.describe RHDL::HDL::Decoder3to8 do
     end
 
     it 'generates valid IR' do
-      ir = RHDL::HDL::Decoder3to8.to_ir
-      expect(ir).to be_a(RHDL::Export::IR::ModuleDef)
+      ir = RHDL::HDL::Decoder3to8.to_flat_circt_nodes
+      expect(ir).to be_a(RHDL::Codegen::CIRCT::IR::ModuleOp)
       expect(ir.ports.length).to eq(10)  # a, en, y0-y7
     end
 
@@ -38,12 +38,12 @@ RSpec.describe RHDL::HDL::Decoder3to8 do
       expect(verilog).to include('input [2:0] a')
     end
 
-    it 'generates valid FIRRTL' do
-      firrtl = RHDL::HDL::Decoder3to8.to_circt
-      expect(firrtl).to include('FIRRTL version')
-      expect(firrtl).to include('circuit decoder3to8')
-      expect(firrtl).to include('input a')
-      expect(firrtl).to include('output y0')
+    it 'generates valid CIRCT MLIR' do
+      mlir = RHDL::HDL::Decoder3to8.to_circt
+      expect(mlir).to include('hw.output')
+      expect(mlir).to include('hw.module @decoder3to8')
+      expect(mlir).to include('%a:')
+      expect(mlir).to include('y0:')
     end
 
     context 'CIRCT firtool validation', if: HdlToolchain.firtool_available? && HdlToolchain.iverilog_available? do
@@ -174,7 +174,7 @@ RSpec.describe RHDL::HDL::Decoder3to8 do
 
   describe 'gate-level netlist' do
     let(:component) { RHDL::HDL::Decoder3to8.new('dec3to8') }
-    let(:ir) { RHDL::Export::Structure::Lower.from_components([component], name: 'dec3to8') }
+    let(:ir) { RHDL::Codegen::Netlist::Lower.from_components([component], name: 'dec3to8') }
 
     it 'generates correct IR structure' do
       expect(ir.inputs.keys).to include('dec3to8.a', 'dec3to8.en')

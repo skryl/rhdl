@@ -1,7 +1,8 @@
 # frozen_string_literal: true
 
 require 'spec_helper'
-require_relative '../../../../examples/gameboy/gameboy'
+require_relative '../../../../examples/gameboy/hdl/gameboy'
+require_relative '../../../../examples/gameboy/utilities/clock_enable_waveform'
 
 # Game Boy Speed Control Unit Tests
 # Tests the SpeedControl component for clock enable generation
@@ -17,6 +18,13 @@ require_relative '../../../../examples/gameboy/gameboy'
 # In IR simulation, ce is always ~pause (no clock division).
 
 RSpec.describe 'GameBoy SpeedControl' do
+  def clock_cycle(component)
+    component.set_input(:clk_sys, 0)
+    component.propagate
+    component.set_input(:clk_sys, 1)
+    component.propagate
+  end
+
   describe 'Module Loading' do
     it 'defines the SpeedControl class' do
       expect(defined?(RHDL::Examples::GameBoy::SpeedControl)).to eq('constant')
@@ -29,7 +37,7 @@ RSpec.describe 'GameBoy SpeedControl' do
 
   describe 'SpeedControl Component Structure' do
     let(:speed_ctrl) { RHDL::Examples::GameBoy::SpeedControl.new('speedcontrol') }
-    let(:ir) { speed_ctrl.class.to_ir }
+    let(:ir) { speed_ctrl.class.to_flat_circt_nodes }
     let(:port_names) { ir.ports.map { |p| p.name.to_sym } }
 
     describe 'Input Ports (via IR)' do
@@ -79,7 +87,7 @@ RSpec.describe 'GameBoy SpeedControl' do
       end
 
       it 'can generate flattened IR' do
-        flat_ir = speed_ctrl.class.to_flat_ir
+        flat_ir = speed_ctrl.class.to_flat_circt_nodes
         expect(flat_ir).not_to be_nil
       end
 
@@ -91,23 +99,58 @@ RSpec.describe 'GameBoy SpeedControl' do
   end
 
   describe 'SpeedControl Behavior' do
-    # SpeedControl is a simple component that generates clock enables
-    # In the IR simulation, it simply outputs ~pause for all clock enables
+    let(:speed_ctrl) { RHDL::Examples::GameBoy::SpeedControl.new }
+
+    before do
+      speed_ctrl.set_input(:reset, 0)
+      speed_ctrl.set_input(:clk_sys, 0)
+      speed_ctrl.set_input(:pause, 0)
+      speed_ctrl.set_input(:speedup, 0)
+      speed_ctrl.set_input(:cart_act, 0)
+      speed_ctrl.set_input(:dma_on, 0)
+      speed_ctrl.propagate
+    end
 
     describe 'Clock Enable Logic' do
-      it 'documents that ce is inverse of pause signal' do
-        # This is the behavior defined in the component:
-        # ce <= ~pause
-        # ce_n <= ~pause
-        # ce_2x <= ~pause
-        # The behavior block implements this directly
-        expect(true).to eq(true)  # Documented behavior
+      it 'starts on the reference phase-0 waveform after reset' do
+        speed_ctrl.set_input(:reset, 1)
+        clock_cycle(speed_ctrl)
+        speed_ctrl.set_input(:reset, 0)
+        speed_ctrl.propagate
+
+        expect(speed_ctrl.get_output(:ce)).to eq(1)
+        expect(speed_ctrl.get_output(:ce_n)).to eq(0)
+        expect(speed_ctrl.get_output(:ce_2x)).to eq(1)
       end
 
-      it 'documents that all clock enables are tied together in simulation mode' do
-        # In IR simulation, all three outputs (ce, ce_n, ce_2x) are equal to ~pause
-        # This simplifies the simulation to run at 4MHz effective speed
-        expect(true).to eq(true)  # Documented behavior
+      it 'matches the shared 8-phase clock-enable waveform' do
+        speed_ctrl.set_input(:reset, 1)
+        clock_cycle(speed_ctrl)
+        speed_ctrl.set_input(:reset, 0)
+        speed_ctrl.propagate
+
+        sequence = []
+        8.times do
+          sequence << {
+            ce: speed_ctrl.get_output(:ce),
+            ce_n: speed_ctrl.get_output(:ce_n),
+            ce_2x: speed_ctrl.get_output(:ce_2x)
+          }
+          clock_cycle(speed_ctrl)
+        end
+
+        expect(sequence).to eq(
+          8.times.map { |phase| RHDL::Examples::GameBoy::ClockEnableWaveform.values_for_phase(phase) }
+        )
+      end
+
+      it 'suppresses all clock enables while paused' do
+        speed_ctrl.set_input(:pause, 1)
+        speed_ctrl.propagate
+
+        expect(speed_ctrl.get_output(:ce)).to eq(0)
+        expect(speed_ctrl.get_output(:ce_n)).to eq(0)
+        expect(speed_ctrl.get_output(:ce_2x)).to eq(0)
       end
     end
   end
@@ -136,16 +179,34 @@ RSpec.describe 'GameBoy SpeedControl' do
     end
 
     it 'generates ce at clkdiv=0' do
-      # Reference: ce active when clkdiv reaches 0
-      pending 'ce generation at clkdiv=0'
-      fail
+      speed_ctrl = RHDL::Examples::GameBoy::SpeedControl.new
+      speed_ctrl.set_input(:reset, 1)
+      clock_cycle(speed_ctrl)
+      speed_ctrl.set_input(:reset, 0)
+      speed_ctrl.set_input(:pause, 0)
+      speed_ctrl.set_input(:speedup, 0)
+      speed_ctrl.set_input(:cart_act, 0)
+      speed_ctrl.set_input(:dma_on, 0)
+      speed_ctrl.propagate
+
+      expect(speed_ctrl.get_output(:ce)).to eq(1)
     end
 
     it 'generates ce_n at clkdiv=4 (180 degrees out of phase)' do
-      # Reference: ce and ce_n are 180 degrees out of phase
-      # Currently both are ~pause which is incorrect
-      pending 'ce_n 180 degree phase offset from ce'
-      fail
+      speed_ctrl = RHDL::Examples::GameBoy::SpeedControl.new
+      speed_ctrl.set_input(:reset, 1)
+      clock_cycle(speed_ctrl)
+      speed_ctrl.set_input(:reset, 0)
+      speed_ctrl.set_input(:pause, 0)
+      speed_ctrl.set_input(:speedup, 0)
+      speed_ctrl.set_input(:cart_act, 0)
+      speed_ctrl.set_input(:dma_on, 0)
+      speed_ctrl.propagate
+
+      4.times { clock_cycle(speed_ctrl) }
+
+      expect(speed_ctrl.get_output(:ce)).to eq(0)
+      expect(speed_ctrl.get_output(:ce_n)).to eq(1)
     end
   end
 
@@ -229,16 +290,43 @@ RSpec.describe 'GameBoy SpeedControl' do
 
   describe 'ce_2x Behavior' do
     it 'generates ce_2x at specific clkdiv phases for double-speed' do
-      # Reference: ce_2x only active at specific clkdiv values in various modes
-      # Currently always ~pause which is incorrect
-      pending 'ce_2x phase-specific generation'
-      fail
+      speed_ctrl = RHDL::Examples::GameBoy::SpeedControl.new
+      speed_ctrl.set_input(:reset, 1)
+      clock_cycle(speed_ctrl)
+      speed_ctrl.set_input(:reset, 0)
+      speed_ctrl.set_input(:pause, 0)
+      speed_ctrl.set_input(:speedup, 0)
+      speed_ctrl.set_input(:cart_act, 0)
+      speed_ctrl.set_input(:dma_on, 0)
+      speed_ctrl.propagate
+
+      phases = []
+      8.times do
+        phases << speed_ctrl.get_output(:ce_2x)
+        clock_cycle(speed_ctrl)
+      end
+
+      expect(phases).to eq([1, 0, 0, 0, 1, 0, 0, 0])
     end
 
     it 'ce_2x has different timing than ce' do
-      # Reference: ce_2x for GBC double-speed mode has specific timing
-      pending 'ce_2x distinct timing from ce'
-      fail
+      speed_ctrl = RHDL::Examples::GameBoy::SpeedControl.new
+      speed_ctrl.set_input(:reset, 1)
+      clock_cycle(speed_ctrl)
+      speed_ctrl.set_input(:reset, 0)
+      speed_ctrl.set_input(:pause, 0)
+      speed_ctrl.set_input(:speedup, 0)
+      speed_ctrl.set_input(:cart_act, 0)
+      speed_ctrl.set_input(:dma_on, 0)
+      speed_ctrl.propagate
+
+      values = []
+      8.times do
+        values << [speed_ctrl.get_output(:ce), speed_ctrl.get_output(:ce_n), speed_ctrl.get_output(:ce_2x)]
+        clock_cycle(speed_ctrl)
+      end
+
+      expect(values.uniq).to include([0, 1, 1])
     end
   end
 

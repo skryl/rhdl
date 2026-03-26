@@ -230,5 +230,4 @@ require_relative "dsl/sequential"
 require_relative "dsl/memory"
 require_relative "dsl/state_machine"
 
-# Load codegen modules (depend on Export::IR, loaded later)
-# These are loaded after codegen.rb in the main rhdl.rb
+# Load codegen modules after codegen.rb in the main rhdl.rb.

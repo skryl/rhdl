@@ -58,12 +58,12 @@ RSpec.describe RHDL::Examples::MOS6502::ControlUnit do
       expect(verilog).to include('state')
     end
 
-    it 'generates valid FIRRTL' do
-      firrtl = described_class.to_circt
-      expect(firrtl).to include('FIRRTL version')
-      expect(firrtl).to include('circuit mos6502_control_unit')
-      expect(firrtl).to include('input clk')
-      expect(firrtl).to include('output state')
+    it 'generates valid CIRCT MLIR' do
+      mlir = described_class.to_circt
+      expect(mlir).to include('hw.output')
+      expect(mlir).to include('hw.module @mos6502_control_unit')
+      expect(mlir).to include('%clk:')
+      expect(mlir).to include('state:')
     end
 
     context 'CIRCT firtool validation', if: HdlToolchain.firtool_available? do
@@ -112,7 +112,7 @@ RSpec.describe RHDL::Examples::MOS6502::ControlUnit do
 
   describe 'gate-level netlist' do
     let(:component) { described_class.new('mos6502_control_unit') }
-    let(:ir) { RHDL::Export::Structure::Lower.from_components([component], name: 'mos6502_control_unit') }
+    let(:ir) { RHDL::Codegen::Netlist::Lower.from_components([component], name: 'mos6502_control_unit') }
 
     it 'generates correct IR structure' do
       expect(ir.inputs.keys).to include('mos6502_control_unit.clk', 'mos6502_control_unit.rst')

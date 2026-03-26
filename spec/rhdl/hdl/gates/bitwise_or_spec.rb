@@ -21,13 +21,13 @@ RSpec.describe RHDL::HDL::BitwiseOr do
       expect(verilog).to include('assign y')
     end
 
-    it 'generates valid FIRRTL' do
-      firrtl = RHDL::HDL::BitwiseOr.to_circt
-      expect(firrtl).to include('FIRRTL version')
-      expect(firrtl).to include('circuit bitwise_or')
-      expect(firrtl).to include('input a')
-      expect(firrtl).to include('input b')
-      expect(firrtl).to include('output y')
+    it 'generates valid CIRCT MLIR' do
+      mlir = RHDL::HDL::BitwiseOr.to_circt
+      expect(mlir).to include('hw.output')
+      expect(mlir).to include('hw.module @bitwise_or')
+      expect(mlir).to include('%a:')
+      expect(mlir).to include('%b:')
+      expect(mlir).to include('y:')
     end
 
     context 'CIRCT firtool validation', if: HdlToolchain.firtool_available? && HdlToolchain.iverilog_available? do
@@ -51,7 +51,7 @@ RSpec.describe RHDL::HDL::BitwiseOr do
 
   describe 'gate-level netlist' do
     let(:component) { RHDL::HDL::BitwiseOr.new('bitwise_or', width: 4) }
-    let(:ir) { RHDL::Export::Structure::Lower.from_components([component], name: 'bitwise_or') }
+    let(:ir) { RHDL::Codegen::Netlist::Lower.from_components([component], name: 'bitwise_or') }
 
     it 'generates correct IR structure' do
       expect(ir.inputs.keys).to include('bitwise_or.a', 'bitwise_or.b')
