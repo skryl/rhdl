@@ -226,6 +226,19 @@ module RHDL
         end
       end
 
+      # Case expression helper used by raised imported source. Supports grouped
+      # keys like { [2, 3] => expr } as well as scalar keys.
+      def case_expr(selector, cases, default: 0, width:)
+        sel_val = resolve_value(selector)
+        value =
+          cases.each do |raw_keys, expr|
+            break resolve_value(expr) if Array(raw_keys).include?(sel_val)
+          end
+
+        masked = (value.nil? ? resolve_value(default) : value) & MaskCache.mask(width)
+        LocalProxy.new(nil, masked, width, self)
+      end
+
       # Memory read expression - reads from memory array using address expression
       # For simulation, this directly reads from the component's memory array
       # @param memory_name [Symbol] The memory array name

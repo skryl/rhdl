@@ -1124,6 +1124,11 @@ module RHDL
           end
         end
 
+        # Case expression for a single selected value
+        def case_expr(selector, cases, default: nil, width:)
+          BehaviorCaseSelect.new(selector, cases, default_val: default, width: width)
+        end
+
         # If-elsif-else chain with multiple outputs
         def if_chain(&block)
           builder = BehaviorIfChain.new(@context_wrapper)

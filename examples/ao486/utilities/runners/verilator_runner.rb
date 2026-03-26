@@ -2330,6 +2330,8 @@ module RHDL
           end
         end
 
+        public
+
         def run_fetch_trace(max_cycles: DEFAULT_MAX_CYCLES)
           capture_run_stats(operation: :run_fetch_trace, cycles: max_cycles) do
             stdout = run_harness(max_cycles: max_cycles)

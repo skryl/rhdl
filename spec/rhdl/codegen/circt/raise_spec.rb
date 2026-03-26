@@ -644,6 +644,115 @@ RSpec.describe RHDL::Codegen::CIRCT::Raise do
       expect(source).to include('local(:q_reg_seq_0_local_0')
       expect(source).to include('q_reg <=')
     end
+
+    it 'raises IR case expressions into case_expr helpers instead of default-only fallbacks' do
+      mod = ir::ModuleOp.new(
+        name: 'raised_case_expr',
+        ports: [
+          ir::Port.new(name: :sel, direction: :in, width: 2),
+          ir::Port.new(name: :y, direction: :out, width: 8)
+        ],
+        nets: [],
+        regs: [],
+        assigns: [
+          ir::Assign.new(
+            target: :y,
+            expr: ir::Case.new(
+              selector: ir::Signal.new(name: :sel, width: 2),
+              cases: {
+                [0] => ir::Literal.new(value: 1, width: 8),
+                [2, 3] => ir::Literal.new(value: 5, width: 8)
+              },
+              default: ir::Literal.new(value: 9, width: 8),
+              width: 8
+            )
+          )
+        ],
+        processes: [],
+        instances: [],
+        memories: [],
+        write_ports: [],
+        sync_read_ports: [],
+        parameters: {}
+      )
+
+      result = described_class.to_sources(mod, top: 'raised_case_expr', strict: true)
+      expect(result.success?).to be(true), result.diagnostics.map(&:message).join("\n")
+
+      source = result.sources.fetch('raised_case_expr')
+      expect(source).to include('case_expr(sel, { 0 => lit(1, width: 8), [2, 3] => lit(5, width: 8) }, default: lit(9, width: 8), width: 8)')
+    end
+
+    it 'round-trips raised IR case expressions back through to_circt_nodes' do
+      mod = ir::ModuleOp.new(
+        name: 'raised_case_roundtrip',
+        ports: [
+          ir::Port.new(name: :sel, direction: :in, width: 2),
+          ir::Port.new(name: :y, direction: :out, width: 8)
+        ],
+        nets: [],
+        regs: [],
+        assigns: [
+          ir::Assign.new(
+            target: :y,
+            expr: ir::Case.new(
+              selector: ir::Signal.new(name: :sel, width: 2),
+              cases: {
+                [0] => ir::Literal.new(value: 1, width: 8),
+                [2, 3] => ir::Literal.new(value: 5, width: 8)
+              },
+              default: ir::Literal.new(value: 9, width: 8),
+              width: 8
+            )
+          )
+        ],
+        processes: [],
+        instances: [],
+        memories: [],
+        write_ports: [],
+        sync_read_ports: [],
+        parameters: {}
+      )
+
+      result = described_class.to_components(mod, top: 'raised_case_roundtrip', strict: true)
+      expect(result.success?).to be(true), result.diagnostics.map(&:message).join("\n")
+
+      component = result.components.fetch('raised_case_roundtrip')
+      rebuilt = component.to_circt_nodes(top_name: 'raised_case_roundtrip')
+      expr = rebuilt.assigns.find { |assign| assign.target.to_s == 'y' }&.expr
+
+      expect(expr).not_to be_nil
+
+      evaluate_expr = lambda do |node, sel_value|
+        case node
+        when ir::Literal
+          node.value
+        when ir::Signal
+          expect(node.name.to_s).to eq('sel')
+          sel_value
+        when ir::BinaryOp
+          left = evaluate_expr.call(node.left, sel_value)
+          right = evaluate_expr.call(node.right, sel_value)
+          case node.op.to_sym
+          when :==
+            left == right ? 1 : 0
+          else
+            raise "unexpected op #{node.op.inspect}"
+          end
+        when ir::Mux
+          cond = evaluate_expr.call(node.condition, sel_value)
+          branch = cond.to_i.zero? ? node.when_false : node.when_true
+          evaluate_expr.call(branch, sel_value)
+        else
+          raise "unexpected expr #{node.class}"
+        end
+      end
+
+      expect(evaluate_expr.call(expr, 0)).to eq(1)
+      expect(evaluate_expr.call(expr, 1)).to eq(9)
+      expect(evaluate_expr.call(expr, 2)).to eq(5)
+      expect(evaluate_expr.call(expr, 3)).to eq(5)
+    end
   end
 
   describe '.format_output_dir' do

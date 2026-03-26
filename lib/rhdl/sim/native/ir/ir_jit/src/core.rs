@@ -6,6 +6,7 @@
 
 use serde::Deserialize;
 use serde_json::{Map, Value};
+use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::mem;
 
@@ -71,6 +72,7 @@ pub enum ExprDef {
         value: SignedSignalValue,
         width: usize
     },
+    ExprRef { id: usize, width: usize },
     #[serde(alias = "unary")]
     UnaryOp { op: String, operand: Box<ExprDef>, width: usize },
     #[serde(alias = "binary")]
@@ -156,6 +158,8 @@ pub struct ModuleIR {
     pub ports: Vec<PortDef>,
     pub nets: Vec<NetDef>,
     pub regs: Vec<RegDef>,
+    #[serde(default)]
+    pub exprs: Vec<ExprDef>,
     pub assigns: Vec<AssignDef>,
     pub processes: Vec<ProcessDef>,
     #[serde(default)]
@@ -235,6 +239,7 @@ fn extract_runtime_module(payload: Value) -> Result<Map<String, Value>, String> 
 
 fn module_to_normalized_value(module_obj: Map<String, Value>) -> Result<Value, String> {
     let expr_pool = array_field(&module_obj, "exprs");
+    let mut synthesized_exprs = Vec::new();
     let mut out = Map::new();
     out.insert("name".to_string(), Value::String(value_to_string(module_obj.get("name"))));
     out.insert(
@@ -278,10 +283,11 @@ fn module_to_normalized_value(module_obj: Map<String, Value>) -> Result<Value, S
         Value::Array(
             array_field(&module_obj, "processes")
                 .into_iter()
-                .map(|v| process_to_normalized_value(&v, &expr_pool))
+                .map(|v| process_to_normalized_value(&v, &expr_pool, &mut synthesized_exprs))
                 .collect::<Result<Vec<_>, _>>()?,
         ),
     );
+    out.insert("exprs".to_string(), Value::Array(synthesized_exprs));
     out.insert(
         "memories".to_string(),
         Value::Array(
@@ -353,7 +359,11 @@ fn assign_to_normalized_value(value: &Value, expr_pool: &[Value]) -> Result<Valu
     Ok(Value::Object(out))
 }
 
-fn process_to_normalized_value(value: &Value, expr_pool: &[Value]) -> Result<Value, String> {
+fn process_to_normalized_value(
+    value: &Value,
+    expr_pool: &[Value],
+    synthesized_exprs: &mut Vec<Value>,
+) -> Result<Value, String> {
     let obj = as_object(value, "process")?;
     let mut out = Map::new();
     out.insert("name".to_string(), Value::String(value_to_string(obj.get("name"))));
@@ -372,100 +382,119 @@ fn process_to_normalized_value(value: &Value, expr_pool: &[Value]) -> Result<Val
     out.insert("clocked".to_string(), Value::Bool(value_to_bool(obj.get("clocked"))));
     out.insert(
         "statements".to_string(),
-        Value::Array(flatten_statements(array_field(obj, "statements"), expr_pool)?),
+        Value::Array(flatten_statements(
+            array_field(obj, "statements"),
+            expr_pool,
+            synthesized_exprs,
+        )?),
     );
     Ok(Value::Object(out))
 }
 
-fn flatten_statements(statements: Vec<Value>, expr_pool: &[Value]) -> Result<Vec<Value>, String> {
+fn flatten_statements(
+    statements: Vec<Value>,
+    expr_pool: &[Value],
+    synthesized_exprs: &mut Vec<Value>,
+) -> Result<Vec<Value>, String> {
     let mut out = Vec::new();
+    let mut effective_targets = HashMap::new();
+    flatten_statements_with_guard(
+        statements,
+        None,
+        &mut out,
+        expr_pool,
+        &mut effective_targets,
+        synthesized_exprs,
+    )?;
+    Ok(out)
+}
+
+fn flatten_statements_with_guard(
+    statements: Vec<Value>,
+    guard: Option<Value>,
+    out: &mut Vec<Value>,
+    expr_pool: &[Value],
+    effective_targets: &mut HashMap<String, Value>,
+    synthesized_exprs: &mut Vec<Value>,
+) -> Result<(), String> {
     for stmt in statements {
         let stmt_obj = as_object(&stmt, "statement")?;
         match stmt_obj.get("kind").and_then(Value::as_str).unwrap_or("") {
             "seq_assign" => {
+                let target = value_to_string(stmt_obj.get("target"));
+                let assigned_expr = expr_to_normalized_value(stmt_obj.get("expr"), expr_pool)?;
+                let width = expr_width(Some(&assigned_expr)).unwrap_or(8);
+                let prior_expr = effective_targets
+                    .get(&target)
+                    .cloned()
+                    .unwrap_or_else(|| signal_expr(target.clone(), width));
+                let expr = match &guard {
+                    Some(path_guard) => mux_expr(
+                        path_guard.clone(),
+                        assigned_expr,
+                        prior_expr,
+                        width,
+                    ),
+                    None => assigned_expr,
+                };
+                let pooled_expr = intern_expr(expr, synthesized_exprs);
+                effective_targets.insert(target.clone(), pooled_expr.clone());
                 let mut seq = Map::new();
-                seq.insert(
-                    "target".to_string(),
-                    Value::String(value_to_string(stmt_obj.get("target"))),
-                );
-                seq.insert("expr".to_string(), expr_to_normalized_value(stmt_obj.get("expr"), expr_pool)?);
+                seq.insert("target".to_string(), Value::String(target));
+                seq.insert("expr".to_string(), pooled_expr);
                 out.push(Value::Object(seq));
             }
-            "if" => flatten_if(stmt_obj, &mut out, expr_pool)?,
+            "if" => flatten_if(
+                stmt_obj,
+                guard.clone(),
+                out,
+                expr_pool,
+                effective_targets,
+                synthesized_exprs,
+            )?,
             _ => {}
         }
     }
-    Ok(out)
+    Ok(())
 }
 
-fn flatten_if(if_obj: &Map<String, Value>, out: &mut Vec<Value>, expr_pool: &[Value]) -> Result<(), String> {
+fn combine_path_guard(guard: Option<Value>, cond: Value, synthesized_exprs: &mut Vec<Value>) -> Value {
+    let combined = match guard {
+        Some(path_guard) => binary_expr("&", path_guard, cond, 1),
+        None => cond,
+    };
+    intern_expr(combined, synthesized_exprs)
+}
+
+fn flatten_if(
+    if_obj: &Map<String, Value>,
+    guard: Option<Value>,
+    out: &mut Vec<Value>,
+    expr_pool: &[Value],
+    effective_targets: &mut HashMap<String, Value>,
+    synthesized_exprs: &mut Vec<Value>,
+) -> Result<(), String> {
     let cond = expr_to_normalized_value(if_obj.get("condition"), expr_pool)?;
+    let then_guard = combine_path_guard(guard.clone(), cond.clone(), synthesized_exprs);
+    flatten_statements_with_guard(
+        array_field(if_obj, "then_statements"),
+        Some(then_guard),
+        out,
+        expr_pool,
+        effective_targets,
+        synthesized_exprs,
+    )?;
 
-    let mut then_assigns: HashMap<String, Value> = HashMap::new();
-    for stmt in array_field(if_obj, "then_statements") {
-        let obj = as_object(&stmt, "if.then statement")?;
-        match obj.get("kind").and_then(Value::as_str).unwrap_or("") {
-            "seq_assign" => {
-                then_assigns.insert(
-                    value_to_string(obj.get("target")),
-                    expr_to_normalized_value(obj.get("expr"), expr_pool)?,
-                );
-            }
-            "if" => flatten_if(obj, out, expr_pool)?,
-            _ => {}
-        }
-    }
-
-    let mut else_assigns: HashMap<String, Value> = HashMap::new();
-    for stmt in array_field(if_obj, "else_statements") {
-        let obj = as_object(&stmt, "if.else statement")?;
-        match obj.get("kind").and_then(Value::as_str).unwrap_or("") {
-            "seq_assign" => {
-                else_assigns.insert(
-                    value_to_string(obj.get("target")),
-                    expr_to_normalized_value(obj.get("expr"), expr_pool)?,
-                );
-            }
-            "if" => flatten_if(obj, out, expr_pool)?,
-            _ => {}
-        }
-    }
-
-    let mut all_targets: Vec<String> = then_assigns
-        .keys()
-        .chain(else_assigns.keys())
-        .cloned()
-        .collect();
-    all_targets.sort();
-    all_targets.dedup();
-
-    for target in all_targets {
-        let then_expr = then_assigns.get(&target).cloned();
-        let else_expr = else_assigns.get(&target).cloned();
-        let width = expr_width(then_expr.as_ref().or(else_expr.as_ref())).unwrap_or(8);
-
-        let mux_expr = match (then_expr, else_expr) {
-            (Some(t), Some(f)) => mux_expr(cond.clone(), t, f, width),
-            (Some(t), None) => mux_expr(
-                cond.clone(),
-                t,
-                signal_expr(target.clone(), width),
-                width,
-            ),
-            (None, Some(f)) => mux_expr(
-                unary_expr("~", cond.clone(), 1),
-                f,
-                signal_expr(target.clone(), width),
-                width,
-            ),
-            (None, None) => continue,
-        };
-
-        let mut seq = Map::new();
-        seq.insert("target".to_string(), Value::String(target));
-        seq.insert("expr".to_string(), mux_expr);
-        out.push(Value::Object(seq));
-    }
+    let else_cond = intern_expr(binary_expr("^", cond, literal_expr(1, 1), 1), synthesized_exprs);
+    let else_guard = combine_path_guard(guard, else_cond, synthesized_exprs);
+    flatten_statements_with_guard(
+        array_field(if_obj, "else_statements"),
+        Some(else_guard),
+        out,
+        expr_pool,
+        effective_targets,
+        synthesized_exprs,
+    )?;
 
     Ok(())
 }
@@ -792,9 +821,66 @@ fn mux_expr(condition: Value, when_true: Value, when_false: Value, width: usize)
     Value::Object(out)
 }
 
+fn expr_ref_expr(id: usize, width: usize) -> Value {
+    let mut out = Map::new();
+    out.insert("kind".to_string(), Value::String("expr_ref".to_string()));
+    out.insert("id".to_string(), Value::from(id as u64));
+    out.insert("width".to_string(), Value::from(width as u64));
+    Value::Object(out)
+}
+
+fn intern_expr(expr: Value, synthesized_exprs: &mut Vec<Value>) -> Value {
+    let width = expr_width(Some(&expr)).unwrap_or(1);
+    let expr_ref = expr_ref_expr(synthesized_exprs.len(), width);
+    synthesized_exprs.push(expr);
+    expr_ref
+}
+
 fn expr_width(expr: Option<&Value>) -> Option<usize> {
     let obj = expr?.as_object()?;
     obj.get("width").map(|w| value_to_usize(Some(w)))
+}
+
+#[derive(Default)]
+struct RuntimeExprEvalCache {
+    epoch: u32,
+    marks: Vec<u32>,
+    values: Vec<RuntimeValue>,
+}
+
+impl RuntimeExprEvalCache {
+    fn new(expr_count: usize) -> Self {
+        Self {
+            epoch: 1,
+            marks: vec![0; expr_count],
+            values: vec![RuntimeValue::Narrow(0); expr_count],
+        }
+    }
+
+    fn next_epoch(&mut self) {
+        self.epoch = self.epoch.wrapping_add(1);
+        if self.epoch == 0 {
+            self.marks.fill(0);
+            self.epoch = 1;
+        }
+    }
+
+    fn get(&self, id: usize) -> Option<RuntimeValue> {
+        if self.marks.get(id).copied() == Some(self.epoch) {
+            self.values.get(id).cloned()
+        } else {
+            None
+        }
+    }
+
+    fn store(&mut self, id: usize, value: RuntimeValue) {
+        if let Some(mark) = self.marks.get_mut(id) {
+            *mark = self.epoch;
+        }
+        if let Some(slot) = self.values.get_mut(id) {
+            *slot = value;
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -923,6 +1009,7 @@ impl JitCompiler {
                 let masked = (*value as i128 as SimValue) & mask;
                 Self::emit_const(builder, masked)
             }
+            ExprDef::ExprRef { .. } => builder.ins().iconst(types::I128, 0),
             ExprDef::UnaryOp { op, operand, width } => {
                 let src = self.compile_expr(builder, operand, signals_ptr, mem_ptrs);
                 let mask = Self::compile_mask(*width);
@@ -1109,6 +1196,7 @@ impl JitCompiler {
                 name_to_idx.get(name).and_then(|&idx| widths.get(idx).copied()).unwrap_or(*width)
             }
             ExprDef::Literal { width, .. } => *width,
+            ExprDef::ExprRef { width, .. } => *width,
             ExprDef::UnaryOp { width, .. } => *width,
             ExprDef::BinaryOp { width, .. } => *width,
             ExprDef::Mux { width, .. } => *width,
@@ -1134,6 +1222,7 @@ impl JitCompiler {
                 }
             }
             ExprDef::Literal { .. } => {}
+            ExprDef::ExprRef { .. } => {}
             ExprDef::UnaryOp { operand, .. } => {
                 self.collect_expr_deps(operand, deps);
             }
@@ -1388,6 +1477,12 @@ pub struct CoreSimulator {
     pub seq_targets: Vec<usize>,
     /// Original sequential assignment expressions for runtime sampling
     seq_exprs: Vec<ExprDef>,
+    /// Shared expression pool for compact sequential expressions
+    exprs: Vec<ExprDef>,
+    /// Direct incoming reference count for each compact expr id
+    expr_ref_use_counts: Vec<usize>,
+    /// Per-pass memoization for compact expr evaluation on the runtime path
+    runtime_expr_cache: RefCell<RuntimeExprEvalCache>,
     /// Clock signal index for each sequential assignment
     pub seq_clocks: Vec<usize>,
     /// Unique clock signal indices
@@ -1422,8 +1517,73 @@ pub struct CoreSimulator {
 }
 
 impl CoreSimulator {
+    fn compute_expr_ref_use_counts(ir: &ModuleIR) -> Vec<usize> {
+        let mut counts = vec![0usize; ir.exprs.len()];
+
+        for expr in &ir.exprs {
+            Self::accumulate_direct_expr_ref_uses(expr, &mut counts);
+        }
+        for assign in &ir.assigns {
+            Self::accumulate_direct_expr_ref_uses(&assign.expr, &mut counts);
+        }
+        for process in &ir.processes {
+            for stmt in &process.statements {
+                Self::accumulate_direct_expr_ref_uses(&stmt.expr, &mut counts);
+            }
+        }
+        for port in &ir.write_ports {
+            Self::accumulate_direct_expr_ref_uses(&port.addr, &mut counts);
+            Self::accumulate_direct_expr_ref_uses(&port.data, &mut counts);
+            Self::accumulate_direct_expr_ref_uses(&port.enable, &mut counts);
+        }
+        for port in &ir.sync_read_ports {
+            Self::accumulate_direct_expr_ref_uses(&port.addr, &mut counts);
+            if let Some(enable) = &port.enable {
+                Self::accumulate_direct_expr_ref_uses(enable, &mut counts);
+            }
+        }
+
+        counts
+    }
+
+    fn accumulate_direct_expr_ref_uses(expr: &ExprDef, counts: &mut [usize]) {
+        match expr {
+            ExprDef::Signal { .. } | ExprDef::Literal { .. } => {}
+            ExprDef::ExprRef { id, .. } => {
+                if let Some(count) = counts.get_mut(*id) {
+                    *count += 1;
+                }
+            }
+            ExprDef::UnaryOp { operand, .. } => Self::accumulate_direct_expr_ref_uses(operand, counts),
+            ExprDef::BinaryOp { left, right, .. } => {
+                Self::accumulate_direct_expr_ref_uses(left, counts);
+                Self::accumulate_direct_expr_ref_uses(right, counts);
+            }
+            ExprDef::Mux {
+                condition,
+                when_true,
+                when_false,
+                ..
+            } => {
+                Self::accumulate_direct_expr_ref_uses(condition, counts);
+                Self::accumulate_direct_expr_ref_uses(when_true, counts);
+                Self::accumulate_direct_expr_ref_uses(when_false, counts);
+            }
+            ExprDef::Slice { base, .. } => Self::accumulate_direct_expr_ref_uses(base, counts),
+            ExprDef::Concat { parts, .. } => {
+                for part in parts {
+                    Self::accumulate_direct_expr_ref_uses(part, counts);
+                }
+            }
+            ExprDef::Resize { expr, .. } => Self::accumulate_direct_expr_ref_uses(expr, counts),
+            ExprDef::MemRead { addr, .. } => Self::accumulate_direct_expr_ref_uses(addr, counts),
+        }
+    }
+
     pub fn new(json: &str) -> Result<Self, String> {
         let ir = parse_module_ir(json)?;
+        let expr_ref_use_counts = Self::compute_expr_ref_use_counts(&ir);
+        let expr_count = ir.exprs.len();
 
         let mut signals = Vec::new();
         let mut widths = Vec::new();
@@ -1598,6 +1758,9 @@ impl CoreSimulator {
             comb_assigns,
             seq_targets,
             seq_exprs,
+            exprs: ir.exprs.clone(),
+            expr_ref_use_counts,
+            runtime_expr_cache: RefCell::new(RuntimeExprEvalCache::new(expr_count)),
             seq_clocks,
             clock_indices,
             prev_clock_values,
@@ -1697,8 +1860,12 @@ impl CoreSimulator {
         // runtime evaluator for next-state sampling. Imported CIRCT packages can
         // generate very large nested mux trees that the compiled seq-sample path
         // does not yet handle reliably.
-        for (idx, expr) in self.seq_exprs.iter().enumerate() {
-            self.next_regs[idx] = self.eval_expr_runtime(expr);
+        let cache = self.runtime_expr_cache.get_mut() as *mut RuntimeExprEvalCache;
+        unsafe {
+            (*cache).next_epoch();
+            for (idx, expr) in self.seq_exprs.iter().enumerate() {
+                self.next_regs[idx] = self.eval_expr_runtime_with_cache(expr, &mut *cache);
+            }
         }
     }
 
@@ -1708,6 +1875,7 @@ impl CoreSimulator {
                 name_to_idx.get(name).and_then(|&idx| widths.get(idx).copied()).unwrap_or(*width)
             }
             ExprDef::Literal { width, .. } => *width,
+            ExprDef::ExprRef { width, .. } => *width,
             ExprDef::UnaryOp { width, .. } => *width,
             ExprDef::BinaryOp { width, .. } => *width,
             ExprDef::Mux { width, .. } => *width,
@@ -1731,15 +1899,40 @@ impl CoreSimulator {
         }
     }
 
-    fn eval_expr_runtime(&self, expr: &ExprDef) -> RuntimeValue {
+    fn eval_expr_runtime_with_cache(
+        &self,
+        expr: &ExprDef,
+        cache: &mut RuntimeExprEvalCache,
+    ) -> RuntimeValue {
         match expr {
             ExprDef::Signal { name, width } => {
                 let idx = self.name_to_idx.get(name).copied().unwrap_or(0);
                 self.signal_runtime_value(idx, *width)
             }
             ExprDef::Literal { value, width } => RuntimeValue::from_signed_i128(*value, *width),
+            ExprDef::ExprRef { id, width } => {
+                let should_cache = self
+                    .expr_ref_use_counts
+                    .get(*id)
+                    .copied()
+                    .unwrap_or(0)
+                    > 1;
+                if should_cache {
+                    if let Some(value) = cache.get(*id) {
+                        return value;
+                    }
+                }
+                let Some(expr) = self.exprs.get(*id) else {
+                    return RuntimeValue::zero(*width);
+                };
+                let value = self.eval_expr_runtime_with_cache(expr, cache).resize(*width);
+                if should_cache {
+                    cache.store(*id, value.clone());
+                }
+                value
+            }
             ExprDef::UnaryOp { op, operand, width } => {
-                let src = self.eval_expr_runtime(operand);
+                let src = self.eval_expr_runtime_with_cache(operand, cache);
                 match op.as_str() {
                     "~" | "not" => RuntimeValue::from_u128(Self::compute_mask(*width), *width)
                         .bitxor(&src, *width),
@@ -1753,8 +1946,8 @@ impl CoreSimulator {
                 }
             }
             ExprDef::BinaryOp { op, left, right, width } => {
-                let l = self.eval_expr_runtime(left);
-                let r = self.eval_expr_runtime(right);
+                let l = self.eval_expr_runtime_with_cache(left, cache);
+                let r = self.eval_expr_runtime_with_cache(right, cache);
                 match op.as_str() {
                     "&" => l.bitand(&r, *width),
                     "|" => l.bitor(&r, *width),
@@ -1790,29 +1983,29 @@ impl CoreSimulator {
                 }
             }
             ExprDef::Mux { condition, when_true, when_false, width } => {
-                let cond = self.eval_expr_runtime(condition);
+                let cond = self.eval_expr_runtime_with_cache(condition, cache);
                 let selected = if cond.is_zero() {
-                    self.eval_expr_runtime(when_false)
+                    self.eval_expr_runtime_with_cache(when_false, cache)
                 } else {
-                    self.eval_expr_runtime(when_true)
+                    self.eval_expr_runtime_with_cache(when_true, cache)
                 };
                 selected.mask(*width)
             }
             ExprDef::Slice { base, low, width, .. } => {
-                let base_val = self.eval_expr_runtime(base);
+                let base_val = self.eval_expr_runtime_with_cache(base, cache);
                 base_val.slice(*low, *width)
             }
             ExprDef::Concat { parts, width } => {
                 let mut result = RuntimeValue::zero(*width);
                 for part in parts {
                     let part_width = Self::runtime_expr_width(part, &self.widths, &self.name_to_idx);
-                    let value = self.eval_expr_runtime(part);
+                    let value = self.eval_expr_runtime_with_cache(part, cache);
                     result = result.shl(part_width, *width);
                     result = result.bitor(&value.mask(part_width), *width);
                 }
                 result.mask(*width)
             }
-            ExprDef::Resize { expr, width } => self.eval_expr_runtime(expr).resize(*width),
+            ExprDef::Resize { expr, width } => self.eval_expr_runtime_with_cache(expr, cache).resize(*width),
             ExprDef::MemRead { memory, addr, width } => {
                 let Some(&memory_idx) = self.memory_name_to_idx.get(memory) else {
                     return RuntimeValue::zero(*width);
@@ -1823,10 +2016,16 @@ impl CoreSimulator {
                 if mem.is_empty() {
                     return RuntimeValue::zero(*width);
                 }
-                let addr_val = self.eval_expr_runtime(addr).low_u128() as usize % mem.len();
+                let addr_val = self.eval_expr_runtime_with_cache(addr, cache).low_u128() as usize % mem.len();
                 self.memory_runtime_value(memory_idx, *width, addr_val)
             }
         }
+    }
+
+    fn eval_expr_runtime(&self, expr: &ExprDef) -> RuntimeValue {
+        let mut cache = RuntimeExprEvalCache::new(self.exprs.len());
+        cache.next_epoch();
+        self.eval_expr_runtime_with_cache(expr, &mut cache)
     }
 
     fn apply_write_ports_level(&mut self) {
@@ -1835,20 +2034,24 @@ impl CoreSimulator {
         }
 
         let mut writes: Vec<(usize, usize, usize, RuntimeValue)> = Vec::new();
-        for wp in &self.write_ports {
-            if self.signal_runtime_value(wp.clock_idx, self.widths.get(wp.clock_idx).copied().unwrap_or(0)).is_zero() {
-                continue;
-            }
-            if (self.eval_expr_runtime(&wp.enable).low_u128() & 1) == 0 {
-                continue;
-            }
-            if wp.memory_depth == 0 {
-                continue;
-            }
+        let cache = self.runtime_expr_cache.get_mut() as *mut RuntimeExprEvalCache;
+        unsafe {
+            (*cache).next_epoch();
+            for wp in &self.write_ports {
+                if self.signal_runtime_value(wp.clock_idx, self.widths.get(wp.clock_idx).copied().unwrap_or(0)).is_zero() {
+                    continue;
+                }
+                if (self.eval_expr_runtime_with_cache(&wp.enable, &mut *cache).low_u128() & 1) == 0 {
+                    continue;
+                }
+                if wp.memory_depth == 0 {
+                    continue;
+                }
 
-            let addr = (self.eval_expr_runtime(&wp.addr).low_u128() as usize) % wp.memory_depth;
-            let data = self.eval_expr_runtime(&wp.data).mask(wp.memory_width);
-            writes.push((wp.memory_idx, addr, wp.memory_width, data));
+                let addr = (self.eval_expr_runtime_with_cache(&wp.addr, &mut *cache).low_u128() as usize) % wp.memory_depth;
+                let data = self.eval_expr_runtime_with_cache(&wp.data, &mut *cache).mask(wp.memory_width);
+                writes.push((wp.memory_idx, addr, wp.memory_width, data));
+            }
         }
 
         for (memory_idx, addr, width, value) in writes {
@@ -1862,26 +2065,30 @@ impl CoreSimulator {
         }
 
         let mut updates: Vec<(usize, RuntimeValue)> = Vec::new();
-        for rp in &self.sync_read_ports {
-            if self.signal_runtime_value(rp.clock_idx, self.widths.get(rp.clock_idx).copied().unwrap_or(0)).is_zero() {
-                continue;
-            }
-            if let Some(enable) = &rp.enable {
-                if (self.eval_expr_runtime(enable).low_u128() & 1) == 0 {
+        let cache = self.runtime_expr_cache.get_mut() as *mut RuntimeExprEvalCache;
+        unsafe {
+            (*cache).next_epoch();
+            for rp in &self.sync_read_ports {
+                if self.signal_runtime_value(rp.clock_idx, self.widths.get(rp.clock_idx).copied().unwrap_or(0)).is_zero() {
                     continue;
                 }
-            }
+                if let Some(enable) = &rp.enable {
+                    if (self.eval_expr_runtime_with_cache(enable, &mut *cache).low_u128() & 1) == 0 {
+                        continue;
+                    }
+                }
 
-            let Some(mem) = self.wide_memory_arrays.get(rp.memory_idx) else {
-                continue;
-            };
-            if mem.is_empty() {
-                continue;
-            }
+                let Some(mem) = self.wide_memory_arrays.get(rp.memory_idx) else {
+                    continue;
+                };
+                if mem.is_empty() {
+                    continue;
+                }
 
-            let addr = (self.eval_expr_runtime(&rp.addr).low_u128() as usize) % mem.len();
-            let data = self.memory_runtime_value(rp.memory_idx, rp.memory_width, addr).resize(rp.data_width);
-            updates.push((rp.data_idx, data));
+                let addr = (self.eval_expr_runtime_with_cache(&rp.addr, &mut *cache).low_u128() as usize) % mem.len();
+                let data = self.memory_runtime_value(rp.memory_idx, rp.memory_width, addr).resize(rp.data_width);
+                updates.push((rp.data_idx, data));
+            }
         }
 
         for (idx, value) in updates {
@@ -2001,10 +2208,14 @@ impl CoreSimulator {
     fn evaluate_no_clock_capture(&mut self) {
         self.sync_wide_from_low_views();
         let comb_assigns = self.comb_assigns.clone();
-        for (target_idx, expr) in comb_assigns {
-            let width = self.widths.get(target_idx).copied().unwrap_or(0);
-            let value = self.eval_expr_runtime(&expr);
-            self.store_signal_runtime_value(target_idx, width, value);
+        let cache = self.runtime_expr_cache.get_mut() as *mut RuntimeExprEvalCache;
+        unsafe {
+            (*cache).next_epoch();
+            for (target_idx, expr) in comb_assigns {
+                let width = self.widths.get(target_idx).copied().unwrap_or(0);
+                let value = self.eval_expr_runtime_with_cache(&expr, &mut *cache);
+                self.store_signal_runtime_value(target_idx, width, value);
+            }
         }
     }
 

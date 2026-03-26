@@ -19,6 +19,7 @@ module RHDL
         DEFAULT_VHDL_IMPORT_TOOL = 'ghdl'
         DEFAULT_ARC_FLATTEN_PIPELINE = 'builtin.module(hw-flatten-modules{hw-inline-public hw-inline-with-state})'
         DEFAULT_ARC_CLEANUP_PASSES = ['--canonicalize', '--cse'].freeze
+        DEFAULT_ARC_PREP_INCLUDE_STEPS = %i[strip_dbg strip_llhd flatten canonicalize to_arc].freeze
         DEFAULT_ARCILATOR_SPLIT_FUNCS_THRESHOLD = 100
         DEFAULT_ARC_INPUT_SYNTAX_CLEANUP_PASSES = [
           '--llhd-sig2reg',
@@ -34,6 +35,7 @@ module RHDL
           '--canonicalize'
         ].freeze
         VALID_ARC_INPUT_CLEANUP_MODES = %i[semantic llhd_only syntax_only].freeze
+        VALID_ARC_PREP_INCLUDE_STEPS = (DEFAULT_ARC_PREP_INCLUDE_STEPS + [:cannonicalize]).freeze
 
         def circt_verilog_import_args(extra_args: [])
           args = Array(extra_args).dup
@@ -190,10 +192,11 @@ module RHDL
 
         def prepare_arc_mlir_from_circt_mlir(mlir_path:, work_dir:, base_name: 'import', top: nil, strict: false,
                                              extern_modules: [], stub_modules: [], cleanup_mode: :semantic,
-                                             stage_index_offset: 0)
+                                             stage_index_offset: 0, include: DEFAULT_ARC_PREP_INCLUDE_STEPS)
           FileUtils.mkdir_p(work_dir)
 
           cleanup_mode = normalize_arc_input_cleanup_mode(cleanup_mode)
+          include_steps = normalize_arc_prep_include_steps(include)
           source_mlir_path = stage_artifact_path(work_dir: work_dir, base_name: base_name, step: stage_index_offset + 1, suffix: 'input.core.mlir')
           dbg_stripped_mlir_path = stage_artifact_path(work_dir: work_dir, base_name: base_name, step: stage_index_offset + 2, suffix: 'dbg_stripped.core.mlir')
           normalized_llhd_mlir_path = stage_artifact_path(work_dir: work_dir, base_name: base_name, step: stage_index_offset + 3, suffix: 'prepared.normalized.llhd.mlir')
@@ -205,134 +208,168 @@ module RHDL
 
           text = File.read(mlir_path)
           File.write(source_mlir_path, text)
-          cleanup_result =
-            case cleanup_mode
-            when :semantic, :llhd_only
-              File.write(dbg_stripped_mlir_path, text)
-              strip_dbg_ops!(dbg_stripped_mlir_path)
-              cleaned_text = cleanup_imported_core_mlir_text(
-                File.read(dbg_stripped_mlir_path),
-                top: top,
-                strict: strict,
-                extern_modules: extern_modules,
-                stub_modules: stub_modules,
-                llhd_only: cleanup_mode == :llhd_only
-              )
-              File.write(normalized_llhd_mlir_path, cleaned_text)
-              {
-                success: true,
-                command: nil,
-                stdout: '',
-                stderr: '',
-                output_path: normalized_llhd_mlir_path,
-                tool: cleanup_mode == :llhd_only ? 'ruby-import-cleanup-llhd-only' : 'ruby-import-cleanup'
-              }
-            when :syntax_only
-              syntax_only_arc_input_cleanup!(
-                input_path: source_mlir_path,
-                output_path: syntax_cleanup_path,
-                stub_modules: stub_modules
-              )
-            end
-          return prepare_arc_failure(normalize: cleanup_result, work_dir: work_dir) unless cleanup_result[:success]
+          current_path = source_mlir_path
+          current_text = text
 
-          cleaned_mlir_path = cleanup_result.fetch(:output_path)
-          cleaned_text = File.read(cleaned_mlir_path)
+          normalize = skipped_stage_result(tool: 'ruby-import-cleanup', out_path: normalized_llhd_mlir_path)
+          transform = skipped_transform_result(current_text)
+          flatten = skipped_stage_result(tool: 'circt-opt', out_path: flattened_hwseq_mlir_path)
+          flatten_cleanup = skipped_stage_result(tool: 'circt-opt', out_path: flattened_cleaned_hwseq_mlir_path)
+          arc = skipped_stage_result(tool: 'circt-opt', out_path: arc_mlir_path)
 
-          transform =
-            if cleanup_mode == :syntax_only
-              {
-                success: true,
-                output_text: cleaned_text,
-                transformed_modules: module_names_from_core_mlir(cleaned_text),
-                unsupported_modules: []
-              }
-            else
-              prepare_hwseq_from_circt_mlir_text(cleaned_text)
-            end
-          File.write(hwseq_mlir_path, transform.fetch(:output_text))
+          if include_steps.include?(:strip_dbg)
+            File.write(dbg_stripped_mlir_path, current_text)
+            strip_dbg_ops!(dbg_stripped_mlir_path)
+            current_path = dbg_stripped_mlir_path
+            current_text = File.read(current_path)
+          else
+            dbg_stripped_mlir_path = nil
+          end
 
-          flatten = if transform.fetch(:unsupported_modules).empty?
-                      flatten_hwseq_for_arc(
-                        hwseq_mlir_path: hwseq_mlir_path,
-                        output_path: flattened_hwseq_mlir_path,
-                        work_dir: work_dir,
-                        base_name: base_name
-                      )
-                    else
-                      failed_result(
-                        tool: 'circt-opt',
-                        out_path: flattened_hwseq_mlir_path,
-                        cmd: arc_flatten_command(
-                          input_path: hwseq_mlir_path,
+          if include_steps.include?(:strip_llhd)
+            normalize =
+              case cleanup_mode
+              when :semantic, :llhd_only
+                cleaned_text = cleanup_imported_core_mlir_text(
+                  current_text,
+                  top: top,
+                  strict: strict,
+                  extern_modules: extern_modules,
+                  stub_modules: stub_modules,
+                  llhd_only: cleanup_mode == :llhd_only
+                )
+                File.write(normalized_llhd_mlir_path, cleaned_text)
+                {
+                  success: true,
+                  command: nil,
+                  stdout: '',
+                  stderr: '',
+                  output_path: normalized_llhd_mlir_path,
+                  tool: cleanup_mode == :llhd_only ? 'ruby-import-cleanup-llhd-only' : 'ruby-import-cleanup'
+                }
+              when :syntax_only
+                syntax_only_arc_input_cleanup!(
+                  input_path: current_path,
+                  output_path: syntax_cleanup_path,
+                  stub_modules: stub_modules
+                )
+              end
+            return prepare_arc_failure(normalize: normalize, work_dir: work_dir) unless normalize[:success]
+
+            current_path = normalize.fetch(:output_path)
+            current_text = File.read(current_path)
+
+            transform =
+              if cleanup_mode == :syntax_only
+                {
+                  success: true,
+                  output_text: current_text,
+                  transformed_modules: module_names_from_core_mlir(current_text),
+                  unsupported_modules: []
+                }
+              else
+                prepare_hwseq_from_circt_mlir_text(current_text)
+              end
+            File.write(hwseq_mlir_path, transform.fetch(:output_text))
+            current_path = hwseq_mlir_path
+            current_text = transform.fetch(:output_text)
+          else
+            normalized_llhd_mlir_path = nil
+            hwseq_mlir_path = nil
+          end
+
+          if include_steps.include?(:flatten)
+            flatten = if transform.fetch(:unsupported_modules).empty?
+                        flatten_hwseq_for_arc(
+                          hwseq_mlir_path: current_path,
                           output_path: flattened_hwseq_mlir_path,
                           work_dir: work_dir,
                           base_name: base_name
-                        ),
-                        stderr: format_unsupported_modules(transform.fetch(:unsupported_modules))
-                      )
-                    end
+                        )
+                      else
+                        failed_result(
+                          tool: 'circt-opt',
+                          out_path: flattened_hwseq_mlir_path,
+                          cmd: arc_flatten_command(
+                            input_path: current_path,
+                            output_path: flattened_hwseq_mlir_path,
+                            work_dir: work_dir,
+                            base_name: base_name
+                          ),
+                          stderr: format_unsupported_modules(transform.fetch(:unsupported_modules))
+                        )
+                      end
+            current_path = flattened_hwseq_mlir_path if flatten[:success]
+          else
+            flattened_hwseq_mlir_path = nil
+          end
 
-          flatten_cleanup = if transform.fetch(:unsupported_modules).empty? && flatten[:success]
-                              cleanup_flattened_hwseq_for_arc(
-                                flattened_hwseq_mlir_path: flattened_hwseq_mlir_path,
-                                output_path: flattened_cleaned_hwseq_mlir_path,
-                                work_dir: work_dir,
-                                base_name: base_name
-                              )
-                            else
-                              failed_result(
-                                tool: 'circt-opt',
-                                out_path: flattened_cleaned_hwseq_mlir_path,
-                                cmd: arc_cleanup_command(
-                                  input_path: flattened_hwseq_mlir_path,
+          if include_steps.include?(:canonicalize)
+            flatten_cleanup = if transform.fetch(:unsupported_modules).empty? && flatten[:success]
+                                cleanup_flattened_hwseq_for_arc(
+                                  flattened_hwseq_mlir_path: current_path,
                                   output_path: flattened_cleaned_hwseq_mlir_path,
                                   work_dir: work_dir,
                                   base_name: base_name
-                                ),
-                                stderr: flatten[:stderr]
-                              )
-                            end
+                                )
+                              else
+                                failed_result(
+                                  tool: 'circt-opt',
+                                  out_path: flattened_cleaned_hwseq_mlir_path,
+                                  cmd: arc_cleanup_command(
+                                    input_path: current_path,
+                                    output_path: flattened_cleaned_hwseq_mlir_path,
+                                    work_dir: work_dir,
+                                    base_name: base_name
+                                  ),
+                                  stderr: flatten[:stderr]
+                                )
+                              end
+            current_path = flattened_cleaned_hwseq_mlir_path if flatten_cleanup[:success]
+          else
+            flattened_cleaned_hwseq_mlir_path = nil
+          end
 
-          arc_input_mlir_path = flatten_cleanup[:success] ? flattened_cleaned_hwseq_mlir_path : nil
-
-          arc = if transform.fetch(:unsupported_modules).empty? && flatten_cleanup[:success]
-                  run_external_command(
-                    tool: 'circt-opt',
-                    cmd: ['circt-opt', arc_input_mlir_path, '--convert-to-arcs', '-o', arc_mlir_path],
-                    out_path: arc_mlir_path
-                  )
-                else
-                  failed_result(
-                    tool: 'circt-opt',
-                    out_path: arc_mlir_path,
-                    cmd: ['circt-opt', (arc_input_mlir_path || flattened_cleaned_hwseq_mlir_path), '--convert-to-arcs', '-o', arc_mlir_path],
-                    stderr: if transform.fetch(:unsupported_modules).empty?
-                              flatten_cleanup[:stderr]
-                            else
-                              format_unsupported_modules(transform.fetch(:unsupported_modules))
-                            end
-                  )
-                end
+          if include_steps.include?(:to_arc)
+            arc_command = arc_convert_command(input_path: current_path, output_path: arc_mlir_path)
+            arc = if transform.fetch(:unsupported_modules).empty?
+                    run_external_command(
+                      tool: 'circt-opt',
+                      cmd: arc_command,
+                      out_path: arc_mlir_path
+                    )
+                  else
+                    failed_result(
+                      tool: 'circt-opt',
+                      out_path: arc_mlir_path,
+                      cmd: arc_command,
+                      stderr: format_unsupported_modules(transform.fetch(:unsupported_modules))
+                    )
+                  end
+          else
+            arc_mlir_path = nil
+          end
 
           {
-            success: arc[:success],
+            success: [normalize, flatten, flatten_cleanup, arc].all? { |stage| stage[:success] },
             import: nil,
-            normalize: nil,
+            normalize: normalize,
             transform: transform,
             flatten: flatten,
             flatten_cleanup: flatten_cleanup,
+            canonicalize: flatten_cleanup,
             arc: arc,
             moore_mlir_path: nil,
             source_mlir_path: source_mlir_path,
-            dbg_stripped_mlir_path: File.file?(dbg_stripped_mlir_path) ? dbg_stripped_mlir_path : nil,
-            normalized_llhd_mlir_path: File.file?(normalized_llhd_mlir_path) ? normalized_llhd_mlir_path : nil,
-            hwseq_mlir_path: hwseq_mlir_path,
-            flattened_hwseq_mlir_path: flatten[:success] ? flattened_hwseq_mlir_path : nil,
-            flattened_cleaned_hwseq_mlir_path: flatten_cleanup[:success] ? flattened_cleaned_hwseq_mlir_path : nil,
-            arc_mlir_path: arc[:success] ? arc_mlir_path : nil,
+            dbg_stripped_mlir_path: dbg_stripped_mlir_path && File.file?(dbg_stripped_mlir_path) ? dbg_stripped_mlir_path : nil,
+            normalized_llhd_mlir_path: normalized_llhd_mlir_path && File.file?(normalized_llhd_mlir_path) ? normalized_llhd_mlir_path : nil,
+            hwseq_mlir_path: hwseq_mlir_path && File.file?(hwseq_mlir_path) ? hwseq_mlir_path : nil,
+            flattened_hwseq_mlir_path: flattened_hwseq_mlir_path && File.file?(flattened_hwseq_mlir_path) ? flattened_hwseq_mlir_path : nil,
+            flattened_cleaned_hwseq_mlir_path: flattened_cleaned_hwseq_mlir_path && File.file?(flattened_cleaned_hwseq_mlir_path) ? flattened_cleaned_hwseq_mlir_path : nil,
+            arc_mlir_path: arc_mlir_path && File.file?(arc_mlir_path) ? arc_mlir_path : nil,
             transformed_modules: transform.fetch(:transformed_modules),
-            unsupported_modules: transform.fetch(:unsupported_modules)
+            unsupported_modules: transform.fetch(:unsupported_modules),
+            include_steps: include_steps
           }
         end
 
@@ -541,6 +578,37 @@ module RHDL
                 "Unsupported ARC input cleanup mode #{mode.inspect}. Use :semantic, :llhd_only, or :syntax_only."
         end
 
+        def normalize_arc_prep_include_steps(include_steps)
+          steps = Array(include_steps).map(&:to_sym).map { |step| step == :cannonicalize ? :canonicalize : step }
+          invalid = steps - DEFAULT_ARC_PREP_INCLUDE_STEPS
+          return steps.freeze if invalid.empty?
+
+          raise ArgumentError,
+                "Unsupported ARC prep include step(s) #{invalid.inspect}. Use any of: #{DEFAULT_ARC_PREP_INCLUDE_STEPS.join(', ')}"
+        end
+
+        def skipped_stage_result(tool:, out_path:)
+          {
+            success: true,
+            skipped: true,
+            command: nil,
+            stdout: '',
+            stderr: '',
+            output_path: out_path.to_s,
+            tool: tool
+          }
+        end
+
+        def skipped_transform_result(text)
+          {
+            success: true,
+            skipped: true,
+            output_text: text,
+            transformed_modules: module_names_from_core_mlir(text),
+            unsupported_modules: []
+          }
+        end
+
         def syntax_only_arc_input_cleanup!(input_path:, output_path:, stub_modules:)
           if Array(stub_modules).any?
             return failed_result(
@@ -621,6 +689,10 @@ module RHDL
           raise ArgumentError, 'cleanup output file must use the flattened cleanup naming convention' unless valid_cleanup_name || output_path.to_s == input_path.to_s
 
           ['circt-opt', input_path] + DEFAULT_ARC_CLEANUP_PASSES + ['-o', output_path]
+        end
+
+        def arc_convert_command(input_path:, output_path:)
+          ['circt-opt', input_path, '--convert-to-arcs', '--arc-split-loops', '--arc-canonicalizer', '-o', output_path]
         end
 
         def format_unsupported_modules(entries)

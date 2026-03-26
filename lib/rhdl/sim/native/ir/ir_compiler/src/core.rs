@@ -318,6 +318,10 @@ fn extract_runtime_module(payload: Value) -> Result<Map<String, Value>, String> 
 }
 
 fn module_to_normalized_value(module_obj: Map<String, Value>) -> Result<Value, String> {
+    let mut normalized_exprs = array_field(&module_obj, "exprs")
+        .into_iter()
+        .map(|v| expr_to_normalized_value(Some(&v)))
+        .collect::<Result<Vec<_>, _>>()?;
     let mut out = Map::new();
     out.insert("name".to_string(), Value::String(value_to_string(module_obj.get("name"))));
     out.insert(
@@ -348,15 +352,6 @@ fn module_to_normalized_value(module_obj: Map<String, Value>) -> Result<Value, S
         ),
     );
     out.insert(
-        "exprs".to_string(),
-        Value::Array(
-            array_field(&module_obj, "exprs")
-                .into_iter()
-                .map(|v| expr_to_normalized_value(Some(&v)))
-                .collect::<Result<Vec<_>, _>>()?,
-        ),
-    );
-    out.insert(
         "assigns".to_string(),
         Value::Array(
             array_field(&module_obj, "assigns")
@@ -370,10 +365,11 @@ fn module_to_normalized_value(module_obj: Map<String, Value>) -> Result<Value, S
         Value::Array(
             array_field(&module_obj, "processes")
                 .into_iter()
-                .map(|v| process_to_normalized_value(&v))
+                .map(|v| process_to_normalized_value(&v, &mut normalized_exprs))
                 .collect::<Result<Vec<_>, _>>()?,
         ),
     );
+    out.insert("exprs".to_string(), Value::Array(normalized_exprs));
     out.insert(
         "memories".to_string(),
         Value::Array(
@@ -445,7 +441,7 @@ fn assign_to_normalized_value(value: &Value) -> Result<Value, String> {
     Ok(Value::Object(out))
 }
 
-fn process_to_normalized_value(value: &Value) -> Result<Value, String> {
+fn process_to_normalized_value(value: &Value, normalized_exprs: &mut Vec<Value>) -> Result<Value, String> {
     let obj = as_object(value, "process")?;
     let mut out = Map::new();
     out.insert("name".to_string(), Value::String(value_to_string(obj.get("name"))));
@@ -464,100 +460,93 @@ fn process_to_normalized_value(value: &Value) -> Result<Value, String> {
     out.insert("clocked".to_string(), Value::Bool(value_to_bool(obj.get("clocked"))));
     out.insert(
         "statements".to_string(),
-        Value::Array(flatten_statements(array_field(obj, "statements"))?),
+        Value::Array(flatten_statements(array_field(obj, "statements"), normalized_exprs)?),
     );
     Ok(Value::Object(out))
 }
 
-fn flatten_statements(statements: Vec<Value>) -> Result<Vec<Value>, String> {
+fn flatten_statements(statements: Vec<Value>, normalized_exprs: &mut Vec<Value>) -> Result<Vec<Value>, String> {
     let mut out = Vec::new();
+    let mut effective_targets = HashMap::new();
+    flatten_statements_with_guard(statements, None, &mut out, &mut effective_targets, normalized_exprs)?;
+    Ok(out)
+}
+
+fn flatten_statements_with_guard(
+    statements: Vec<Value>,
+    guard: Option<Value>,
+    out: &mut Vec<Value>,
+    effective_targets: &mut HashMap<String, Value>,
+    normalized_exprs: &mut Vec<Value>,
+) -> Result<(), String> {
     for stmt in statements {
         let stmt_obj = as_object(&stmt, "statement")?;
         match stmt_obj.get("kind").and_then(Value::as_str).unwrap_or("") {
             "seq_assign" => {
+                let target = value_to_string(stmt_obj.get("target"));
+                let assigned_expr = expr_to_normalized_value(stmt_obj.get("expr"))?;
+                let width = expr_width(Some(&assigned_expr)).unwrap_or(8);
+                let prior_expr = effective_targets
+                    .get(&target)
+                    .cloned()
+                    .unwrap_or_else(|| signal_expr(target.clone(), width));
+                let expr = match &guard {
+                    Some(path_guard) => mux_expr(
+                        path_guard.clone(),
+                        assigned_expr,
+                        prior_expr,
+                        width,
+                    ),
+                    None => assigned_expr,
+                };
+                let pooled_expr = intern_expr(expr, normalized_exprs);
+                effective_targets.insert(target.clone(), pooled_expr.clone());
                 let mut seq = Map::new();
-                seq.insert(
-                    "target".to_string(),
-                    Value::String(value_to_string(stmt_obj.get("target"))),
-                );
-                seq.insert("expr".to_string(), expr_to_normalized_value(stmt_obj.get("expr"))?);
+                seq.insert("target".to_string(), Value::String(target));
+                seq.insert("expr".to_string(), pooled_expr);
                 out.push(Value::Object(seq));
             }
-            "if" => flatten_if(stmt_obj, &mut out)?,
+            "if" => flatten_if(stmt_obj, guard.clone(), out, effective_targets, normalized_exprs)?,
             _ => {}
         }
     }
-    Ok(out)
+    Ok(())
 }
 
-fn flatten_if(if_obj: &Map<String, Value>, out: &mut Vec<Value>) -> Result<(), String> {
+fn combine_path_guard(guard: Option<Value>, cond: Value, normalized_exprs: &mut Vec<Value>) -> Value {
+    let combined = match guard {
+        Some(path_guard) => binary_expr("&", path_guard, cond, 1),
+        None => cond,
+    };
+    intern_expr(combined, normalized_exprs)
+}
+
+fn flatten_if(
+    if_obj: &Map<String, Value>,
+    guard: Option<Value>,
+    out: &mut Vec<Value>,
+    effective_targets: &mut HashMap<String, Value>,
+    normalized_exprs: &mut Vec<Value>,
+) -> Result<(), String> {
     let cond = expr_to_normalized_value(if_obj.get("condition"))?;
+    let then_guard = combine_path_guard(guard.clone(), cond.clone(), normalized_exprs);
+    flatten_statements_with_guard(
+        array_field(if_obj, "then_statements"),
+        Some(then_guard),
+        out,
+        effective_targets,
+        normalized_exprs,
+    )?;
 
-    let mut then_assigns: HashMap<String, Value> = HashMap::new();
-    for stmt in array_field(if_obj, "then_statements") {
-        let obj = as_object(&stmt, "if.then statement")?;
-        match obj.get("kind").and_then(Value::as_str).unwrap_or("") {
-            "seq_assign" => {
-                then_assigns.insert(
-                    value_to_string(obj.get("target")),
-                    expr_to_normalized_value(obj.get("expr"))?,
-                );
-            }
-            "if" => flatten_if(obj, out)?,
-            _ => {}
-        }
-    }
-
-    let mut else_assigns: HashMap<String, Value> = HashMap::new();
-    for stmt in array_field(if_obj, "else_statements") {
-        let obj = as_object(&stmt, "if.else statement")?;
-        match obj.get("kind").and_then(Value::as_str).unwrap_or("") {
-            "seq_assign" => {
-                else_assigns.insert(
-                    value_to_string(obj.get("target")),
-                    expr_to_normalized_value(obj.get("expr"))?,
-                );
-            }
-            "if" => flatten_if(obj, out)?,
-            _ => {}
-        }
-    }
-
-    let mut all_targets: Vec<String> = then_assigns
-        .keys()
-        .chain(else_assigns.keys())
-        .cloned()
-        .collect();
-    all_targets.sort();
-    all_targets.dedup();
-
-    for target in all_targets {
-        let then_expr = then_assigns.get(&target).cloned();
-        let else_expr = else_assigns.get(&target).cloned();
-        let width = expr_width(then_expr.as_ref().or(else_expr.as_ref())).unwrap_or(8);
-
-        let mux_expr = match (then_expr, else_expr) {
-            (Some(t), Some(f)) => mux_expr(cond.clone(), t, f, width),
-            (Some(t), None) => mux_expr(
-                cond.clone(),
-                t,
-                signal_expr(target.clone(), width),
-                width,
-            ),
-            (None, Some(f)) => mux_expr(
-                unary_expr("~", cond.clone(), 1),
-                f,
-                signal_expr(target.clone(), width),
-                width,
-            ),
-            (None, None) => continue,
-        };
-
-        let mut seq = Map::new();
-        seq.insert("target".to_string(), Value::String(target));
-        seq.insert("expr".to_string(), mux_expr);
-        out.push(Value::Object(seq));
-    }
+    let else_cond = intern_expr(binary_expr("^", cond, literal_expr(1, 1), 1), normalized_exprs);
+    let else_guard = combine_path_guard(guard, else_cond, normalized_exprs);
+    flatten_statements_with_guard(
+        array_field(if_obj, "else_statements"),
+        Some(else_guard),
+        out,
+        effective_targets,
+        normalized_exprs,
+    )?;
 
     Ok(())
 }
@@ -882,6 +871,21 @@ fn mux_expr(condition: Value, when_true: Value, when_false: Value, width: usize)
     out.insert("when_false".to_string(), when_false);
     out.insert("width".to_string(), Value::from(width as u64));
     Value::Object(out)
+}
+
+fn expr_ref_expr(id: usize, width: usize) -> Value {
+    let mut out = Map::new();
+    out.insert("kind".to_string(), Value::String("expr_ref".to_string()));
+    out.insert("id".to_string(), Value::from(id as u64));
+    out.insert("width".to_string(), Value::from(width as u64));
+    Value::Object(out)
+}
+
+fn intern_expr(expr: Value, normalized_exprs: &mut Vec<Value>) -> Value {
+    let width = expr_width(Some(&expr)).unwrap_or(1);
+    let expr_ref = expr_ref_expr(normalized_exprs.len(), width);
+    normalized_exprs.push(expr);
+    expr_ref
 }
 
 fn expr_width(expr: Option<&Value>) -> Option<usize> {
@@ -2003,14 +2007,7 @@ impl CoreSimulator {
     }
 
     pub fn compile_fast_path_blocker(&self, include_tick_helpers: bool) -> Option<String> {
-        if self.compile_fast_path_tick_helper_blocked(include_tick_helpers) {
-            return Some(
-                "compiled fast path does not support overwide (>128-bit) runtime signals when tick helpers are required"
-                    .to_string(),
-            );
-        }
-
-        if !self.runtime_comb_assigns.is_empty() {
+        if include_tick_helpers && !self.runtime_comb_assigns.is_empty() {
             let samples = self
                 .runtime_comb_assigns
                 .iter()
@@ -2024,10 +2021,17 @@ impl CoreSimulator {
                 format!("; first targets: {}", samples.join(", "))
             };
             return Some(format!(
-                "compiled fast path requires runtime fallback for {} combinational assigns{}",
+                "compiled fast path with tick helpers requires runtime fallback for {} combinational assigns{}",
                 self.runtime_comb_assigns.len(),
                 sample_text
             ));
+        }
+
+        if self.compile_fast_path_tick_helper_blocked(include_tick_helpers) {
+            return Some(
+                "compiled fast path does not support overwide (>128-bit) runtime signals when tick helpers are required"
+                    .to_string(),
+            );
         }
 
         None
@@ -4741,7 +4745,7 @@ mod tests {
     }
 
     #[test]
-    fn reports_fast_path_blockers_for_runtime_fallback_assigns() {
+    fn allows_runtime_fallback_assigns_without_tick_helpers() {
         let json = serde_json::json!({
             "circt_json_version": 1,
             "modules": [{
@@ -4776,11 +4780,50 @@ mod tests {
         .to_string();
 
         let sim = CoreSimulator::new(&json).expect("parse overwide compile blocker payload");
+        assert!(sim.compile_fast_path_blocker(false).is_none());
+    }
+
+    #[test]
+    fn reports_fast_path_blockers_for_runtime_fallback_assigns_when_tick_helpers_are_needed() {
+        let json = serde_json::json!({
+            "circt_json_version": 1,
+            "modules": [{
+                "name": "top",
+                "ports": [
+                    { "name": "a", "direction": "in", "width": 8 },
+                    { "name": "b", "direction": "in", "width": 8 },
+                    { "name": "sum", "direction": "out", "width": 8 }
+                ],
+                "nets": [],
+                "regs": [],
+                "assigns": [
+                    {
+                        "target": "sum",
+                        "expr": {
+                            "kind": "binary",
+                            "op": "+",
+                            "left": { "kind": "signal", "name": "a", "width": 8 },
+                            "right": { "kind": "signal", "name": "b", "width": 8 },
+                            "width": 8
+                        }
+                    }
+                ],
+                "processes": [],
+                "memories": [],
+                "write_ports": [],
+                "sync_read_ports": []
+            }]
+        })
+        .to_string();
+
+        let mut sim = CoreSimulator::new(&json).expect("parse compile blocker payload");
+        let target_idx = sim.name_to_idx.get("sum").copied().expect("sum signal");
+        sim.runtime_comb_assigns = vec![(target_idx, 0)];
         let blocker = sim
-            .compile_fast_path_blocker(false)
-            .expect("runtime fallback should be rejected");
+            .compile_fast_path_blocker(true)
+            .expect("runtime fallback should be rejected when tick helpers are needed");
 
         assert!(blocker.contains("runtime fallback"));
-        assert!(blocker.contains("wide_out"));
+        assert!(blocker.contains("sum"));
     }
 }

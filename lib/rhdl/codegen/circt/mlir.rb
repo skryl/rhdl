@@ -1068,9 +1068,10 @@ module RHDL
           def normalize_const(value, width)
             modulus = 1 << width
             wrapped = value.to_i % modulus
-            return wrapped if value.to_i >= 0
+            sign_bit = 1 << (width - 1)
+            return wrapped if wrapped < sign_bit
 
-            wrapped.zero? ? 0 : wrapped - modulus
+            wrapped - modulus
           end
 
           def resolve_clock(name)

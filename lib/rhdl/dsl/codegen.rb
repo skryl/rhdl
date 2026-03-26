@@ -91,31 +91,36 @@ module RHDL
         end
 
         # Generate CIRCT MLIR for this component hierarchy.
-        # Imported components are always re-exported through the rebuilt
-        # RHDL/CIRCT path. `core_mlir_path` is retained only for call-site
-        # compatibility and is intentionally ignored here.
+        # When `core_mlir_path` is provided, imported modules may reuse their
+        # source MLIR text from that file to preserve constructs that the
+        # rebuilt RHDL path does not yet round-trip exactly (for example
+        # imported async-reset forms). Modules flagged as needing regeneration
+        # still flow back through the rebuilt RHDL/CIRCT path.
         def to_mlir_hierarchy(top_name: nil, core_mlir_path: nil)
-          _unused_core_mlir_path = core_mlir_path
-          ir_modules = []
+          source_module_texts = extract_module_texts_from_mlir(core_mlir_path)
 
-          collect_submodule_specs.each do |component_class, parameters|
-            ir_modules << component_class.to_circt_nodes(parameters: parameters || {})
+          module_texts = collect_submodule_specs.map do |component_class, parameters|
+            component_class.mlir_text_for_hierarchy_export(
+              source_module_texts: source_module_texts,
+              parameters: parameters || {}
+            )
           end
-          ir_modules << to_circt_nodes(top_name: top_name)
-
-          RHDL::Codegen::CIRCT::MLIR.generate(
-            RHDL::Codegen::CIRCT::IR::Package.new(modules: ir_modules)
+          module_texts << mlir_text_for_hierarchy_export(
+            source_module_texts: source_module_texts,
+            top_name: top_name
           )
+
+          module_texts.join("\n\n")
         end
 
-        # Returns true if this module's raw MLIR text has the broken async reset
-        # pattern where circt-verilog lowered `always @(posedge clk or negedge rst)`
-        # to `seq.compreg` with `comb.mux %clk` (using clock as a data selector).
-        # This pattern drops non-zero register values in async reset case arms.
-        # Modules matching this pattern are regenerated through the RHDL IR pipeline
-        # which correctly emits `seq.firreg ... reset async`.
+        # Returns true if this module's raw MLIR text has the broken
+        # clock-as-data-selector pattern where circt-verilog lowered clocked
+        # logic to `seq.compreg`/`seq.firreg` with `comb.mux %clk` or
+        # `comb.mux %CLK` feeding the next-state path. These modules need to be
+        # regenerated through the RHDL IR path for both hierarchy export and the
+        # legacy flat/runtime export path.
         def module_text_needs_regeneration?(text)
-          text.include?('seq.compreg') && text.match?(/comb\.mux\s+%clk\b/)
+          text.match?(/\bseq\.(?:compreg|firreg)\b/) && text.match?(/comb\.mux\s+%clk\b/i)
         end
 
         # Extract individual hw.module blocks from a raw MLIR file.
@@ -138,7 +143,7 @@ module RHDL
               current_lines << line
               depth += line.count('{') - line.count('}')
               if depth <= 0
-                texts[current_name] = current_lines.join
+                texts[current_name] = sanitize_hw_constant_literals_for_mlir(current_lines.join)
                 current_name = nil
                 current_lines = []
               end
@@ -146,6 +151,18 @@ module RHDL
           end
 
           texts
+        end
+
+        def sanitize_hw_constant_literals_for_mlir(text)
+          text.gsub(/hw\.constant\s+(-?\d+)(\s*:\s*i(\d+))/) do
+            literal = Regexp.last_match(1).to_i
+            width = Regexp.last_match(3).to_i
+            modulus = 1 << width
+            wrapped = literal % modulus
+            sign_bit = 1 << (width - 1)
+            canonical = wrapped < sign_bit ? wrapped : wrapped - modulus
+            "hw.constant #{canonical}#{Regexp.last_match(2)}"
+          end
         end
 
         # Returns the Verilog module name for this component
@@ -361,6 +378,7 @@ module RHDL
 
         def build_flat_circt_module(top_name: nil, prefix: '', parameters: {})
           name = top_name || verilog_module_name
+          resolved_params = resolve_codegen_parameters(parameters)
 
           all_ports = []
           all_nets = []
@@ -373,7 +391,16 @@ module RHDL
           net_names = Set.new
           reg_names = Set.new
 
-          ir = build_circt_module(top_name: name, parameters: parameters)
+          ir =
+            if prefer_imported_circt_flat_export?(parameters: parameters)
+              cached_imported_circt_module(top_name: name, parameters: parameters) ||
+                build_circt_module(top_name: name, parameters: parameters)
+            else
+              # Flat/runtime export normally rebuilds from the raised DSL
+              # structure so ordinary DSL components do not bypass current
+              # regeneration fixes.
+              build_circt_module(top_name: name, parameters: parameters)
+            end
 
           all_ports = ir.ports if prefix.empty?
 
@@ -471,6 +498,11 @@ module RHDL
                     target: child_signal,
                     expr: RHDL::Codegen::CIRCT::IR::Signal.new(name: parent_sig, width: port_width)
                   )
+                else
+                  all_assigns << RHDL::Codegen::CIRCT::IR::Assign.new(
+                    target: parent_sig,
+                    expr: RHDL::Codegen::CIRCT::IR::Signal.new(name: child_signal, width: port_width)
+                  )
                 end
 
                 append_flat_net!(all_nets, net_names, reg_names: reg_names, name: child_signal.to_sym, width: port_width)
@@ -482,7 +514,11 @@ module RHDL
                 next if port_def[:default].nil?
 
                 child_signal = "#{inst_prefix}__#{port_def[:name]}"
-                default_value = port_def[:default].is_a?(Proc) ? port_def[:default].call : port_def[:default].to_i
+                default_value = evaluate_port_default(
+                  port_def[:default],
+                  resolved_params: resolved_params,
+                  resolved_width: resolved_width
+                )
 
                 raw_width = port_def[:width]
                 resolved_width = if raw_width.is_a?(Symbol)
@@ -762,6 +798,27 @@ module RHDL
           end
         end
 
+        def evaluate_port_default(default_value, resolved_params:, resolved_width:)
+          return default_value.to_i unless default_value.is_a?(Proc)
+
+          eval_context = Object.new
+          resolved_params.each do |key, value|
+            eval_context.instance_variable_set(:"@#{key}", value)
+          end
+
+          result =
+            case default_value.arity
+            when 0
+              eval_context.instance_exec(&default_value)
+            when 1
+              eval_context.instance_exec(resolved_width, &default_value)
+            else
+              eval_context.instance_exec(resolved_width, resolved_params, &default_value)
+            end
+
+          result.to_i
+        end
+
         def prefix_circt_assign(assign, prefix)
           return assign if prefix.empty?
 
@@ -902,6 +959,8 @@ module RHDL
 
           base = instance_variable_get(:@_imported_circt_module)
           return nil unless base
+          base_text = instance_variable_get(:@_imported_circt_module_text)
+          return nil if base_text && module_text_needs_regeneration?(base_text)
 
           desired_name = top_name ? top_name.to_s : base.name.to_s
           return base if desired_name == base.name.to_s
@@ -933,6 +992,7 @@ module RHDL
           base = instance_variable_get(:@_imported_circt_module_text)
           mod = instance_variable_get(:@_imported_circt_module)
           return nil unless base && mod
+          return nil if module_text_needs_regeneration?(base)
 
           desired_name = top_name ? top_name.to_s : mod.name.to_s
           return base if desired_name == mod.name.to_s
@@ -950,6 +1010,88 @@ module RHDL
           cached_by_name[desired_name] = renamed
           instance_variable_set(:@_imported_circt_module_text_by_name, cached_by_name)
           renamed
+        end
+
+        def prefer_imported_circt_flat_export?(parameters:)
+          return false unless parameters.nil? || parameters.empty?
+
+          instance_variable_get(:@_raised_from_imported_circt) == true
+        end
+
+        def mlir_text_for_hierarchy_export(source_module_texts:, top_name: nil, parameters: {})
+          source_text = source_backed_mlir_text_for_hierarchy_export(
+            source_module_texts: source_module_texts,
+            top_name: top_name,
+            parameters: parameters
+          )
+          return source_text if source_text
+
+          imported_text = imported_circt_module_text_for_hierarchy_export(
+            top_name: top_name,
+            parameters: parameters
+          )
+          return imported_text if imported_text
+
+          to_ir(top_name: top_name, parameters: parameters)
+        end
+
+        def source_backed_mlir_text_for_hierarchy_export(source_module_texts:, top_name: nil, parameters: {})
+          return nil if source_module_texts.nil? || source_module_texts.empty?
+          return nil unless parameters.nil? || parameters.empty?
+
+          imported_module = cached_imported_circt_module(top_name: nil, parameters: parameters)
+          return nil unless imported_module
+
+          source_name = imported_module.name.to_s
+          source_text = source_module_texts[source_name]
+          return nil unless source_text
+
+          normalized_text = source_text.gsub(/\bhw\.module\s+private\s+@/, 'hw.module @').strip
+          return nil if module_text_needs_regeneration?(normalized_text)
+
+          desired_name = top_name ? top_name.to_s : source_name
+          return normalized_text if desired_name == source_name
+
+          header = /
+            ^
+            (?<prefix>\s*(?:hw|sv)\.module(?:\s+\w+)*\s+)
+            @#{Regexp.escape(source_name)}
+            (?=[(<\s])
+          /x
+          normalized_text.sub(header, "\\k<prefix>@#{desired_name}")
+        end
+
+        def imported_circt_module_text_for_hierarchy_export(top_name:, parameters: {})
+          return nil unless parameters.nil? || parameters.empty?
+          return nil unless instance_variable_get(:@_raised_from_imported_circt) == true
+
+          base = instance_variable_get(:@_imported_circt_module)
+          return nil unless base
+
+          desired_name = top_name ? top_name.to_s : base.name.to_s
+          mod =
+            if desired_name == base.name.to_s
+              base
+            else
+              cached_by_name = instance_variable_get(:@_imported_circt_module_by_name) || {}
+              cached_by_name[desired_name] ||= RHDL::Codegen::CIRCT::IR::ModuleOp.new(
+                name: desired_name,
+                ports: base.ports,
+                nets: base.nets,
+                regs: base.regs,
+                assigns: base.assigns,
+                processes: base.processes,
+                instances: base.instances,
+                memories: base.memories,
+                write_ports: base.write_ports,
+                sync_read_ports: base.sync_read_ports,
+                parameters: base.parameters
+              )
+              instance_variable_set(:@_imported_circt_module_by_name, cached_by_name)
+              cached_by_name[desired_name]
+            end
+
+          RHDL::Codegen::CIRCT::MLIR.generate(mod)
         end
 
         # Generate CIRCT IR from Memory DSL definitions

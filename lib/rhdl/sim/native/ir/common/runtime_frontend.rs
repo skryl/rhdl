@@ -156,12 +156,28 @@ pub fn normalize_mlir_payload(text: &str) -> Result<Value, String> {
         .iter()
         .map(|module_text| parse_mlir_module(module_text))
         .collect::<Result<Vec<_>, _>>()?;
-    let top_name = parsed
-        .last()
-        .map(|module| module.name.clone())
-        .ok_or_else(|| "No top module found in MLIR".to_string())?;
+    let top_name = select_top_module_name(&parsed)?;
     let flattened = flatten_modules(&parsed, &top_name)?;
     Ok(module_to_value(&flattened))
+}
+
+fn select_top_module_name(modules: &[FrontendModule]) -> Result<String, String> {
+    if modules.is_empty() {
+        return Err("No top module found in MLIR".to_string());
+    }
+
+    let instantiated = modules
+        .iter()
+        .flat_map(|module| module.instances.iter().map(|inst| inst.module_name.clone()))
+        .collect::<HashSet<_>>();
+
+    modules
+        .iter()
+        .rev()
+        .find(|module| !instantiated.contains(&module.name))
+        .map(|module| module.name.clone())
+        .or_else(|| modules.last().map(|module| module.name.clone()))
+        .ok_or_else(|| "No top module found in MLIR".to_string())
 }
 
 fn extract_hw_modules(text: &str) -> Result<Vec<String>, String> {
@@ -228,6 +244,7 @@ fn parse_mlir_module(module_text: &str) -> Result<FrontendModule, String> {
         .collect::<HashMap<_, _>>();
     let mut clock_aliases = HashMap::<String, String>::new();
     let mut constant_values = HashMap::<String, Value>::new();
+    let mut aggregate_arrays = HashMap::<String, Vec<Value>>::new();
     let mut output_exprs = Vec::<Value>::new();
 
     for raw_line in lines.iter().skip(1) {
@@ -243,6 +260,17 @@ fn parse_mlir_module(module_text: &str) -> Result<FrontendModule, String> {
 
         if line.starts_with("seq.firmem.write_port ") {
             parse_memory_write_port(&line, &mut module, &widths, &clock_aliases)?;
+            continue;
+        }
+
+        if line.starts_with("hw.instance ") {
+            parse_hw_instance(
+                &[],
+                &line,
+                &mut module,
+                &mut widths,
+                &clock_aliases,
+            )?;
             continue;
         }
 
@@ -267,8 +295,22 @@ fn parse_mlir_module(module_text: &str) -> Result<FrontendModule, String> {
 
         if rhs.starts_with("hw.constant ") {
             let lhs = expect_single_lhs(&lhs_values, "hw.constant")?;
-            let (value_text, ty) = split_once_required(rhs.trim_start_matches("hw.constant ").trim(), ':', "hw.constant")?;
-            let width = parse_scalar_width(ty.trim())?;
+            let constant_text = strip_trailing_attrs(rhs.trim_start_matches("hw.constant ").trim());
+            let (value_text, width) = if let Some((value_text, ty)) = constant_text.split_once(':') {
+                (value_text.trim(), parse_scalar_width(ty.trim())?)
+            } else {
+                let value_text = constant_text.trim();
+                let width = match value_text {
+                    "true" | "false" => 1,
+                    _ => {
+                        return Err(format!(
+                            "Missing ':' separator in hw.constant and could not infer type in module {}: {}",
+                            module_name, rhs
+                        ))
+                    }
+                };
+                (value_text, width)
+            };
             let literal = literal_expr(value_text.trim(), width);
             widths.insert(lhs.clone(), width);
             constant_values.insert(lhs.clone(), literal_value_only(value_text.trim()));
@@ -278,6 +320,99 @@ fn parse_mlir_module(module_text: &str) -> Result<FrontendModule, String> {
                 FrontendAssign {
                     target: lhs,
                     expr: literal,
+                },
+            );
+            continue;
+        }
+
+        if rhs.starts_with("hw.array_create ") {
+            let lhs = expect_single_lhs(&lhs_values, "hw.array_create")?;
+            let (elements_text, type_text) = split_once_required(
+                rhs.trim_start_matches("hw.array_create ").trim(),
+                ':',
+                "hw.array_create"
+            )?;
+            reject_aggregate_type(type_text.trim(), "hw.array_create")?;
+            let element_width = parse_scalar_width(type_text.trim())?;
+            let mut elements = split_top_level(elements_text, ',')
+                .into_iter()
+                .filter(|entry| !entry.trim().is_empty())
+                .map(|entry| operand_expr(&entry, &widths, Some(element_width), &clock_aliases))
+                .collect::<Result<Vec<_>, _>>()?;
+            elements.reverse();
+            aggregate_arrays.insert(lhs, elements);
+            continue;
+        }
+
+        if rhs.starts_with("hw.aggregate_constant ") {
+            let lhs = expect_single_lhs(&lhs_values, "hw.aggregate_constant")?;
+            let rest = rhs.trim_start_matches("hw.aggregate_constant ").trim();
+            let (elements_text, type_text) = split_once_required(rest, ':', "hw.aggregate_constant")?;
+            let array_type = parse_hw_array_type(type_text.trim())?;
+            let mut elements = split_top_level(
+                elements_text
+                    .trim()
+                    .trim_start_matches('[')
+                    .trim_end_matches(']'),
+                ','
+            )
+                .into_iter()
+                .filter(|entry| !entry.trim().is_empty())
+                .map(|entry| {
+                    let (value_text, entry_type) = split_once_required(&entry, ':', "hw.aggregate_constant element")?;
+                    reject_aggregate_type(entry_type.trim(), "hw.aggregate_constant element")?;
+                    let width = parse_scalar_width(entry_type.trim())?;
+                    if width != array_type.1 {
+                        return Err(format!(
+                            "hw.aggregate_constant element width mismatch: expected {}, got {}",
+                            array_type.1,
+                            width
+                        ));
+                    }
+                    Ok(literal_expr(value_text.trim(), width))
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            elements.reverse();
+            aggregate_arrays.insert(lhs, elements);
+            continue;
+        }
+
+        if rhs.starts_with("hw.array_get ") {
+            let lhs = expect_single_lhs(&lhs_values, "hw.array_get")?;
+            let rest = rhs.trim_start_matches("hw.array_get ").trim();
+            let (target_text, type_text) = split_once_required(rest, ':', "hw.array_get")?;
+            let (array_name, index_text) = parse_memory_access_target(target_text.trim())?;
+            let type_parts = split_top_level(type_text, ',');
+            if type_parts.len() != 2 {
+                return Err(format!("Invalid hw.array_get types in module {}: {}", module_name, rhs));
+            }
+            let (array_len, element_width) = parse_hw_array_type(type_parts[0].trim())?;
+            reject_aggregate_type(type_parts[1].trim(), "hw.array_get index")?;
+            let index_width = parse_scalar_width(type_parts[1].trim())?;
+            let elements = aggregate_arrays
+                .get(&array_name)
+                .cloned()
+                .ok_or_else(|| format!("Unknown hw.array_get source {}", array_name))?;
+            if elements.len() != array_len {
+                return Err(format!(
+                    "hw.array_get source {} expected {} elements, got {}",
+                    array_name,
+                    array_len,
+                    elements.len()
+                ));
+            }
+            append_net(&mut module.nets, &lhs, element_width);
+            widths.insert(lhs.clone(), element_width);
+            append_assign(
+                &mut module.assigns,
+                FrontendAssign {
+                    target: lhs,
+                    expr: select_array_element_expr(
+                        &elements,
+                        operand_expr(&index_text, &widths, Some(index_width), &clock_aliases)?,
+                        index_width,
+                        element_width,
+                    ),
                 },
             );
             continue;
@@ -337,6 +472,22 @@ fn parse_mlir_module(module_text: &str) -> Result<FrontendModule, String> {
             continue;
         }
 
+        if rhs.starts_with("comb.replicate ") {
+            let lhs = expect_single_lhs(&lhs_values, "comb.replicate")?;
+            let rest = rhs.trim_start_matches("comb.replicate ").trim();
+            let (width, expr) = build_comb_replicate_expr(rest, &widths, &clock_aliases, module_name.as_str(), rhs)?;
+            append_net(&mut module.nets, &lhs, width);
+            widths.insert(lhs.clone(), width);
+            append_assign(
+                &mut module.assigns,
+                FrontendAssign {
+                    target: lhs,
+                    expr,
+                },
+            );
+            continue;
+        }
+
         if rhs.starts_with("comb.extract ") {
             let lhs = expect_single_lhs(&lhs_values, "comb.extract")?;
             let rest = rhs.trim_start_matches("comb.extract ").trim();
@@ -349,7 +500,7 @@ fn parse_mlir_module(module_text: &str) -> Result<FrontendModule, String> {
                 .ok_or_else(|| format!("Invalid comb.extract result type in module {}: {}", module_name, rhs))?;
             reject_aggregate_type(result_ty.trim(), "comb.extract")?;
             let width = parse_scalar_width(result_ty.trim())?;
-            let low = low_text
+            let low = strip_trailing_attrs(low_text)
                 .trim()
                 .parse::<usize>()
                 .map_err(|e| format!("Invalid comb.extract offset {}: {}", low_text.trim(), e))?;
@@ -404,25 +555,46 @@ fn parse_mlir_module(module_text: &str) -> Result<FrontendModule, String> {
             let mut op_split = without_prefix.splitn(2, char::is_whitespace);
             let mlir_op = op_split.next().unwrap_or("").trim();
             let rest = op_split.next().unwrap_or("").trim();
+            if mlir_op == "replicate" {
+                let (width, expr) = build_comb_replicate_expr(rest, &widths, &clock_aliases, module_name.as_str(), rhs)?;
+                append_net(&mut module.nets, &lhs, width);
+                widths.insert(lhs.clone(), width);
+                append_assign(
+                    &mut module.assigns,
+                    FrontendAssign {
+                        target: lhs,
+                        expr,
+                    },
+                );
+                continue;
+            }
             let (args_text, ty_text) = split_once_required(rest, ':', mlir_op)?;
             reject_aggregate_type(ty_text.trim(), mlir_op)?;
             let width = parse_scalar_width(ty_text.trim())?;
             let args = split_top_level(args_text, ',');
-            if args.len() != 2 {
+            if args.len() < 2 {
                 return Err(format!("Invalid comb op arity for {} in module {}: {}", mlir_op, module_name, rhs));
             }
+            if args.len() > 2 && !comb_op_supports_variadic_operands(mlir_op) {
+                return Err(format!("Invalid comb op arity for {} in module {}: {}", mlir_op, module_name, rhs));
+            }
+            let runtime_op = comb_binary_op_to_runtime_op(mlir_op)?;
             append_net(&mut module.nets, &lhs, width);
             widths.insert(lhs.clone(), width);
+            let mut expr = operand_expr(&args[0], &widths, None, &clock_aliases)?;
+            for arg in args.iter().skip(1) {
+                expr = binary_expr(
+                    runtime_op,
+                    expr,
+                    operand_expr(arg, &widths, None, &clock_aliases)?,
+                    width,
+                );
+            }
             append_assign(
                 &mut module.assigns,
                 FrontendAssign {
                     target: lhs,
-                    expr: binary_expr(
-                        comb_binary_op_to_runtime_op(mlir_op)?,
-                        operand_expr(&args[0], &widths, None, &clock_aliases)?,
-                        operand_expr(&args[1], &widths, None, &clock_aliases)?,
-                        width,
-                    ),
+                    expr,
                 },
             );
             continue;
@@ -477,10 +649,7 @@ fn parse_mlir_module(module_text: &str) -> Result<FrontendModule, String> {
             continue;
         }
 
-        if rhs.starts_with("hw.array_")
-            || rhs.starts_with("hw.aggregate_constant ")
-            || rhs.starts_with("hw.bitcast ")
-        {
+        if rhs.starts_with("hw.array_") || rhs.starts_with("hw.aggregate_constant ") || rhs.starts_with("hw.bitcast ") {
             return Err(format!("Unsupported MLIR operation for native runtime frontend: {}", rhs));
         }
 
@@ -502,6 +671,8 @@ fn parse_mlir_module(module_text: &str) -> Result<FrontendModule, String> {
             expr,
         });
     }
+
+    canonicalize_module_signal_widths(&mut module);
 
     Ok(module)
 }
@@ -591,26 +762,39 @@ fn parse_seq_firreg(
     let (input_text, after_clock) = before_type
         .split_once(" clock ")
         .ok_or_else(|| format!("Invalid seq.firreg syntax: {}", rhs))?;
-    let (clock_text, reset_value) = if let Some((clock_part, reset_part)) = after_clock.split_once(" reset async ") {
-        let (_, value_text) = split_once_required(reset_part, ',', "seq.firreg reset")?;
+    let (clock_text, reset_signal, reset_expr, reset_value) = if let Some((clock_part, reset_part)) = after_clock.split_once(" reset async ") {
+        let (signal_text, value_text) = split_once_required(reset_part, ',', "seq.firreg reset")?;
         let reset_name = normalize_value_name(value_text.trim());
         (
             clock_part.trim(),
+            Some(signal_text.trim().to_string()),
+            Some(operand_expr(value_text, widths, Some(width), clock_aliases)?),
             constant_values.get(&reset_name).cloned(),
         )
     } else {
-        (after_clock.trim(), None)
+        (after_clock.trim(), None, None, None)
     };
 
     widths.insert(lhs.to_string(), width);
     append_reg(&mut module.regs, lhs, width, reset_value.clone());
+    let input_expr = operand_expr(input_text, widths, Some(width), clock_aliases)?;
+    let seq_expr = if let (Some(reset_signal), Some(reset_expr)) = (reset_signal.as_ref(), reset_expr) {
+        mux_expr(
+            operand_expr(reset_signal, widths, Some(1), clock_aliases)?,
+            reset_expr,
+            input_expr,
+            width,
+        )
+    } else {
+        input_expr
+    };
     module.processes.push(FrontendProcess {
         name: format!("seq__{}", lhs),
         clock: Some(resolve_clock_name(&normalize_value_name(clock_text), clock_aliases)),
         clocked: true,
         statements: vec![FrontendSeqAssign {
             target: lhs.to_string(),
-            expr: operand_expr(input_text, widths, Some(width), clock_aliases)?,
+            expr: seq_expr,
         }],
     });
     Ok(())
@@ -630,26 +814,39 @@ fn parse_seq_compreg(
     let width = parse_scalar_width(type_text.trim())?;
 
     let (data_text, after_data) = split_once_required(before_type, ',', "seq.compreg")?;
-    let (clock_text, reset_value) = if let Some((clock_part, reset_part)) = after_data.trim().split_once(" reset ") {
-        let (_, value_text) = split_once_required(reset_part, ',', "seq.compreg reset")?;
+    let (clock_text, reset_signal, reset_expr, reset_value) = if let Some((clock_part, reset_part)) = after_data.trim().split_once(" reset ") {
+        let (signal_text, value_text) = split_once_required(reset_part, ',', "seq.compreg reset")?;
         let reset_name = normalize_value_name(value_text.trim());
         (
             clock_part.trim(),
+            Some(signal_text.trim().to_string()),
+            Some(operand_expr(value_text, widths, Some(width), clock_aliases)?),
             constant_values.get(&reset_name).cloned(),
         )
     } else {
-        (after_data.trim(), None)
+        (after_data.trim(), None, None, None)
     };
 
     widths.insert(lhs.to_string(), width);
     append_reg(&mut module.regs, lhs, width, reset_value.clone());
+    let data_expr = operand_expr(data_text, widths, Some(width), clock_aliases)?;
+    let seq_expr = if let (Some(reset_signal), Some(reset_expr)) = (reset_signal.as_ref(), reset_expr) {
+        mux_expr(
+            operand_expr(reset_signal, widths, Some(1), clock_aliases)?,
+            reset_expr,
+            data_expr,
+            width,
+        )
+    } else {
+        data_expr
+    };
     module.processes.push(FrontendProcess {
         name: format!("seq__{}", lhs),
         clock: Some(resolve_clock_name(&normalize_value_name(clock_text), clock_aliases)),
         clocked: true,
         statements: vec![FrontendSeqAssign {
             target: lhs.to_string(),
-            expr: operand_expr(data_text, widths, Some(width), clock_aliases)?,
+            expr: seq_expr,
         }],
     });
     Ok(())
@@ -1348,6 +1545,110 @@ fn append_net(nets: &mut Vec<FrontendNet>, name: &str, width: usize) {
     });
 }
 
+fn canonicalize_module_signal_widths(module: &mut FrontendModule) {
+    let mut widths = HashMap::<String, usize>::new();
+    for port in &module.ports {
+        widths.insert(port.name.clone(), port.width);
+    }
+    for net in &module.nets {
+        widths.insert(net.name.clone(), net.width);
+    }
+    for reg in &module.regs {
+        widths.insert(reg.name.clone(), reg.width);
+    }
+
+    for assign in &mut module.assigns {
+        canonicalize_expr_signal_widths(&mut assign.expr, &widths);
+    }
+    for process in &mut module.processes {
+        for statement in &mut process.statements {
+            canonicalize_expr_signal_widths(&mut statement.expr, &widths);
+        }
+    }
+    for instance in &mut module.instances {
+        for connection in &mut instance.connections {
+            if let Some(expr) = &mut connection.expr {
+                canonicalize_expr_signal_widths(expr, &widths);
+            }
+        }
+    }
+    for write_port in &mut module.write_ports {
+        canonicalize_expr_signal_widths(&mut write_port.addr, &widths);
+        canonicalize_expr_signal_widths(&mut write_port.data, &widths);
+        canonicalize_expr_signal_widths(&mut write_port.enable, &widths);
+    }
+    for read_port in &mut module.sync_read_ports {
+        canonicalize_expr_signal_widths(&mut read_port.addr, &widths);
+        if let Some(enable) = &mut read_port.enable {
+            canonicalize_expr_signal_widths(enable, &widths);
+        }
+    }
+}
+
+fn canonicalize_expr_signal_widths(expr: &mut Value, widths: &HashMap<String, usize>) {
+    let Some(obj) = expr.as_object_mut() else {
+        return;
+    };
+
+    match obj.get("kind").and_then(Value::as_str).unwrap_or("") {
+        "signal" => {
+            let Some(name) = obj.get("name").and_then(Value::as_str) else {
+                return;
+            };
+            if let Some(&width) = widths.get(name) {
+                obj.insert("width".to_string(), Value::from(width as u64));
+            }
+        }
+        "unary" => {
+            if let Some(operand) = obj.get_mut("operand") {
+                canonicalize_expr_signal_widths(operand, widths);
+            }
+        }
+        "binary" => {
+            if let Some(left) = obj.get_mut("left") {
+                canonicalize_expr_signal_widths(left, widths);
+            }
+            if let Some(right) = obj.get_mut("right") {
+                canonicalize_expr_signal_widths(right, widths);
+            }
+        }
+        "mux" => {
+            if let Some(condition) = obj.get_mut("condition") {
+                canonicalize_expr_signal_widths(condition, widths);
+            }
+            if let Some(when_true) = obj.get_mut("when_true") {
+                canonicalize_expr_signal_widths(when_true, widths);
+            }
+            if let Some(when_false) = obj.get_mut("when_false") {
+                canonicalize_expr_signal_widths(when_false, widths);
+            }
+        }
+        "slice" => {
+            if let Some(base) = obj.get_mut("base") {
+                canonicalize_expr_signal_widths(base, widths);
+            }
+        }
+        "concat" => {
+            if let Some(parts) = obj.get_mut("parts").and_then(Value::as_array_mut) {
+                for part in parts {
+                    canonicalize_expr_signal_widths(part, widths);
+                }
+            }
+        }
+        "resize" => {
+            if let Some(inner) = obj.get_mut("expr") {
+                canonicalize_expr_signal_widths(inner, widths);
+            }
+        }
+        "memory_read" => {
+            if let Some(addr) = obj.get_mut("addr") {
+                canonicalize_expr_signal_widths(addr, widths);
+            }
+        }
+        _ => {}
+    }
+}
+
 fn append_reg(regs: &mut Vec<FrontendReg>, name: &str, width: usize, reset_value: Option<Value>) {
     if regs.iter().any(|reg| reg.name == name) {
         return;
@@ -1414,10 +1715,14 @@ fn comb_binary_op_to_runtime_op(mlir_op: &str) -> Result<&'static str, String> {
     }
 }
 
+fn comb_op_supports_variadic_operands(mlir_op: &str) -> bool {
+    matches!(mlir_op, "add" | "mul" | "and" | "or" | "xor")
+}
+
 fn icmp_predicate_to_op(pred: &str) -> Result<&'static str, String> {
     match pred {
-        "eq" => Ok("=="),
-        "ne" => Ok("!="),
+        "eq" | "ceq" => Ok("=="),
+        "ne" | "cne" => Ok("!="),
         "ult" | "slt" => Ok("<"),
         "ugt" | "sgt" => Ok(">"),
         "ule" | "sle" => Ok("<="),
@@ -1465,6 +1770,24 @@ fn parse_firmem_type(ty: &str) -> Result<(usize, usize), String> {
     Ok((depth, width))
 }
 
+fn parse_hw_array_type(ty: &str) -> Result<(usize, usize), String> {
+    let trimmed = ty.trim();
+    let inner = trimmed
+        .strip_prefix("!hw.array<")
+        .and_then(|value| value.strip_suffix('>'))
+        .ok_or_else(|| format!("Invalid hw.array type {}", trimmed))?;
+    let (len_text, elem_type) = inner
+        .split_once('x')
+        .ok_or_else(|| format!("Invalid hw.array shape {}", trimmed))?;
+    reject_aggregate_type(elem_type.trim(), "hw.array element")?;
+    let len = len_text
+        .trim()
+        .parse::<usize>()
+        .map_err(|e| format!("Invalid hw.array length {}: {}", len_text.trim(), e))?;
+    let width = parse_scalar_width(elem_type.trim())?;
+    Ok((len, width))
+}
+
 fn parse_memory_access_target(text: &str) -> Result<(String, String), String> {
     let open = text
         .find('[')
@@ -1497,6 +1820,7 @@ fn split_once_top_level(text: &str, delimiter: char) -> Option<(&str, &str)> {
     let mut paren_depth = 0i32;
     let mut bracket_depth = 0i32;
     let mut angle_depth = 0i32;
+    let mut brace_depth = 0i32;
     let mut in_string = false;
 
     for (idx, ch) in text.char_indices() {
@@ -1508,10 +1832,18 @@ fn split_once_top_level(text: &str, delimiter: char) -> Option<(&str, &str)> {
             ']' if !in_string => bracket_depth -= 1,
             '<' if !in_string => angle_depth += 1,
             '>' if !in_string => angle_depth -= 1,
+            '{' if !in_string => brace_depth += 1,
+            '}' if !in_string => brace_depth -= 1,
             _ => {}
         }
 
-        if ch == delimiter && !in_string && paren_depth == 0 && bracket_depth == 0 && angle_depth == 0 {
+        if ch == delimiter
+            && !in_string
+            && paren_depth == 0
+            && bracket_depth == 0
+            && angle_depth == 0
+            && brace_depth == 0
+        {
             return Some((&text[..idx], &text[idx + ch.len_utf8()..]));
         }
     }
@@ -1525,6 +1857,7 @@ fn split_top_level(text: &str, delimiter: char) -> Vec<String> {
     let mut paren_depth = 0i32;
     let mut bracket_depth = 0i32;
     let mut angle_depth = 0i32;
+    let mut brace_depth = 0i32;
     let mut in_string = false;
 
     for (idx, ch) in text.char_indices() {
@@ -1536,10 +1869,18 @@ fn split_top_level(text: &str, delimiter: char) -> Vec<String> {
             ']' if !in_string => bracket_depth -= 1,
             '<' if !in_string => angle_depth += 1,
             '>' if !in_string => angle_depth -= 1,
+            '{' if !in_string => brace_depth += 1,
+            '}' if !in_string => brace_depth -= 1,
             _ => {}
         }
 
-        if ch == delimiter && !in_string && paren_depth == 0 && bracket_depth == 0 && angle_depth == 0 {
+        if ch == delimiter
+            && !in_string
+            && paren_depth == 0
+            && bracket_depth == 0
+            && angle_depth == 0
+            && brace_depth == 0
+        {
             out.push(text[start..idx].trim().to_string());
             start = idx + ch.len_utf8();
         }
@@ -1591,7 +1932,28 @@ fn code_for(line: &str) -> String {
 }
 
 fn normalize_value_name(token: &str) -> String {
-    token.trim().trim_start_matches('%').to_string()
+    strip_trailing_attrs(token.trim())
+        .trim_start_matches('%')
+        .replace('.', "__")
+}
+
+fn strip_trailing_attrs(text: &str) -> String {
+    let mut trimmed = text.trim().to_string();
+
+    loop {
+        let Some(open_idx) = trimmed.rfind('{') else {
+            break;
+        };
+        let Some(close_idx) = matching_delimiter(&trimmed, open_idx, '{', '}') else {
+            break;
+        };
+        if !trimmed[close_idx + 1..].trim().is_empty() {
+            break;
+        }
+        trimmed = trimmed[..open_idx].trim_end().to_string();
+    }
+
+    trimmed
 }
 
 fn resolve_clock_name(token: &str, clock_aliases: &HashMap<String, String>) -> String {
@@ -1630,8 +1992,107 @@ fn memory_addr_width(depth: usize) -> usize {
     (usize::BITS - (depth.saturating_sub(1)).leading_zeros()) as usize
 }
 
+fn select_array_element_expr(elements: &[Value], index_expr: Value, index_width: usize, element_width: usize) -> Value {
+    if elements.is_empty() {
+        return literal_expr("0", element_width.max(1));
+    }
+
+    build_index_select_tree(
+        elements
+            .iter()
+            .cloned()
+            .enumerate()
+            .map(|(idx, expr)| (idx, expr))
+            .collect(),
+        index_expr,
+        index_width.max(1),
+        elements[0].clone(),
+        element_width,
+    )
+}
+
+fn build_index_select_tree(
+    entries: Vec<(usize, Value)>,
+    index_expr: Value,
+    index_width: usize,
+    default_expr: Value,
+    element_width: usize,
+) -> Value {
+    if entries.is_empty() {
+        return default_expr;
+    }
+
+    if entries.len() == 1 {
+        let (idx, element_expr) = entries[0].clone();
+        let cond = binary_expr(
+            "==",
+            index_expr,
+            literal_expr(&idx.to_string(), index_width),
+            1,
+        );
+        return mux_expr(cond, element_expr, default_expr, element_width);
+    }
+
+    let mid = entries.len() / 2;
+    let left_entries = entries[..mid].to_vec();
+    let right_entries = entries[mid..].to_vec();
+    let pivot = right_entries[0].0;
+    let left_expr = build_index_select_tree(
+        left_entries,
+        index_expr.clone(),
+        index_width,
+        default_expr.clone(),
+        element_width,
+    );
+    let right_expr = build_index_select_tree(
+        right_entries,
+        index_expr.clone(),
+        index_width,
+        default_expr,
+        element_width,
+    );
+    let cond = binary_expr(
+        "<",
+        index_expr,
+        literal_expr(&pivot.to_string(), index_width),
+        1,
+    );
+    mux_expr(cond, left_expr, right_expr, element_width)
+}
+
+fn build_comb_replicate_expr(
+    rest: &str,
+    widths: &HashMap<String, usize>,
+    clock_aliases: &HashMap<String, String>,
+    module_name: &str,
+    rhs: &str,
+) -> Result<(usize, Value), String> {
+    let (value_text, type_text) = split_once_required(rest, ':', "comb.replicate")?;
+    let (input_ty, output_ty) = type_text
+        .split_once("->")
+        .ok_or_else(|| format!("Invalid comb.replicate result type in module {}: {}", module_name, rhs))?;
+    let input_ty = input_ty.trim().trim_start_matches('(').trim_end_matches(')');
+    reject_aggregate_type(input_ty, "comb.replicate input")?;
+    reject_aggregate_type(output_ty.trim(), "comb.replicate output")?;
+    let input_width = parse_scalar_width(input_ty)?;
+    let width = parse_scalar_width(output_ty.trim())?;
+    if input_width == 0 || width == 0 || width % input_width != 0 {
+        return Err(format!("Invalid comb.replicate width relation in module {}: {}", module_name, rhs));
+    }
+    let repeat = width / input_width;
+    Ok((
+        width,
+        concat_expr(
+            (0..repeat)
+                .map(|_| operand_expr(value_text, widths, Some(input_width), clock_aliases))
+                .collect::<Result<Vec<_>, _>>()?,
+            width,
+        ),
+    ))
+}
+
 fn literal_value_only(value: &str) -> Value {
-    Value::String(value.trim().to_string())
+    literal_json_value(value)
 }
 
 fn signal_expr(name: &str, width: usize) -> Value {
@@ -1645,9 +2106,17 @@ fn signal_expr(name: &str, width: usize) -> Value {
 fn literal_expr(value: &str, width: usize) -> Value {
     let mut out = Map::new();
     out.insert("kind".to_string(), Value::String("literal".to_string()));
-    out.insert("value".to_string(), Value::String(value.trim().to_string()));
+    out.insert("value".to_string(), literal_json_value(value));
     out.insert("width".to_string(), Value::from(width as u64));
     Value::Object(out)
+}
+
+fn literal_json_value(value: &str) -> Value {
+    match value.trim() {
+        "true" => Value::Bool(true),
+        "false" => Value::Bool(false),
+        other => Value::String(other.to_string()),
+    }
 }
 
 fn unary_expr(op: &str, operand: Value, width: usize) -> Value {
@@ -1895,88 +2364,83 @@ fn process_to_normalized_value(value: &Value, expr_pool: &[Value]) -> Result<Val
 
 fn flatten_statements(statements: Vec<Value>, expr_pool: &[Value]) -> Result<Vec<Value>, String> {
     let mut out = Vec::new();
+    let mut effective_targets = HashMap::new();
+    flatten_statements_with_guard(statements, None, &mut out, expr_pool, &mut effective_targets)?;
+    Ok(out)
+}
+
+fn flatten_statements_with_guard(
+    statements: Vec<Value>,
+    guard: Option<Value>,
+    out: &mut Vec<Value>,
+    expr_pool: &[Value],
+    effective_targets: &mut HashMap<String, Value>,
+) -> Result<(), String> {
     for stmt in statements {
         let stmt_obj = as_object(&stmt, "statement")?;
         match stmt_obj.get("kind").and_then(Value::as_str).unwrap_or("") {
             "seq_assign" => {
+                let target = value_to_string(stmt_obj.get("target"));
+                let assigned_expr = expr_to_normalized_value(stmt_obj.get("expr"), expr_pool)?;
+                let width = expr_width(Some(&assigned_expr)).unwrap_or(8);
+                let prior_expr = effective_targets
+                    .get(&target)
+                    .cloned()
+                    .unwrap_or_else(|| signal_expr(&target, width));
+                let expr = match &guard {
+                    Some(path_guard) => mux_expr(
+                        path_guard.clone(),
+                        assigned_expr,
+                        prior_expr,
+                        width,
+                    ),
+                    None => assigned_expr,
+                };
+                effective_targets.insert(target.clone(), expr.clone());
                 let mut seq = Map::new();
-                seq.insert(
-                    "target".to_string(),
-                    Value::String(value_to_string(stmt_obj.get("target"))),
-                );
-                seq.insert("expr".to_string(), expr_to_normalized_value(stmt_obj.get("expr"), expr_pool)?);
+                seq.insert("target".to_string(), Value::String(target));
+                seq.insert("expr".to_string(), expr);
                 out.push(Value::Object(seq));
             }
-            "if" => flatten_if(stmt_obj, &mut out, expr_pool)?,
+            "if" => flatten_if(stmt_obj, guard.clone(), out, expr_pool, effective_targets)?,
             _ => {}
         }
     }
-    Ok(out)
+    Ok(())
 }
 
-fn flatten_if(if_obj: &Map<String, Value>, out: &mut Vec<Value>, expr_pool: &[Value]) -> Result<(), String> {
+fn combine_path_guard(guard: Option<Value>, cond: Value) -> Value {
+    match guard {
+        Some(path_guard) => binary_expr("&", path_guard, cond, 1),
+        None => cond,
+    }
+}
+
+fn flatten_if(
+    if_obj: &Map<String, Value>,
+    guard: Option<Value>,
+    out: &mut Vec<Value>,
+    expr_pool: &[Value],
+    effective_targets: &mut HashMap<String, Value>,
+) -> Result<(), String> {
     let cond = expr_to_normalized_value(if_obj.get("condition"), expr_pool)?;
+    let then_guard = combine_path_guard(guard.clone(), cond.clone());
+    flatten_statements_with_guard(
+        array_field(if_obj, "then_statements"),
+        Some(then_guard),
+        out,
+        expr_pool,
+        effective_targets,
+    )?;
 
-    let mut then_assigns: HashMap<String, Value> = HashMap::new();
-    for stmt in array_field(if_obj, "then_statements") {
-        let obj = as_object(&stmt, "if.then statement")?;
-        match obj.get("kind").and_then(Value::as_str).unwrap_or("") {
-            "seq_assign" => {
-                then_assigns.insert(
-                    value_to_string(obj.get("target")),
-                    expr_to_normalized_value(obj.get("expr"), expr_pool)?,
-                );
-            }
-            "if" => flatten_if(obj, out, expr_pool)?,
-            _ => {}
-        }
-    }
-
-    let mut else_assigns: HashMap<String, Value> = HashMap::new();
-    for stmt in array_field(if_obj, "else_statements") {
-        let obj = as_object(&stmt, "if.else statement")?;
-        match obj.get("kind").and_then(Value::as_str).unwrap_or("") {
-            "seq_assign" => {
-                else_assigns.insert(
-                    value_to_string(obj.get("target")),
-                    expr_to_normalized_value(obj.get("expr"), expr_pool)?,
-                );
-            }
-            "if" => flatten_if(obj, out, expr_pool)?,
-            _ => {}
-        }
-    }
-
-    let mut all_targets: Vec<String> = then_assigns
-        .keys()
-        .chain(else_assigns.keys())
-        .cloned()
-        .collect();
-    all_targets.sort();
-    all_targets.dedup();
-
-    for target in all_targets {
-        let then_expr = then_assigns.get(&target).cloned();
-        let else_expr = else_assigns.get(&target).cloned();
-        let width = expr_width(then_expr.as_ref().or(else_expr.as_ref())).unwrap_or(8);
-
-        let mux_expr = match (then_expr, else_expr) {
-            (Some(t), Some(f)) => mux_expr(cond.clone(), t, f, width),
-            (Some(t), None) => mux_expr(cond.clone(), t, signal_expr(&target, width), width),
-            (None, Some(f)) => mux_expr(
-                unary_expr("~", cond.clone(), 1),
-                f,
-                signal_expr(&target, width),
-                width,
-            ),
-            (None, None) => continue,
-        };
-
-        let mut seq = Map::new();
-        seq.insert("target".to_string(), Value::String(target));
-        seq.insert("expr".to_string(), mux_expr);
-        out.push(Value::Object(seq));
-    }
+    let else_guard = combine_path_guard(guard, binary_expr("^", cond, literal_expr("1", 1), 1));
+    flatten_statements_with_guard(
+        array_field(if_obj, "else_statements"),
+        Some(else_guard),
+        out,
+        expr_pool,
+        effective_targets,
+    )?;
 
     Ok(())
 }

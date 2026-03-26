@@ -173,13 +173,25 @@ module RHDL
             raise Array(import_result.diagnostics).join("\n") unless import_result.success?
 
             cleaned_mlir = File.read(import_result.normalized_core_mlir_path)
-            imported = RHDL::Codegen.import_circt_mlir(cleaned_mlir, strict: false, top: 'ao486')
-            raise Array(imported.diagnostics).join("\n") unless imported.success?
+            component_result = RHDL::Codegen::CIRCT::Raise.to_components(
+              cleaned_mlir,
+              namespace: Module.new,
+              top: 'ao486',
+              strict: false
+            )
+            raise Array(component_result.diagnostics).join("\n") unless component_result.success?
 
-            flat = RHDL::Codegen::CIRCT::Flatten.to_flat_module(imported.modules, top: 'ao486')
+            component = component_result.components.fetch('ao486') do
+              raise "Raised AO486 component set did not define top component 'ao486'"
+            end
+            regenerated_mlir = component.to_mlir_hierarchy(
+              top_name: 'ao486',
+              core_mlir_path: import_result.normalized_core_mlir_path
+            )
             {
               backend: backend,
-              ir_json: RHDL::Sim::Native::IR.sim_json(flat, backend: backend),
+              ir_payload: regenerated_mlir,
+              input_format: :mlir,
               import_result: import_result
             }
           end
@@ -188,14 +200,8 @@ module RHDL
         def self.build_from_cleaned_mlir(mlir_text, backend: preferred_import_backend)
           raise ArgumentError, 'IrRunner imported AO486 runtime requires an IR compiler or JIT backend' unless backend
 
-          imported = RHDL::Codegen.import_circt_mlir(mlir_text, strict: false, top: 'ao486')
-          raise ArgumentError, Array(imported.diagnostics).join("\n") unless imported.success?
-
-          flat = RHDL::Codegen::CIRCT::Flatten.to_flat_module(imported.modules, top: 'ao486')
-          ir_json = RHDL::Sim::Native::IR.sim_json(flat, backend: backend)
-
           new(backend: backend, headless: true).tap do |runner|
-            runner.send(:initialize_imported_parity_runtime!, ir_json)
+            runner.send(:initialize_imported_parity_runtime!, mlir_text, input_format: :mlir)
           end
         end
 
@@ -485,9 +491,13 @@ module RHDL
           @imported_parity_mode
         end
 
-        def initialize_imported_parity_runtime!(ir_json)
+        def initialize_imported_parity_runtime!(ir_payload, input_format: nil)
           @parity_sim_factory = lambda {
-            RHDL::Sim::Native::IR::Simulator.new(ir_json, backend: sim_backend || self.class.preferred_import_backend)
+            RHDL::Sim::Native::IR::Simulator.new(
+              ir_payload,
+              backend: sim_backend || self.class.preferred_import_backend,
+              input_format: input_format
+            )
           }
           @imported_parity_mode = true
           @sim = nil
@@ -577,8 +587,9 @@ module RHDL
 
           bundle = self.class.runtime_bundle(backend: sim_backend || :compile)
           @sim = RHDL::Sim::Native::IR::Simulator.new(
-            bundle.fetch(:ir_json),
-            backend: bundle.fetch(:backend)
+            bundle.fetch(:ir_payload),
+            backend: bundle.fetch(:backend),
+            input_format: bundle.fetch(:input_format)
           )
           raise "Imported AO486 runner did not bind to native :ao486 mode" unless @sim.runner_kind == :ao486
 

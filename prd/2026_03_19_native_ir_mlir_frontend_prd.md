@@ -39,6 +39,8 @@ The immediate goal is narrower than the broader import/export unification discus
   - Mitigation: keep the backend-facing normalized IR shape stable and run targeted parity checks across all available native backends.
 - Risk: hierarchy flattening semantics could diverge from the existing Ruby flatten path.
   - Mitigation: add a dedicated hierarchical MLIR spec that checks both top-level outputs and flattened instance-visible signals.
+- Risk: AO486 clean imported runtime still depends on a broader reference-frontend/l1-icache path that is already red outside the new MLIR frontend work.
+  - Mitigation: keep the MLIR frontend rollout focused on frontend/export correctness, and track AO486 boot-state failures separately once they are shown to reproduce on the legacy flattened-runtime path too.
 
 ## Acceptance Criteria
 
@@ -100,6 +102,7 @@ Exit Criteria:
 - [x] Phase 2 shared native frontend implemented
 - [x] Phase 2 MLIR execution specs green
 - [ ] Phase 3 targeted native regressions green
+- [x] Phase 3 MLIR/frontend-specific regressions green
 - [x] PRD status/checklist/command log updated
 
 ## Command Log
@@ -125,3 +128,24 @@ Exit Criteria:
   - Fails on existing `core::tests::reports_fast_path_blockers_for_runtime_fallback_assigns`
 - `bundle exec rspec spec/rhdl/sim/native/ir/circt_hierarchy_flatten_runtime_spec.rb`
   - Fails on existing `child_y` visibility expectations on the compact runtime JSON path
+- `bundle exec rspec spec/rhdl/import/import_paths_spec.rb -e 'relinks raised instance classes after dependency retries so deep hierarchy export stays intact'`
+  - Green: 1 example, 0 failures
+- `cargo test runtime_fallback_assigns && cargo build --release`
+  - `lib/rhdl/sim/native/ir/ir_compiler`
+  - Green after allowing mixed compiled/runtime evaluation without tick helpers
+- `bundle exec rspec spec/rhdl/sim/native/ir/ir_simulator_input_format_spec.rb -e 'chooses the uninstantiated root module instead of the last module in MLIR order' -e 'allows the compiler backend to mix compiled logic with runtime fallback overwide assigns'`
+  - Green: 2 examples, 0 failures
+- `bundle exec rspec spec/examples/ao486/integration/ir_runner_boot_smoke_spec.rb:37`
+  - Still red after the MLIR frontend/export fixes: `pipeline_inst__decode_inst__eip` remains `0` while reset is released and prefetch arms `0xFFFF0/16`
+- `bundle exec rspec spec/examples/ao486/import/unit/cache/l1_icache_runtime_spec.rb`
+  - Still red on the legacy flattened CIRCT-runtime-JSON path: `state` and `update_tag_addr` remain `0`, so the clean imported `l1_icache` startup bug reproduces outside the new MLIR frontend
+- `bundle exec rspec spec/rhdl/import/import_paths_spec.rb -e 'does not reuse cached imported MLIR text during hierarchy or direct MLIR regeneration' -e 'reuses attached imported CIRCT modules for hierarchy MLIR export on raised imported components'`
+  - Green: 2 examples, 0 failures
+- `bundle exec rake native:build`
+  - Green after canonicalizing parsed MLIR signal widths against the final module width map
+- `bundle exec rspec spec/rhdl/sim/native/ir/ir_simulator_input_format_spec.rb -e 'preserves full signal widths for forward-referenced seq registers in MLIR'`
+  - Green: 1 example, 0 failures
+- `bundle exec rspec spec/examples/ao486/import/unit/cache/l1_icache_runtime_spec.rb -e 'delays the first memory request until the startup tag clear sweep completes on IR JIT via the MLIR frontend'`
+  - Green: the imported AO486 `l1_icache` startup sweep now reaches the first `MEM_REQ` on the MLIR frontend path
+- `bundle exec rspec spec/examples/ao486/import/unit/cache/l1_icache_runtime_spec.rb -e 'delays the first memory request until the startup tag clear sweep completes on IR JIT'`
+  - Green: both the legacy flattened path and the MLIR frontend path pass together

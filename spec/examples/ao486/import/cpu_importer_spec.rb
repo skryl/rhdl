@@ -34,6 +34,12 @@ RSpec.describe RHDL::Examples::AO486::Import::CpuImporter do
     lines.join("\n")
   end
 
+  def raise_runtime_component(cleaned_mlir, top:)
+    raised = RHDL::Codegen.raise_circt_components(cleaned_mlir, top: top, strict: false)
+    expect(raised.success?).to be(true), diagnostic_summary(raised)
+    raised.components.fetch(top)
+  end
+
   def run_importer(out_dir:, workspace:, maintain_directory_structure: true)
     described_class.new(
       output_dir: out_dir,
@@ -166,10 +172,7 @@ RSpec.describe RHDL::Examples::AO486::Import::CpuImporter do
         )
 
         cleaned = File.read(result.normalized_core_mlir_path)
-        imported = RHDL::Codegen.import_circt_mlir(cleaned, strict: false, top: 'ao486')
-        expect(imported.success?).to be(true), diagnostic_summary(imported)
-
-        flat = RHDL::Codegen::CIRCT::Flatten.to_flat_module(imported.modules, top: 'ao486')
+        flat = raise_runtime_component(cleaned, top: 'ao486').to_flat_circt_nodes(top_name: 'ao486')
         runtime_mod = RHDL::Codegen::CIRCT::RuntimeJSON.normalize_modules_for_runtime([flat]).first
         duplicate_runtime_assigns = runtime_mod.assigns.group_by { |assign| assign.target.to_s }
                                               .select { |_target, assigns| assigns.length > 1 }

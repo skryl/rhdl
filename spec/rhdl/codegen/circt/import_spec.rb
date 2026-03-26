@@ -61,6 +61,34 @@ RSpec.describe RHDL::Codegen::CIRCT::Import do
       expect(process.statements.first.expr.width).to eq(8)
     end
 
+    it 'does not intern same-named signals across different modules' do
+      mlir = <<~MLIR
+        hw.module @first(%a: i1) -> (y: i1) {
+          hw.output %a : i1
+        }
+
+        hw.module @second(%a: i1) -> (y: i1) {
+          hw.output %a : i1
+        }
+      MLIR
+
+      result = described_class.from_mlir(mlir)
+      expect(result.success?).to be(true)
+
+      first = result.modules.find { |mod| mod.name == 'first' }
+      second = result.modules.find { |mod| mod.name == 'second' }
+      first_signal = first.assigns.first.expr
+      second_signal = second.assigns.first.expr
+
+      aggregate_failures do
+        expect(first_signal).to be_a(RHDL::Codegen::CIRCT::IR::Signal)
+        expect(second_signal).to be_a(RHDL::Codegen::CIRCT::IR::Signal)
+        expect(first_signal.name).to eq('a')
+        expect(second_signal.name).to eq('a')
+        expect(first_signal).not_to equal(second_signal)
+      end
+    end
+
     it 'imports comb.parity and ignores llhd.halt in strict mode' do
       mlir = <<~MLIR
         hw.module @parity_mod(%a: i2) -> (y: i1) {
@@ -360,6 +388,79 @@ RSpec.describe RHDL::Codegen::CIRCT::Import do
       expect(process.reset_values.values).to eq([0])
     end
 
+    it 'seeds resultful LLHD entry block arguments from the process prologue branch' do
+      mlir = <<~MLIR
+        hw.module @entry_seeded(in %d : i1, in %clk : i1, out q : i1) {
+          %t0 = llhd.constant_time <0ns, 1d, 0e>
+          %true = hw.constant true
+          %false = hw.constant false
+          %q_sig = llhd.sig %false : i1
+          %proc:2 = llhd.process -> i1, i1 {
+            cf.br ^bb1(%clk, %false, %false : i1, i1, i1)
+          ^bb1(%prev_clk: i1, %value: i1, %enable: i1):
+            llhd.wait yield (%value, %enable : i1, i1), (%clk : i1), ^bb2(%prev_clk : i1)
+          ^bb2(%seen_clk: i1):
+            %edge = comb.xor bin %seen_clk, %true : i1
+            %posedge = comb.and bin %edge, %clk : i1
+            cf.cond_br %posedge, ^bb3, ^bb1(%clk, %false, %false : i1, i1, i1)
+          ^bb3:
+            cf.br ^bb1(%clk, %d, %true : i1, i1, i1)
+          }
+          llhd.drv %q_sig, %proc#0 after %t0 if %proc#1 : i1
+          %q_value = llhd.prb %q_sig : i1
+          hw.output %q_value : i1
+        }
+      MLIR
+
+      result = described_class.from_mlir(mlir, strict: true)
+      expect(result.success?).to be(true), result.diagnostics.map(&:message).join("\n")
+
+      mod = result.modules.first
+      process = mod.processes.first
+      expect(process.clock).to eq('clk')
+
+      q_assign = nil
+      collect_assign = lambda do |statements|
+        Array(statements).each do |statement|
+          case statement
+          when RHDL::Codegen::CIRCT::IR::SeqAssign
+            q_assign = statement if statement.target.to_s == 'q_sig'
+          when RHDL::Codegen::CIRCT::IR::If
+            collect_assign.call(statement.then_statements)
+            collect_assign.call(statement.else_statements)
+          end
+        end
+      end
+      collect_assign.call(process.statements)
+
+      expect(q_assign).not_to be_nil
+
+      signal_names = lambda do |expr|
+        case expr
+        when RHDL::Codegen::CIRCT::IR::Signal
+          [expr.name.to_s]
+        when RHDL::Codegen::CIRCT::IR::Literal
+          []
+        when RHDL::Codegen::CIRCT::IR::UnaryOp
+          signal_names.call(expr.operand)
+        when RHDL::Codegen::CIRCT::IR::BinaryOp
+          signal_names.call(expr.left) + signal_names.call(expr.right)
+        when RHDL::Codegen::CIRCT::IR::Mux
+          signal_names.call(expr.condition) + signal_names.call(expr.when_true) + signal_names.call(expr.when_false)
+        when RHDL::Codegen::CIRCT::IR::Concat
+          Array(expr.parts).flat_map { |part| signal_names.call(part) }
+        when RHDL::Codegen::CIRCT::IR::Slice
+          signal_names.call(expr.base)
+        when RHDL::Codegen::CIRCT::IR::Resize
+          signal_names.call(expr.expr)
+        else
+          []
+        end
+      end
+
+      expect(signal_names.call(q_assign.expr)).to include('d')
+    end
+
     it 'parses one-shot resultful llhd array init processes with intervening drives' do
       mlir = <<~MLIR
         hw.module @resultful_array_init(in %clk : i1, in %rd : i1, out y : i8) {
@@ -496,6 +597,163 @@ RSpec.describe RHDL::Codegen::CIRCT::Import do
 
       expect(signal_names.call(state_assign.expr)).to include('din')
       expect(signal_names.call(arr_assign.expr)).to include('din')
+    end
+
+    it 'imports long resultful LLHD clear loops without falling back to the generic process parser' do
+      mlir = <<~MLIR
+        hw.module @long_resultful_clear(in %clk : i1, in %aclr : i1, out y : i4) {
+          %t0 = llhd.constant_time <0ns, 1d, 0e>
+          %true = hw.constant true
+          %false = hw.constant false
+          %c0_i4 = hw.constant 0 : i4
+          %c0_i7 = hw.constant 0 : i7
+          %c-1_i7 = hw.constant -1 : i7
+          %c0_i25 = hw.constant 0 : i25
+          %c0_i32 = hw.constant 0 : i32
+          %c1_i32 = hw.constant 1 : i32
+          %c127_i32 = hw.constant 127 : i32
+          %c128_i32 = hw.constant 128 : i32
+          %c0_i512 = hw.constant 0 : i512
+          %zero_arr = hw.bitcast %c0_i512 : (i512) -> !hw.array<128xi4>
+          %mem = llhd.sig %zero_arr : !hw.array<128xi4>
+          %proc:4 = llhd.process -> i32, i1, !hw.array<128xi4>, i1 {
+            cf.br ^bb1(%clk, %aclr, %c0_i32, %false, %zero_arr, %false : i1, i1, i32, i1, !hw.array<128xi4>, i1)
+          ^bb1(%prev_clk: i1, %prev_aclr: i1, %idx: i32, %en: i1, %acc: !hw.array<128xi4>, %done: i1):
+            llhd.wait yield (%idx, %en, %acc, %done : i32, i1, !hw.array<128xi4>, i1), (%clk, %aclr : i1, i1), ^bb2(%prev_clk, %prev_aclr : i1, i1)
+          ^bb2(%seen_clk: i1, %seen_aclr: i1):
+            %clk_edge_n = comb.xor bin %seen_clk, %true : i1
+            %posedge_clk = comb.and bin %clk_edge_n, %clk : i1
+            %aclr_edge_n = comb.xor bin %seen_aclr, %true : i1
+            %posedge_aclr = comb.and bin %aclr_edge_n, %aclr : i1
+            %trigger = comb.or bin %posedge_clk, %posedge_aclr : i1
+            cf.cond_br %trigger, ^bb3, ^bb1(%clk, %aclr, %c0_i32, %false, %zero_arr, %false : i1, i1, i32, i1, !hw.array<128xi4>, i1)
+          ^bb3:
+            cf.cond_br %aclr, ^bb4(%c0_i32, %zero_arr, %false : i32, !hw.array<128xi4>, i1), ^bb1(%clk, %aclr, %c0_i32, %false, %zero_arr, %false : i1, i1, i32, i1, !hw.array<128xi4>, i1)
+          ^bb4(%loop_i: i32, %loop_acc: !hw.array<128xi4>, %loop_done: i1):
+            %lt = comb.icmp slt %loop_i, %c128_i32 : i32
+            cf.cond_br %lt, ^bb5, ^bb1(%clk, %aclr, %loop_i, %true, %loop_acc, %loop_done : i1, i1, i32, i1, !hw.array<128xi4>, i1)
+          ^bb5:
+            %mirror = comb.sub %c127_i32, %loop_i : i32
+            %high = comb.extract %mirror from 7 : (i32) -> i25
+            %in_range = comb.icmp eq %high, %c0_i25 : i25
+            %low = comb.extract %mirror from 0 : (i32) -> i7
+            %slot = comb.mux %in_range, %low, %c-1_i7 : i7
+            %next_acc = hw.array_inject %loop_acc[%slot], %c0_i4 : !hw.array<128xi4>, i7
+            %next_i = comb.add %loop_i, %c1_i32 : i32
+            cf.br ^bb4(%next_i, %next_acc, %true : i32, !hw.array<128xi4>, i1)
+          }
+          llhd.drv %mem, %proc#2 after %t0 if %proc#3 : !hw.array<128xi4>
+          %read = hw.array_get %mem[%false] : !hw.array<128xi4>, i1
+          hw.output %read : i4
+        }
+      MLIR
+
+      result = described_class.from_mlir(mlir, strict: true)
+      expect(result.success?).to be(true), result.diagnostics.map(&:message).join("\n")
+
+      mod = result.modules.first
+      process = mod.processes.first
+      expect(process.clock).to eq('clk')
+
+      seq_assigns = []
+      collect_assigns = lambda do |statements|
+        Array(statements).each do |statement|
+          case statement
+          when RHDL::Codegen::CIRCT::IR::SeqAssign
+            seq_assigns << statement
+          when RHDL::Codegen::CIRCT::IR::If
+            collect_assigns.call(statement.then_statements)
+            collect_assigns.call(statement.else_statements)
+          end
+        end
+      end
+      collect_assigns.call(process.statements)
+
+      expect(seq_assigns.map { |statement| statement.target.to_s }).to include('mem')
+
+      contains_array_forward_ref = lambda do |node|
+        case node
+        when RHDL::Codegen::CIRCT::Import::ArrayForwardRef
+          true
+        when Array
+          node.any? { |item| contains_array_forward_ref.call(item) }
+        when Hash
+          node.any? { |key, value| contains_array_forward_ref.call(key) || contains_array_forward_ref.call(value) }
+        else
+          node.respond_to?(:instance_variables) &&
+            node.instance_variables.any? { |ivar| contains_array_forward_ref.call(node.instance_variable_get(ivar)) }
+        end
+      end
+
+      expect(contains_array_forward_ref.call(process)).to be(false)
+    end
+
+    it 'prunes literal branches in short resultful LLHD concat-counted loops' do
+      mlir = <<~MLIR
+        hw.module @short_concat_loop(in %clk : i1, in %sel : i2, out y : i2) {
+          %t0 = llhd.constant_time <0ns, 1d, 0e>
+          %true = hw.constant true
+          %false = hw.constant false
+          %c0_i2 = hw.constant 0 : i2
+          %c1_i2 = hw.constant 1 : i2
+          %c0_i3 = hw.constant 0 : i3
+          %c1_i3 = hw.constant 1 : i3
+          %c3_i3 = hw.constant 3 : i3
+          %c0_i29 = hw.constant 0 : i29
+          %c4_i32 = hw.constant 4 : i32
+          %c-1_i2 = hw.constant -1 : i2
+          %zero_arr = hw.aggregate_constant [0 : i2, 0 : i2, 0 : i2, 0 : i2] : !hw.array<4xi2>
+          %arr = llhd.sig %zero_arr : !hw.array<4xi2>
+          %proc:3 = llhd.process -> i3, !hw.array<4xi2>, i1 {
+            cf.br ^bb1(%clk, %c0_i3, %zero_arr, %false : i1, i3, !hw.array<4xi2>, i1)
+          ^bb1(%prev_clk: i1, %idx: i3, %acc: !hw.array<4xi2>, %enable: i1):
+            llhd.wait yield (%idx, %acc, %enable : i3, !hw.array<4xi2>, i1), (%clk : i1), ^bb2(%prev_clk : i1)
+          ^bb2(%seen_clk: i1):
+            %edge = comb.xor bin %seen_clk, %true : i1
+            %posedge = comb.and bin %edge, %clk : i1
+            cf.cond_br %posedge, ^bb3(%c0_i3, %zero_arr, %false : i3, !hw.array<4xi2>, i1), ^bb1(%clk, %c0_i3, %zero_arr, %false : i1, i3, !hw.array<4xi2>, i1)
+          ^bb3(%loop_i: i3, %loop_acc: !hw.array<4xi2>, %loop_enable: i1):
+            %wide_i = comb.concat %c0_i29, %loop_i : i29, i3
+            %lt = comb.icmp ult %wide_i, %c4_i32 : i32
+            cf.cond_br %lt, ^bb4, ^bb1(%clk, %loop_i, %loop_acc, %loop_enable : i1, i3, !hw.array<4xi2>, i1)
+          ^bb4:
+            %mirror = comb.sub %c3_i3, %loop_i : i3
+            %high = comb.extract %mirror from 2 : (i3) -> i1
+            %in_range = comb.xor %high, %true : i1
+            %low = comb.extract %mirror from 0 : (i3) -> i2
+            %slot = comb.mux %in_range, %low, %c-1_i2 : i2
+            %next_acc = hw.array_inject %loop_acc[%slot], %slot : !hw.array<4xi2>, i2
+            %next_i = comb.add %loop_i, %c1_i3 : i3
+            cf.br ^bb3(%next_i, %next_acc, %true : i3, !hw.array<4xi2>, i1)
+          }
+          llhd.drv %arr, %proc#1 after %t0 if %proc#2 : !hw.array<4xi2>
+          %read = hw.array_get %arr[%sel] : !hw.array<4xi2>, i2
+          hw.output %read : i2
+        }
+      MLIR
+
+      result = described_class.from_mlir(mlir, strict: true)
+      expect(result.success?).to be(true), result.diagnostics.map(&:message).join("\n")
+
+      mod = result.modules.first
+      process = mod.processes.first
+      expect(process.clock).to eq('clk')
+
+      seq_assigns = []
+      collect_assigns = lambda do |statements|
+        Array(statements).each do |statement|
+          case statement
+          when RHDL::Codegen::CIRCT::IR::SeqAssign
+            seq_assigns << statement
+          when RHDL::Codegen::CIRCT::IR::If
+            collect_assigns.call(statement.then_statements)
+            collect_assigns.call(statement.else_statements)
+          end
+        end
+      end
+      collect_assigns.call(process.statements)
+
+      expect(seq_assigns.map { |statement| statement.target.to_s }).to include('arr')
     end
 
     it 'captures implicit active-low reset wrappers around seq.compreg state' do
@@ -1468,6 +1726,26 @@ RSpec.describe RHDL::Codegen::CIRCT::Import do
       expect(simplified.width).to eq(4)
     end
 
+    it 'folds literal concats before simplifying comparisons' do
+      expr = RHDL::Codegen::CIRCT::IR::BinaryOp.new(
+        op: :<,
+        left: RHDL::Codegen::CIRCT::IR::Concat.new(
+          parts: [
+            RHDL::Codegen::CIRCT::IR::Literal.new(value: 0, width: 29),
+            RHDL::Codegen::CIRCT::IR::Literal.new(value: 3, width: 3)
+          ],
+          width: 32
+        ),
+        right: RHDL::Codegen::CIRCT::IR::Literal.new(value: 4, width: 32),
+        width: 1
+      )
+
+      simplified = described_class.send(:simplify_expr, expr)
+      expect(simplified).to be_a(RHDL::Codegen::CIRCT::IR::Literal)
+      expect(simplified.value).to eq(1)
+      expect(simplified.width).to eq(1)
+    end
+
     it 'parses seq.firmem read and write ports as CIRCT memory IR' do
       mlir = <<~MLIR
         hw.module @firmem_mod(%clk: i1, %addr: i2, %waddr: i2, %din: i8, %we: i1) -> (y: i8) {
@@ -1597,6 +1875,47 @@ RSpec.describe RHDL::Codegen::CIRCT::Import do
         expect(first).to equal(second)
         expect(first).to be_a(RHDL::Codegen::CIRCT::IR::BinaryOp)
         expect(first.op).to eq(:and)
+      end
+    end
+
+    it 'collapses mutually exclusive inner equality guards under an outer true branch' do
+      with_import_expr_caches do
+        selector = RHDL::Codegen::CIRCT::IR::Signal.new(name: 'sel', width: 2)
+        eq0 = RHDL::Codegen::CIRCT::IR::BinaryOp.new(
+          op: :==,
+          left: selector,
+          right: RHDL::Codegen::CIRCT::IR::Literal.new(value: 0, width: 2),
+          width: 1
+        )
+        eq1 = RHDL::Codegen::CIRCT::IR::BinaryOp.new(
+          op: :==,
+          left: selector,
+          right: RHDL::Codegen::CIRCT::IR::Literal.new(value: 1, width: 2),
+          width: 1
+        )
+        state_chain = RHDL::Codegen::CIRCT::IR::Signal.new(name: 'state_chain', width: 7)
+        hold = RHDL::Codegen::CIRCT::IR::Signal.new(name: 'hold', width: 7)
+        expr = RHDL::Codegen::CIRCT::IR::Mux.new(
+          condition: eq0,
+          when_true: RHDL::Codegen::CIRCT::IR::Mux.new(
+            condition: eq1,
+            when_true: hold,
+            when_false: state_chain,
+            width: 7
+          ),
+          when_false: hold,
+          width: 7
+        )
+
+        simplified = described_class.send(:simplify_expr, expr)
+
+        expect(simplified).to be_a(RHDL::Codegen::CIRCT::IR::Mux)
+        expect(described_class.send(:expr_signature, simplified.when_true)).to eq(
+          described_class.send(:expr_signature, state_chain)
+        )
+        expect(described_class.send(:expr_signature, simplified.when_false)).to eq(
+          described_class.send(:expr_signature, hold)
+        )
       end
     end
   end

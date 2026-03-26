@@ -1,9 +1,39 @@
 # frozen_string_literal: true
 
 require 'spec_helper'
+require 'fileutils'
+require 'tmpdir'
 require_relative '../../../../examples/ao486/utilities/runners/ir_runner'
 
 RSpec.describe RHDL::Examples::AO486::IrRunner, timeout: 240 do
+  it 'builds imported parity runtimes from cleaned MLIR via the MLIR frontend', timeout: 360 do
+    skip 'IR Compiler not available' unless RHDL::Sim::Native::IR::COMPILER_AVAILABLE
+
+    out_dir = Dir.mktmpdir('ao486_ir_runner_import_out')
+    workspace_dir = Dir.mktmpdir('ao486_ir_runner_import_ws')
+    import_result = RHDL::Examples::AO486::Import::CpuImporter.new(
+      output_dir: out_dir,
+      workspace_dir: workspace_dir,
+      keep_workspace: true,
+      patches_dir: RHDL::Examples::AO486::Import::CpuImporter::DEFAULT_PATCHES_ROOT,
+      strict: false
+    ).run
+    expect(import_result.success?).to be(true), Array(import_result.diagnostics).join("\n")
+
+    runner = described_class.build_from_cleaned_mlir(
+      File.read(import_result.normalized_core_mlir_path),
+      backend: :compile
+    )
+    sim = runner.send(:build_imported_parity_simulator!)
+
+    expect(sim.input_format).to eq(:mlir)
+    expect(sim.effective_input_format).to eq(:mlir)
+  ensure
+    sim&.close
+    FileUtils.rm_rf(out_dir) if out_dir && Dir.exist?(out_dir)
+    FileUtils.rm_rf(workspace_dir) if workspace_dir && Dir.exist?(workspace_dir)
+  end
+
   it 'reaches the BIOS reset-vector fetch state with the compiler-backed runner' do
     skip 'IR Compiler not available' unless RHDL::Sim::Native::IR::COMPILER_AVAILABLE
 
@@ -13,6 +43,8 @@ RSpec.describe RHDL::Examples::AO486::IrRunner, timeout: 240 do
 
     expect(state[:bios_loaded]).to be(true)
     expect(state[:simulator_type]).to eq(:ao486_ir_compile)
+    expect(runner.sim.input_format).to eq(:mlir)
+    expect(runner.sim.effective_input_format).to eq(:mlir)
     expect(runner.peek('rst_n')).to eq(1)
     expect(runner.peek('pipeline_inst__decode_inst__eip')).to eq(0xFFF0)
     expect(runner.peek('memory_inst__prefetch_inst__prefetch_address')).to eq(0xFFFF0)

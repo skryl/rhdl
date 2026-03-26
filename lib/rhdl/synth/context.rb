@@ -196,6 +196,23 @@ module RHDL
         result
       end
 
+      # Case expression helper used by raised imported source. Supports scalar
+      # keys and grouped keys like { [2, 3] => expr }.
+      def case_expr(selector, cases, default: 0, width:)
+        sel = wrap_expr(selector)
+        result = wrap_expr(default)
+
+        cases.to_a.reverse_each do |raw_keys, expr|
+          wrapped = wrap_expr(expr)
+          Array(raw_keys).reverse_each do |value|
+            cond = BinaryOp.new(:==, sel, Literal.new(value, sel.width), 1)
+            result = Mux.new(cond, wrapped, result, [wrapped.width, result.width, width].max)
+          end
+        end
+
+        result
+      end
+
       # Memory read expression for use in behavior blocks
       # Creates a MemoryRead that generates IR::MemoryRead for synthesis
       # @param memory_name [Symbol] The memory array name

@@ -184,4 +184,34 @@ RSpec.describe 'CIRCT hierarchical runtime flattening' do
       expect(sim.peek('y')).to eq(64)
     end
   end
+
+  it 'materializes backing state for imported sequential output targets on the legacy flat runtime path' do
+    skip 'IR JIT unavailable' unless RHDL::Sim::Native::IR::JIT_AVAILABLE
+
+    mlir = <<~MLIR
+      hw.module @regwrap(%d: i8, %clk: i1) -> (q: i8) {
+        %clock = seq.to_clock %clk
+        %q = seq.compreg %d, %clock : i8
+        hw.output %q : i8
+      }
+    MLIR
+
+    raised = RHDL::Codegen.raise_circt_components(mlir, top: 'regwrap', strict: false)
+    expect(raised.success?).to be(true), Array(raised.diagnostics).join("\n")
+
+    flat = raised.components.fetch('regwrap').to_flat_circt_nodes(top_name: 'regwrap')
+    sim = RHDL::Sim::Native::IR::Simulator.new(
+      RHDL::Sim::Native::IR.sim_json(flat, backend: :jit),
+      backend: :jit
+    )
+
+    sim.poke('d', 7)
+    sim.poke('clk', 0)
+    sim.evaluate
+    expect(sim.peek('q')).to eq(0)
+
+    sim.poke('clk', 1)
+    sim.tick
+    expect(sim.peek('q')).to eq(7)
+  end
 end

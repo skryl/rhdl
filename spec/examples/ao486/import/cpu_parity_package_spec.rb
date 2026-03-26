@@ -29,6 +29,12 @@ RSpec.describe 'AO486 default patch-series package' do
     backend
   end
 
+  def raise_runtime_component(cleaned_mlir, top:)
+    raised = RHDL::Codegen.raise_circt_components(cleaned_mlir, top: top, strict: false)
+    expect(raised.success?).to be(true), Array(raised.diagnostics).join("\n")
+    raised.components.fetch(top)
+  end
+
   it 'builds a parity package that issues the reset-vector code fetch with cache disabled', timeout: 240 do
     require_import_tool!
     skip 'circt-opt not available' unless HdlToolchain.which('circt-opt')
@@ -37,10 +43,8 @@ RSpec.describe 'AO486 default patch-series package' do
     Dir.mktmpdir('ao486_cpu_parity_out') do |out_dir|
       Dir.mktmpdir('ao486_cpu_parity_ws') do |workspace|
         result = run_importer(out_dir: out_dir, workspace: workspace)
-        imported = RHDL::Codegen.import_circt_mlir(File.read(result.normalized_core_mlir_path), strict: false, top: 'ao486')
-        expect(imported.success?).to be(true), Array(imported.diagnostics).join("\n")
-
-        flat = RHDL::Codegen::CIRCT::Flatten.to_flat_module(imported.modules, top: 'ao486')
+        cleaned_mlir = File.read(result.normalized_core_mlir_path)
+        flat = raise_runtime_component(cleaned_mlir, top: 'ao486').to_flat_circt_nodes(top_name: 'ao486')
         ir_json = RHDL::Sim::Native::IR.sim_json(flat, backend: backend)
         sim = RHDL::Sim::Native::IR::Simulator.new(ir_json, backend: backend)
 

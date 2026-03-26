@@ -103,7 +103,8 @@ module RHDL
             mlir_path: mlir_path,
             work_dir: File.join(@work_dir, 'arc'),
             base_name: 'cpu_parity',
-            top: 'ao486'
+            top: 'ao486',
+            include: %i[flatten to_arc]
           )
           raise "ARC preparation failed:\n#{prepared.dig(:arc, :stderr)}" unless prepared[:success]
 

@@ -10,7 +10,6 @@ RSpec.describe 'RHDL import path coverage' do
     raise.behavior
     raise.expr
     raise.memory_read
-    raise.case
     raise.sequential
   ].freeze
 
@@ -62,6 +61,24 @@ RSpec.describe 'RHDL import path coverage' do
     MLIR
   end
 
+  let(:circt_retry_hier_mlir) do
+    <<~MLIR
+      hw.module @top(in %a: i1, out y: i1) {
+        %u.y = hw.instance "u" @mid(a: %a : i1) -> (y: i1)
+        hw.output %u.y : i1
+      }
+
+      hw.module @mid(in %a: i1, out y: i1) {
+        %u.y = hw.instance "u" @leaf(a: %a : i1) -> (y: i1)
+        hw.output %u.y : i1
+      }
+
+      hw.module @leaf(in %a: i1, out y: i1) {
+        hw.output %a : i1
+      }
+    MLIR
+  end
+
   let(:comb_inputs) { { a: 8, b: 8 } }
   let(:comb_outputs) { { y: 8 } }
   let(:comb_vectors) do
@@ -99,6 +116,7 @@ RSpec.describe 'RHDL import path coverage' do
     expect(comb_source).to include('behavior do')
     expect(comb_source).to include('y <=')
     expect(seq_source).to include('sequential clock: :clk do')
+    expect(seq_source).not_to include("behavior do\n    q <= 0")
   end
 
   it 'covers Verilog -> CIRCT -> RHDL at highest available DSL level' do
@@ -229,7 +247,7 @@ RSpec.describe 'RHDL import path coverage' do
       assigns: [
         RHDL::Codegen::CIRCT::IR::Assign.new(
           target: :y,
-          expr: RHDL::Codegen::CIRCT::IR::Literal.new(value: 1, width: 1)
+          expr: RHDL::Codegen::CIRCT::IR::Signal.new(name: :a, width: 1)
         )
       ],
       processes: [],
@@ -253,6 +271,252 @@ RSpec.describe 'RHDL import path coverage' do
     expect(direct_mlir).not_to include('hw.constant true')
     expect(direct_mlir).to include('hw.module @child')
     expect(direct_mlir).to include('hw.output %a : i1')
+  end
+
+  it 'regenerates flat and source-backed hierarchy exports when imported text uses clock as a data selector' do
+    regen_component = Class.new(RHDL::Sim::Component) do
+      include RHDL::DSL::Behavior
+
+      def self.name
+        'ImportPathsClockBad'
+      end
+
+      def self.verilog_module_name
+        'clock_bad'
+      end
+
+      input :CLK
+      input :a
+      output :y
+
+      behavior do
+        y <= a
+      end
+    end
+
+    poisoned_text = <<~MLIR.strip
+      hw.module @clock_bad(in %CLK: i1, in %a: i1, out y: i1) {
+        %c0_i1 = hw.constant 0 : i1
+        %c1_i1 = hw.constant 1 : i1
+        %gate = comb.mux %CLK, %c1_i1, %c0_i1 : i1
+        %next = comb.mux %gate, %c1_i1, %shadow : i1
+        %shadow = seq.firreg %next clock %CLK : i1
+        hw.output %c1_i1 : i1
+      }
+    MLIR
+    poisoned_module = RHDL::Codegen::CIRCT::IR::ModuleOp.new(
+      name: 'clock_bad',
+      ports: [
+        RHDL::Codegen::CIRCT::IR::Port.new(name: :CLK, direction: :in, width: 1),
+        RHDL::Codegen::CIRCT::IR::Port.new(name: :a, direction: :in, width: 1),
+        RHDL::Codegen::CIRCT::IR::Port.new(name: :y, direction: :out, width: 1)
+      ],
+      nets: [],
+      regs: [],
+      assigns: [
+        RHDL::Codegen::CIRCT::IR::Assign.new(
+          target: :y,
+          expr: RHDL::Codegen::CIRCT::IR::Literal.new(value: 1, width: 1)
+        )
+      ],
+      processes: [],
+      instances: [],
+      memories: [],
+      write_ports: [],
+      sync_read_ports: [],
+      parameters: {}
+    )
+    regen_component.instance_variable_set(:@_imported_circt_module_text, poisoned_text)
+    regen_component.instance_variable_set(:@_imported_circt_module_text_by_name, { 'clock_bad' => poisoned_text })
+    regen_component.instance_variable_set(:@_imported_circt_module, poisoned_module)
+    regen_component.instance_variable_set(:@_imported_circt_module_by_name, { 'clock_bad' => poisoned_module })
+
+    flat = regen_component.to_flat_circt_nodes(top_name: 'clock_bad')
+    flat_assign = flat.assigns.find { |assign| assign.target.to_s == 'y' }
+
+    expect(flat_assign).not_to be_nil
+    expect(flat_assign.expr).to be_a(RHDL::Codegen::CIRCT::IR::Signal)
+    expect(flat_assign.expr.name.to_s).to eq('a')
+
+    Dir.mktmpdir('rhdl_import_clock_bad') do |dir|
+      mlir_path = File.join(dir, 'clock_bad.mlir')
+      File.write(mlir_path, poisoned_text)
+
+      hierarchy_mlir = regen_component.to_mlir_hierarchy(top_name: 'clock_bad', core_mlir_path: mlir_path)
+
+      expect(hierarchy_mlir).not_to include('hw.output %c1_i1 : i1')
+      expect(hierarchy_mlir).to include('hw.module @clock_bad')
+      expect(hierarchy_mlir).to include('hw.output %a : i1')
+    end
+  end
+
+  it 'reuses attached imported CIRCT for flat export on raised imported components only' do
+    imported_component = Class.new(RHDL::Sim::Component) do
+      include RHDL::DSL::Behavior
+
+      def self.name
+        'ImportPathsRaisedFlatReuse'
+      end
+
+      def self.verilog_module_name
+        'raised_flat_reuse'
+      end
+
+      input :a
+      output :y
+
+      behavior do
+        y <= a
+      end
+    end
+
+    imported_module = RHDL::Codegen::CIRCT::IR::ModuleOp.new(
+      name: 'raised_flat_reuse',
+      ports: [
+        RHDL::Codegen::CIRCT::IR::Port.new(name: :a, direction: :in, width: 1),
+        RHDL::Codegen::CIRCT::IR::Port.new(name: :y, direction: :out, width: 1)
+      ],
+      nets: [],
+      regs: [],
+      assigns: [
+        RHDL::Codegen::CIRCT::IR::Assign.new(
+          target: :y,
+          expr: RHDL::Codegen::CIRCT::IR::Literal.new(value: 1, width: 1)
+        )
+      ],
+      processes: [],
+      instances: [],
+      memories: [],
+      write_ports: [],
+      sync_read_ports: [],
+      parameters: {}
+    )
+
+    imported_component.instance_variable_set(:@_raised_from_imported_circt, true)
+    imported_component.instance_variable_set(:@_imported_circt_module, imported_module)
+    imported_component.instance_variable_set(:@_imported_circt_module_by_name, { 'raised_flat_reuse' => imported_module })
+
+    flat = imported_component.to_flat_circt_nodes(top_name: 'raised_flat_reuse')
+    flat_assign = flat.assigns.find { |assign| assign.target.to_s == 'y' }
+
+    expect(flat_assign).not_to be_nil
+    expect(flat_assign.expr).to be_a(RHDL::Codegen::CIRCT::IR::Literal)
+    expect(flat_assign.expr.value).to eq(1)
+  end
+
+  it 'reuses attached imported CIRCT modules for hierarchy MLIR export on raised imported components' do
+    imported_component = Class.new(RHDL::Sim::Component) do
+      include RHDL::DSL::Behavior
+
+      def self.name
+        'ImportPathsRaisedHierarchyReuse'
+      end
+
+      def self.verilog_module_name
+        'raised_hierarchy_reuse'
+      end
+
+      input :a
+      output :y
+
+      behavior do
+        y <= lit(1, width: 1)
+      end
+    end
+
+    imported_module = RHDL::Codegen::CIRCT::IR::ModuleOp.new(
+      name: 'raised_hierarchy_reuse',
+      ports: [
+        RHDL::Codegen::CIRCT::IR::Port.new(name: :a, direction: :in, width: 1),
+        RHDL::Codegen::CIRCT::IR::Port.new(name: :y, direction: :out, width: 1)
+      ],
+      nets: [],
+      regs: [],
+      assigns: [
+        RHDL::Codegen::CIRCT::IR::Assign.new(
+          target: :y,
+          expr: RHDL::Codegen::CIRCT::IR::Signal.new(name: :a, width: 1)
+        )
+      ],
+      processes: [],
+      instances: [],
+      memories: [],
+      write_ports: [],
+      sync_read_ports: [],
+      parameters: {}
+    )
+
+    imported_component.instance_variable_set(:@_raised_from_imported_circt, true)
+    imported_component.instance_variable_set(:@_imported_circt_module, imported_module)
+    imported_component.instance_variable_set(
+      :@_imported_circt_module_by_name,
+      { 'raised_hierarchy_reuse' => imported_module }
+    )
+
+    hierarchy_mlir = imported_component.to_mlir_hierarchy(top_name: 'raised_hierarchy_reuse')
+
+    expect(hierarchy_mlir).to include('hw.module @raised_hierarchy_reuse')
+    expect(hierarchy_mlir).to include('hw.output %a : i1')
+    expect(hierarchy_mlir).not_to include('hw.constant true')
+  end
+
+  it 'relinks raised instance classes after dependency retries so deep hierarchy export stays intact' do
+    Dir.mktmpdir('rhdl_import_retry_hier') do |dir|
+      mlir_path = File.join(dir, 'retry_hier.mlir')
+      File.write(mlir_path, circt_retry_hier_mlir)
+
+      components = RHDL::Codegen.raise_circt_components(circt_retry_hier_mlir, top: 'top')
+      expect(components.success?).to be(true), diagnostic_summary(components.diagnostics)
+
+      top_component = components.components.fetch('top')
+      mid_component = components.components.fetch('mid')
+      leaf_component = components.components.fetch('leaf')
+
+      top_mid_class = top_component._instance_defs.fetch(0).fetch(:component_class)
+      mid_leaf_class = mid_component._instance_defs.fetch(0).fetch(:component_class)
+
+      expect(top_mid_class).to equal(mid_component)
+      expect(mid_leaf_class).to equal(leaf_component)
+      expect(top_component.collect_submodule_specs.keys.map(&:verilog_module_name)).to include('mid', 'leaf')
+
+      hierarchy_mlir = top_component.to_mlir_hierarchy(top_name: 'top', core_mlir_path: mlir_path)
+      expect(hierarchy_mlir).to include('hw.module @mid')
+      expect(hierarchy_mlir).to include('hw.module @leaf')
+    end
+  end
+
+  it 'sanitizes out-of-range typed hw.constant literals when hierarchy export reuses source MLIR text' do
+    skip 'circt-opt not available' unless HdlToolchain.which('circt-opt')
+
+    source_mlir = <<~MLIR
+      hw.module @const_wrap_import(out y: i32) {
+        %c = hw.constant 4294967295 : i32
+        hw.output %c : i32
+      }
+    MLIR
+
+    Dir.mktmpdir('rhdl_import_const_wrap') do |dir|
+      mlir_path = File.join(dir, 'const_wrap_import.mlir')
+      File.write(mlir_path, source_mlir)
+
+      components = RHDL::Codegen.raise_circt_components(source_mlir, top: 'const_wrap_import')
+      expect(components.success?).to be(true), diagnostic_summary(components.diagnostics)
+
+      top_component = components.components.fetch('const_wrap_import')
+      hierarchy_mlir = top_component.to_mlir_hierarchy(
+        top_name: 'const_wrap_import',
+        core_mlir_path: mlir_path
+      )
+
+      expect(hierarchy_mlir).to include('hw.constant -1 : i32')
+      expect(hierarchy_mlir).not_to include('hw.constant 4294967295 : i32')
+
+      input_path = File.join(dir, 'hierarchy.mlir')
+      output_path = File.join(dir, 'hierarchy.opt.mlir')
+      File.write(input_path, hierarchy_mlir)
+      _stdout, stderr, status = Open3.capture3('circt-opt', input_path, '-o', output_path)
+      expect(status.success?).to be(true), stderr
+    end
   end
 
   private

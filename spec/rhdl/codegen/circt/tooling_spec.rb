@@ -428,7 +428,11 @@ RSpec.describe RHDL::Codegen::CIRCT::Tooling do
           "--pass-pipeline=#{described_class::DEFAULT_ARC_FLATTEN_PIPELINE}",
           '-o',
           flattened_path
-        ).ordered.and_return(['', '', status])
+        ).ordered do
+          FileUtils.mkdir_p(work_dir)
+          File.write(flattened_path, "hw.module @top(out out : i1) {\n  %false = hw.constant false\n  hw.output %false : i1\n}\n")
+          ['', '', status]
+        end
 
         expect(Open3).to receive(:capture3).with(
           'circt-opt',
@@ -437,15 +441,25 @@ RSpec.describe RHDL::Codegen::CIRCT::Tooling do
           '--cse',
           '-o',
           cleaned_path
-        ).ordered.and_return(['', '', status])
+        ).ordered do
+          FileUtils.mkdir_p(work_dir)
+          File.write(cleaned_path, "hw.module @top(out out : i1) {\n  %false = hw.constant false\n  hw.output %false : i1\n}\n")
+          ['', '', status]
+        end
 
         expect(Open3).to receive(:capture3).with(
           'circt-opt',
           cleaned_path,
           '--convert-to-arcs',
+          '--arc-split-loops',
+          '--arc-canonicalizer',
           '-o',
           arc_path
-        ).ordered.and_return(['', '', status])
+        ).ordered do
+          FileUtils.mkdir_p(work_dir)
+          File.write(arc_path, "arc.define @top() {\n}\n")
+          ['', '', status]
+        end
 
         result = described_class.prepare_arc_mlir_from_circt_mlir(
           mlir_path: mlir_path,
@@ -456,6 +470,53 @@ RSpec.describe RHDL::Codegen::CIRCT::Tooling do
         expect(result[:success]).to be(true)
         expect(result.dig(:flatten_cleanup, :success)).to be(true)
         expect(result.fetch(:flattened_cleaned_hwseq_mlir_path)).to eq(cleaned_path)
+      end
+    end
+
+    it 'supports explicit include steps and can convert directly to ARC with loop splitting and ARC canonicalization' do
+      status = instance_double(Process::Status, success?: true)
+
+      Dir.mktmpdir('tooling_prepare_arc_circt_direct_arc') do |dir|
+        mlir_path = File.join(dir, 'top.mlir')
+        work_dir = File.join(dir, 'work')
+        source_path = File.join(work_dir, '01.top.input.core.mlir')
+        arc_path = File.join(work_dir, '07.top.arc.mlir')
+        File.write(mlir_path, <<~MLIR)
+          hw.module @top(out out : i1) {
+            %false = hw.constant false
+            hw.output %false : i1
+          }
+        MLIR
+
+        expect(Open3).to receive(:capture3).with(
+          'circt-opt',
+          source_path,
+          '--convert-to-arcs',
+          '--arc-split-loops',
+          '--arc-canonicalizer',
+          '-o',
+          arc_path
+        ) do
+          FileUtils.mkdir_p(work_dir)
+          File.write(arc_path, "arc.define @top() {\n}\n")
+          ['', '', status]
+        end
+
+        result = described_class.prepare_arc_mlir_from_circt_mlir(
+          mlir_path: mlir_path,
+          work_dir: work_dir,
+          base_name: 'top',
+          include: [:to_arc]
+        )
+
+        expect(result[:success]).to be(true)
+        expect(result.fetch(:include_steps)).to eq([:to_arc])
+        expect(result.fetch(:dbg_stripped_mlir_path)).to be_nil
+        expect(result.fetch(:normalized_llhd_mlir_path)).to be_nil
+        expect(result.fetch(:hwseq_mlir_path)).to be_nil
+        expect(result.fetch(:flattened_hwseq_mlir_path)).to be_nil
+        expect(result.fetch(:flattened_cleaned_hwseq_mlir_path)).to be_nil
+        expect(result.fetch(:arc_mlir_path)).to eq(arc_path)
       end
     end
 

@@ -154,7 +154,7 @@ module RHDL
                 inc bx
                 hlt
               ASM
-              max_cycles: 32,
+              max_cycles: 128,
               min_fetch_groups: 3,
               expected_memory: {}
             )

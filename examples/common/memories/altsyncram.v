@@ -115,18 +115,13 @@ module altsyncram #(
             if (widthad_b > 0) begin
                 address_b_reg_clock0 <= {widthad_b{1'b0}};
             end
-        end else if (clocken0 && !addressstall_a && wren_a) begin
-            mem[address_a] <= apply_byteena_a(mem[address_a], data_a, byteena_a);
-        end
-    end
-
-    always @(posedge clock0 or posedge aclr0) begin
-        if (aclr0) begin
-            if (widthad_b > 0) begin
-                address_b_reg_clock0 <= {widthad_b{1'b0}};
+        end else begin
+            if (clocken0 && !addressstall_a && wren_a) begin
+                mem[address_a] <= apply_byteena_a(mem[address_a], data_a, byteena_a);
             end
-        end else if (address_reg_b == "CLOCK0" && clocken0 && !addressstall_b) begin
-            address_b_reg_clock0 <= address_b;
+            if (address_reg_b == "CLOCK0" && clocken0 && !addressstall_b) begin
+                address_b_reg_clock0 <= address_b;
+            end
         end
     end
 

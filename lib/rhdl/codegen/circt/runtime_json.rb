@@ -86,6 +86,7 @@ module RHDL
 
         def normalize_modules_for_runtime(modules)
           Array(modules).map do |mod|
+            mod = materialize_clocked_seq_targets(mod)
             assign_map = build_assign_map(mod.assigns)
             inlineable_names = Array(mod.nets).map { |net| net.name.to_s }.to_set
             signal_widths = build_signal_width_map(mod)
@@ -117,9 +118,134 @@ module RHDL
           end
         end
 
+        def materialize_clocked_seq_targets(mod)
+          reg_names = Array(mod.regs).map { |reg| reg.name.to_s }.to_set
+          seq_targets = collect_runtime_seq_targets(Array(mod.processes))
+          promoted_targets = seq_targets.reject { |target| reg_names.include?(target) }
+          return mod if promoted_targets.empty?
+
+          signal_widths = build_signal_width_map(mod)
+          existing_names = Set.new
+          Array(mod.ports).each { |port| existing_names << port.name.to_s }
+          Array(mod.nets).each { |net| existing_names << net.name.to_s }
+          Array(mod.regs).each { |reg| existing_names << reg.name.to_s }
+          Array(mod.memories).each { |memory| existing_names << memory.name.to_s }
+
+          backing_names = promoted_targets.each_with_object({}) do |target, acc|
+            candidate = "#{target}__seq_reg"
+            suffix = 0
+            while existing_names.include?(candidate)
+              suffix += 1
+              candidate = "#{target}__seq_reg_#{suffix}"
+            end
+            existing_names << candidate
+            acc[target] = candidate
+          end
+
+          promoted_regs = promoted_targets.map do |target|
+            IR::Reg.new(
+              name: backing_names.fetch(target),
+              width: signal_widths.fetch(target, 1),
+              reset_value: nil
+            )
+          end
+
+          rewritten_assigns = Array(mod.assigns).reject do |assign|
+            promoted_targets.include?(assign.target.to_s)
+          end
+          rewritten_assigns.concat(
+            promoted_targets.map do |target|
+              IR::Assign.new(
+                target: target,
+                expr: IR::Signal.new(name: backing_names.fetch(target), width: signal_widths.fetch(target, 1))
+              )
+            end
+          )
+
+          rewritten_processes = Array(mod.processes).map do |process|
+            rewrite_runtime_process_seq_targets(process, backing_names)
+          end
+
+          IR::ModuleOp.new(
+            name: mod.name,
+            ports: mod.ports,
+            nets: mod.nets,
+            regs: Array(mod.regs) + promoted_regs,
+            assigns: rewritten_assigns,
+            processes: rewritten_processes,
+            instances: mod.instances,
+            memories: mod.memories,
+            write_ports: mod.write_ports,
+            sync_read_ports: mod.sync_read_ports,
+            parameters: mod.parameters || {}
+          )
+        end
+
+        def collect_runtime_seq_targets(processes, acc = Set.new)
+          Array(processes).each do |process|
+            collect_runtime_seq_targets_from_statements(Array(process.statements), acc)
+          end
+
+          acc
+        end
+
+        def collect_runtime_seq_targets_from_statements(statements, acc)
+          Array(statements).each do |stmt|
+            case stmt
+            when IR::SeqAssign
+              acc << stmt.target.to_s
+            when IR::If
+              collect_runtime_seq_targets_from_statements(stmt.then_statements, acc)
+              collect_runtime_seq_targets_from_statements(stmt.else_statements, acc)
+            end
+          end
+        end
+
+        def rewrite_runtime_process_seq_targets(process, backing_names)
+          return process if backing_names.empty?
+
+          reset_values = if process.reset_values
+                           Array(process.reset_values).each_with_object({}) do |(target, value), acc|
+                             rewritten_target = backing_names.fetch(target.to_s, target.to_s)
+                             acc[rewritten_target.to_sym] = value
+                           end
+                         end
+
+          IR::Process.new(
+            name: process.name,
+            statements: rewrite_runtime_seq_target_statements(process.statements, backing_names),
+            clocked: process.clocked,
+            clock: process.clock,
+            sensitivity_list: process.sensitivity_list,
+            reset: process.reset,
+            reset_active_low: process.reset_active_low,
+            reset_values: reset_values
+          )
+        end
+
+        def rewrite_runtime_seq_target_statements(statements, backing_names)
+          Array(statements).map do |stmt|
+            case stmt
+            when IR::SeqAssign
+              target_name = stmt.target.to_s
+              rewritten_target = backing_names.fetch(target_name, target_name)
+              rewritten_target == target_name ? stmt : IR::SeqAssign.new(target: rewritten_target, expr: stmt.expr)
+            when IR::If
+              IR::If.new(
+                condition: stmt.condition,
+                then_statements: rewrite_runtime_seq_target_statements(stmt.then_statements, backing_names),
+                else_statements: rewrite_runtime_seq_target_statements(stmt.else_statements, backing_names)
+              )
+            else
+              stmt
+            end
+          end
+        end
+
         def normalize_module_for_runtime(mod, live_assign_targets: nil, assign_map: nil, inlineable_names: nil,
                                          signal_widths: nil, runtime_sensitive_names: nil, needs_cache: nil,
                                          simplify_cache: nil, hoist_shared_exprs: false)
+          mod = materialize_clocked_seq_targets(mod)
           temp_counter = 0
           extra_nets = []
           extra_assigns = []

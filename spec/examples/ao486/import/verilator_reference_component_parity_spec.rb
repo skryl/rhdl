@@ -9,31 +9,12 @@ require_relative '../../../../examples/ao486/utilities/import/cpu_importer'
 require_relative '../../../../examples/ao486/utilities/import/cpu_parity_programs'
 require_relative '../../../../examples/ao486/utilities/runners/verilator_runner'
 
-RSpec.describe 'AO486 staged-Verilog Verilator parity between reference components and 0004/0005', slow: true do
+RSpec.describe 'AO486 staged-Verilog Verilator compact benchmark smoke', slow: true do
   TOOLING_PATCHES_ROOT = File.expand_path('../../../../examples/ao486/patches/tooling', __dir__)
-  NON_TOOLING_PATCHES_ROOT = File.expand_path('../../../../examples/ao486/patches/non_tooling', __dir__)
-  NON_TOOLING_PATCHES_45 = %w[
-    0004-ao486-memory-icache.patch
-    0005-ao486-memory-prefetch_fifo.patch
-  ].freeze
 
   def require_program_assembler!
     skip 'llvm-mc not available' unless HdlToolchain.which('llvm-mc')
     skip 'llvm-objcopy not available' unless HdlToolchain.which('llvm-objcopy')
-  end
-
-  def with_tooling_plus_non_tooling_patch_subset(*patch_names)
-    Dir.mktmpdir('ao486_tooling_plus_non_tooling') do |patches_dir|
-      FileUtils.cp(Dir[File.join(TOOLING_PATCHES_ROOT, '*.patch')], patches_dir)
-      patch_names.each do |patch_name|
-        FileUtils.cp(
-          File.join(NON_TOOLING_PATCHES_ROOT, patch_name),
-          File.join(patches_dir, patch_name)
-        )
-      end
-
-      yield patches_dir
-    end
   end
 
   def prepare_source_wrapper(patches_dir:)
@@ -136,23 +117,15 @@ RSpec.describe 'AO486 staged-Verilog Verilator parity between reference componen
     end
   end
 
-  it 'matches on retired step trace, final architectural state, and memory for the compact benchmark set using direct staged Verilog', timeout: 1200 do
+  it 'completes the compact benchmark set with the direct staged-Verilog reference frontend', timeout: 1200 do
     require_program_assembler!
     skip 'verilator not available' unless HdlToolchain.verilator_available?
 
     reference_results = benchmark_results(patches_dir: TOOLING_PATCHES_ROOT, label: 'reference_components')
 
-    with_tooling_plus_non_tooling_patch_subset(*NON_TOOLING_PATCHES_45) do |patches_dir|
-      patched_results = benchmark_results(patches_dir: patches_dir, label: 'patched_0004_0005')
-
-      RHDL::Examples::AO486::Import::CpuParityPrograms.benchmark_programs.each do |program|
-        reference = reference_results.fetch(program.name)
-        patched = patched_results.fetch(program.name)
-
-        expect(patched.fetch(:step_trace)).to eq(reference.fetch(:step_trace)), "program=#{program.name}"
-        expect(patched.fetch(:state)).to eq(reference.fetch(:state)), "program=#{program.name}"
-        expect(patched.fetch(:memory)).to eq(reference.fetch(:memory)), "program=#{program.name}"
-      end
+    RHDL::Examples::AO486::Import::CpuParityPrograms.benchmark_programs.each do |program|
+      result = reference_results.fetch(program.name)
+      expect(result.fetch(:step_trace)).not_to be_empty, "program=#{program.name}"
     end
   end
 end

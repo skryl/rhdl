@@ -52,6 +52,67 @@ RSpec.describe RHDL::Codegen::CIRCT::ImportCleanup do
     assign.expr.name.to_s
   end
 
+  def eval_ir_expr(expr, env)
+    case expr
+    when RHDL::Codegen::CIRCT::IR::Signal
+      env.fetch(expr.name.to_s, 0)
+    when RHDL::Codegen::CIRCT::IR::Literal
+      mask_width(expr.value, expr.width)
+    when RHDL::Codegen::CIRCT::IR::BinaryOp
+      left = eval_ir_expr(expr.left, env)
+      right = eval_ir_expr(expr.right, env)
+      mask = (1 << expr.width) - 1
+      case expr.op
+      when :|
+        (left | right) & mask
+      when :&
+        (left & right) & mask
+      when :^
+        (left ^ right) & mask
+      when :==
+        left == right ? 1 : 0
+      else
+        raise "Unsupported IR binary op in test: #{expr.op.inspect}"
+      end
+    when RHDL::Codegen::CIRCT::IR::Mux
+      cond = eval_ir_expr(expr.condition, env)
+      branch = cond.zero? ? expr.when_false : expr.when_true
+      eval_ir_expr(branch, env)
+    else
+      raise "Unsupported IR expr in test: #{expr.class}"
+    end
+  end
+
+  def mask_width(value, width)
+    return value if width.nil? || width <= 0
+
+    value & ((1 << width) - 1)
+  end
+
+  def find_seq_assign(mod, target)
+    walker = lambda do |statements|
+      Array(statements).each do |statement|
+        case statement
+        when RHDL::Codegen::CIRCT::IR::SeqAssign
+          return statement if statement.target.to_s == target.to_s
+        when RHDL::Codegen::CIRCT::IR::If
+          found = walker.call(statement.then_statements)
+          return found if found
+          found = walker.call(statement.else_statements)
+          return found if found
+        end
+      end
+      nil
+    end
+
+    Array(mod.processes).each do |process|
+      found = walker.call(process.statements)
+      return found if found
+    end
+
+    nil
+  end
+
   it 'removes the LLHD signal overlay from an imported register wrapper module' do
     mlir = <<~MLIR
       hw.module private @eReg_SavestateV__vhdl_c2a6c3cbd0d4(in %clk : i1, in %BUS_Din : i64, in %BUS_Adr : i10, in %BUS_wren : i1, in %BUS_rst : i1, in %Din : i61, out BUS_Dout : i64, out Dout : i61) {
@@ -469,6 +530,57 @@ RSpec.describe RHDL::Codegen::CIRCT::ImportCleanup do
 
     firtool_result = firtool_accepts?(result.cleaned_text)
     expect(firtool_result).not_to eq(false)
+  end
+
+  it 'preserves branch order in nested resultful LLHD successor ladders' do
+    mlir = <<~MLIR
+      hw.module @mini_ladder(in %clk : i1, in %sel0 : i1, in %sel1 : i1, in %state_in : i1, out y : i1) {
+        %t0 = llhd.constant_time <0ns, 1d, 0e>
+        %true = hw.constant true
+        %false = hw.constant false
+        %y_sig = llhd.sig %false : i1
+        %proc:2 = llhd.process -> i1, i1 {
+          cf.br ^bb1(%clk, %false, %false : i1, i1, i1)
+        ^bb1(%prev_clk: i1, %value: i1, %enable: i1):
+          llhd.wait yield (%value, %enable : i1, i1), (%clk : i1), ^bb2(%prev_clk : i1)
+        ^bb2(%seen_clk: i1):
+          %edge = comb.xor bin %seen_clk, %true : i1
+          %posedge = comb.and bin %edge, %clk : i1
+          cf.cond_br %posedge, ^bb3, ^bb1(%clk, %state_in, %true : i1, i1, i1)
+        ^bb3:
+          cf.cond_br %sel0, ^bb4, ^bb5
+        ^bb4:
+          cf.br ^bb1(%clk, %true, %true : i1, i1, i1)
+        ^bb5:
+          cf.cond_br %sel1, ^bb6, ^bb7
+        ^bb6:
+          cf.br ^bb1(%clk, %false, %true : i1, i1, i1)
+        ^bb7:
+          cf.br ^bb1(%clk, %state_in, %true : i1, i1, i1)
+        }
+        llhd.drv %y_sig, %proc#0 after %t0 if %proc#1 : i1
+        %y_q = llhd.prb %y_sig : i1
+        hw.output %y_q : i1
+      }
+    MLIR
+
+    result = described_class.cleanup_imported_core_mlir(mlir, strict: true, top: 'mini_ladder')
+
+    expect(result).to be_success
+    expect(result.cleaned_text).not_to include('llhd.')
+
+    imported = imported_module_for(result.cleaned_text, top: 'mini_ladder')
+    y_reg = assigned_signal_for(imported, 'y')
+    expect(y_reg).to be_a(String)
+
+    seq_assign = find_seq_assign(imported, y_reg)
+    expect(seq_assign).not_to be_nil
+
+    aggregate_failures do
+      expect(eval_ir_expr(seq_assign.expr, { 'sel0' => 1, 'sel1' => 0, 'state_in' => 0 })).to eq(1)
+      expect(eval_ir_expr(seq_assign.expr, { 'sel0' => 0, 'sel1' => 1, 'state_in' => 1 })).to eq(0)
+      expect(eval_ir_expr(seq_assign.expr, { 'sel0' => 0, 'sel1' => 0, 'state_in' => 1 })).to eq(1)
+    end
   end
 
   it 'preserves dual-port memories as seq.firmem through imported cleanup' do

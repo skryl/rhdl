@@ -1,6 +1,8 @@
 # frozen_string_literal: true
 
 require 'spec_helper'
+require 'open3'
+require 'tmpdir'
 
 RSpec.describe RHDL::Codegen::CIRCT::MLIR do
   let(:ir) { RHDL::Codegen::CIRCT::IR }
@@ -137,6 +139,43 @@ RSpec.describe RHDL::Codegen::CIRCT::MLIR do
       expect(mlir).to include('comb.mux')
       expect(mlir).to include('seq.compreg')
       expect(mlir).to include('hw.output')
+    end
+
+    it 'canonicalizes wrapped integer literals into parser-valid signed hw.constant forms' do
+      skip 'circt-opt not available' unless HdlToolchain.which('circt-opt')
+
+      mod = ir::ModuleOp.new(
+        name: 'const_wrap_demo',
+        ports: [
+          ir::Port.new(name: :y_pos, direction: :out, width: 32),
+          ir::Port.new(name: :y_neg, direction: :out, width: 32)
+        ],
+        nets: [],
+        regs: [],
+        assigns: [
+          ir::Assign.new(target: :y_pos, expr: ir::Literal.new(value: 0xFFFF_FFFF, width: 32)),
+          ir::Assign.new(target: :y_neg, expr: ir::Literal.new(value: -4_278_190_081, width: 32))
+        ],
+        processes: [],
+        instances: [],
+        memories: [],
+        write_ports: [],
+        sync_read_ports: [],
+        parameters: {}
+      )
+
+      mlir = described_class.generate(mod)
+      expect(mlir).to include('hw.constant -1 : i32')
+      expect(mlir).to include('hw.constant 16777215 : i32')
+      expect(mlir).not_to include('hw.constant 4294967295 : i32')
+      expect(mlir).not_to include('hw.constant -4278190081 : i32')
+
+      Dir.mktmpdir('rhdl_mlir_const_wrap') do |dir|
+        input_path = File.join(dir, 'const_wrap_demo.mlir')
+        File.write(input_path, mlir)
+        _stdout, stderr, status = Open3.capture3('circt-opt', input_path, '-o', File.join(dir, 'out.mlir'))
+        expect(status.success?).to be(true), stderr
+      end
     end
 
     it 'emits async memory reads as array state instead of seq.firmem read ports' do

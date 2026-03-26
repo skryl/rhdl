@@ -200,6 +200,8 @@ module RHDL
             )
           end
 
+          relink_instance_component_classes!(components)
+
           ComponentResult.new(components: components, namespace: namespace, diagnostics: diagnostics)
         end
 
@@ -209,10 +211,27 @@ module RHDL
           component_class.instance_variable_set(:@_imported_circt_module, mod)
           component_class.instance_variable_set(:@_imported_circt_module_by_name, { mod.name.to_s => mod })
           component_class.instance_variable_set(:@_imported_circt_module_text, module_text&.strip)
+          component_class.instance_variable_set(:@_raised_from_imported_circt, true)
           component_class.instance_variable_set(
             :@_imported_circt_module_text_by_name,
             module_text ? { mod.name.to_s => module_text.strip } : {}
           )
+        end
+
+        def relink_instance_component_classes!(components)
+          return if components.nil? || components.empty?
+
+          components.each_value do |component_class|
+            next unless component_class.respond_to?(:_instance_defs)
+
+            component_class._instance_defs.each do |inst_def|
+              module_name = inst_def[:module_name].to_s
+              replacement = components[module_name]
+              next unless replacement
+
+              inst_def[:component_class] = replacement
+            end
+          end
         end
 
         def normalize_modules(nodes_or_mlir)
@@ -278,7 +297,8 @@ module RHDL
 
           mod.ports.each do |port|
             width_arg = port.width.to_i == 1 ? '' : ", width: #{port.width.to_i}"
-            lines << "  #{port.direction == :out ? 'output' : 'input'} :#{sanitize_name(port.name)}#{width_arg}"
+            default_arg = known_imported_port_default_source(mod.name, port)
+            lines << "  #{port.direction == :out ? 'output' : 'input'} :#{sanitize_name(port.name)}#{width_arg}#{default_arg}"
           end
           lines << ''
 
@@ -308,6 +328,28 @@ module RHDL
           lines.join("\n")
         end
 
+        def known_imported_port_default_source(module_name, port)
+          return '' unless port.direction == :in
+
+          default =
+            case imported_primitive_family(module_name)
+            when :altdpram
+              case sanitize_name(port.name)
+              when 'aclr', 'rdaddressstall', 'sclr', 'wraddressstall' then '0'
+              when 'inclocken', 'outclocken', 'rden' then '1'
+              when 'byteena' then '->(width) { (1 << width) - 1 }'
+              end
+            when :altsyncram
+              case sanitize_name(port.name)
+              when 'aclr0', 'aclr1', 'addressstall_a', 'addressstall_b' then '0'
+              when 'clocken0', 'clocken1', 'clocken2', 'clocken3', 'rden_a', 'rden_b' then '1'
+              when 'byteena_a', 'byteena_b' then '->(width) { (1 << width) - 1 }'
+              end
+            end
+
+          default ? ", default: #{default}" : ''
+        end
+
         def dsl_features_for_module(mod, structure_plan: nil)
           structure_plan ||= build_structure_plan(mod, [])
           behavior_plan = behavior_plan_for_module(
@@ -328,6 +370,7 @@ module RHDL
 
         def behavior_plan_for_module(mod, bridge_assignments:, structural_output_targets:)
           driven_outputs = Set.new(Array(structural_output_targets).map { |name| sanitize_name(name) })
+          driven_outputs.merge(sequentially_driven_targets(mod))
           assign_counts = Hash.new(0)
           Array(mod.assigns).each { |assign| assign_counts[sanitize_name(assign.target)] += 1 }
 
@@ -350,6 +393,24 @@ module RHDL
             missing_outputs: missing_outputs,
             emit: emitted_assignments.any? || missing_outputs.any?
           }
+        end
+
+        def sequentially_driven_targets(mod)
+          Array(mod.processes).each_with_object(Set.new) do |process, driven|
+            collect_sequential_assignment_targets(Array(process.statements), driven)
+          end
+        end
+
+        def collect_sequential_assignment_targets(statements, driven)
+          Array(statements).each do |stmt|
+            case stmt
+            when IR::SeqAssign
+              driven << sanitize_name(stmt.target)
+            when IR::If
+              collect_sequential_assignment_targets(Array(stmt.then_statements), driven)
+              collect_sequential_assignment_targets(Array(stmt.else_statements), driven)
+            end
+          end
         end
 
         def memory_feature_for_module?(mod)
@@ -846,12 +907,18 @@ module RHDL
             inst_name = sanitize_name(inst.name)
             Array(inst.connections).each do |conn|
               port_name = sanitize_name(conn.port_name)
+              signal = normalize_known_imported_instance_input(
+                module_name: inst.module_name,
+                port_name: conn.port_name,
+                signal: conn.signal,
+                width: conn.width
+              )
               case conn.direction.to_s
               when 'out'
-                dest = connection_ref(conn.signal)
+                dest = connection_ref(signal)
                 if dest
                   structure_lines << "  port [:#{inst_name}, :#{port_name}] => #{dest}"
-                  target_name = signal_name_for_connection(conn.signal)
+                  target_name = signal_name_for_connection(signal)
                   if target_name && output_port?(mod, target_name)
                     structural_output_targets << sanitize_name(target_name)
                   end
@@ -865,15 +932,15 @@ module RHDL
                   )
                 end
               else
-                src = connection_ref(conn.signal)
+                src = connection_ref(signal)
                 if src
                   structure_lines << "  port #{src} => [:#{inst_name}, :#{port_name}]"
-                elsif conn.signal.is_a?(IR::Expr)
+                elsif signal.is_a?(IR::Expr)
                   bridge_name = "#{inst_name}__#{port_name}__bridge"
                   unless bridge_wire_names.include?(bridge_name)
                     bridge_wire_names << bridge_name
-                    bridge_wires << { name: bridge_name, width: conn.signal.width.to_i }
-                    bridge_assignments << IR::Assign.new(target: bridge_name, expr: conn.signal)
+                    bridge_wires << { name: bridge_name, width: signal.width.to_i }
+                    bridge_assignments << IR::Assign.new(target: bridge_name, expr: signal)
                   end
                   structure_lines << "  port :#{sanitize_name(bridge_name)} => [:#{inst_name}, :#{port_name}]"
                 else
@@ -895,6 +962,33 @@ module RHDL
             bridge_wires: bridge_wires,
             structural_output_targets: structural_output_targets.to_a
           }
+        end
+
+        def normalize_known_imported_instance_input(module_name:, port_name:, signal:, width:)
+          case imported_primitive_family(module_name)
+          when :altdpram
+            normalize_known_imported_mask_input(signal, port_name: port_name, accepted_ports: %w[byteena], width: width)
+          when :altsyncram
+            normalize_known_imported_mask_input(signal, port_name: port_name, accepted_ports: %w[byteena_a byteena_b], width: width)
+          else
+            signal
+          end
+        end
+
+        def imported_primitive_family(module_name)
+          case module_name.to_s
+          when /\Aaltdpram(?:_\d+)?\z/ then :altdpram
+          when /\Aaltsyncram(?:_\d+)?\z/ then :altsyncram
+          end
+        end
+
+        def normalize_known_imported_mask_input(signal, port_name:, accepted_ports:, width:)
+          return signal unless accepted_ports.include?(port_name.to_s)
+          return signal unless signal.is_a?(IR::Literal)
+          return signal unless signal.value.to_i.zero?
+
+          mask_width = [width.to_i, 1].max
+          IR::Literal.new(value: (1 << mask_width) - 1, width: mask_width)
         end
 
         def format_instance_params(parameters)
@@ -1650,25 +1744,27 @@ module RHDL
           when IR::Resize
             expr_to_ruby_cached(expr.expr, diagnostics, strict: strict, cache: cache)
           when IR::Case
-            if strict
-              diagnostics << Diagnostic.new(
-                severity: :error,
-                message: 'Case expression lowering is unsupported in CIRCT->DSL strict raise',
-                line: nil,
-                column: nil,
-                op: 'raise.case'
-              )
-              nil
-            else
-              diagnostics << Diagnostic.new(
-                severity: :warning,
-                message: 'Case expression emitted as default branch only',
-                line: nil,
-                column: nil,
-                op: 'raise.case'
-              )
-              expr.default ? expr_to_ruby_cached(expr.default, diagnostics, strict: strict, cache: cache) : '0'
+            selector = expr_to_ruby_cached(expr.selector, diagnostics, strict: strict, cache: cache)
+            return nil if selector.nil?
+
+            default_expr =
+              if expr.default
+                expr_to_ruby_cached(expr.default, diagnostics, strict: strict, cache: cache)
+              else
+                "lit(0, width: #{expr.width.to_i})"
+              end
+            return nil if default_expr.nil?
+
+            case_entries = expr.cases.map do |keys, value|
+              value_ruby = expr_to_ruby_cached(value, diagnostics, strict: strict, cache: cache)
+              return nil if value_ruby.nil?
+
+              ruby_keys = Array(keys).map { |key| ruby_case_key_literal(key) }
+              key_ruby = ruby_keys.length == 1 ? ruby_keys.first : "[#{ruby_keys.join(', ')}]"
+              "#{key_ruby} => #{value_ruby}"
             end
+
+            "case_expr(#{selector}, { #{case_entries.join(', ')} }, default: #{default_expr}, width: #{expr.width.to_i})"
           when IR::MemoryRead
             addr = expr_to_ruby_cached(expr.addr, diagnostics, strict: strict, cache: cache)
             return nil if addr.nil?
@@ -1695,6 +1791,11 @@ module RHDL
               '0'
             end
           end
+        end
+
+        def ruby_case_key_literal(key)
+          value = key.is_a?(IR::Literal) ? key.value.to_i : key.to_i
+          value.inspect
         end
 
         def expr_to_ruby_mux(expr, diagnostics, strict:, cache:)

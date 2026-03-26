@@ -28,25 +28,18 @@ module altdpram #(
     input      [widthad-1:0] wraddress,
     input                   wren,
     output     [width-1:0]  q,
-    input                   aclr,
+    input tri0              aclr,
     input      [width_byteena-1:0] byteena,
-    input                   inclocken,
-    input                   outclocken,
-    input                   rdaddressstall,
-    input                   rden,
-    input                   sclr,
-    input                   wraddressstall
+    input tri1              inclocken,
+    input tri1              outclocken,
+    input tri0              rdaddressstall,
+    input tri1              rden,
+    input tri0              sclr,
+    input tri0              wraddressstall
 );
     // Quartus primitives treat omitted optional controls as enabled/bypassed.
-    // Direct Verilator compiles drive missing inputs low, so restore the
-    // vendor-style defaults with weak pull devices.
-    pullup(inclocken);
-    pullup(outclocken);
-    pullup(rden);
-    pulldown(aclr);
-    pulldown(sclr);
-    pulldown(rdaddressstall);
-    pulldown(wraddressstall);
+    // Use tri0/tri1 port defaults instead of pullup/pulldown primitives so
+    // the module stays importable by circt-verilog.
 
     localparam DEPTH = (1 << widthad);
     localparam BYTE_WIDTH = (width_byteena > 0) ? ((width + width_byteena - 1) / width_byteena) : width;
